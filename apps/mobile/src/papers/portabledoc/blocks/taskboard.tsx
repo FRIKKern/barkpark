@@ -3,29 +3,35 @@
 // charter D46c). The capstone's task-list is QUERY-driven with no snapshot: that
 // renders the same honest "No tasks yet." empty state the reference emits.
 //
-// THE ROLE LADDER LIVES HERE, ONCE. A persisted STATUS resolves to a ROLE, and
-// the role — never the raw status — carries the glyph, the label and the hue.
-// The tables below are the RN copy of js/packages/react/src/inline.tsx's
-// STATUS_ROLES / roleOf, whose own source of truth is
-// design/status-manifest.json (the Elixir side inlines the manifest at compile
-// time and cannot drift; every JS-side copy CAN).
-// DRIFT GUARD: a role, glyph or label added or changed in the manifest must be
-// mirrored here in lockstep. THIS COMMENT IS NOT THE GUARD — it used to be, and
-// saying so was the whole defect (mob-bl-status-manifest-mobile-gate). Two real
-// gates now watch this file from opposite directions, and both are proven able
-// to fail by mutation:
+// THE ROLE LADDER IS NOT TYPED HERE. It is GENERATED from
+// design/status-manifest.json — the ONE source of the white ladder — into
+// ./status-vocab.gen.ts by design/emit.mjs, exactly as the react and web twins
+// are (js/packages/react/src/status-vocab.gen.ts, web/lib/status-ladder.gen.ts).
+// This file re-exports that projection with the ONE thing the manifest does not
+// own appended: the JS-only fail-open `unknown` sentinel (D11), which is never a
+// lifecycle state and appears in no manifest.
+//
+// WHY GENERATED AND NOT GUARDED. This file used to hand-type the whole
+// vocabulary behind a comment that said it was the guard; that comment was the
+// defect (mob-bl-status-manifest-mobile-gate), and the byte-check that replaced
+// it — scripts/status-manifest-check.sh Part 5b — was an ENUMERATION: a gate can
+// only byte-check the copies it was told about, so copy #4 arrives unguarded. A
+// generated projection cannot hold a value the manifest does not, for any number
+// of surfaces. Three gates watch the derivation now, each catching an edit the
+// others cannot see:
+//   • design/check.mjs Part A (doc-gates) re-emits status-vocab.gen.ts from the
+//     manifest and byte-compares the committed bytes — so a HAND-EDIT of the
+//     generated file, or a manifest edit landed without a regen, reds there.
+//   • scripts/status-manifest-check.sh Part 5b is now a FRESHNESS assertion: it
+//     proves this file still READS the generated projection instead of retyping
+//     it, and holds the manifest's platform_overrides honest.
 //   • apps/mobile/__tests__/statusManifestParity.test.ts runs inside the mobile
-//     jest suite, so an edit HERE reds on the mobile gate.
-//   • scripts/status-manifest-check.sh Part 5b byte-checks this file from
-//     doc-gates.yml, whose paths block already covers BOTH directions —
-//     design/status-manifest.json by name, and this file via `**/*.tsx` — so a
-//     MANIFEST edit this file does not mirror reds there.
+//     jest suite and pins the resulting VALUES against the manifest on disk.
 // The one glyph that legitimately differs (`progress`) is adjudicated in the
-// manifest's own `platform_overrides`, with its reason — not skipped in either
-// gate, and the gates refuse an override that stops earning its exemption or
-// that would let a second divergence hide behind it.
+// manifest's own `platform_overrides`, with its reason, and the emitter applies
+// it — so it is true by construction rather than asserted afterwards.
 // The tables are EXPORTED for the test and for no other reason — nothing
-// outside this file may render from them, because the ladder still lives here
+// outside this file may render from them, because the ladder still resolves here
 // once.
 import type { ReactNode } from 'react'
 import { Text, View } from 'react-native'
@@ -33,70 +39,69 @@ import { Text, View } from 'react-native'
 import { scale } from '../../../ui/typography'
 import { asList, isMap, str } from '../model'
 import { MONO, type BlockCtx, type Render } from '../register'
+import {
+  MANIFEST_DEFAULT_ROLE,
+  MANIFEST_ROLE_GLYPH,
+  MANIFEST_ROLE_LABEL,
+  MANIFEST_STATUS_TO_ROLE,
+} from './status-vocab.gen'
 
-export const STATUS_TO_ROLE: Record<string, string> = {
-  open: 'open',
-  ready: 'ready',
-  in_progress: 'progress',
-  blocked: 'blocked',
-  done: 'done',
-  closed: 'done',
-  cancelled: 'cancel',
-  considering: 'considering',
-  researching: 'researching',
-}
+/** The manifest `statuses` map, verbatim from the generated projection. */
+export const STATUS_TO_ROLE: Record<string, string> = MANIFEST_STATUS_TO_ROLE
 
+/** The manifest rungs' glyphs (the emitter has already applied the manifest's
+ * own adjudicated `progress` override for this surface), PLUS the fail-open
+ * sentinel (D11): an unrecognized NON-EMPTY status lands on a dim neutral glyph,
+ * never masquerading as the bright `open` circle. The sentinel is appended here
+ * because it is not a manifest rung and the generated file must not invent one.
+ * Spread order keeps the manifest rungs in manifest order — BOARD_ROLES below
+ * derives the lane order from exactly that. */
 export const ROLE_GLYPH: Record<string, string> = {
-  open: '○',
-  ready: '○',
-  // The web paints `progress` as an EMPTY span whose ::before CSS-animates the
-  // Braille frames. A block renderer here is pure by law (D50: no hooks), so
-  // there is no animation to run and no honest way to fake one; '◐' is the
-  // glyph mobile already ships for in_progress (chat.tsx's todo vocabulary),
-  // so the app stays internally consistent rather than importing the web's
-  // reduced-motion fallback frame.
-  progress: '◐',
-  blocked: '!',
-  done: '✓',
-  cancel: '✕',
-  considering: '◌',
-  researching: '◎',
-  // The fail-open sentinel (D11): an unrecognized NON-EMPTY status lands here
-  // with a dim neutral glyph, never masquerading as the bright `open` circle.
+  ...MANIFEST_ROLE_GLYPH,
   unknown: '◦',
 }
 
+/** The manifest rungs' sentence-cased labels, plus the sentinel's. */
 export const ROLE_LABEL: Record<string, string> = {
-  open: 'Open',
-  ready: 'Ready',
-  progress: 'In progress',
-  blocked: 'Blocked',
-  done: 'Done',
-  cancel: 'Cancelled',
-  considering: 'Considering',
-  researching: 'Researching',
+  ...MANIFEST_ROLE_LABEL,
   unknown: 'Unknown',
 }
 
-/** The board's lane roles, in white-ladder order. `cancel` is NOT a lane (it
- * folds to a tally on the web) and neither is the `unknown` sentinel — see
- * taskBoard for what happens to their rows. */
+/** The terminal, non-claimable rung. Named once so the lane derivation reads as a
+ * RULE ("move the terminal rung last"), not as a second hand-typed list. */
+export const CANCEL_ROLE = 'cancel'
+
+/** The opacity the terminal lane renders at — the web twin's
+ * `.bp-board__col--cancel { opacity: .55 }`. */
+const LANE_DEEMPHASIS = 0.55
+
+/** The JS-only fail-open sentinel (D11) — never a manifest rung, never a lane. */
+const SENTINEL_ROLE = 'unknown'
+
+/** The board's lane roles — DERIVED from ROLE_LABEL's key order, which IS
+ * design/status-manifest.json's roles[] order: the generated projection emits the
+ * rungs in manifest order and the sentinel is spread in last. EVERY manifest rung is a
+ * lane, with the terminal `cancel` rung moved LAST and de-emphasised (see lane()).
+ *
+ * Before task-881952f8d8417f4b this was a hand-typed seven-role list without
+ * `cancel`, so the fallback in taskBoard homed cancelled rows in `open` — the
+ * CLAIMABLE lane `bp task ready` serves — manufacturing phantom ready work. With
+ * every rung a lane, the only role that fallback can still catch is the sentinel.
+ *
+ * Deriving rather than retyping means a rung added to the manifest becomes a lane
+ * automatically; it can never be silently dropped or misfiled again. */
 export const BOARD_ROLES: readonly string[] = [
-  'open',
-  'ready',
-  'progress',
-  'blocked',
-  'done',
-  'considering',
-  'researching',
+  ...Object.keys(ROLE_LABEL).filter((r) => r !== SENTINEL_ROLE && r !== CANCEL_ROLE),
+  CANCEL_ROLE,
 ]
 
-/** An absent or empty status is `open`; an unrecognized one is `unknown`
- * (react inline.tsx roleOf — DEFAULT_ROLE vs UNKNOWN_ROLE). */
+/** An absent or empty status falls back to the manifest's `default_role`; an
+ * unrecognized one fails OPEN to the sentinel (react inline.tsx roleOf —
+ * DEFAULT_ROLE vs UNKNOWN_ROLE). Neither value is typed here. */
 export function roleOf(status: unknown): string {
   const s = str(status)
-  if (s === '') return 'open'
-  return STATUS_TO_ROLE[s] ?? 'unknown'
+  if (s === '') return MANIFEST_DEFAULT_ROLE
+  return STATUS_TO_ROLE[s] ?? SENTINEL_ROLE
 }
 
 export function glyphOf(role: string): string {
@@ -237,7 +242,19 @@ function boardCard(row: unknown, ctx: BlockCtx, key: number): ReactNode {
  * keep the surface fill that every other mobile card block already uses. */
 function lane(role: string, rows: unknown[], ctx: BlockCtx, key: number): ReactNode {
   return (
-    <View key={key} style={{ marginTop: 12, borderTopWidth: 3, borderTopColor: laneRule(role, ctx), paddingTop: 8 }}>
+    <View
+      key={key}
+      style={{
+        marginTop: 12,
+        borderTopWidth: 3,
+        borderTopColor: laneRule(role, ctx),
+        paddingTop: 8,
+        // The terminal lane is DE-EMPHASISED: abandoned work stays legible but
+        // does not compete with claimable work. Mirrors the web's
+        // `.bp-board__col--cancel { opacity: .55 }`.
+        opacity: role === CANCEL_ROLE ? LANE_DEEMPHASIS : 1,
+      }}
+    >
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <Text style={{ ...scale.micro, fontWeight: '700', letterSpacing: 0.6, color: ctx.theme.textMuted }}>
           {labelOf(role).toUpperCase()}
@@ -280,11 +297,11 @@ const taskBoard: Render = (b, ctx, key) => {
   const rows = asList(b.snapshot)
   if (rows.length === 0) return emptyTasks(ctx, key)
 
-  // A ROW IS NEVER DROPPED (D46c). A role without a lane — `cancel`, or the
-  // fail-open `unknown` sentinel — homes in `open`, keeping its own glyph. The
-  // TUI's board resolves considering/researching and then silently drops those
-  // rows (5 lanes only, filed mob-zb-bl-tui-board-thought-lanes) and Elixir
-  // drops cancelled ones; react is the newest register and mobile follows it.
+  // A ROW IS NEVER DROPPED (D46c) AND NEVER MISFILED. Every manifest rung has a
+  // lane of its own now (task-881952f8d8417f4b), so the only role that can reach
+  // the `open` fallback is the non-manifest `unknown` sentinel — a cancelled row
+  // lands in the terminal `cancel` lane, last and de-emphasised, not in the
+  // claimable lane. All four sibling board surfaces obey the same derived rule.
   const byLane = new Map<string, unknown[]>()
   for (const r of rows) {
     const role = roleOf(isMap(r) ? r.status : undefined)

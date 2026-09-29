@@ -1,0 +1,44 @@
+{
+ "closure": 3,
+ "note": "THE THREE LIVE ROWS THAT CARRY A STORED disposition_rerun, read 2026-09-10 from guerrilla.barkpark.cloud (/v1/tasks/<id>) VERBATIM. The shipped 172-row live-corpus-2026-07-31.json snapshot carries ZERO stored reruns, so it cannot exercise the stored-rerun path at all — that snapshot is the RE-DERIVED PROOF OF THE ABSENCE, and this file is the proof of the presence. Reason prose is deliberately NOT stored, same rule as the big snapshot: grip never parses evidence.",
+ "read_at": "2026-09-10",
+ "root": "task-2ac1f95237c4a8e5",
+ "rows": [
+  {
+   "_createdAt": "2026-07-30T22:44:38.320358Z",
+   "disposition": "open",
+   "disposition_reason_bytes": 1516,
+   "disposition_reason_sha256": "82734777c08d746e8523c4701f2752a5d49762c0a479f3f6e4a6c05075692051",
+   "disposition_rerun": "git grep -n os.Create origin/main -- internal/cli/context_render.go",
+   "doc_id": "pds-bl-remaining-os-create-sinks",
+   "lifecycle_status": "open",
+   "parent_id": "task-2ac1f95237c4a8e5",
+   "reopen_trigger": "",
+   "title": "Four `os.Create` sinks still truncate their destination, and the S3 one throws away a declared size it already receives"
+  },
+  {
+   "_createdAt": "2026-08-22T14:53:51.520590Z",
+   "disposition": "open",
+   "disposition_reason_bytes": 1264,
+   "disposition_reason_sha256": "3b5f9563644c1fe85c86c82a510a7cf45fc7091d859411107ecc64829fb03023",
+   "disposition_rerun": "git grep -n 'Enum.all?(list, &is_map/1)' origin/main -- api/lib/barkpark/plugins/tasks.ex",
+   "doc_id": "pds-bl-stray-keys-on-acceptance-criteria",
+   "lifecycle_status": "open",
+   "parent_id": "task-2ac1f95237c4a8e5",
+   "reopen_trigger": "",
+   "title": "Three undeclared keys have leaked onto acceptance_criteria entries — `index` 31, `text` 3, `note` 1 — and nothing rejects them"
+  },
+  {
+   "_createdAt": "2026-07-20T20:15:18.273983Z",
+   "disposition": "open",
+   "disposition_reason_bytes": 1507,
+   "disposition_reason_sha256": "87d8d1a0713e13302ae7ec32224f44dbb0bc388f7d7f9aab9d28fff1ee9ba214",
+   "disposition_rerun": "git grep -n '@stageable or from == to' origin/main -- api/lib/barkpark/tasks/stage.ex",
+   "doc_id": "pds-w12-crown-climb-preconditions",
+   "lifecycle_status": "blocked",
+   "parent_id": "pds-bl-streaming-workspace-export",
+   "reopen_trigger": "",
+   "title": "Wave 12: clear the three named preconditions and run ONE unsplit crown climb against the deployed spill engine"
+  }
+ ]
+}

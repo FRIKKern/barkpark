@@ -60,7 +60,9 @@ defmodule Barkpark.Webhooks do
   """
   def get_webhook(id, opts \\ []) do
     # Guard the :binary_id cast: a non-UUID id (e.g. GET /v1/webhooks/:ds/garbage)
-    # would raise Ecto.CastError → 500. A malformed id matches no row → not_found.
+    # would raise Ecto.Query.CastError → an opaque 400 (phoenix_ecto maps that
+    # struct to 400; it is NOT Ecto.CastError, which never fires on a binary_id
+    # bind). A malformed id matches no row → not_found.
     case Repo.uuid_or_nil(id) do
       nil ->
         {:error, :not_found}
@@ -181,7 +183,7 @@ defmodule Barkpark.Webhooks do
   # hiccup can never fail the CRUD that already committed. Field hygiene: the
   # signing `secret` is NEVER put in metadata.
   defp audit_webhook({:ok, %Webhook{} = webhook} = result, action) do
-    Audit.emit(%{
+    Audit.emit_best_effort(%{
       category: "plugin_settings",
       action: action,
       subject: webhook.id,
@@ -191,10 +193,6 @@ defmodule Barkpark.Webhooks do
     })
 
     result
-  rescue
-    _ -> result
-  catch
-    _, _ -> result
   end
 
   defp audit_webhook(result, _action), do: result
@@ -290,6 +288,19 @@ defmodule Barkpark.Webhooks do
 
   def next_probe_at(%Webhook{} = w),
     do: DateTime.add(w.auto_disabled_at, cooldown_seconds(w.consecutive_failures), :second)
+
+  @doc """
+  How long this endpoint has been dark — `nil` for an endpoint that is active,
+  or one a person disabled by hand (a hand-disabled endpoint has no automatic
+  dark interval to measure). Mirrors `Barkpark.Audit.Export.sink_health/1`'s
+  `:dark_for_seconds` so the two latch surfaces read alike.
+  """
+  def dark_for_seconds(webhook, now \\ DateTime.utc_now())
+  def dark_for_seconds(%Webhook{active: true}, _now), do: nil
+  def dark_for_seconds(%Webhook{auto_disabled_at: nil}, _now), do: nil
+
+  def dark_for_seconds(%Webhook{auto_disabled_at: at}, now),
+    do: DateTime.diff(now, at, :second)
 
   defp probe_due?(%Webhook{active: true}, _now), do: true
   defp probe_due?(%Webhook{auto_disabled_at: nil}, _now), do: false
@@ -430,19 +441,86 @@ defmodule Barkpark.Webhooks do
   JSON body — is snapshotted into `payload_snapshot`, because media's source event
   is gone by design (`media.deleted` passes the file struct at delete time). The
   `RetryWorker` / `StuckDeliverySweeper` rebuild the media attempt FROM this
-  snapshot, branching on `source_kind`. Never deduped (every media delivery is its
-  own row — a lifecycle event fires once and is never re-broadcast).
+  snapshot, branching on `source_kind`.
+
+  ## Dedup (asm-bl-media-delivery-event-id-dedup)
+
+  Media used to be NEVER deduped, and that was a real at-least-once hole: the
+  stuck-processing sweeper re-fires `media.processed` for a recovered file, and
+  nothing stopped the SAME logical lifecycle event reaching the SAME endpoint
+  twice. It cannot ride the document dedup — that is UNIQUE(endpoint_id,
+  event_id), and a media row has BOTH NULL (config endpoint, no `mutation_events`
+  source); a NULL anywhere in a unique tuple never collides in Postgres, so the
+  index is inert here. `event_id` is also an INTEGER FK to `mutation_events`, so a
+  synthetic media id cannot live in it at all.
+
+  So media rides the existing exactly-once column, `dedupe_key`, under a PARTIAL
+  UNIQUE (dedupe_key) WHERE source_kind = 'media' — keyed on `dedupe_key` ALONE,
+  because folding in the NULL `endpoint_id` would make the index inert.
+
+  The key is STABLE: it is a sha256 over the media event's own identity —
+  `dataset`, `event`, `media_file_id` read back out of the already-encoded body,
+  plus the target `url` — and over nothing else. It deliberately does NOT hash the
+  body, because `build_payload/5` stamps a fresh `timestamp` into every encode, so
+  a body hash would differ on every re-fire and dedupe nothing. A retry or a
+  sweeper re-drive of the same file's `media.processed` re-derives the same three
+  identity fields and therefore the same key; two DIFFERENT endpoints, or a
+  different lifecycle event on the same file, derive different keys and both land.
+
+  A snapshot with no derivable identity (unparseable body, or missing any of the
+  three fields) keeps `dedupe_key` NULL, and a NULL never collides — such a row
+  keeps the OLD at-least-once behaviour rather than being given an invented key.
+  Pre-existing rows are NOT backfilled for exactly that reason.
+
+  Returns `{:error, :already_delivered}` when the key is already claimed.
   """
   def create_media_delivery(payload_snapshot) when is_map(payload_snapshot) do
-    %Delivery{}
-    |> Delivery.changeset(%{
-      source_kind: "media",
-      status: "pending",
-      attempts: 0,
-      payload_snapshot: payload_snapshot
-    })
-    |> Repo.insert()
+    changeset =
+      Delivery.changeset(%Delivery{}, %{
+        source_kind: "media",
+        status: "pending",
+        attempts: 0,
+        payload_snapshot: payload_snapshot,
+        dedupe_key: media_dedupe_key(payload_snapshot)
+      })
+
+    case Repo.insert(changeset,
+           on_conflict: :nothing,
+           conflict_target: {:unsafe_fragment, "(dedupe_key) WHERE source_kind = 'media'"}
+         ) do
+      {:ok, %Delivery{id: nil}} -> {:error, :already_delivered}
+      {:ok, %Delivery{} = d} -> {:ok, d}
+      {:error, _} = err -> err
+    end
   end
+
+  # Version prefix so a future change to what identity means can be rolled out
+  # without silently colliding with keys minted under the old rule.
+  @media_dedupe_version "v1"
+
+  @doc false
+  # Derive the STABLE media dedup key, or nil when the snapshot carries no
+  # identity we can honestly key on. Public-for-test (`@doc false`) so the
+  # derivation can be asserted directly rather than inferred from an insert.
+  def media_dedupe_key(%{"url" => url, "body" => body})
+      when is_binary(url) and is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"event" => event, "dataset" => dataset, "media_file_id" => file_id}}
+      when is_binary(event) and is_binary(dataset) and not is_nil(file_id) ->
+        digest =
+          :crypto.hash(
+            :sha256,
+            Enum.join([@media_dedupe_version, dataset, event, to_string(file_id), url], "\n")
+          )
+
+        "media:" <> Base.encode16(digest, case: :lower)
+
+      _ ->
+        nil
+    end
+  end
+
+  def media_dedupe_key(_snapshot), do: nil
 
   @doc """
   Insert a durable AUDIT delivery row (`source_kind: "audit"`) for `endpoint_id`
@@ -743,7 +821,7 @@ defmodule Barkpark.Webhooks do
   # only happens on a THRESHOLD CROSSING, and the `active == true` guard above
   # makes a crossing a once-per-dark-interval event.
   defp emit_latch_event(%Webhook{} = w, action, extra) do
-    Audit.emit(%{
+    Audit.emit_best_effort(%{
       category: "plugin_settings",
       action: action,
       subject: w.id,
@@ -751,12 +829,6 @@ defmodule Barkpark.Webhooks do
       project_id: w.project_id,
       metadata: Map.merge(%{"name" => w.name, "dataset" => w.dataset}, extra)
     })
-
-    :ok
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
   end
 
   # Human-readable disable reason, bounded so a long transport error can't
@@ -809,13 +881,34 @@ defmodule Barkpark.Webhooks do
       attempt to run next and the `max_attempts` bound holds across scheduled
       hops.
 
+  ## Why the fence is not a bare `DateTime.utc_now()` (clk-bl-webhooks-fence-equality-cas-class-d)
+
+  The property this CAS token actually needs is NON-REPETITION: the value written
+  must DIFFER from the value compared, or a second writer holding the same stale
+  struct CASes on a token that is still present and its update lands too — both
+  writers "win" and the mutual exclusion above evaporates.
+
+  `DateTime.utc_now/0` does not provide that property. It reads `os_time`, which
+  Erlang documents as NOT monotonic: it repeats within a microsecond (two calls in
+  a tight loop routinely return the same value) and can step BACKWARD on an NTP
+  correction, after which a row written pre-step carries an `updated_at` in the
+  future and a fresh `utc_now()` can be equal to — or less than — the token it is
+  replacing. In normal operation the gap is enormous (a committed write, a SELECT,
+  and an HTTP attempt sit between the two clock reads), but nothing in the code
+  GUARANTEES the write differs from the token, and the failure is silent.
+
+  So the fence is derived from the token rather than from the clock alone: the
+  wall clock when it is strictly ahead, otherwise the token plus one microsecond.
+  The written value is then unconditionally greater than the compared value, and
+  the CAS's correctness stops depending on clock behaviour.
+
   Returns `{:ok, job}` when the fence CAS wins and the job is enqueued,
   `{:error, :superseded}` when another writer already claimed/terminalised the
   row, or `{:error, reason}` on an enqueue failure.
   """
   def schedule_retry(%Delivery{} = delivery, n, delay_ms)
       when is_integer(n) and n >= 1 and is_integer(delay_ms) and delay_ms >= 0 do
-    fence = DateTime.utc_now()
+    fence = advance_fence(delivery.updated_at)
 
     {claimed, _} =
       from(d in Delivery,
@@ -841,6 +934,23 @@ defmodule Barkpark.Webhooks do
         {:error, :superseded}
     end
   end
+
+  @doc false
+  # The fence value for a CAS whose token is `previous`: STRICTLY greater than
+  # `previous`, always. Wall clock when the clock is already ahead; otherwise the
+  # smallest representable step past the token (`updated_at` is
+  # `:utc_datetime_usec`, so one microsecond IS the next distinct value). Never
+  # returns `previous` itself — that is the whole point.
+  def advance_fence(%DateTime{} = previous) do
+    now = DateTime.utc_now()
+
+    case DateTime.compare(now, previous) do
+      :gt -> now
+      _ -> DateTime.add(previous, 1, :microsecond)
+    end
+  end
+
+  def advance_fence(_previous), do: DateTime.utc_now()
 
   def get_delivery(endpoint_id, event_id) do
     Delivery

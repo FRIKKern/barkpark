@@ -194,7 +194,7 @@ defmodule Barkpark.WebhooksTest do
     assert {:error, :not_found} = Webhooks.delete_webhook(wh)
   end
 
-  test "get_webhook with a malformed (non-UUID) id is {:error, :not_found}, not an Ecto CastError" do
+  test "get_webhook with a malformed (non-UUID) id is {:error, :not_found}, not an Ecto.Query.CastError" do
     # id is :binary_id; before the UUID-cast guard a non-UUID crashed the query
     # (500 at GET/PUT/DELETE /v1/webhooks/:ds/:id). Now it's a clean not_found.
     assert {:error, :not_found} = Webhooks.get_webhook("not-a-uuid")
@@ -432,6 +432,35 @@ defmodule Barkpark.WebhooksTest do
       {:ok, d2} = Webhooks.create_test_delivery(%{"body" => "{}"})
       {:ok, fail_row} = Webhooks.mark_giveup(d2, 500, "http 500", 1)
       assert fail_row.status == "failed_giveup"
+    end
+  end
+
+  describe "claim_delivery/2 — vanished mutation_events source (R2)" do
+    # `webhook_deliveries.event_id` REFERENCES `mutation_events(id)`. Claiming
+    # against an id that has no such row is the DIRECT reproduction of the race
+    # where a retention DELETE removes the source event between the replay
+    # route's existence guard and this insert. Without
+    # `foreign_key_constraint(:event_id)` on the Delivery changeset the insert
+    # raises a raw `Ecto.ConstraintError` (a bare 500); with it the caller gets
+    # an honest changeset error it can turn into a 404.
+    test "returns a changeset error instead of raising Ecto.ConstraintError" do
+      {:ok, wh} =
+        Webhooks.create_webhook(%{
+          "name" => "fk",
+          "url" => "http://example.test/hook",
+          "dataset" => "test"
+        })
+
+      # An id no `mutation_events` row can have (the table is a serial PK and
+      # this test's sandbox never inserts anywhere near it).
+      missing_event_id = 2_147_000_042
+
+      assert Barkpark.Repo.get(Barkpark.Content.MutationEvent, missing_event_id) == nil
+
+      assert {:error, %Ecto.Changeset{} = cs} =
+               Webhooks.claim_delivery(wh.id, missing_event_id)
+
+      assert %{event_id: ["does not exist"]} = errors_on(cs)
     end
   end
 end

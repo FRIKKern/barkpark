@@ -11,8 +11,8 @@
 **/.turbo
 **/coverage
 web/dist
-docs-site/build
-docs-site/.docusaurus
+docs/site/build
+docs/site/.docusaurus
 
 # Elixir / Phoenix
 **/*.beam
@@ -39,6 +39,6 @@ api/priv/static/cache_manifest.json
 # Heavy / out-of-scope subtrees for the web image
 api
 cloud
-docs-site
+docs/site
 obsidian_example
 IndxData

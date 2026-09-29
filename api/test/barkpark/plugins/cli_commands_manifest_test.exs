@@ -15,6 +15,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   """
   use ExUnit.Case, async: true
 
+  alias Barkpark.Content.Papers.EpicQuality
   alias Barkpark.Plugins.{Bulldocs, Capabilities, OnixEdit, Tasks}
   alias Barkpark.Tasks.Validation
 
@@ -22,6 +23,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   # OnixEdit `register_routes/1`), prefixed with the host's `/v1/plugins` mount.
   @bulldocs_routes MapSet.new([
                      "/v1/plugins/bulldocs/papers",
+                     "/v1/plugins/bulldocs/papers/:slug/create",
                      "/v1/plugins/bulldocs/papers/:slug/ops",
                      "/v1/plugins/bulldocs/papers/:slug/proposals",
                      "/v1/plugins/bulldocs/intents",
@@ -94,21 +96,22 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Bulldocs.cli_commands/0" do
-    test "declares five paper verbs, all ingest-tier, all grounded in a real route" do
+    test "declares six paper verbs, all ingest-tier, all grounded in a real route" do
       cmds = Bulldocs.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
+      assert "bulldocs.create" in ids
       assert "bulldocs.publish" in ids
       assert "bulldocs.patch" in ids
       assert "bulldocs.propose" in ids
       assert "bulldocs.intents" in ids
       assert "bulldocs.intent-processed" in ids
 
-      # The five `bulldocs.*` paper verbs all sit behind the ingest highway
+      # The six `bulldocs.*` paper verbs all sit behind the ingest highway
       # bucket (the `session.*` group added in task 6 is NOT all-ingest —
       # see the dedicated describe block below).
       paper_cmds = Enum.filter(cmds, &(&1.noun == "bulldocs"))
-      assert length(paper_cmds) == 5
+      assert length(paper_cmds) == 6
       assert Enum.all?(paper_cmds, &(&1.auth_tier == "ingest"))
 
       # Every path_template is a route the plugin actually mounts — no invented
@@ -214,9 +217,166 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       refute view.writes
       assert Enum.all?([open, log, publish, link_task, touch], & &1.writes)
     end
+
+    test "bulldocs.publish's summary names the if-rev fence and the ops route that carries it" do
+      # WORDING PIN (task dr-w32-bl-post-papers-silently-ignores-ifrev).
+      # `POST /v1/plugins/bulldocs/papers` is an UNFENCED create-or-replace; it
+      # now REFUSES a body carrying `ifRev`/`if_rev` with a 400 naming the
+      # sibling ops route (BulldocsIngestController.refuse_unfenced_if_rev/2).
+      # That refusal is honest but invisible until you trip it: the asymmetry
+      # between `bulldocs publish` (no fence) and `bulldocs patch --if-rev`
+      # (fenced, 412 on a stale rev) was discoverable ONLY by reading the
+      # controller. The manifest summary is where a reader meets a verb —
+      # it flows to `bp bulldocs publish --help` and to docs/openapi.json —
+      # so the fence has to be stated there. This test reds if the sentence
+      # goes away.
+      publish = Enum.find(Bulldocs.cli_commands(), &(&1.id == "bulldocs.publish"))
+      summary = publish.summary
+
+      assert summary =~ "if-rev",
+             "bulldocs.publish's summary must name the if-rev fence, or the " <>
+               "asymmetry with bulldocs.patch is invisible. Got: #{summary}"
+
+      assert summary =~ "ifRev/if_rev is refused 400",
+             "bulldocs.publish's summary must say the key is REFUSED (not " <>
+               "honoured, not ignored) — that is the behaviour the route ships. " <>
+               "Got: #{summary}"
+
+      assert summary =~ "/v1/plugins/bulldocs/papers/:slug/ops",
+             "bulldocs.publish's summary must name the route that actually " <>
+               "carries the fence. Got: #{summary}"
+
+      assert summary =~ "bp bulldocs patch --if-rev",
+             "bulldocs.publish's summary must name the CLI verb a fenced caller " <>
+               "should use instead. Got: #{summary}"
+
+      # Non-vacuity: the route the sentence points at is the one bulldocs.patch
+      # is actually grounded in, so this pin cannot drift away from the manifest.
+      patch = Enum.find(Bulldocs.cli_commands(), &(&1.id == "bulldocs.patch"))
+      assert patch.http.path_template == "/v1/plugins/bulldocs/papers/:slug/ops"
+      assert patch.verb == "patch"
+    end
+
+    test "bulldocs.publish's summary names both composition caps and their tag scope" do
+      # WORDING PIN (task-4ff0ef8d27e6453b). EpicQuality refuses a canonical
+      # Epic Paper past 80 top-level blocks or 16 top-level headings. Both caps
+      # were enforced and documented NOWHERE a publisher looks: the manifest
+      # summary carried the reader spacing law and neither number, so the first
+      # a wave author heard of an 81st block was a 422. The numbers here are
+      # read from the module, so a cap that MOVES reds this test by name rather
+      # than leaving a stale number in the help text.
+      publish = Enum.find(Bulldocs.cli_commands(), &(&1.id == "bulldocs.publish"))
+      summary = publish.summary
+
+      assert summary =~ EpicQuality.canonical_tag(),
+             "bulldocs.publish's summary must name the tag the caps are scoped " <>
+               "to, or a publisher of an untagged paper reads them as universal. " <>
+               "Got: #{summary}"
+
+      assert summary =~ "80 top-level blocks",
+             "bulldocs.publish's summary must state the top-level BLOCK cap " <>
+               "(EpicQuality @max_top_level_blocks). Got: #{summary}"
+
+      assert summary =~ "16 top-level headings",
+             "bulldocs.publish's summary must state the top-level HEADING cap " <>
+               "(EpicQuality @max_top_level_headings). Got: #{summary}"
+
+      assert summary =~ "top_level_block_overload",
+             "bulldocs.publish's summary must name the failure atom the 422 " <>
+               "carries, so a reader can match help text to a refusal body. " <>
+               "Got: #{summary}"
+
+      assert summary =~ "top_level_heading_overload",
+             "bulldocs.publish's summary must name the heading failure atom. " <>
+               "Got: #{summary}"
+
+      assert summary =~ "details.limits",
+             "bulldocs.publish's summary must point at the field carrying the " <>
+               "cap and the count, or the help text documents a number the " <>
+               "caller still cannot read back off the wire. Got: #{summary}"
+
+      # NON-VACUITY: the two numbers in the sentence are the module's live
+      # constants, proven by making EpicQuality itself state them. A cap bump
+      # that forgets the summary reds HERE, not in a reader's 422.
+      over_blocks = for i <- 1..81, do: %{"type" => "paragraph", "text" => "b#{i}"}
+      over_headings = for i <- 1..17, do: %{"type" => "heading", "level" => 2, "text" => "h#{i}"}
+
+      assert :top_level_block_overload in EpicQuality.failures(%{"blocks" => over_blocks})
+      assert :top_level_heading_overload in EpicQuality.failures(%{"blocks" => over_headings})
+
+      refute :top_level_block_overload in EpicQuality.failures(%{
+               "blocks" => Enum.take(over_blocks, 80)
+             })
+
+      refute :top_level_heading_overload in EpicQuality.failures(%{
+               "blocks" => Enum.take(over_headings, 16)
+             })
+    end
   end
 
   describe "Tasks.cli_commands/0" do
+    # THE FILES MANIFEST IS DECLARED, OR NO CALLER CAN SEND ONE
+    # (task-074f50e46e4c926c). The server has stored `content.landed.files`
+    # since PR #17475 and every landing still recorded the sha alone, because
+    # the ONLY thing standing between the two was this declaration: `bp`'s
+    # splitArgs refuses an undeclared `--files` as an unknown flag and sends
+    # NOTHING, so the field was reachable by curl and by nothing a human types.
+    #
+    # `repeatable: true` is load-bearing twice over. Without it a SECOND
+    # `--files` is a usage error (refuseRepeatedFlag: bp will not silently keep
+    # one of two paths), so a manifest is capped at one path; and the Go client
+    # keys the JSON-array body encoding off the same flag, so dropping it turns
+    # `"files": ["a"]` into `"files": "a"` and the server's Landed.check_files/1
+    # 400s the request.
+    test "task.landed declares a repeatable --files flag, the only door to content.landed.files" do
+      landed = Enum.find(Tasks.cli_commands(), &(&1.id == "task.landed"))
+      files = Enum.find(landed.flags, &(&1.name == "files"))
+
+      assert files,
+             "task.landed declares no --files flag, so `bp task landed … --files x` is an " <>
+               "unknown-flag usage error and content.landed.files is unreachable from the CLI"
+
+      assert files.type == "string"
+      assert files[:repeatable] == true
+
+      # The summary is what `bp task landed --help` prints; it has to say the
+      # unit, because "files" plural invites a caller to pass a comma-joined
+      # list as ONE path.
+      assert files.summary =~ "ONE changed path per occurrence"
+    end
+
+    # pdf-bl-roster-enrichment's CLI half (task-ba602058cd90881d): the server has
+    # accepted a beat's `feed` since #20100, but `bp` refuses an undeclared flag
+    # and sends NOTHING, so the annotation was reachable by curl alone. The
+    # vocabulary is read from Fleet.feeds/0 — the list put_feed/2 enforces — so
+    # a value added or dropped server-side reds here until the help says so.
+    test "fleet.beat declares --feed and its help names every value the server accepts" do
+      beat = Enum.find(Tasks.cli_commands(), &(&1.id == "fleet.beat"))
+      feed = Enum.find(beat.flags, &(&1.name == "feed"))
+
+      assert feed,
+             "fleet.beat declares no --feed flag, so `bp fleet beat w --feed sse` is an " <>
+               "unknown-flag usage error and the beat's feed key is unreachable from the CLI"
+
+      assert feed.type == "string"
+      assert Barkpark.Tasks.Fleet.feeds() == ~w(sse poll)
+      assert feed.summary =~ Enum.join(Barkpark.Tasks.Fleet.feeds(), " | ")
+      assert feed.summary =~ "invalid_feed"
+    end
+
+    # task-ba602058cd90881d: #20073 added the fifth rerun-screen arm
+    # (:prefix_match_probe in Barkpark.Tasks.Stage). The help is the only place a
+    # writer learns why an unterminated definition-shaped grep is a 422, and what
+    # the one-character fix is.
+    test "task.stage --rerun help names the prefix-match probe refusal and its fix" do
+      stage = Enum.find(Tasks.cli_commands(), &(&1.id == "task.stage"))
+      rerun = Enum.find(stage.flags, &(&1.name == "rerun"))
+
+      assert rerun.summary =~ "PREFIX match"
+      assert rerun.summary =~ "`'defp apply_engagement('`"
+      assert rerun.summary =~ "`'defp handle_[a-z]'`"
+    end
+
     test "declares the sixteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
@@ -313,7 +473,13 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
 
       # POST, so write-tier — `release` moves a task's claim lease.
       assert release.auth_tier == "write"
-      assert release.flags == []
+
+      # `dataset` is appended by the ROUTE-derived rule in
+      # `Barkpark.Plugins.Tasks.declare_dataset_on_doc_id_route/1` (#18611):
+      # `/v1/tasks/:doc_id/release` carries `:doc_id`, so the route can answer a
+      # 409 `ambiguous_dataset` and must declare the disambiguator that clears it.
+      # Pinned exactly, not loosened — this list is the drift guard.
+      assert Enum.map(release.flags, & &1.name) == ["dataset"]
 
       # task.claim declares required worker_id body arg (server requires it).
       claim_arg_names = Enum.map(claim.args, & &1.name)
@@ -572,10 +738,12 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
 
       assert parent.type == "string"
 
-      # The help text has to say WHY this route rather than the rail: it is the
-      # one that answers a close-time question. A summary that merely said
-      # "filter by parent" would leave the audit ergonomics exactly where the
-      # trap found them.
+      # The help text has to name the close-time field, so a reader auditing
+      # "which children closed in this window?" knows the answer is on the
+      # row. Both this listing and `bp task get`'s child rail carry updated_at
+      # (pinned below); the help states the real difference between them
+      # (claim/assignee/content on these rows) rather than implying the rail
+      # lacks it — task-40e138710f10229b.
       assert parent.summary =~ "updated_at"
       assert parent.summary =~ "close-time"
     end
@@ -717,6 +885,53 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
         assert flags["set"]["type"] == "string"
         assert flags["set"]["repeatable"]
       end
+    end
+
+    # scaffy-backlog-doc-patch-file-flag. doc.patch was the LAST document write
+    # verb declaring only --set, so `bp doc patch <type> <id> --file p.json`
+    # exited 2 "unknown flag --file" and a multi-kilobyte structured patch had
+    # to fall back to raw HTTP /v1/data/mutate.
+    #
+    # doc.patch is NOT a create-family verb and must never be added to that
+    # gate: it is the ONLY served command carrying `set_key`, so its file body
+    # is a SET MAP that the Go client (internal/cli/run.go, PR #18616) routes
+    # UNDER `patch.set` rather than merging flat into the document object. The
+    # end-to-end proof that the served manifest produces that body lives in
+    # internal/cli/doc_patch_file_body_e2e_test.go.
+    test "doc.patch declares the same file-or-stdin body flag as its create siblings" do
+      command =
+        Capabilities.manifest("admin", project: false)["commands"]
+        |> Enum.find(&(&1["id"] == "doc.patch"))
+
+      assert command, "doc.patch is not in the manifest"
+      flags = Map.new(command["flags"], &{&1["name"], &1})
+
+      file_flag = flags["file"]
+
+      assert file_flag,
+             "doc.patch declares no --file flag, so `bp doc patch <type> <id> --file p.json` " <>
+               "is an unknown-flag usage error and a multi-KB structured patch is unreachable " <>
+               "from the CLI"
+
+      # type "file" is what makes the Go client READ the path (or stdin for -)
+      # instead of sending the literal string; a plain "string" would ship the
+      # filename as a field value.
+      assert file_flag["type"] == "file"
+      refute file_flag["repeatable"]
+      assert file_flag["summary"] =~ "JSON object"
+      assert file_flag["summary"] =~ "stdin"
+
+      # --set stays, and stays repeatable: the flag is ADDITIVE, every existing
+      # `--set k=v` invocation must keep working.
+      assert flags["set"]["type"] == "string"
+      assert flags["set"]["repeatable"]
+
+      # The declaration must not move authorization or the mutation it performs.
+      assert command["auth_tier"] == "write"
+      assert command["mutation_op"] == "patch"
+      assert command["set_key"] == "set"
+      assert command["http"]["method"] == "POST"
+      assert command["http"]["path_template"] == "/v1/data/mutate/:dataset"
     end
   end
 

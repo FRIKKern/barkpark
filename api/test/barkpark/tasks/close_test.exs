@@ -146,8 +146,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
   describe "close/3 — not found" do
     test "returns {:error, :not_found} for an unknown task_id", %{scope: _scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       assert {:error, :not_found} =
                Close.close(
                  "00000000-0000-0000-0000-000000000099",
@@ -164,8 +162,6 @@ defmodule Barkpark.Tasks.CloseTest do
     test "a task with no claim record closes to 'done' regardless of observed_epoch", %{
       scope: scope
     } do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("no-claim"), scope)
       refute Map.has_key?(task.content, "claim"), "precondition: no claim on task"
 
@@ -188,8 +184,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
   describe "close/3 — cancelled lifecycle_status" do
     test "closing to 'cancelled' sets lifecycle_status correctly", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("cancel-me"), scope)
 
       assert {:ok, closed} =
@@ -210,8 +204,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
   describe "close/3 — :reason option" do
     test "non-blank reason is written to content.close_reason", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("with-reason"), scope)
 
       assert {:ok, closed} =
@@ -225,8 +217,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "blank reason does NOT overwrite an existing close_reason", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       # Create a task that already has a close_reason in content via raw update.
       task = mk_task!(uniq("blank-reason"), scope)
 
@@ -261,8 +251,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
   describe "close/3 — :landed option (land digest, task-obsession L3)" do
     test "a landed map is written to content.landed atomically with the close", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("landed"), scope)
 
       assert {:ok, closed} =
@@ -284,8 +272,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "a nil/absent landed digest does not write the key", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("no-landed"), scope)
 
       {:ok, closed} =
@@ -295,8 +281,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "landed UNIONS into an existing digest (backfill accumulates)", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("landed-union"), scope)
       # Seed a prior digest on the still-open task (as a CI backfill might).
       foreign_patch_content!(task.id, %{"landed" => %{"files" => ["a.ex"], "prs" => [10]}})
@@ -320,8 +304,6 @@ defmodule Barkpark.Tasks.CloseTest do
     test "closing a task already in 'done' without an explicit rev → {:error, :stale_claim}", %{
       scope: scope
     } do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("double-close"), scope)
 
       # First close succeeds.
@@ -357,8 +339,6 @@ defmodule Barkpark.Tasks.CloseTest do
     ]
 
     test "sets met+evidence on the targeted row, leaves the rest untouched", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-happy"), scope, %{"acceptance_criteria" => @two_criteria})
 
       assert {:ok, closed} =
@@ -397,8 +377,6 @@ defmodule Barkpark.Tasks.CloseTest do
     test "met defaults to true; explicit met: false is allowed (honest unmet close)", %{
       scope: scope
     } do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-default"), scope, %{"acceptance_criteria" => @two_criteria})
 
       assert {:ok, closed} =
@@ -424,8 +402,6 @@ defmodule Barkpark.Tasks.CloseTest do
     test "explicit empty evidence clears stale evidence atomically with a cancelled close", %{
       scope: scope
     } do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("crit-clear-evidence"), scope, %{
           "acceptance_criteria" => [
@@ -458,8 +434,6 @@ defmodule Barkpark.Tasks.CloseTest do
     test "omitted evidence preserves stale evidence while other close fields update", %{
       scope: scope
     } do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("crit-preserve-evidence"), scope, %{
           "acceptance_criteria" => [
@@ -487,8 +461,6 @@ defmodule Barkpark.Tasks.CloseTest do
     test "non-binary explicit evidence aborts the whole close without partial mutation", %{
       scope: scope
     } do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("crit-invalid-evidence"), scope, %{
           "acceptance_criteria" => [
@@ -514,8 +486,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "index out of range aborts the WHOLE close — no partial state", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-oob"), scope, %{"acceptance_criteria" => @two_criteria})
 
       assert {:error, :criteria_index_out_of_range} =
@@ -540,8 +510,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "criterion text guard mismatch aborts (criteria-grain CAS)", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-guard"), scope, %{"acceptance_criteria" => @two_criteria})
 
       assert {:error, :criteria_mismatch} =
@@ -587,8 +555,6 @@ defmodule Barkpark.Tasks.CloseTest do
     ]
 
     test "an index-only met:true entry is REJECTED and the whole close aborts", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-noguard"), scope, %{"acceptance_criteria" => @guard_criteria})
 
       # Intent was criterion B (index 1); a 1-based "2" lands on index 2 — the
@@ -609,8 +575,6 @@ defmodule Barkpark.Tasks.CloseTest do
     test "an index-only entry with NO met key (the met→true default) is REJECTED too", %{
       scope: scope
     } do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("crit-default-met"), scope, %{"acceptance_criteria" => @guard_criteria})
 
@@ -627,8 +591,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "an honest met:false entry still needs no text (it flips no lock)", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-unmet-ok"), scope, %{"acceptance_criteria" => @guard_criteria})
 
       assert {:ok, closed} =
@@ -650,8 +612,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "a guarded met:true entry lands exactly where it says", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-guarded-ok"), scope, %{"acceptance_criteria" => @guard_criteria})
 
       assert {:ok, closed} =
@@ -678,8 +638,6 @@ defmodule Barkpark.Tasks.CloseTest do
   describe "close/3 — :criteria vs concurrent content mutation (rev-CAS race)" do
     test "a mutation between the caller's read and its close loses the CAS atomically, and the re-read retry recovers BOTH writes",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("crit-race"), scope, %{
           "acceptance_criteria" => [%{"criterion" => "close carries evidence", "met" => false}]
@@ -744,8 +702,13 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "interleaved relabel + close-with-criteria from separate processes both land (no lost update)",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
+      # The two `Task.async/1` children below — the `Tasks.relabel_by_id/3`
+      # task and the `Close.close/3` task — both need this test's connection.
+      # No explicit `Sandbox.mode(Repo, {:shared, self()})` is required:
+      # `DataCase.setup_sandbox/1` already starts the owner with
+      # `shared: not tags[:async]`, and this case is `async: false`, so the
+      # connection is shared for the whole test. The explicit call this
+      # replaced only re-asserted what setup had already done.
       task =
         mk_task!(uniq("crit-interleave"), scope, %{
           "acceptance_criteria" => [%{"criterion" => "survives interleaving", "met" => false}]
@@ -792,8 +755,6 @@ defmodule Barkpark.Tasks.CloseTest do
   describe "close/3 — work-digest fence (default path)" do
     test "(a) a foreign description edit between claim and close → doc_changed_since_claim; re-read then closes",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       doc_id = uniq("fence-desc")
       task = mk_task!(doc_id, scope, %{"description" => "original brief"})
 
@@ -829,8 +790,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "(b) editing content.code_refs / labels between claim and close → close still succeeds",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       doc_id = uniq("fence-selfedit")
       task = mk_task!(doc_id, scope, %{"description" => "steady brief"})
 
@@ -852,8 +811,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "(c) a claim WITHOUT a work_digest (legacy lease) closes exactly as before",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("fence-legacy"), scope, %{"description" => "pre-digest brief"})
 
       # Hand-craft a pre-existing claim map with NO work_digest key (what a
@@ -877,8 +834,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "(d) an explicit stale observed_rev still loses the rev CAS (behaviour unchanged)",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       doc_id = uniq("fence-explicit-rev")
       task = mk_task!(doc_id, scope, %{"description" => "brief"})
 
@@ -924,8 +879,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "an in-progress task whose claim scope overlaps the landed files is notified",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       holder = make_holder!("holder", scope, ["shared.ex"])
       lander = mk_task!(uniq("lander"), scope)
 
@@ -949,8 +902,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "no notice when the claimed scope does not overlap the landed files",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       holder = make_holder!("holder-disjoint", scope, ["unrelated.ex"])
       lander = mk_task!(uniq("lander-disjoint"), scope)
 
@@ -965,8 +916,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "a close with no land digest emits no notice", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       holder = make_holder!("holder-nolanded", scope, ["shared.ex"])
       lander = mk_task!(uniq("lander-nolanded"), scope)
 
@@ -998,8 +947,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "(a) a done-close WITH a landed digest flips the merge_gate criterion met=true with composed evidence",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       # A claimed task (epoch 5) so the composed evidence carries the epoch.
       task =
         mk_task!(uniq("mg-happy"), scope, %{
@@ -1052,8 +999,6 @@ defmodule Barkpark.Tasks.CloseTest do
     # criterion_text_required instead of stamping the gate.
     test "(a2) the auto-stamp survives the fail-closed guard — it threads the stored text",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("mg-guarded"), scope, %{
           "acceptance_criteria" => @merge_gate_criteria,
@@ -1084,8 +1029,6 @@ defmodule Barkpark.Tasks.CloseTest do
     # auto-stamp skips it — and the close still succeeds.
     test "(a3) a merge_gate criterion with NO text is skipped, not stamped through a hole",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       textless = [
         %{"criterion" => "feature built", "met" => true, "evidence" => "PR #1"},
         %{"criterion" => "", "met" => false, "merge_gate" => true}
@@ -1123,8 +1066,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "(b) a done-close with NO landed digest does NOT auto-stamp (builder pre-merge close)",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("mg-nolanded"), scope, %{"acceptance_criteria" => @merge_gate_criteria})
 
@@ -1144,8 +1085,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "(c) a criterion WITHOUT the merge_gate marker is NOT auto-stamped even on a merge close",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       # Same shape but the last entry is unmarked — the text 'MERGE GATE'
       # convention alone must NOT trigger the stamp.
       unmarked = [
@@ -1170,8 +1109,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "(d) a caller-supplied explicit update for the gate index WINS (no auto overwrite)",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("mg-caller-wins"), scope, %{"acceptance_criteria" => @merge_gate_criteria})
 
@@ -1201,8 +1138,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "an already-met merge_gate criterion is left untouched (idempotent, no re-evidence)",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       already = [
         %{
           "criterion" => "MERGE GATE",
@@ -1227,8 +1162,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "a cancelled close (non-'done' terminal) with landed does NOT auto-stamp the gate",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("mg-cancelled"), scope, %{"acceptance_criteria" => @merge_gate_criteria})
 
@@ -1283,8 +1216,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "a scratch worker citing a FOREIGN PR is REFUSED — the server stamps no gate for a PR it never saw land here",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("fabrication"), scope, %{
           "acceptance_criteria" => @fabrication_criteria,
@@ -1311,8 +1242,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "a WITNESSED close still stamps — and the ledger still refuses to claim a lead or a merge, and still leaves a trace",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("witnessed-seal"), scope, %{
           "acceptance_criteria" => @fabrication_criteria,
@@ -1373,8 +1302,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "an internal caller (no api_token) records a NULL authenticated actor rather than borrowing the asserted one",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("autostamp-internal"), scope, %{
           "acceptance_criteria" => @fabrication_criteria
@@ -1397,8 +1324,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "a close that autostamps NOTHING writes no trace (an honest close has nothing to confess)",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("autostamp-none"), scope, %{
           "acceptance_criteria" => @fabrication_criteria
@@ -1417,8 +1342,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "SIDE BY SIDE: the unverified close-time sentence and the webhook-verified one are distinguishable, and so are their traces",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       # (1) The webhook-verified path — a real merge event was observed.
       verified_task =
         mk_task!(uniq("autostamp-verified"), scope, %{
@@ -1478,8 +1401,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "a later verified merge event does NOT erase the earlier unverified assertion",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       unstamped = [
         %{"criterion" => "work built", "met" => true, "evidence" => "local run"},
         %{"criterion" => "MERGE GATE: PR merged", "met" => false, "merge_gate" => true},
@@ -1534,8 +1455,6 @@ defmodule Barkpark.Tasks.CloseTest do
   describe "close/3 — holder gate" do
     test "worker-B closing worker-A's claimed task is REFUSED (was silently {:ok, doc})",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       doc_id = uniq("holder-foreign")
       task = mk_task!(doc_id, scope)
 
@@ -1552,8 +1471,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "arm 2 — the holder closes its own claim", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       doc_id = uniq("holder-self")
       task = mk_task!(doc_id, scope)
       assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-A", scope)
@@ -1570,8 +1487,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "arm 1 — a never-claimed container task still closes for anyone", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("holder-container"), scope)
       refute Map.has_key?(task.content, "claim"), "precondition: no claim map"
 
@@ -1583,8 +1498,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "arm 3a — a TTL-reaped lease self-resumes on previous_worker", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("holder-reaped"), scope)
 
       # What TtlSweeper leaves behind: worker nil'd, epoch bumped, the reaped
@@ -1608,8 +1521,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "arm 3b — a VOLUNTARILY released lease self-resumes on released_by", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       doc_id = uniq("holder-released")
       task = mk_task!(doc_id, scope)
 
@@ -1637,8 +1548,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "arm 3 does not admit a DIFFERENT worker over a released lease", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("holder-released-foreign"), scope)
 
       :ok =
@@ -1654,8 +1563,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "the override lands the foreign close AND records actor + held_by + reason",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       doc_id = uniq("holder-override")
       task = mk_task!(doc_id, scope)
       assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-A", scope)
@@ -1680,8 +1587,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "a blank/whitespace override reason is NOT an override", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       doc_id = uniq("holder-blank-override")
       task = mk_task!(doc_id, scope)
       assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-A", scope)
@@ -1701,8 +1606,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "the holder gate is independent of the epoch fence (a stale epoch still loses)",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       doc_id = uniq("holder-vs-fence")
       task = mk_task!(doc_id, scope)
       assert {:ok, _} = Tasks.claim_by_id(doc_id, "worker-A", scope)
@@ -1731,8 +1634,6 @@ defmodule Barkpark.Tasks.CloseTest do
     ]
 
     test "a done close over an unmet criterion is REFUSED, naming the index", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-gate-refuse"), scope, %{"acceptance_criteria" => @unproven})
 
       assert {:error, {:criteria_unmet, [1]}} =
@@ -1745,8 +1646,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "a closer that flips its OWN criteria in the closing command still hits the gate",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-gate-selfflip"), scope, %{"acceptance_criteria" => @unproven})
 
       # This is the whole point of the seat (close.ex, `check_criteria_proven/6`
@@ -1812,8 +1711,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "a closer that LOWERS a met criterion to false in the closing command hits the gate",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-gate-lower"), scope, %{"acceptance_criteria" => @all_met})
 
       # The mirror of the test above. Pre-write the row is fully proven, so the
@@ -1835,8 +1732,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "the lowering close is APPEALABLE — criteria_override lands it and records the unmet row",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-gate-lower-ovr"), scope, %{"acceptance_criteria" => @all_met})
 
       # The refusal above is a refusal, not a wall. This is the whole reason the
@@ -1861,8 +1756,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "a fully-proven task closes with no override and no record", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       proven = [%{"criterion" => "A: built", "met" => true, "evidence" => "PR #1"}]
       task = mk_task!(uniq("crit-gate-proven"), scope, %{"acceptance_criteria" => proven})
 
@@ -1878,8 +1771,6 @@ defmodule Barkpark.Tasks.CloseTest do
     # close needs an artifact in its reason — the row is closed by naming the PR
     # and sha, not by saying "done". Opts out of the fixture criterion on purpose.
     test "a task with NO acceptance criteria is unaffected", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-gate-none"), scope, %{"acceptance_criteria" => []})
 
       assert {:ok, closed} =
@@ -1893,8 +1784,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "cancelled is EXEMPT by name — unmet criteria close unchanged", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-gate-cancelled"), scope, %{"acceptance_criteria" => @unproven})
 
       assert {:ok, closed} =
@@ -1910,8 +1799,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "blocked is EXEMPT by name — unmet criteria close unchanged", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-gate-blocked"), scope, %{"acceptance_criteria" => @unproven})
 
       assert {:ok, closed} =
@@ -1923,8 +1810,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "the override lands the unproven close AND records actor + unmet + reason",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-gate-override"), scope, %{"acceptance_criteria" => @unproven})
 
       assert {:ok, _closed} =
@@ -1942,8 +1827,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "a blank criteria_override reason is NOT an override", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-gate-blank"), scope, %{"acceptance_criteria" => @unproven})
 
       assert {:error, {:criteria_unmet, [1]}} =
@@ -1956,8 +1839,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "a malformed criteria payload keeps its OWN error ahead of the unmet gate",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-gate-precedence"), scope, %{"acceptance_criteria" => @unproven})
 
       # Out of range, stale text guard, and an unguarded met-flip each keep the
@@ -1987,8 +1868,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "BOTH overrides on one close write BOTH records", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       doc_id = uniq("crit-gate-both")
       task = mk_task!(doc_id, scope, %{"acceptance_criteria" => @unproven})
       assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-A", scope)
@@ -2016,8 +1895,6 @@ defmodule Barkpark.Tasks.CloseTest do
   describe "close/3 — sentinel worker ids" do
     test "empty-after-trim and None|null|nil|- are refused before the DB is touched",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("sentinel"), scope)
 
       for sentinel <- ["", "   ", "None", "none", "NULL", "null", "nil", "-", " None "] do
@@ -2033,8 +1910,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "a worker id that merely CONTAINS a sentinel is fine", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("sentinel-ok"), scope)
 
       assert {:ok, closed} =
@@ -2067,8 +1942,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "a rubric row with no index resolves by exact text and flips that row only",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-text-happy"), scope, %{"acceptance_criteria" => @rubric})
 
       assert {:ok, closed} =
@@ -2100,8 +1973,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "the whole rubric can be pasted back — mixed met values, one write", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-text-whole"), scope, %{"acceptance_criteria" => @rubric})
 
       # The lifecycle is `done` and not `blocked` because of the raise gate
@@ -2137,8 +2008,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "a text that matches NO stored row is refused and writes nothing", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-text-missing"), scope, %{"acceptance_criteria" => @rubric})
 
       assert {:error, :criterion_not_found} =
@@ -2163,8 +2032,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "two rows sharing one wording are AMBIGUOUS — refused, never guessed",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       dupes = [
         %{"criterion" => "ships with a test", "met" => false},
         %{"criterion" => "ships with a test", "met" => false}
@@ -2208,8 +2075,6 @@ defmodule Barkpark.Tasks.CloseTest do
 
     test "a text-keyed met-flip is guarded BY CONSTRUCTION — the text is the CAS",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("crit-text-guard"), scope, %{"acceptance_criteria" => @rubric})
 
       # The D56 refusal (:criterion_text_required) exists for an index with no
@@ -2269,8 +2134,6 @@ defmodule Barkpark.Tasks.CloseTest do
   # be handed a success receipt — into exactly that receipt.
   describe "close/3 — every close names its closer on the task.closed event" do
     test "a NEVER-CLAIMED task's close names the closer on its event", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("claimless"), scope)
       refute Map.has_key?(task.content, "claim"), "fixture must reach the `_ ->` arm"
 
@@ -2298,8 +2161,6 @@ defmodule Barkpark.Tasks.CloseTest do
     test "a claimless close with NO api_token names the worker and omits the token", %{
       scope: scope
     } do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("claimless-anon"), scope)
 
       assert {:ok, _} =
@@ -2315,8 +2176,6 @@ defmodule Barkpark.Tasks.CloseTest do
     end
 
     test "a CLAIMED close carries the same event stamp beside claim.closed_by", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task =
         mk_task!(uniq("claimed"), scope, %{
           "lifecycle_status" => "in_progress",

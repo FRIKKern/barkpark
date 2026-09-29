@@ -221,9 +221,43 @@ main() {
   [ "$(jq 'length' <<<"$got")" -gt 0 ] \
     || fail "the candidate lists ZERO required contexts — a spec that requires nothing cannot fail"
 
+  # NOTHING DERIVED FROM THE SPEC FILE TRAVELS IN ARGV (honest-gates; the #18123
+  # class). `--argjson g "$got"` puts the whole value into ONE execve argument,
+  # and Linux caps a SINGLE argument at MAX_ARG_STRLEN (32 pages = 131072 bytes)
+  # independently of the much larger ARG_MAX — so no amount of total-size
+  # headroom relieves it. That is exactly how `--argjson base "$base_json"` in
+  # scripts/required-checks-generate.sh died: .github/required-checks.json grew
+  # from 98,463 to 133,127 bytes in one PR (661e87d9f / #17989) and from that
+  # commit every generator call on a Linux runner exited 126 with
+  # `jq: Argument list too long`, so required-checks-drift concluded failure on
+  # every main head for a day. This script reads the SAME file under the SAME
+  # growth pressure: measured on origin/main 2026-09-13 (spec 136,352 bytes),
+  # `$got`/`$want` serialise to 182 bytes and `$got_readme` to 8,005 — the
+  # `_readme` handoff at roughly 16x margin and closing, since _readme is where
+  # essentially all of this file's growth lands.
+  #
+  # MACOS CANNOT REPRODUCE THIS. Darwin enforces a total ARG_MAX and no
+  # per-argument cap, so every one of these calls succeeds on a developer
+  # laptop no matter how large the value gets, and a local green says nothing
+  # whatever about whether the CI runner can start the process. That is why the
+  # remedy is a SHAPE the script holds unconditionally rather than a size
+  # somebody re-checks: §14f of scripts/required-checks.test.sh measures the
+  # longest single jq argument across a full floor run, on any platform, and
+  # refuses one over the cap.
+  #
+  # `--slurpfile` wraps the single JSON value in the file in an OUTER array,
+  # hence the `$x_in[0] as $x` unwrapping in each program below — every
+  # reference stays the `$g`/`$w` the argv form bound, so the emit is unchanged.
+  local argdir
+  argdir="$(mktemp -d)" || fail "could not create a temp dir for the floor's jq inputs"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$argdir'" EXIT
+  printf '%s\n' "$want" >"$argdir/want.json"
+  printf '%s\n' "$got"  >"$argdir/got.json"
+
   local lost gained
-  lost="$(jq -r --argjson g "$got" '[.[] | select(. as $w | $g | index($w) | not)] | .[] | "\(.context)\t\(.app_id // "null")"' <<<"$want")"
-  gained="$(jq -r --argjson w "$want" '[.[] | select(. as $g | $w | index($g) | not)] | .[] | "\(.context)\t\(.app_id // "null")"' <<<"$got")"
+  lost="$(jq -r --slurpfile g_in "$argdir/got.json" '($g_in[0]) as $g | [.[] | select(. as $w | $g | index($w) | not)] | .[] | "\(.context)\t\(.app_id // "null")"' <<<"$want")"
+  gained="$(jq -r --slurpfile w_in "$argdir/want.json" '($w_in[0]) as $w | [.[] | select(. as $g | $w | index($g) | not)] | .[] | "\(.context)\t\(.app_id // "null")"' <<<"$got")"
 
   # The other two floored fields. Read here rather than inside the `if`s so a
   # candidate that breaches on several axes at once reports ALL of them in one
@@ -232,7 +266,8 @@ main() {
   local want_readme got_readme readme_lost want_enforced got_enforced enforced_regressed
   want_readme="$(printf '%s' "$ref" | readme_of)"
   got_readme="$(readme_of < "$CANDIDATE")"
-  readme_lost="$(jq -r --argjson g "$got_readme" '[.[] | select(IN($g[]) | not)] | .[] | (if length > 96 then .[0:96] + " …" else . end)' <<<"$want_readme")"  # README-LOSS CLAUSE
+  printf '%s\n' "$got_readme" >"$argdir/got_readme.json"
+  readme_lost="$(jq -r --slurpfile g_in "$argdir/got_readme.json" '($g_in[0]) as $g | [.[] | select(IN($g[]) | not)] | .[] | (if length > 96 then .[0:96] + " …" else . end)' <<<"$want_readme")"  # README-LOSS CLAUSE
   want_enforced="$(printf '%s' "$ref" | enforced_of)"
   got_enforced="$(enforced_of < "$CANDIDATE")"
   enforced_regressed=0

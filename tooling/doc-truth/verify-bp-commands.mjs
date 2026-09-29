@@ -37,7 +37,8 @@
 // Exit 0 only when every printed command was adjudicated and none is
 // unresolved. Dependency-free. ESM, node: builtins only.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, cpSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -365,6 +366,196 @@ function selftest() {
     const r = verifyDocs([fix("clean")], { manifestPath: "docs/cli/fixtures/does-not-exist.json" });
     return (r.sources.ok === false && /SOURCE A UNAVAILABLE/.test(r.sources.errors.join(" "))) ||
       `run did not fail: ok=${r.sources.ok} errors=${JSON.stringify(r.sources.errors)}`;
+  });
+
+  // ── VERB TABLES: dispatch that is DATA, not syntax ───────────────────────
+  //
+  // #18555 replaced runCloudSite()'s verb switch with a lookup table
+  // (internal/cli/site_verb_matrix.go). A reader keyed to `case "x":` saw NO
+  // verbs and reported every correct `bp cloud site …` line in templates/ as
+  // UNRESOLVED — a false red on docs nobody had touched
+  // (task-130384a036e99eb6). The resolver now reads the TABLE.
+  //
+  // BOTH ARMS, because either failure is silent:
+  //   · the POSITIVE checks RED if the reader is reverted to case-scraping, or
+  //     if it stops citing the table row that adjudicated the verb;
+  //   · the MUTATION checks RED if the reader is widened into one that answers
+  //     "parses" for tokens the table does not declare — the vacuous green
+  //     this whole gate exists to prevent.
+  const tableCite = (line) => {
+    const r = verdict(line);
+    if (r.verdict !== PROVEN) return `${r.verdict}: ${r.reasons.join("|")}`;
+    const cited = (r.authority || []).filter((a) => /^D .*site_verb_matrix\.go:\d+$/.test(a));
+    return cited.length > 0 ||
+      `resolved but cited no verb-table row: ${JSON.stringify(r.authority)}`;
+  };
+  for (const v of ["create", "deploy", "status", "rollback", "delete", "ls"]) {
+    check(`VERB TABLE: \`bp cloud site ${v}\` resolves THROUGH siteVerbMatrix`, () =>
+      tableCite(`bp cloud site ${v}`));
+  }
+  check("VERB TABLE: an Aliases cell resolves (`bp cloud site build` → deploy)", () =>
+    tableCite("bp cloud site build"));
+  check("VERB TABLE: the other spelling reads the SAME table (`bp sites logs`)", () =>
+    tableCite("bp sites logs"));
+  check("VERB TABLE: a token the table does NOT declare still REDs", () => {
+    const r = verdict("bp cloud site redeploy");
+    return (r.verdict === UNRESOLVED && /redeploy/.test(r.reasons.join(" "))) ||
+      `${r.verdict}: ${r.reasons.join("|")} — the table reader answers for verbs the table never declares`;
+  });
+  check("VERB TABLE: a NOUN-QUALIFIED table donates no bare verbs", () => {
+    // nounBuiltins rows carry `Noun: "task", Verb: "lint"` — the dispatch token
+    // is the PAIR. Donating the bare verb would make `bp <anything> lint`
+    // resolvable, which is the vacuous green source D exists to kill.
+    const r = verdict("bp vercel lint");
+    return (r.verdict === UNRESOLVED) ||
+      `${r.verdict} — a noun-qualified row resolved by its verb alone`;
+  });
+  check("VERB TABLE SCOPE: a spawner-only verb still REFUSES at the fleet noun", () => {
+    const r = verdict("bp sites deploy");
+    return (r.verdict === UNRESOLVED && /deploy/.test(r.reasons.join(" "))) ||
+      `${r.verdict} — the Scope column was ignored; every verb reads as offered at every noun`;
+  });
+
+  // MUTATION on a COPY of internal/cli — the arm that fires on REAL drift: a
+  // verb retired in the table while a doc still prints it. The tree is copied,
+  // not edited, so nothing here can touch the working tree.
+  const runProbe = (printed, edit, editFile = "internal/cli/site_verb_matrix.go", opts = {}) => {
+    const tmp = mkdtempSync(join(tmpdir(), "bp-verb-table-"));
+    try {
+      cpSync(join(REPO_ROOT, "internal/cli"), join(tmp, "internal/cli"), { recursive: true });
+      let changed = true;
+      if (edit) {
+        const f = join(tmp, editFile);
+        const before = readFileSync(f, "utf8");
+        const after = edit(before);
+        changed = after !== before;
+        if (changed) writeFileSync(f, after);
+      }
+      writeFileSync(join(tmp, "probe.md"), "```sh\n" + printed + "\n```\n");
+      if (opts.rawLoad) {
+        return { changed, sources: loadBpSources({ root: tmp, offline: true }) };
+      }
+      return { changed, report: verifyDocs(["probe.md"], { root: tmp, offline: true }) };
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  };
+  const dropRow = (verb) => (src) =>
+    src.replace(new RegExp(`\\n\\t\\t\\{\\n\\t\\t\\tVerb: "${verb}",[\\s\\S]*?\\n\\t\\t\\},`), "");
+
+  check("CONTROL: the probe doc GREENs against the UNMUTATED copy", () => {
+    const { report } = runProbe("bp cloud site rollback <slug>", null);
+    return (report.totals.commands === 1 && report.totals.unresolved === 0) ||
+      `commands=${report.totals.commands} unresolved=${report.totals.unresolved} — ` +
+      "the mutation checks below would be measuring a broken harness, not the mutation";
+  });
+  check("MUTATION: retire `rollback` from the table and the doc printing it REDs", () => {
+    const { changed, report } = runProbe("bp cloud site rollback <slug>", dropRow("rollback"));
+    if (!changed) return "the row-drop did not apply — this check would pass vacuously";
+    return (report.totals.unresolved === 1) ||
+      `expected 1 UNRESOLVED, got ${report.totals.unresolved} of ${report.totals.commands} — ` +
+      "a verb deleted from the table still resolves";
+  });
+  check("MUTATION: drop the `build` alias and `bp cloud site build` REDs", () => {
+    const { changed, report } = runProbe("bp cloud site build <slug>",
+      (src) => src.replace(' Aliases: []string{"build"},', ""));
+    if (!changed) return "the alias-drop did not apply — this check would pass vacuously";
+    return (report.totals.unresolved === 1) ||
+      `expected 1 UNRESOLVED, got ${report.totals.unresolved} — aliases are not read from the table`;
+  });
+  check("MUTATION: widen deploy's Scope and `bp sites deploy` stops refusing", () => {
+    // The scope column is READ, not decoration: flip spawner-only to shared and
+    // the fleet noun starts answering. If this stays UNRESOLVED the scope check
+    // above is passing for some other reason.
+    const { changed, report } = runProbe("bp sites deploy <slug>",
+      (src) => src.replace("Scope: siteVerbSpawnerOnly", "Scope: siteVerbShared"));
+    if (!changed) return "the scope flip did not apply — this check would pass vacuously";
+    return (report.totals.unresolved === 0) ||
+      `still UNRESOLVED with the scope widened: ${report.unresolved.map((x) => x.reasons.join("|")).join(" ")}`;
+  });
+
+  // ── [D3] the NOUN-QUALIFIED built-in registry ────────────────────────────
+  //
+  // `bp task create` is dispatched from nounBuiltins and exists in NO manifest.
+  // Before D3 the verifier scored three TRUE docs/cli/error-exit-table.md lines
+  // UNRESOLVED. The arms below prove the pair resolves, prove it resolves ONLY
+  // because of the registry, and prove the registry read REFUSES rather than
+  // answering "no pairs" when it comes back empty.
+  const NB = "internal/cli/noun_builtins.go";
+
+  check("D3 resolves `bp task create --publish` (registry-only, no manifest row)", () => {
+    const r = verdict("bp task create --publish");
+    const fromRegistry = r.authority.some((a) => /^D create → internal\/cli\/noun_builtins\.go:\d+$/.test(a));
+    return (r.verdict === PROVEN && fromRegistry) ||
+      `${r.verdict} via ${r.via.join("+")} — authority: ${r.authority.join(" ; ")}`;
+  });
+  check("D3 names the built-in's own leaf, so [C]/[E] can still adjudicate its flags", () => {
+    // Without the leaf the pair parses and the FLAG degrades to UNPROVEN — a
+    // softer answer that is not a pass and hides that --publish is real.
+    const r = verdict("bp task create --publish");
+    return (r.unproven.length === 0) ||
+      `flags fell to UNPROVEN: ${r.unproven.join("|")}`;
+  });
+  check("D3 does NOT donate a bare verb: `bp doc create` is judged by the manifest, `bp task frontier` by the pair", () => {
+    // The pair is the dispatch token. `frontier` is registered under `task`
+    // only; a noun that does not carry it must not inherit it.
+    const good = verdict("bp task frontier");
+    const bad = verdict("bp media frontier");
+    return (good.verdict === PROVEN && bad.verdict === UNRESOLVED) ||
+      `task frontier=${good.verdict} media frontier=${bad.verdict} — the pair leaked into another noun`;
+  });
+  check("CONTROL: the D3 probe doc GREENs against the UNMUTATED copy", () => {
+    const { report } = runProbe("bp task create --publish", null, NB);
+    return (report.totals.commands === 1 && report.totals.unresolved === 0) ||
+      `commands=${report.totals.commands} unresolved=${report.totals.unresolved} — ` +
+      "the D3 mutations below would be measuring a broken harness";
+  });
+  check("MUTATION: delete the `task create` registry row and the doc printing it REDs", () => {
+    const { changed, report } = runProbe("bp task create --publish",
+      (src) => src.replace(/\n\t\{\n\t\tNoun:\s+"task",\n\t\tVerb:\s+"create",[\s\S]*?\n\t\},/, ""), NB);
+    if (!changed) return "the row-drop did not apply — this check would pass vacuously";
+    return (report.totals.unresolved === 1) ||
+      `expected 1 UNRESOLVED, got ${report.totals.unresolved} of ${report.totals.commands} — ` +
+      "`task create` resolves from something other than the registry, so D3 is not what greens it";
+  });
+  check("POSITIVE CONTROL: an EMPTY registry REFUSES the load — it never answers `no pairs`", () => {
+    // An absence claim needs a control. If the registry read could come back
+    // empty and still report a clean load, every `<noun> <verb>` built-in would
+    // silently go back to being invisible and this gate would RED true lines
+    // while looking healthy. The refusal is keyed on the SHAPE, not a filename.
+    const { changed, sources } = runProbe("bp task create",
+      (src) => src.replace(/\bNoun:/g, "Group_RENAMED_AWAY:"), NB, { rawLoad: true });
+    if (!changed) return "the registry blanking did not apply — this check would pass vacuously";
+    return (sources.ok === false && /noun-qualified verb registry/.test(sources.errors.join(" "))) ||
+      `expected a REFUSAL, got ok=${sources.ok} errors=${sources.errors.join("|")}`;
+  });
+
+  // ── [D] `!=` intercepts are dispatch too ─────────────────────────────────
+  const MK = "internal/cli/make_cmd.go";
+
+  check("D reads a `!=` sub-noun guard: `bp make schema <name>`", () => {
+    const r = verdict("bp make schema <name>");
+    const fromMake = r.authority.some((a) => /^D schema → internal\/cli\/make_cmd\.go:\d+$/.test(a));
+    return (r.verdict === PROVEN && fromMake) ||
+      `${r.verdict} — authority: ${r.authority.join(" ; ")}`;
+  });
+  check("CONTROL: the `!=` probe doc GREENs against the UNMUTATED copy", () => {
+    const { report } = runProbe("bp make schema post", null, MK);
+    return (report.totals.commands === 1 && report.totals.unresolved === 0) ||
+      `commands=${report.totals.commands} unresolved=${report.totals.unresolved}`;
+  });
+  check("MUTATION: rename the token in the `!=` guard and `bp make schema` REDs", () => {
+    const { changed, report } = runProbe("bp make schema post",
+      (src) => src.replace(/args\[0\] != "schema"/g, 'args[0] != "blueprint"'), MK);
+    if (!changed) return "the guard rename did not apply — this check would pass vacuously";
+    return (report.totals.unresolved === 1) ||
+      `expected 1 UNRESOLVED, got ${report.totals.unresolved} — \`schema\` resolves from something ` +
+      "other than the guard, so the `!=` rule is not what greens it";
+  });
+  check("`!=` does not make an UNDECLARED sub-noun resolvable", () => {
+    const r = verdict("bp make casserole");
+    return (r.verdict === UNRESOLVED) ||
+      `${r.verdict} — reading \`!=\` turned the make leaf into a wildcard`;
   });
 
   // the templates/** corpus, on the real files: E is what closes the UNPROVEN

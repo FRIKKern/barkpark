@@ -121,6 +121,27 @@ defmodule BarkparkWeb.Studio.InspectorPaintRulePredicatePinTest do
   # combinator that introduces `.bp-doc-sidebar`.
   defp html_compound(selector), do: selector |> String.split(~r/\s+/, parts: 2) |> hd()
 
+  # spd-b1-pane-state-persistence — the paint rule is a selector LIST, and one
+  # alternative is keyed on a second <html> axis: `[data-inspector-pref="closed"]`,
+  # the remembered wide collapse the pre-paint head script stamps from
+  # localStorage. That alternative is NOT part of the bucket predicate this pin
+  # compares: it applies only to the STATIC render (connect_params is nil
+  # there, so the server still says `panel_open: true`), and the connected
+  # mount seeds `sidebar_open: false` for the same client, so the state it
+  # selects — `.is-open:not([data-user-opened])` under the stamp — does not
+  # exist post-connect (pinned in studio_live_inspector_pref_test.exs). The
+  # bucket predicate is therefore read from the alternatives WITHOUT the pref
+  # axis, and the pref alternatives are checked separately below.
+  @pref_axis ~S|[data-inspector-pref="closed"]|
+
+  defp pref_alternative?(selector), do: String.contains?(html_compound(selector), @pref_axis)
+
+  defp alternatives(selector_list) do
+    selector_list
+    |> String.split(",")
+    |> Enum.map(&(&1 |> String.replace(~r/\s+/, " ") |> String.trim()))
+  end
+
   # Which buckets does this compound MATCH, given `<html data-width-bucket=…>`?
   # `:not([data-width-bucket="x"])` excludes x; a bare `[data-width-bucket="x"]`
   # requires x. Anything else in the compound is bucket-agnostic.
@@ -145,7 +166,26 @@ defmodule BarkparkWeb.Studio.InspectorPaintRulePredicatePinTest do
   defp css_paints_closed_for(css) do
     universe = bucket_universe(css)
     selector = paint_selector(css)
-    matched = buckets_matched(html_compound(selector), universe)
+
+    {pref, bucket_alts} = selector |> alternatives() |> Enum.split_with(&pref_alternative?/1)
+
+    if bucket_alts == [] do
+      flunk(
+        "the painted-closed rule has no bucket-keyed alternative — this pin cannot see: #{selector}"
+      )
+    end
+
+    if length(pref) > 1 do
+      flunk(
+        "#{length(pref)} pref-keyed alternatives on the paint rule; expected at most one: #{selector}"
+      )
+    end
+
+    matched =
+      bucket_alts
+      |> Enum.flat_map(&buckets_matched(html_compound(&1), universe))
+      |> Enum.uniq()
+      |> then(fn m -> Enum.filter(universe, &(&1 in m)) end)
 
     if matched == [] do
       flunk("""
@@ -261,14 +301,28 @@ defmodule BarkparkWeb.Studio.InspectorPaintRulePredicatePinTest do
 
       # A selector list may carry several comma-separated selectors; each one
       # anchored at `html` is checked on its own compound.
-      anchored =
+      {pref_anchored, anchored} =
         siblings
         |> Enum.flat_map(&String.split(&1, ","))
         |> Enum.map(&String.trim/1)
         |> Enum.filter(&String.starts_with?(&1, "html"))
+        |> Enum.split_with(&pref_alternative?/1)
 
       assert anchored != [],
              "no `html`-anchored open-but-never-asked rules found — this pin cannot see"
+
+      # The pref axis (spd-b1) must travel with the paint rule as a whole: a
+      # geometry alternative without its title/body suppressor would paint an
+      # empty 300px column, and the reverse would empty a docked panel. Every
+      # pref-keyed alternative is BUCKET-AGNOSTIC — the remembered collapse is
+      # the same strip at every bucket — so it must select the whole universe.
+      assert length(pref_anchored) in [0, 3],
+             "the pref-keyed alternatives must cover the geometry rule AND both suppressors (3), or none: #{inspect(pref_anchored)}"
+
+      for one <- pref_anchored do
+        assert buckets_matched(html_compound(one), universe) == universe,
+               "a pref-keyed alternative is bucket-scoped; the remembered collapse must hold at every bucket: #{one}"
+      end
 
       for one <- anchored do
         assert buckets_matched(html_compound(one), universe) == painted, """

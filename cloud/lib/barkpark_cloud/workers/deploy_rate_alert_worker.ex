@@ -75,6 +75,24 @@ defmodule BarkparkCloud.Workers.DeployRateAlertWorker do
         "sent=#{waiting.sent} latched=#{waiting.latched} recovered=#{waiting.recovered}"
     )
 
-    {:ok, Map.put(result, :waiting, waiting)}
+    # dr-w32-bl-box-unreachable-needs-an-episode-alarm — THE THIRD EDGE-GUARDED
+    # DEPLOY NOTICE, on the same tick and for the third time for the same reason:
+    # a per-team read with a latched, one-per-episode output. Its own crontab row
+    # would put a third hourly ledger scan on the fleet to answer a question this
+    # tick can answer.
+    #
+    # Its window IS this cadence. `BoxUnreachableEpisodeAlert.window_minutes/0`
+    # is 60 because the quiet baseline the threshold derives from was measured in
+    # HOURS, and a missed tick therefore costs at most a delayed episode notice —
+    # never a duplicated one, because the latch is state and not a clock.
+    unreachable = Notifications.deliver_box_unreachable_episode_notices()
+
+    Logger.info(
+      "box_unreachable_episode teams=#{unreachable.teams} episodes=#{unreachable.episodes} " <>
+        "sent=#{unreachable.sent} latched=#{unreachable.latched} " <>
+        "recovered=#{unreachable.recovered}"
+    )
+
+    {:ok, result |> Map.put(:waiting, waiting) |> Map.put(:unreachable, unreachable)}
   end
 end

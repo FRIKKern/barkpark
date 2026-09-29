@@ -104,11 +104,39 @@ Wave 1 (this wave — S2/S3/S4 parallel in worktrees, S1 merges last, S5 anytime
 - S1 `snav-w1-parity-sweep` — route-sweep nav parity test (reflection guard + curated mount table + LazyHTML assertions); red evidence vs pre-fix main; merges after S2-S4. (large)
 - S5 `snav-w1-docs-visibility-rules` — docs/cards/studio.md nav-shell section + sibling-epic note for tickets inbox. (small)
 
-Wave 2 candidates (file as tasks when wave 1 lands):
-- Tickets inbox: decide whether the controller route gets the shell (controller-layout work) or a LiveView migration note to the deep-link sibling.
-- DatasetSwitcher `current_section` + api-tester action group derived from current_path → retire nav_section fully.
-- Latent flat↔scoped workspace-attribution UX (plugin tab enabled in ws A, disabled in Default): surface as disabled-state instead of vanish, coordinated with structure-polish placement tiers.
-- Extend parity sweep to plugin routes behind the `:plugin_routes` tag with enable-fixtures.
+Wave 2 candidates — TRIAGED 2026-09-10 (`spd-b5-navshell-wave2-triage`), against
+origin/main `151022500`. This list is CLOSED: every row below has a verdict and
+an owner or an obsolescence proof, so it must not be mined for new work again.
+The nav-shell epic `bp-studio-nav-shell` is lifecycle **done**, so the two
+still-real rows are parented under `studio-space-priority-desk` (the open Studio
+mission that can actually complete them), not under a sealed epic.
+
+- **Tickets inbox** — DONE, `task-d6489fba128b61b8`. Chosen path: the existing
+  plugin-owned `InboxLive` under the `plugin_admin` / `scoped_plugin_admin`
+  StudioChrome sessions; no controller-layout fork. Flat + scoped Tickets routes
+  are `:plugin` mount rows in `nav_parity_sweep_test.exs`.
+- **DatasetSwitcher `current_section` + api-tester action group derived from
+  current_path → retire nav_section fully** — STILL REAL, filed as
+  `task-0e9a71366667ef23`. `nav_section` no longer drives active-state
+  (`nav.ex:374-376`) but still drives two chrome decisions:
+  `layouts/studio.html.heex:54` feeds it to `DatasetSwitcher`, whose only use is
+  the pure path-suffix map at `studio/dataset_switcher.ex:42-45`, and
+  `layouts/studio.html.heex:77` gates the api-tester token/run-all group on
+  `assigns[:nav_section] == :api_tester`. Six LiveViews still hand-assign it.
+- **Latent flat↔scoped workspace-attribution UX (surface as disabled-state
+  instead of vanish)** — STILL REAL, filed as `task-e34595f816cd4bd2`.
+  `plugins/registry/resolver_chain.ex:140-148` still `Enum.filter`s disabled
+  plugins out of every surfacing callback, and `normalize_top_menu_entry/1`
+  (`resolver_chain.ex:358-366`) keeps no `:disabled` field, so `nav.ex:419-441`
+  has nothing to render a disabled state from.
+- **Extend parity sweep to plugin routes behind the `:plugin_routes` tag with
+  enable-fixtures** — OBSOLETE: it shipped inside wave 1 itself, not wave 2.
+  `snav-w1-parity-sweep` (#1909, 2026-07-09) added the
+  `describe "nav parity on plugin routes (enabled per workspace)"` block with
+  `@describetag :plugin_routes` and a `set_workspace_plugin_settings/2`
+  enable-fixture setup — `test/barkpark_web/studio/nav_parity_sweep_test.exs:347-366`
+  — plus the `:plugin` disposition rows and the global exclude in
+  `test/test_helper.exs:55`. Nothing left to do.
 
 ## Wave log
 

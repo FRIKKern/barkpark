@@ -31,10 +31,22 @@
 // live defect: they required submitProviderCred to stay unpredicated forever.
 // What survives is (2d-ii), the non-directional rule — the same-route pair may
 // not go BOTH unpredicated. That rule is pin-side, so no arrangement of source
-// text can exercise it; the `@pin-override` below drives it as a mutant, nulling
+// text can exercise it; the `@pin-override` below drives it as a mutant, voiding
 // the gated verdict so the pair collapses. Without this row the split would be a
 // net loss of coverage, which is the only reason it is here.
-// @pin-override fixtureGatedProvider|POST /v1/fixture/providers predicate=null
+//
+// THE MUTANT IS `""`, NOT `null`, AND THE DIFFERENCE IS THE POINT
+// (cch-bl-2d-ii-identical-predicate). `fixtureBareProvider` is pinned `null`
+// already, so this override makes the pair {null, ""} — MIXED falsy, an
+// identical-predicate flattening in everything but spelling. A rule written
+// `predicate === null` goes silent on it. So does one written `predicate === ""`.
+// Only the spelling the rest of the census uses for "unpredicated" —
+// `!predicate`, the same test `isUnboundElevated` and the classification summary
+// run — fires. So this cell reds if (2d-ii) is ever narrowed back to a
+// single-value equality in EITHER direction. A both-null mutant could not show
+// that: it fires under `=== null` and under `!predicate` alike, which is exactly
+// how the `""` flattening shipped unseen.
+// @pin-override fixtureGatedProvider|POST /v1/fixture/providers predicate=""
 // @must-flag VERDICT-COLLAPSE POST /v1/fixture/providers
 //
 // ── the negative half: rows this same run must NOT fire on ───────────────────

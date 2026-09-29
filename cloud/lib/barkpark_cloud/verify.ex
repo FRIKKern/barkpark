@@ -26,6 +26,19 @@ defmodule BarkparkCloud.Verify do
       dead-on-arrival class.
     * `verify.studio` GET `/studio`, following the scoped-login redirect ≤3 hops
       → final status `< 500`.
+    * `verify.siteplane` the site-hosting plane — CONDITIONAL, and the one probe
+      that is not an HTTP request (the instance origin serves no plane facts).
+      It reads the fact the on-box agent already ships on every beat
+      (`internal/agent/site_plane.go` → `Report.SitePlane`, stored verbatim in
+      the `health` agent_event's jsonb `payload["site_plane"]` by
+      `POST /v1/agent/report`). REQUIRED only when the box hosts at least one
+      site; a box that hosts none is SKIPPED (`ok: true, skipped: true`), so a
+      CMS-only box never goes red over a plane it has no use for. Required →
+      pass iff the latest beat's `site_plane.complete` is `true`; a measured
+      `false` fails naming the missing parts, and an absent/`null` reading
+      FAILS as unmeasured (a required fact nobody measured is not a pass).
+      On an unreachable box it reports unreachable like its siblings — a stale
+      beat is not a reading of a box that is not answering.
 
   ## Token custody (D46)
 
@@ -48,8 +61,10 @@ defmodule BarkparkCloud.Verify do
   probe outcomes.
   """
 
-  alias BarkparkCloud.Registry
-  alias BarkparkCloud.Registry.Barkpark
+  import Ecto.Query, only: [from: 2]
+
+  alias BarkparkCloud.{Registry, Repo}
+  alias BarkparkCloud.Registry.{Barkpark, Site}
 
   # The deliberately-invalid sentinel credentials the login probe POSTs. Its ONLY
   # job is to make the auth/session stack ANSWER (401/422 = alive; 5xx = #957
@@ -83,10 +98,18 @@ defmodule BarkparkCloud.Verify do
       name: "verify.studio",
       label: "Studio renders",
       pass_rule: "status < 500 after <= 3 redirect hops"
+    },
+    %{
+      name: "verify.siteplane",
+      label: "Sites can build",
+      pass_rule: "site plane complete when required; skipped when not required"
     }
   ]
 
+  # `skipped` rides verify.siteplane only: true when the conditional probe did
+  # not apply to this box.
   @type probe_result :: %{
+          optional(:skipped) => boolean(),
           name: String.t(),
           ok: boolean(),
           reachable: boolean(),
@@ -131,21 +154,25 @@ defmodule BarkparkCloud.Verify do
     case Registry.reveal_admin_token(bp) do
       {:ok, nil} -> {:error, :no_admin_token}
       :error -> {:error, :decrypt_failed}
-      {:ok, token} -> {:ok, execute(String.trim_trailing(url, "/"), token)}
+      {:ok, token} -> {:ok, execute(bp, String.trim_trailing(url, "/"), token)}
     end
   end
 
   def run(_), do: {:error, :not_live}
 
-  # Run the three probes in order and fold them into the envelope. Each probe is
+  # Run the four probes in order and fold them into the envelope. Each probe is
   # self-contained (a transport error on one never aborts the others), so an
-  # unreachable box yields three `reachable: false` probes rather than a raise.
-  defp execute(base, token) do
-    results = [
+  # unreachable box yields four `reachable: false` probes rather than a raise.
+  # verify.siteplane reads stored facts, so it is handed the HTTP results to
+  # know whether the box answered at all.
+  defp execute(bp, base, token) do
+    http = [
       probe_api(base, token),
       probe_login(base),
       probe_studio(base)
     ]
+
+    results = http ++ [probe_siteplane(bp, http)]
 
     %{
       ok: Enum.all?(results, & &1.ok),
@@ -263,6 +290,99 @@ defmodule BarkparkCloud.Verify do
         :unreachable
     end
   end
+
+  # verify.siteplane — CONDITIONAL. See the moduledoc for the rule; this is the
+  # only probe that reads the control plane's own store instead of the box.
+  @siteplane "verify.siteplane"
+
+  # The seven sub-facts `SitePlaneCapability.complete` rolls up, with the words
+  # a failing verdict names them by.
+  @siteplane_tools [
+    {"docker", "docker"},
+    {"buildx", "buildx"},
+    {"nixpacks", "nixpacks"},
+    {"go", "go toolchain"},
+    {"git", "git"}
+  ]
+  @siteplane_units [
+    {"builder_unit_active", "builder unit"},
+    {"runtime_unit_active", "runtime unit"}
+  ]
+
+  defp probe_siteplane(bp, http_results) do
+    start = System.monotonic_time(:millisecond)
+
+    if Enum.any?(http_results, & &1.reachable) do
+      {ok, skipped, evidence} = siteplane_verdict(bp)
+      elapsed = System.monotonic_time(:millisecond) - start
+
+      probe(@siteplane, ok, true, nil, elapsed, evidence)
+      |> Map.put(:skipped, skipped)
+    else
+      @siteplane
+      |> unreachable_probe(System.monotonic_time(:millisecond) - start)
+      |> Map.put(:skipped, false)
+    end
+  end
+
+  # {ok, skipped, evidence}
+  defp siteplane_verdict(bp) do
+    if hosts_sites?(bp) do
+      bp |> latest_site_plane() |> required_siteplane_verdict()
+    else
+      {true, true, "skipped — this box hosts no sites (site plane not required)"}
+    end
+  end
+
+  defp hosts_sites?(%Barkpark{id: id}),
+    do: Repo.exists?(from(s in Site, where: s.barkpark_id == ^id))
+
+  # The newest `health` beat is the agent's CURRENT word on the plane. A
+  # site_plane-less beat (an agent older than the probe, or one whose probe
+  # errored) is `nil` — unmeasured, never absent.
+  defp latest_site_plane(bp) do
+    case Registry.recent_events_of_type(bp, "health", 1) do
+      [%{payload: %{} = payload, inserted_at: at}] -> {Map.get(payload, "site_plane"), at}
+      _ -> {nil, nil}
+    end
+  end
+
+  defp required_siteplane_verdict({%{"complete" => true}, at}),
+    do:
+      {true, false,
+       "site plane complete (docker, buildx, nixpacks, go, git; builder + runtime units active)" <>
+         beat_age(at)}
+
+  defp required_siteplane_verdict({%{"complete" => false} = plane, at}) do
+    missing =
+      for {key, word} <- @siteplane_tools,
+          match?(%{"present" => false}, plane[key]),
+          do: word
+
+    missing = missing ++ for({key, word} <- @siteplane_units, plane[key] == false, do: word)
+
+    detail = if missing == [], do: "", else: " — missing: " <> Enum.join(missing, ", ")
+    {false, false, "site plane incomplete" <> detail <> beat_age(at)}
+  end
+
+  defp required_siteplane_verdict({_unmeasured, nil}),
+    do:
+      {false, false,
+       "site plane UNMEASURED — this box hosts sites but its agent has never reported a beat"}
+
+  defp required_siteplane_verdict({_unmeasured, at}),
+    do:
+      {false, false,
+       "site plane UNMEASURED — this box hosts sites but its agent's latest beat carries no site_plane reading" <>
+         beat_age(at)}
+
+  defp beat_age(%DateTime{} = at) do
+    secs = max(DateTime.diff(DateTime.utc_now(), at, :second), 0)
+    " · beat #{secs}s ago"
+  end
+
+  defp beat_age(%NaiveDateTime{} = at), do: at |> DateTime.from_naive!("Etc/UTC") |> beat_age()
+  defp beat_age(_), do: ""
 
   # ── probe plumbing ──
 

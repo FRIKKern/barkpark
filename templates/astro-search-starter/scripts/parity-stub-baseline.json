@@ -1,0 +1,120 @@
+{
+  "_meta": {
+    "tool": "parity-check.mjs",
+    "route": "/v1/data/search/:dataset?q&engine&types&perspective&limit",
+    "base": "http://127.0.0.1:4320",
+    "dataset": "smoke",
+    "type": "entry",
+    "engines": [
+      "indx",
+      "postgres"
+    ],
+    "limit": 100,
+    "perspective": "published",
+    "queries": [
+      "barkpark",
+      "search",
+      "deploy",
+      "graph",
+      "portable document",
+      "template",
+      "astro",
+      "editor",
+      "task",
+      "plugin",
+      "theme",
+      "finder",
+      "typo tollerance"
+    ],
+    "generatedAt": "2026-09-18T09:59:50.644Z",
+    "note": "Cross-EDITION parity per engine. Not cross-engine identity. COMMITTED EXPECTATION for the CI query-parity control: taken from the canned, deterministic corpus in scripts/smoke-stub-api.mjs, NOT produced by the run that compares against it. Regenerate DELIBERATELY only when that corpus changes: node scripts/smoke-stub-api.mjs --port 4320 & node scripts/parity-check.mjs --base http://127.0.0.1:4320 --dataset smoke --type entry --write scripts/parity-stub-baseline.json  \u2014 and say why in the commit. CI never writes it."
+  },
+  "results": {
+    "barkpark": {
+      "indx": [
+        "doc-finder",
+        "doc-graph",
+        "doc-search",
+        "doc-deploy",
+        "doc-tasks"
+      ],
+      "postgres": [
+        "doc-finder",
+        "doc-graph",
+        "doc-search",
+        "doc-deploy",
+        "doc-tasks"
+      ]
+    },
+    "search": {
+      "indx": [
+        "doc-search"
+      ],
+      "postgres": [
+        "doc-search"
+      ]
+    },
+    "deploy": {
+      "indx": [
+        "doc-deploy"
+      ],
+      "postgres": [
+        "doc-deploy"
+      ]
+    },
+    "graph": {
+      "indx": [
+        "doc-graph"
+      ],
+      "postgres": [
+        "doc-graph"
+      ]
+    },
+    "portable document": {
+      "indx": [],
+      "postgres": []
+    },
+    "template": {
+      "indx": [],
+      "postgres": []
+    },
+    "astro": {
+      "indx": [],
+      "postgres": []
+    },
+    "editor": {
+      "indx": [],
+      "postgres": []
+    },
+    "task": {
+      "indx": [
+        "doc-tasks"
+      ],
+      "postgres": [
+        "doc-tasks"
+      ]
+    },
+    "plugin": {
+      "indx": [],
+      "postgres": []
+    },
+    "theme": {
+      "indx": [],
+      "postgres": []
+    },
+    "finder": {
+      "indx": [
+        "doc-finder",
+        "doc-search"
+      ],
+      "postgres": [
+        "doc-finder",
+        "doc-search"
+      ]
+    },
+    "typo tollerance": {
+      "indx": [],
+      "postgres": []
+    }
+  }
+}

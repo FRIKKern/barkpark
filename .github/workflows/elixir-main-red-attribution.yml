@@ -129,7 +129,14 @@ jobs:
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
 
-          v="$(grep -o 'verdict=[A-Z_]*' <<<"$out" | head -1 | cut -d= -f2)"
+          # NOT `grep | head -1`: `head` closes the pipe, grep dies of SIGPIPE,
+          # and `set -o pipefail` (line 92) + the runner's DEFAULT shell
+          # `bash -e {0}` (no `shell:` key in this workflow, so -e IS on, whatever
+          # the explicit `set -uo` suggests) makes a TRUE match abort the step.
+          # Take the first line with a parameter expansion instead — no pipe.
+          vmatches="$(grep -o 'verdict=[A-Z_]*' <<<"$out" || true)"
+          v="${vmatches%%$'\n'*}"
+          v="${v#verdict=}"
           echo "verdict=${v:-UNREADABLE}" >>"$GITHUB_OUTPUT"
           echo "rc=${arc}" >>"$GITHUB_OUTPUT"
           {

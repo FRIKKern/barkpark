@@ -129,6 +129,71 @@ func TestLegacyBugClasses(t *testing.T) {
 	}
 }
 
+// TestScreamingSnakeIsNotPathLegal pins A1's SCREAMING facet of E-009:
+// SCREAMING_SNAKE is a legal fifth spelling of a variable, but it is not
+// path-legal — only kebab and snake are. Until this test the claim lived
+// in scaffy/README.md prose alone; the E-009 red fixture pinned only the
+// Pascal facet, and E-004 (malformed spelling) covers a different class.
+//
+// Three arms, because a fixture that merely reds proves nothing:
+//
+//	RED      — the fixture reds, with E-009 the ONLY finding, so the
+//	           refusal is not collateral from some unrelated rule.
+//	CONTROL1 — the same command with the path token respelled snake is
+//	           wholly clean, so the fixture's illegality is the casing.
+//	CONTROL2 — the same SCREAMING spelling in a NON-path position is
+//	           wholly clean, so E-009 keys on POSITION, not on the
+//	           spelling being unwelcome everywhere.
+func TestScreamingSnakeIsNotPathLegal(t *testing.T) {
+	const wantMsg = "path-position token {{.WIDGET_NAME}} is not a lowercase spelling"
+
+	t.Run("red/screaming in a path position", func(t *testing.T) {
+		const fx = "E-009-path-casing-screaming.scaffy"
+		findings := ValidateFile(fx, readFixture(t, filepath.Join("red", fx)))
+		if len(findings) != 1 {
+			t.Fatalf("want exactly one finding (E-009 alone, not collateral), got %d:\n%s",
+				len(findings), renderFindings(findings))
+		}
+		f := findings[0]
+		if f.Rule != RulePathCasing || f.Line != 8 {
+			t.Fatalf("want %s at line 8, got %s", RulePathCasing, f)
+		}
+		if f.Msg != wantMsg {
+			t.Errorf("refusal string = %q, want %q", f.Msg, wantMsg)
+		}
+		t.Logf("proven: %s — %s (hint: %s)", f.Rule, f.Msg, f.Hint)
+	})
+
+	t.Run("control/snake in the same path position is clean", func(t *testing.T) {
+		src := []byte(`DIRECTION "add"
+VARIABLE 1 "WidgetName" TITLE "t" DESCRIPTION "d" EXAMPLES "W"
+CREATE FILE IF ABSENT "internal/widgets/{{.widget_name}}.go"
+::: widget module :::
+package widgets
+::: widget module :::
+`)
+		for _, f := range ValidateFile("control-snake.scaffy", src) {
+			t.Errorf("path-legal control is not clean: %s (hint: %s)", f, f.Hint)
+		}
+	})
+
+	t.Run("control/screaming outside a path position is clean", func(t *testing.T) {
+		src := []byte(`DIRECTION "add"
+VARIABLE 1 "WidgetName" TITLE "t" DESCRIPTION "d" EXAMPLES "W"
+CREATE FILE IF ABSENT "internal/widgets/{{.widget_name}}.go"
+::: widget module :::
+package widgets
+
+const {{.WIDGET_NAME}}_KIND = "{{.widget-name}}"
+::: widget module :::
+ASSERT FILE "internal/widgets/{{.widget_name}}.go" CONTAINS "{{.WIDGET_NAME}}_KIND"
+`)
+		for _, f := range ValidateFile("control-position.scaffy", src) {
+			t.Errorf("SCREAMING outside a path is not clean: %s (hint: %s)", f, f.Hint)
+		}
+	})
+}
+
 // TestLintOneOfExamplesOutsideSet: a declared EXAMPLES value outside the
 // ONEOF set reds as E-021 at the VARIABLE line (D56).
 func TestLintOneOfExamplesOutsideSet(t *testing.T) {

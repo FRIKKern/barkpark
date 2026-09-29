@@ -6,6 +6,8 @@ defmodule Barkpark.Plugins.Bulldocs.EventsTest do
   """
   use Barkpark.DataCase, async: true
 
+  import Barkpark.TenancyFixtures
+
   alias Barkpark.Content
   alias Barkpark.Plugins.Bulldocs.Events
 
@@ -211,6 +213,335 @@ defmodule Barkpark.Plugins.Bulldocs.EventsTest do
                )
 
       assert Events.list_for_paper(slug) == []
+    end
+  end
+
+  describe "record_decision/1 — the requester<->accepter identity tie (task-cefcbf5b3a9b1665)" do
+    @slug "tie-demo-paper"
+
+    defp seed_request(overrides \\ %{}) do
+      {:ok, request} =
+        Events.create_event(
+          Map.merge(
+            %{
+              "goal_id" => "g-tie",
+              "paper_slug" => @slug,
+              "event_type" => "simplify-request",
+              "branch" => "simplified-1",
+              "actor_kind" => "user",
+              "actor_id" => "user-alice"
+            },
+            overrides
+          )
+        )
+
+      request
+    end
+
+    defp decision_attrs(request, overrides \\ %{}) do
+      Map.merge(
+        %{
+          "event_type" => "simplify-accept",
+          "paper_slug" => request.paper_slug,
+          "request_event_id" => request.id,
+          "actor_kind" => "user",
+          "actor_id" => "user-alice"
+        },
+        overrides
+      )
+    end
+
+    test "the REQUESTER's own accept is authorized and points back at the request" do
+      request = seed_request()
+
+      assert {:ok, decision} = Events.record_decision(decision_attrs(request))
+
+      assert decision.event_type == "simplify-accept"
+      assert decision.request_event_id == request.id
+      assert decision.actor_kind == "user"
+      assert decision.actor_id == "user-alice"
+      assert decision.authorization == "authorized"
+      # Branch + goal are re-derived from the STORED request, never trusted
+      # from the caller.
+      assert decision.branch == "simplified-1"
+      assert decision.goal_id == "g-tie"
+      assert Events.authoritative_decision?(decision)
+    end
+
+    test "a DIFFERENT user cannot decide someone else's request, and writes nothing" do
+      request = seed_request()
+      before = length(Events.list_for_paper(@slug))
+
+      assert {:error, :foreign_actor} =
+               Events.record_decision(decision_attrs(request, %{"actor_id" => "user-mallory"}))
+
+      # No row — a refused decision leaves no trace in the append-only history.
+      assert length(Events.list_for_paper(@slug)) == before
+    end
+
+    test "an ANONYMOUS decision is refused before the request is even read" do
+      request = seed_request()
+
+      assert {:error, :anonymous} =
+               Events.record_decision(
+                 decision_attrs(request, %{"actor_kind" => nil, "actor_id" => nil})
+               )
+    end
+
+    test "a CROSS-WORKSPACE decision is refused even from the same actor" do
+      workspace = create_workspace!()
+      other = create_workspace!()
+
+      request = seed_request(%{"workspace_id" => workspace.id})
+
+      assert {:error, :cross_scope} =
+               Events.record_decision(decision_attrs(request, %{"workspace_id" => other.id}))
+
+      # Control: the SAME call with the request's own workspace lands.
+      assert {:ok, _} =
+               Events.record_decision(decision_attrs(request, %{"workspace_id" => workspace.id}))
+    end
+
+    # The PROJECT rung of check_same_scope/2. The sibling test above holds
+    # project_id nil on BOTH sides, so the workspace conjunct decides it in
+    # both arms — these hold the WORKSPACE equal so only the project
+    # conjunct can produce the refusal.
+    test "a CROSS-PROJECT decision is refused with the workspace held EQUAL" do
+      workspace = create_workspace!()
+      proj_a = create_project!(workspace)
+      proj_b = create_project!(workspace)
+
+      request =
+        seed_request(%{"workspace_id" => workspace.id, "project_id" => proj_a.id})
+
+      # Same workspace on both sides — the workspace conjunct CANNOT refuse
+      # this; only the project conjunct can.
+      assert request.workspace_id == workspace.id
+      assert request.project_id == proj_a.id
+      assert proj_a.id != proj_b.id
+
+      assert {:error, :cross_scope} =
+               Events.record_decision(
+                 decision_attrs(request, %{
+                   "workspace_id" => workspace.id,
+                   "project_id" => proj_b.id
+                 })
+               )
+
+      # Control: the SAME call with the request's own project lands.
+      assert {:ok, decision} =
+               Events.record_decision(
+                 decision_attrs(request, %{
+                   "workspace_id" => workspace.id,
+                   "project_id" => proj_a.id
+                 })
+               )
+
+      assert decision.authorization == "authorized"
+    end
+
+    test "a decision that OMITS project_id cannot decide a project-scoped request" do
+      workspace = create_workspace!()
+      proj_a = create_project!(workspace)
+
+      request =
+        seed_request(%{"workspace_id" => workspace.id, "project_id" => proj_a.id})
+
+      # The unscoped-reader shape: stamp_scope/2 omits the key entirely when
+      # the resolved paper carries no project, so fetch/2 reads nil.
+      attrs = decision_attrs(request, %{"workspace_id" => workspace.id})
+      refute Map.has_key?(attrs, "project_id")
+
+      assert {:error, :cross_scope} = Events.record_decision(attrs)
+
+      # Control: the same actor, same workspace, WITH the project lands.
+      assert {:ok, decision} =
+               Events.record_decision(
+                 decision_attrs(request, %{
+                   "workspace_id" => workspace.id,
+                   "project_id" => proj_a.id
+                 })
+               )
+
+      assert decision.authorization == "authorized"
+    end
+
+    test "a project-scoped decision cannot decide an UNSCOPED request" do
+      workspace = create_workspace!()
+      proj_a = create_project!(workspace)
+
+      # The mirror of the arm above: the request carries no project, the
+      # decision does. nil != proj_a.id is still a scope mismatch.
+      request = seed_request(%{"workspace_id" => workspace.id})
+      assert is_nil(request.project_id)
+
+      assert {:error, :cross_scope} =
+               Events.record_decision(
+                 decision_attrs(request, %{
+                   "workspace_id" => workspace.id,
+                   "project_id" => proj_a.id
+                 })
+               )
+
+      assert {:ok, decision} =
+               Events.record_decision(decision_attrs(request, %{"workspace_id" => workspace.id}))
+
+      assert decision.authorization == "authorized"
+    end
+
+    test "REPLAY: a second authorized decision on the same request is refused" do
+      request = seed_request()
+
+      assert {:ok, _} = Events.record_decision(decision_attrs(request))
+
+      assert {:error, :already_decided} =
+               Events.record_decision(
+                 decision_attrs(request, %{"event_type" => "simplify-reject"})
+               )
+    end
+
+    test "an EXPIRED request can no longer be decided" do
+      request = seed_request()
+
+      stale =
+        DateTime.add(DateTime.utc_now(), -(Events.decision_ttl_seconds() + 60), :second)
+
+      {1, _} =
+        Barkpark.Repo.update_all(
+          Ecto.Query.from(e in Barkpark.Plugins.Bulldocs.Event, where: e.id == ^request.id),
+          set: [inserted_at: stale]
+        )
+
+      assert {:error, :expired_request} = Events.record_decision(decision_attrs(request))
+    end
+
+    test "an unknown / non-UUID / non-request id is refused, never raised" do
+      assert {:error, :unknown_request} =
+               Events.record_decision(%{
+                 "event_type" => "simplify-accept",
+                 "paper_slug" => @slug,
+                 "request_event_id" => "not-a-uuid",
+                 "actor_kind" => "user",
+                 "actor_id" => "user-alice"
+               })
+
+      {:ok, lifecycle} =
+        Events.create_event(%{
+          "paper_slug" => @slug,
+          "event_type" => "goal-opened",
+          "actor_kind" => "user",
+          "actor_id" => "user-alice"
+        })
+
+      assert {:error, :not_a_request} =
+               Events.record_decision(decision_attrs(lifecycle))
+    end
+
+    test "a decision for a DIFFERENT paper is refused" do
+      request = seed_request()
+
+      assert {:error, :wrong_paper} =
+               Events.record_decision(decision_attrs(request, %{"paper_slug" => "other-paper"}))
+    end
+  end
+
+  describe "decision_audit/2 — who accepted what request (task-cefcbf5b3a9b1665)" do
+    test "names both sides of an authorized decision and flags an untied one" do
+      slug = "audit-paper"
+
+      {:ok, request} =
+        Events.create_event(%{
+          "goal_id" => "g-audit",
+          "paper_slug" => slug,
+          "event_type" => "simplify-request",
+          "branch" => "simplified-1",
+          "actor_kind" => "user",
+          "actor_id" => "user-alice"
+        })
+
+      {:ok, _} =
+        Events.record_decision(%{
+          "event_type" => "simplify-accept",
+          "paper_slug" => slug,
+          "request_event_id" => request.id,
+          "actor_kind" => "user",
+          "actor_id" => "user-alice"
+        })
+
+      # An untied decision written straight through create_event/1.
+      {:ok, _} =
+        Events.create_event(%{
+          "goal_id" => "g-audit",
+          "paper_slug" => slug,
+          "event_type" => "simplify-reject",
+          "branch" => "simplified-7"
+        })
+
+      audit = Events.decision_audit(slug)
+
+      tied = Enum.find(audit, & &1.authoritative?)
+      untied = Enum.find(audit, &(not &1.authoritative?))
+
+      assert tied.decision == "simplify-accept"
+      assert tied.request_event_id == request.id
+      assert tied.branch == "simplified-1"
+      assert tied.requested_by == {"user", "user-alice"}
+      assert tied.decided_by == {"user", "user-alice"}
+      assert tied.authorization == "authorized"
+
+      # The untrustworthy row is LISTED, not hidden — that is the point of an
+      # audit surface.
+      assert untied.decision == "simplify-reject"
+      assert untied.request_event_id == nil
+      assert untied.requested_by == nil
+      assert untied.authorization == "unverified"
+    end
+  end
+
+  describe "the consumer gate: list_pending_intents/1 (task-cefcbf5b3a9b1665)" do
+    test "drains an AUTHORIZED decision and withholds an unverified one" do
+      goal_id = "bd-consumer-gate"
+
+      # A decision written straight through create_event/1 — nobody checked
+      # the tie, so the changeset stamps it "unverified".
+      {:ok, unverified} =
+        Events.create_event(%{
+          "goal_id" => goal_id,
+          "paper_slug" => "gate-paper",
+          "event_type" => "simplify-accept",
+          "branch" => "simplified-9"
+        })
+
+      assert unverified.authorization == "unverified"
+      refute Events.authoritative_decision?(unverified)
+
+      {:ok, request} =
+        Events.create_event(%{
+          "goal_id" => goal_id,
+          "paper_slug" => "gate-paper",
+          "event_type" => "simplify-request",
+          "branch" => "simplified-1",
+          "actor_kind" => "user",
+          "actor_id" => "user-alice"
+        })
+
+      {:ok, authorized} =
+        Events.record_decision(%{
+          "event_type" => "simplify-accept",
+          "paper_slug" => "gate-paper",
+          "request_event_id" => request.id,
+          "actor_kind" => "user",
+          "actor_id" => "user-alice"
+        })
+
+      pending_ids = Events.list_pending_intents() |> Enum.map(& &1.id)
+
+      # The request itself still drains (it is not a decision).
+      assert request.id in pending_ids
+      # The tied decision reaches the automation …
+      assert authorized.id in pending_ids
+      # … the untied one never does.
+      refute unverified.id in pending_ids
     end
   end
 end

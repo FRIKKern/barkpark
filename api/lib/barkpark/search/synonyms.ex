@@ -63,7 +63,7 @@ defmodule Barkpark.Search.Synonyms do
   @spec delete(String.t(), String.t(), String.t(), binary() | nil) :: :ok | {:error, :not_found}
   def delete(id, surface, scope, workspace_id \\ nil)
       when is_binary(surface) and is_binary(scope) do
-    # Guard the raw :id path param: a non-UUID would raise Ecto.CastError (→ 500)
+    # Guard the raw :id path param: a non-UUID would raise Ecto.Query.CastError (→ 400)
     # inside Repo.get on the :binary_id primary key. Treat it as not_found.
     case Repo.uuid_or_nil(id) do
       nil ->

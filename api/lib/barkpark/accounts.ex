@@ -37,8 +37,16 @@ defmodule Barkpark.Accounts do
   def change_user_registration(attrs \\ %{}),
     do: User.registration_changeset(%User{}, attrs)
 
-  @spec get_user(binary()) :: User.t() | nil
-  def get_user(id), do: Repo.get(User, id)
+  @spec get_user(binary() | nil) :: User.t() | nil
+  def get_user(id) do
+    # Guard the :binary_id cast: a non-UUID id would raise Ecto.Query.CastError
+    # the moment a caller wires a raw path param in. A malformed id matches no
+    # row -> nil, matching the guarded siblings (auth, media, tenancy, scim, ...).
+    case Repo.uuid_or_nil(id) do
+      nil -> nil
+      uuid -> Repo.get(User, uuid)
+    end
+  end
 
   @spec get_user_by_email(String.t()) :: User.t() | nil
   def get_user_by_email(email) when is_binary(email),
@@ -166,7 +174,7 @@ defmodule Barkpark.Accounts do
     # lock a non-existent account) and unlike the generic failed-login event it
     # takes 10 failures to provoke — no cheap enumeration oracle.
     if locked? do
-      emit_audit(%{
+      Audit.emit_best_effort(%{
         category: "auth",
         action: "account_locked",
         subject: user.id,
@@ -527,6 +535,23 @@ defmodule Barkpark.Accounts do
   def confirm_user(_), do: :error
 
   @doc """
+  Confirm a user that an identity provider has ALREADY vouched for, with no
+  email-confirmation token.
+
+  `confirm_user/1` needs the plaintext token from the confirmation email.
+  IdP-driven provisioning (SSO JIT, OIDC, social login, SCIM) never has one:
+  the provider verified the address, so the account is born confirmed. This
+  is the one public door for that, so those callers stop reaching past this
+  context with a raw `Repo.update!/1` on `User.confirm_changeset/2`.
+
+  Call it ONLY on a user the caller just provisioned from a verified IdP
+  assertion. It is not a way to skip email confirmation for a sign-up.
+  """
+  @spec confirm_provisioned_user(User.t()) :: User.t()
+  def confirm_provisioned_user(%User{} = user),
+    do: Repo.update!(User.confirm_changeset(user))
+
+  @doc """
   Reset a password from a `"reset"` token plaintext, then revoke all sessions.
 
   Drops the revoked-session count — use `reset_user_password_counting/2` on any
@@ -851,7 +876,7 @@ defmodule Barkpark.Accounts do
       # A one-time recovery code was just burned — a security-relevant fallback
       # authentication. Record it (with how many codes remain) so a run of
       # recovery-code use, or a user running low, is visible on the audit trail.
-      emit_audit(%{
+      Audit.emit_best_effort(%{
         category: "auth",
         action: "recovery_code_used",
         subject: id,
@@ -864,19 +889,6 @@ defmodule Barkpark.Accounts do
     else
       :error
     end
-  end
-
-  # Best-effort audit emit: an audit-bus hiccup must NEVER break an
-  # authentication decision (the change it records has already committed). The
-  # emit result is discarded and any infra-level raise/throw is swallowed —
-  # mirrors `Barkpark.Access.emit_grant_event/4`.
-  defp emit_audit(attrs) do
-    Audit.emit(attrs)
-    :ok
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
   end
 
   # ── Step-up MFA ──────────────────────────────────────────────────────────────

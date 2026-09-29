@@ -1,0 +1,14 @@
+[
+  {
+    "name": "ESM bundle (measured 111 B on d6cfa870d49a, 2026-09-19; ceiling = measured + headroom)",
+    "path": "dist/index.mjs",
+    "limit": "250 B",
+    "gzip": true
+  },
+  {
+    "name": "CJS bundle (measured 158 B on d6cfa870d49a, 2026-09-19; ceiling = measured + headroom)",
+    "path": "dist/index.cjs",
+    "limit": "300 B",
+    "gzip": true
+  }
+]

@@ -23,6 +23,10 @@ defmodule Barkpark.Media.Probe do
     end
   end
 
+  # `File.read/1` reads `path`, the on-disk blob path the media pipeline just
+  # wrote; callers pass a storage key that the blobstore resolves, not a path.
+  # Inline rather than a line-pinned `.sobelow-skips` row (fingerprints shift).
+  # sobelow_skip ["Traversal.FileModule"]
   defp read_prefix(path) do
     case File.read(path) do
       {:ok, bin} when byte_size(bin) > 0 ->

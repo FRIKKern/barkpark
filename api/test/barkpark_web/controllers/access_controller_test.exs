@@ -415,7 +415,7 @@ defmodule BarkparkWeb.AccessControllerTest do
         |> post("/v1/access/claim", %{"token" => "this-token-never-existed"})
 
       assert wrong.status == missing.status
-      assert wrong.resp_body == missing.resp_body
+      assert denial_bytes(wrong) == denial_bytes(missing)
     end
 
     test "expired and already-used collapse to the identical failure", %{conn: conn} do
@@ -434,7 +434,7 @@ defmodule BarkparkWeb.AccessControllerTest do
         |> post("/v1/access/claim", %{"token" => expired_raw})
 
       assert expired.status == reference.status
-      assert expired.resp_body == reference.resp_body
+      assert denial_bytes(expired) == denial_bytes(reference)
 
       # First claim of the single-use grant succeeds…
       ok =
@@ -451,7 +451,7 @@ defmodule BarkparkWeb.AccessControllerTest do
         |> post("/v1/access/claim", %{"token" => single_raw})
 
       assert spent.status == reference.status
-      assert spent.resp_body == reference.resp_body
+      assert denial_bytes(spent) == denial_bytes(reference)
     end
 
     test "an UNCONFIRMED grantee cannot claim — byte-identical to a nonexistent token", %{
@@ -475,7 +475,7 @@ defmodule BarkparkWeb.AccessControllerTest do
       # Same status + same body — the confirmed gate leaks neither grant
       # existence nor account state.
       assert failing.status == reference.status
-      assert failing.resp_body == reference.resp_body
+      assert denial_bytes(failing) == denial_bytes(reference)
 
       # And the grant was NOT bound.
       assert is_nil(Access.get_grant(grant.id).grantee_user_id)
@@ -711,5 +711,23 @@ defmodule BarkparkWeb.AccessControllerTest do
       |> Repo.insert()
 
     raw
+  end
+
+  # A refusal's BYTES, with `request_id` removed.
+  #
+  # Since task-8737e2d7ff1884e0 routed every hand-built envelope through
+  # `BarkparkWeb.ErrorResponse`, every §9 refusal carries a `request_id` — and
+  # that value is PER-REQUEST, so two refusals that must be indistinguishable to
+  # a caller can never again be equal as raw strings. The indistinguishability
+  # this file guards is about the RESOURCE, and `request_id` says nothing about
+  # one: it is derived from the request, the caller already has it on the
+  # response's own `x-request-id` header, and it is the handle that makes the
+  # refusal correlatable to a log line. So it is elided here rather than
+  # suppressed at the emitter.
+  defp denial_bytes(conn) do
+    case Jason.decode(conn.resp_body) do
+      {:ok, %{"error" => error} = body} -> %{body | "error" => Map.delete(error, "request_id")}
+      _ -> conn.resp_body
+    end
   end
 end

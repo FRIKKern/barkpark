@@ -28,23 +28,53 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
       through Accounts — and nothing asserted they agree. ARM C walks the FULL
       role domain, not just the three canonical roles: the schema roles, `nil`
       (non-member), and off-ladder strings. The off-ladder half is not
-      hypothetical — there is NO CHECK constraint on `team_memberships.role` in
-      any migration, so a migration or a hand-edit puts an unknown string in
-      that column, and a third test proves that write survives.
+      hypothetical: rows written before `team_memberships_role_check`
+      (migration 20260918120000) closed the vocabulary carry whatever string
+      was put there, and the CHECK is not a law of physics — a later migration
+      widens `@roles`, a superuser drops it, a restore predates it. Charter
+      D493 rules such a role ranks 0, and this is what proves both encodings
+      agree on that. The fixture reaches the shape through
+      `BarkparkCloud.OffLadderRole.without_role_constraint/1`, and a third test
+      proves the write still survives that drop.
 
     * ARM D — THE TWO `can_grant?` ARE ONE POLICY. The invitation path carries
       its OWN private literal triple (`Accounts.can_grant?/2`, reached from
       `invite_member/4`); the membership role-change path uses the rank-derived
       `Authz.can_grant?/3`. ARM D walks the whole (actor, target) matrix and
       measures the invitation side ONLY through the public `invite_member/4`
-      seam — never a test-only accessor for the private function.
+      seam — never a test-only accessor for the private function. Its ACTOR
+      domain is ARM C's `full_role_domain/0` — schema roles, `nil`, AND the
+      off-ladder strings — as of cch-w41-bl-arm-d-off-ladder-actors-unproved.
+      THE DECISION THAT ROW ASKED FOR, RECORDED: ARM D WIDENS; the invitation
+      path is NOT normalised. Both encodings already fail CLOSED on an
+      off-ladder actor on clean main (the private triple falls to its catch-all
+      `false`; `Authz.can_grant?/3` refuses at `not team_admin?`), so widening
+      asserts a property that HOLDS and changes no behaviour — whereas
+      normalising the invitation path would change what `invite_member/4` does
+      with an unknown role string, which is a charter call, not a census's
+      (same reasoning as the ARM E note at the foot of this file, charter D462).
+      RE-BASELINED, because cch-w41-s1's proof said "reds EXACTLY the two ARM C
+      tests": a downcasing `Authz.role/2` now reds ARM D as well, since an actor
+      holding `"OWNER"` becomes an admin to `Authz` while the invitation path
+      still reads the raw column. What ARM D catches that NOTHING else does is
+      the other direction — a change to the private triple (or to the role it is
+      handed) that lets an off-ladder actor mint an invitation: no other test in
+      `cloud/test` drives `invite_member/4` with an off-ladder ACTOR
+      (`accounts_invitations_test.exs` reaches off-ladder only as a TARGET of
+      `remove_member_as/3`).
 
   Plus the ratified behaviour change the rank drop makes reachable: an
   owner→admin demotion now ends the demoted user's sessions.
   """
-  use BarkparkCloud.DataCase, async: true
+  # async: false — `team_with_role_in_domain/1`'s off-ladder branch DROPS
+  # `team_memberships_role_check` inside this test's sandbox transaction (see
+  # `BarkparkCloud.OffLadderRole`), which takes ACCESS EXCLUSIVE on
+  # `team_memberships`. ExUnit runs sync suites serially and only after every
+  # async suite, so that lock cannot stall a concurrent test.
+  use BarkparkCloud.DataCase, async: false
 
   alias BarkparkCloud.Accounts
+  alias BarkparkCloud.OffLadderRole
   alias BarkparkCloud.Accounts.{Authz, TeamInvitation, TeamMembership, UserToken}
 
   # The census's OWN pinned allowlist of authz actions — a same-file pin, not a
@@ -52,14 +82,16 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
   # owner probe below reds if any of these stops being a real action.
   @actions ~w(read launch delete_barkpark connect_provider manage_members billing delete_team)a
 
-  # The OFF-LADDER half of ARM C's domain: role strings no changeset accepts
-  # but the COLUMN does. Physically reachable —
-  # `grep -rn role priv/repo/migrations/*.exs | grep -i 'check\|constraint'`
-  # returns ZERO, so nothing in Postgres refuses these. Two of them ("OWNER",
+  # The OFF-LADDER half of ARM C's domain: role strings neither the changeset
+  # nor (since `team_memberships_role_check`) the COLUMN accepts. Still
+  # physically reachable — pre-constraint rows hold them, and the fixture
+  # reaches them by dropping the CHECK inside the test's own sandbox
+  # transaction. Two of them ("OWNER",
   # "Admin") are case variants of real roles, which is exactly where a
   # "hardening" edit that downcases one side and not the other splits the two
   # predicates. These are this file's OWN pinned domain, not a foreign count:
-  # the persistence test below proves each one is still writable.
+  # the persistence test below proves each one is still writable once the CHECK
+  # is out of the way.
   @off_ladder ["wizard", "OWNER", "Admin", "root", ""]
 
   ## Fixtures
@@ -129,6 +161,7 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
 
   # A team plus a user standing at `role` in it. Canonical roles go through the
   # public `add_member/3`; off-ladder roles are written straight to the column
+  # with `team_memberships_role_check` dropped for this transaction
   # (the changeset would refuse them — the DATABASE does not), which is the
   # whole point of the off-ladder half. `nil` yields a user who is simply not a
   # member.
@@ -145,10 +178,12 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
       {user, team} = team_with_member_at("member")
 
       {1, _} =
-        Repo.update_all(
-          from(m in TeamMembership, where: m.team_id == ^team.id and m.user_id == ^user.id),
-          set: [role: role]
-        )
+        OffLadderRole.without_role_constraint(fn ->
+          Repo.update_all(
+            from(m in TeamMembership, where: m.team_id == ^team.id and m.user_id == ^user.id),
+            set: [role: role]
+          )
+        end)
 
       {user, team}
     end
@@ -301,13 +336,13 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
                "ARM C must see both an admin and a non-admin verdict"
     end
 
-    test "an off-ladder role string really persists (no CHECK constraint guards the column)" do
+    test "an off-ladder role string really persists once the CHECK is dropped" do
       for role <- @off_ladder do
         {user, team} = team_with_role_in_domain(role)
 
         assert %TeamMembership{role: ^role} = Accounts.get_membership(team, user),
                "UNREACHABLE DOMAIN: #{inspect(role)} no longer survives a write to " <>
-                 "team_memberships.role — if a CHECK constraint now guards the column, " <>
+                 "team_memberships.role even with team_memberships_role_check dropped — " <>
                  "ARM C's off-ladder half is dead weight and should be re-cut"
       end
     end
@@ -317,9 +352,14 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
 
   describe "ARM D: the invitation grant policy agrees with the rank-derived one" do
     test "invite_member/4 and Authz.can_grant?/3 agree over the whole (actor, target) matrix" do
-      actor_roles = TeamMembership.roles() ++ [nil]
+      # THE SAME DOMAIN ARM C WALKS — schema roles, `nil`, and the off-ladder
+      # strings — not `TeamMembership.roles() ++ [nil]`. The narrower cut left
+      # the invitation path's THIRD encoding of the rule (the private literal
+      # triple) unmeasured on exactly the inputs that distinguish it from a rank
+      # comparison: role strings the column accepts and no ladder ranks.
+      actor_roles = full_role_domain()
 
-      verdicts =
+      cells =
         for actor_role <- actor_roles, target_role <- TeamInvitation.roles() do
           {actor, team} = team_with_role_in_domain(actor_role)
 
@@ -332,12 +372,35 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
                    "the invitation path's private literal triple has drifted from the " <>
                    "rank-derived rule the role-change path uses"
 
-          invite?
+          {actor_role, invite?}
         end
+
+      verdicts = Enum.map(cells, &elem(&1, 1))
 
       assert true in verdicts and false in verdicts,
              "VACUOUS CENSUS: the (actor, target) matrix produced " <>
                "#{inspect(Enum.uniq(verdicts))} only — ARM D must see both a grant and a refusal"
+
+      # THE OFF-LADDER HALF, NAMED FROM WHAT WAS MEASURED — never inferred from
+      # the domain function. A fixture that stopped producing off-ladder rows
+      # would shrink this matrix silently and the equality above would still
+      # pass.
+      measured = cells |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+
+      assert Enum.all?(@off_ladder, &(&1 in measured)),
+             "ARM D LOST ITS OFF-LADDER HALF: the actors measured were " <>
+               "#{inspect(measured)}, which does not cover #{inspect(@off_ladder)} — the " <>
+               "matrix shrank instead of reding"
+
+      # AND THE DIRECTION THE EQUALITY CANNOT STATE: equality is satisfied when
+      # BOTH encodings answer true, so it alone never says the off-ladder actors
+      # fail CLOSED. An unknown role string must confer no grant on either side.
+      granted = for {actor_role, true} <- cells, actor_role in @off_ladder, do: actor_role
+
+      assert granted == [],
+             "OFF-LADDER ACTOR GRANTED: #{inspect(Enum.uniq(granted))} minted an " <>
+               "invitation — a role string no changeset accepts must confer NO authority, " <>
+               "and both can_grant? encodings must fail closed on it"
     end
   end
 

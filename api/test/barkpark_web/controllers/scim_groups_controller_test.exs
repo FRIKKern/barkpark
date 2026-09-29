@@ -254,9 +254,9 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
   end
 
   # A raw path `:id` binds to Group's `:binary_id` PK. Before the guard a
-  # non-UUID id raised Ecto.CastError → HTTP 500; now it folds into the not_found
+  # non-UUID id raised Ecto.Query.CastError → an opaque HTTP 400; now it folds into the not_found
   # branch → SCIM 404. Positive control: a well-formed UUID still resolves.
-  describe "malformed id → 404, not 500 (Ecto.CastError #672 class)" do
+  describe "malformed id → 404, not an opaque 400 (Ecto.Query.CastError #672 class)" do
     test "GET /scim/v2/Groups/:id with a non-UUID id → 404 (never a 500)" do
       %{token: token} = org_with_ws("grp-cast")
       assert scim(token) |> get("/scim/v2/Groups/not-a-uuid") |> json_response(404)

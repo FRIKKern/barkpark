@@ -42,8 +42,55 @@ other places — this section and the console's Decommission sheet
 (`priv/static/app.js`, `confirmDecommission`). Move all three together, or the
 copy starts promising a window the sweep does not apply.
 
-There is **no account-delete and no team-delete route** anywhere on the plane,
-and the console offers neither — erasure exists per BUNDLE, not per account.
+## Erasure — the decision, and what each route does
+
+**THE DECISION: Barkpark Cloud ships self-serve erasure at BOTH levels, as
+routes.** Ruled by team-lead on 2026-09-02, recorded on `task-c161ba42b88805c0`
+(filed out of `cch-w54-bl`'s criterion 2). The alternative on the table was to
+record the absence as consented, and it was declined for a stated reason: the
+2026-09-02 ruling that authorised the bundle retention above covered bundles
+only, so nobody had consented to the absence of account- and team-level erasure,
+and documenting an absence is not disposing of it. Before this, the only erasable
+object on the plane was a single archive bundle — a person who asked to be
+removed could have one archive object purged and nothing else.
+
+| Route | Who | Deletes | Refuses when |
+|---|---|---|---|
+| `DELETE /v1/teams/:id` | team **owner** | the team row + memberships, invitations, providers, subscription, notification settings + deliveries, GitHub installation, deploy-rate alert state, the team's audit trail, and every team-scoped PAT | the team still owns ANY instance or site — `409 {"error":"instances_present","barkparks":N,"sites":M}` |
+| `DELETE /v1/account` | the account holder, **reauthenticated with their password** | the user row + memberships, every session and PAT, external identities, device push tokens, device auth requests, their personal security trail | they are the SOLE owner of a team that still exists — `409 {"error":"sole_owner","teams":[slug]}` |
+
+**The team refusal is the safety argument, not an edge case.** `barkparks.team_id`
+is `ON DELETE CASCADE`, so an unrefused team delete would drop every instance ROW
+while the billed Hetzner/Azure server it names kept running — and that row is the
+only thing that still says what to tear down. Decommission the fleet first.
+
+**The account refusal has a route out.** Promote another owner
+(`PATCH /v1/teams/:id/members/:user_id`) or erase the team first. Being one of
+several owners never blocks.
+
+**What is ANONYMISED rather than deleted.** `audit_events.actor_user_id` is
+`ON DELETE SET NULL` and stays that way: a team's audit trail is the TEAM's
+record of what happened to the team, so erasing a user removes the person from it
+and leaves the team an honest history. Audit `metadata` may still carry an email
+a producing route put there; scrubbing those is a separate sweep this route does
+not claim to have done.
+
+**What still needs a human.** An OAuth-only account has no password to present,
+so it cannot pass the reauthentication on `DELETE /v1/account`. Set a password
+first, or ask an operator.
+
+Both tables are append-only at the DB (a `BEFORE UPDATE OR DELETE` trigger), and
+a row-level BEFORE DELETE trigger fires on an FK cascade too — so both erasures
+would abort without a bypass. Migration `20260917100000` narrows both trigger
+functions to fall through **only** under the transaction-local GUC
+`barkpark.erasure`, and even then only for a `DELETE` or for the exact
+`actor_user_id` nilify the FK performs. Rewriting an `action` or a `metadata`
+still raises, flag or no flag. `BarkparkCloud.Accounts.Erasure.arm_erasure/0` is
+the sole caller of that `SET LOCAL`.
+
+The console surfaces both as Danger-zone sections — the team one on
+`#settings/members` (owner-only), the account one at the bottom of the account
+sheet — each on the destroy-tier confirm that makes you type the name back.
 
 ## Run it (local dev)
 

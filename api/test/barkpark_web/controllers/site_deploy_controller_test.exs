@@ -19,6 +19,15 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
   @admin_token "barkpark-test-site-deploy-admin"
   @junior_token "barkpark-test-site-deploy-junior"
 
+  # The box status payload's key set, READ from the one shared copy. See the
+  # pin in "the response never leaks the configured command" below.
+  @status_fixture_path Path.expand("../../support/fixtures/box_status_payload.json", __DIR__)
+  @external_resource @status_fixture_path
+  @status_fixture @status_fixture_path |> File.read!() |> Jason.decode!()
+  @status_keys get_in(@status_fixture, ["status", "consumed"]) ++
+                 get_in(@status_fixture, ["status", "producer_only"])
+  @status_conditional get_in(@status_fixture, ["status", "conditional"])
+
   setup do
     base =
       Path.join(System.tmp_dir!(), "bp-site-controller-#{System.unique_integer([:positive])}")
@@ -550,6 +559,104 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
                |> get("/v1/admin/site-deploy", %{"slug" => "bad-digest"})
                |> json_response(200)
     end
+
+    # THE PAIR THAT PINS THE CLASS (ssw11-bl-internal-failures-reported-as-400).
+    #
+    # `stage/4` answers TWO kinds of failure through ONE `{:error, code,
+    # message}` shape, and the door used to render both 400. A 400 is a
+    # statement about the CALLER'S bytes: told one, a correct client stops
+    # retrying and repacks an artifact that was already valid, while the box's
+    # disk stays full. The test above is the QUIET arm — a genuine caller fault
+    # (`E_DIGEST_MISMATCH`) must stay 400. This one is the LOUD arm.
+    #
+    # The induction is real, not a stub: the run-state dir is made read-only, so
+    # `PrebuiltArtifact` cannot create its staging dir and answers
+    # `E_STAGING_FAILED` — exactly the EACCES shape a mis-permissioned box
+    # produces. The precondition is ASSERTED rather than assumed, so a run as
+    # root (where the chmod does not bite and the artifact would stage fine)
+    # reds with a message naming the cause instead of failing on the status.
+    test "500, not 400, when the BOX could not stage a perfectly good artifact", %{conn: conn} do
+      run_state = Path.join(System.tmp_dir!(), "bp-ctl-ro-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(run_state)
+
+      on_exit(fn ->
+        File.chmod(run_state, 0o700)
+        File.rm_rf(run_state)
+      end)
+
+      {b64, sha} = prebuilt_artifact()
+      put_runner_cfg(enabled: true, run_state_dir: run_state, command: stub("exit 0"))
+
+      :ok = File.chmod!(run_state, 0o500)
+
+      # BIND FIRST, THEN ASSERT. `assert pattern = expr, message` evaluates the
+      # match as an ordinary match, so a mismatch raises MatchError and kills
+      # the process before `assert/2` is ever called — the authored message is
+      # dead code on exactly the path it was written for
+      # (`scripts/unreachable-assert-message-check.sh`).
+      probe = File.mkdir_p(Path.join(run_state, "precondition-probe"))
+
+      assert probe == {:error, :eacces},
+             "precondition broken: a 0500 run-state dir still accepts a mkdir (got " <>
+               "#{inspect(probe)}), so this test cannot induce E_STAGING_FAILED — running as " <>
+               "root? The 500 it asserts below would be measuring nothing."
+
+      body =
+        conn
+        |> admin_conn()
+        |> post(
+          "/v1/admin/site-deploy",
+          body("pb-nospace", %{"artifact_b64" => b64, "artifact_sha256" => sha})
+        )
+        |> json_response(500)
+
+      # The typed code TRAVELS unchanged — the control plane renders
+      # "<code> — <message>" and a rename would break its taxonomy. Only the
+      # class moved, and `fault` says out loud whose it is.
+      assert %{"error" => %{"code" => "E_STAGING_FAILED", "message" => message}} = body
+      assert body["error"]["fault"] == "box"
+      assert message =~ "staging"
+
+      # A box fault is not a slot-holder either: nothing ran, nothing staged.
+      assert %{"state" => "idle"} =
+               conn
+               |> admin_conn()
+               |> get("/v1/admin/site-deploy", %{"slug" => "pb-nospace"})
+               |> json_response(200)
+    end
+
+    # The moduledoc is the door's published status contract, and it used to be a
+    # HAND-KEPT copy of the extractor's code set: it listed 19 of 22, and the
+    # three it dropped were exactly the three whose class was wrong. Both lists
+    # are generated from `PrebuiltArtifact` now, so this asserts the generation
+    # actually reached the rendered doc — a future edit that re-types a literal
+    # list reds here.
+    test "the door's moduledoc documents EVERY extractor code, from the module that emits them" do
+      {:docs_v1, _, _, _, %{"en" => moduledoc}, _, _} =
+        Code.fetch_docs(BarkparkWeb.SiteDeployController)
+
+      # Only backticked tokens: `BARKPARK_SITE_DEPLOY_APPLY` and
+      # `BUILD_GATE_SLOTS` both END in something a bare /E_[A-Z_]+/ matches.
+      documented =
+        ~r/`(E_[A-Z0-9_]+)`/
+        |> Regex.scan(moduledoc)
+        |> Enum.map(fn [_, code] -> code end)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      assert documented == Barkpark.Sites.PrebuiltArtifact.codes()
+
+      # And they are not all in one bucket: the three internal ones must sit
+      # under a 500 heading, not the 400 one.
+      [internal_bullet | _] =
+        moduledoc
+        |> String.split("* **")
+        |> Enum.filter(&String.starts_with?(&1, "500** `E_"))
+
+      for code <- Barkpark.Sites.PrebuiltArtifact.internal_failure_codes() do
+        assert internal_bullet =~ "`#{code}`"
+      end
+    end
   end
 
   describe "POST — 409 single-flight is PER SLUG" do
@@ -676,10 +783,27 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       # here and this pin is the proof: `echo hi` reports no HEALTH stage, and an
       # unmeasured health code is OMITTED rather than defaulted to 0 (0 is the
       # SUCCESS code, so a default would certify a gate that never ran).
-      assert Map.keys(done) |> Enum.sort() == ~w(
-               build_id content_rev exit_code failure_reason finished_at log mode
-               served_port served_slot slug stages started_at state
-             )
+      #
+      # deploy-reliability W21 (charter D608): +route_status +route_detail, and
+      # they are PRESENT-AND-NULL here rather than absent — the opposite of
+      # `health_exit_code` one line up, because the value a default would invent
+      # differs. An invented health code is 0, which IS the success code, so only
+      # absence is honest there. `route_status` is a string; `null` reads as
+      # "nobody measured this" on its face, exactly like `served_slot` does. This
+      # run (`echo hi`) emits no ROUTE line at all, so both are null and the key
+      # set still carries them.
+      # THE KEY SET IS READ, NEVER RETYPED. It used to be a closed `~w(...)`
+      # literal here, and cloud/ held two more hand-written snapshots of the
+      # same truth — which is how `route_status`/`route_detail` reached the
+      # record door in #17640 and never reached an operator. The one copy is
+      # api/test/support/fixtures/box_status_payload.json; this pin now derives
+      # from it, and BarkparkWeb.SiteDeployStatusPayloadConformanceTest asserts
+      # that JSON against the real emitter.
+      assert Map.keys(done) |> Enum.sort() ==
+               Enum.sort(@status_keys -- @status_conditional)
+
+      assert done["route_status"] == nil
+      assert done["route_detail"] == nil
     end
 
     test "a non-empty build_id that does not match the served run is 404", %{conn: conn} do
@@ -851,6 +975,57 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       refute body["log_state"] in ["evicted", "missing", "available"]
     end
 
+    # THE ORPHAN CASE, through the HTTP door (dr-w22 c2). `tombstone/2` normally
+    # REWRITES an existing record in place; when the log is evicted before the
+    # run was ever finalized there is nothing to rewrite, so
+    # `orphan_tombstone/2` fabricates one with no build identity and no exit
+    # code. That record must reach an operator as an explicit unknown — keys
+    # present, values null — and never as an omission or as `never_recorded`,
+    # which would claim the deployment never happened.
+    test "an orphaned run answers through the door as an explicit unknown, not an omission",
+         %{conn: conn} do
+      run_state = Path.join(System.tmp_dir!(), "bp-rec-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(run_state)
+      on_exit(fn -> File.rm_rf(run_state) end)
+
+      put_runner_cfg(
+        enabled: true,
+        run_state_dir: run_state,
+        command: stub("exit 0"),
+        max_build_logs: 0
+      )
+
+      # A run that never reached finalize: bytes on disk, no terminal record.
+      File.write!(Path.join(run_state, "orphandoor-o1.log"), "partial output\n")
+      refute File.exists?(Path.join(run_state, "orphandoor-o1.terminal.json"))
+
+      assert %{evicted: 1} = DeployRunner.retention_sweep()
+
+      # PRECONDITION: the sweep fabricated the tombstone. Without it the
+      # assertions below would be measuring `never_recorded` and passing on the
+      # `refute` for the wrong reason.
+      assert File.exists?(Path.join(run_state, "orphandoor-o1.terminal.json"))
+
+      body =
+        conn
+        |> admin_conn()
+        |> get("/v1/admin/site-deploy?slug=orphandoor&build_id=o1&record=1")
+        |> json_response(200)
+
+      for key <- ~w(build_id exit_code unit_name started_at finished_at) do
+        assert Map.has_key?(body, key), "#{key} is absent from the door's orphan answer"
+        assert body[key] == nil, "#{key} was invented for a run that never recorded one"
+      end
+
+      assert body["record"] == "terminal"
+      assert body["log_state"] == "evicted"
+
+      refute body["log_state"] == "never_recorded",
+             "an orphaned run answered like a slug that never deployed"
+
+      assert body["failure_reason"] =~ "no exit code was ever recorded"
+    end
+
     test "a recorded failure exposes the CAUSE — stages, exit code, journal command — and NEVER raw log bytes",
          %{conn: conn} do
       run_state = Path.join(System.tmp_dir!(), "bp-rec-#{System.unique_integer([:positive])}")
@@ -895,13 +1070,27 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       assert body["unit_name"] == "bp-site-build-boom.service"
       assert body["journal_command"]
       assert body["log_state"] == "available"
-      assert body["log_bytes"] == 64
+
+      # THE HEAL, observed through the door (dr-bl-recorder-http-read-path c2).
+      # This fixture is a PRE-SCRUB record on purpose: raw bytes on disk, no
+      # `log_scrub` stamp, and a `log_bytes` that was never true of the file
+      # (64 against a 52-byte log). Reading it folds the log and re-measures, so
+      # the answer now describes the bytes that are actually there.
+      assert body["log_bytes"] == File.stat!(log).size
+      refute body["log_bytes"] == 64
+
+      # …and the STORED ARTIFACT — not the response — is what changed.
+      on_disk = File.read!(log)
+      refute on_disk =~ "bppat_"
+      assert on_disk =~ "BARKPARK_TOKEN=[redacted]"
+      assert on_disk =~ "npm ERR! 401 Unauthorized"
 
       # THE SECURITY BOUNDARY, asserted POSITIVELY against the exact bytes on
       # disk rather than by hoping no field carries them. The build env file
-      # carries BARKPARK_TOKEN in plaintext and the shared scrubber's measured
-      # leak rate against this token shape is 95.1%, which is why the bytes are
-      # refused rather than scrubbed.
+      # carries BARKPARK_TOKEN in plaintext; the bytes on disk are now folded at
+      # write (and healed on read, above), but THIS DOOR still does not serve
+      # them — serving them is c1, and it needs a cap, a tail rule and a refusal
+      # for an unstamped record.
       encoded = Jason.encode!(body)
       refute encoded =~ "bppat_"
       refute encoded =~ "BARKPARK_TOKEN"

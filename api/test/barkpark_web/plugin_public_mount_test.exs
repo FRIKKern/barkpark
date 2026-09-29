@@ -65,13 +65,20 @@ defmodule BarkparkWeb.PluginPublicMountTest do
       {_default_ws, _proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
       raw = "plugin-public-admin-#{System.unique_integer([:positive])}"
 
-      # `create_token/5` writes the token's home membership in the resolved
-      # (Default) workspace, with the role its permissions imply — so this
-      # admin token holds an admin SEAT there without the test saying so. That
-      # is why arpss-w10 leaves this case green: it was always a real admin of
-      # the workspace the flat chrome labels it with.
+      # `create_token/5` writes the token's home membership in the named
+      # workspace, with the role its permissions imply — so this admin token
+      # holds an admin SEAT in the Default workspace, and the mint now says so
+      # rather than relying on the resolver's fallback. That is why arpss-w10
+      # leaves this case green: it was always a real admin of the workspace the
+      # flat chrome labels it with.
       {:ok, _} =
-        Auth.create_token(raw, "plugin public admin", "production", ["read", "write", "admin"])
+        Auth.create_token(
+          raw,
+          "plugin public admin",
+          "production",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       mounted = mount_plugin_public(%{"api_token" => raw})
 

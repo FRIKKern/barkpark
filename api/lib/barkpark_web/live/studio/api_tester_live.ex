@@ -38,7 +38,6 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     # category name into the set hides its items in the nav.
     {:ok,
      assign(socket,
-       nav_section: :api_tester,
        dataset: dataset,
        endpoints: endpoints,
        categories: endpoints |> Enum.map(& &1.category) |> Enum.uniq(),
@@ -123,7 +122,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   end
 
   # NOT orphaned: the top-bar Token field in layouts/studio.html.heex (the
-  # `<form phx-change="token-change">` shown while nav_section == :api_tester)
+  # `<form phx-change="token-change">` shown while current_path is the
+  # api-tester surface, per BarkparkWeb.Studio.Section.from_path/2)
   # dispatches this so an operator can override the run token inline.
   def handle_event("token-change", %{"token" => token}, socket) do
     {:noreply, assign(socket, token: token)}
@@ -748,7 +748,6 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         <tr><td><code>not_found</code></td><td class="text-dim">404</td><td class="text-muted">Document or schema not found</td></tr>
         <tr><td><code>unauthorized</code></td><td class="text-dim">401</td><td class="text-muted">Missing or invalid token</td></tr>
         <tr><td><code>forbidden</code></td><td class="text-dim">403</td><td class="text-muted">Token lacks required permission</td></tr>
-        <tr><td><code>schema_unknown</code></td><td class="text-dim">404</td><td class="text-muted">No schema registered for this type</td></tr>
         <tr><td><code>rev_mismatch</code></td><td class="text-dim">409</td><td class="text-muted"><code class="api-inline-code">ifRevisionID</code> did not match current rev</td></tr>
         <tr><td><code>conflict</code></td><td class="text-dim">409</td><td class="text-muted">Document already exists (on <code class="api-inline-code">create</code>)</td></tr>
         <tr><td><code>malformed</code></td><td class="text-dim">400</td><td class="text-muted">Request body is malformed, missing required key (e.g., <code class="api-inline-code">mutations</code>), or missing required parameter (e.g., <code class="api-inline-code">q</code> for search)</td></tr>

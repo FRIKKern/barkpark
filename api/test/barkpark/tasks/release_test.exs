@@ -16,6 +16,8 @@ defmodule Barkpark.Tasks.ReleaseTest do
        blank (nil) one is fenced off — never a silent exit-0 no-op.
     8. Ruling-pin: release ALWAYS lands "open", even for a blocked-born
        task (deterministic landing, NOT a pre-claim restore).
+    9. task-7674bdd9964d953f — the released claim carries no SUPERSEDED lapse
+       timestamp, and a genuine lapse that was never released keeps its own.
   """
 
   use Barkpark.DataCase, async: false
@@ -24,7 +26,7 @@ defmodule Barkpark.Tasks.ReleaseTest do
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.{Document, MutationEvent}
-  alias Barkpark.Tasks.Release
+  alias Barkpark.Tasks.{Release, TtlSweeper}
 
   @dataset "production"
 
@@ -77,6 +79,33 @@ defmodule Barkpark.Tasks.ReleaseTest do
   end
 
   defp epoch_of(doc), do: get_in(Repo.get!(Document, doc.id).content, ["claim", "epoch"])
+
+  # Write ONE key into the stored claim map without going through a verb —
+  # used to seed a claim shape the engine no longer produces on its own.
+  defp put_claim_key!(doc, key, value) do
+    claim = Map.put(doc.content["claim"] || %{}, key, value)
+    new_content = Map.put(doc.content, "claim", claim)
+
+    {1, _} =
+      from(d in Document, where: d.id == ^doc.id)
+      |> Repo.update_all(set: [content: new_content])
+
+    Repo.get!(Document, doc.id)
+  end
+
+  # Age the live claim past the lease TTL WITHOUT touching worker or epoch, so
+  # the row the TTL sweeper reaps is the one the test claimed.
+  defp age_live_claim!(doc, seconds_ago) do
+    iso = DateTime.utc_now() |> DateTime.add(-seconds_ago, :second) |> DateTime.to_iso8601()
+    claim = Map.put(doc.content["claim"] || %{}, "ts_iso", iso)
+    new_content = Map.put(doc.content, "claim", claim)
+
+    {1, _} =
+      from(d in Document, where: d.id == ^doc.id)
+      |> Repo.update_all(set: [content: new_content])
+
+    Repo.get!(Document, doc.id)
+  end
 
   describe "release/3" do
     test "the holder releases: open, worker cleared, epoch bumped, assignee gone, event emitted",
@@ -333,6 +362,154 @@ defmodule Barkpark.Tasks.ReleaseTest do
 
       assert {:error, {:not_in_progress, "open"}} =
                Release.release(doc.id, "anyone", observed_epoch: epoch + 1)
+    end
+  end
+
+  # ── task-7674bdd9964d953f: a released claim describes ONE reason ───────────
+  #
+  # THE INVARIANT, stated as the writer's job: `claim.expired_at` means "this
+  # lease LAPSED, at this time". After a RELEASE the row is open because a
+  # worker walked away, so a lapse timestamp on the stored claim describes a
+  # SUPERSEDED event. `Release.apply_release_update/2` therefore deletes it,
+  # unconditionally, exactly as it already deletes `resources`. Contrapositive,
+  # equally load-bearing: a lease that genuinely lapsed and was NEVER released
+  # keeps its `expired_at` — the delete belongs to the release verb, not to
+  # the field.
+  #
+  # WHAT THE FILING GOT WRONG, measured here with the real verbs: it claimed
+  # the stale shape arises from REAP -> RE-CLAIM -> RELEASE because the release
+  # merges into "the existing claim". The merge is real, but the claim it
+  # merges into is not the reaped one: `Tasks.Claim.do_claim_resolved/7` builds
+  # `new_claim` as a FRESH map literal, so a re-claim already drops
+  # `expired_at` (and `previous_worker`, `released_at`, `released_by`) before
+  # any release can carry it forward. That is pinned below as its own test, so
+  # the day claim.ex switches to a merge the pin reds instead of the fix
+  # silently becoming load-bearing without anyone noticing.
+  #
+  # The fix is therefore STRUCTURAL, not a repair of a live production path:
+  # the invariant now holds at the release writer for ANY claim map handed to
+  # it — a hand-patched row (`bp doc patch`), a row written by an older
+  # engine, or a future claim path that merges. RED-WITHOUT/GREEN-WITH:
+  # deleting `|> Map.delete("expired_at")` from `apply_release_update/2` reds
+  # "a claim carrying a lapse timestamp loses it when the lease is RELEASED"
+  # and nothing else in this file.
+  describe "release/3 and claim.expired_at (task-7674bdd9964d953f)" do
+    test "a claim carrying a lapse timestamp loses it when the lease is RELEASED",
+         %{scope: scope} do
+      doc = claimed_task!(scope, "w-hold")
+
+      # Seed the shape the gate compensates for: a live claim that still
+      # carries a reap's `expired_at`. Seeded on purpose — see the measured
+      # finding above: no engine verb currently produces it, which is exactly
+      # why the invariant must live in the writer and not in the caller.
+      lapse = "2026-07-30T10:00:00.000000Z"
+      seeded = put_claim_key!(doc, "expired_at", lapse)
+      before_release = seeded.content["claim"]
+
+      assert before_release["expired_at"] == lapse,
+             "BEFORE: the fixture did not carry a lapse timestamp, so this test proves nothing"
+
+      assert before_release["worker"] == "w-hold"
+
+      assert {:ok, _} =
+               Release.release(doc.id, "w-hold", observed_epoch: before_release["epoch"])
+
+      after_release = Repo.get!(Document, doc.id).content["claim"]
+
+      assert is_binary(after_release["released_at"])
+      assert after_release["released_by"] == "w-hold"
+      assert after_release["worker"] == nil
+
+      refute Map.has_key?(after_release, "expired_at"), """
+      a RELEASED claim still carries a lapse timestamp:
+
+        before release: #{inspect(before_release)}
+        after release:  #{inspect(after_release)}
+
+      The row is open because a worker walked away, not because a lease
+      lapsed. Leaving the field means every reader has to compare
+      released_at against expired_at to recover which reason is current.
+      """
+
+      # SCOPE FENCE: exactly ONE field goes. The CAS epoch rides on the merge
+      # and must still bump; nothing else the claim held is tidied away.
+      assert after_release["epoch"] == before_release["epoch"] + 1
+      assert after_release["work_digest"] == before_release["work_digest"]
+    end
+
+    test "a lease that lapsed and was NEVER released keeps its expired_at (control)",
+         %{scope: scope} do
+      doc = claimed_task!(scope, "w-walked-off")
+      _aged = age_live_claim!(doc, 7200)
+
+      assert {:ok, %{swept: swept}} = TtlSweeper.perform(%Oban.Job{})
+      assert swept >= 1, "the sweeper reaped nothing, so this control measured nothing"
+
+      claim = Repo.get!(Document, doc.id).content["claim"]
+
+      assert is_binary(claim["expired_at"]),
+             "the fix erased a lapse timestamp that legitimately describes the row: #{inspect(claim)}"
+
+      assert claim["previous_worker"] == "w-walked-off"
+      assert claim["worker"] == nil
+      refute Map.has_key?(claim, "released_at")
+    end
+
+    test "a plain claim -> release (never reaped) has no expired_at to begin with",
+         %{scope: scope} do
+      doc = claimed_task!(scope, "w-hold")
+      epoch = epoch_of(doc)
+
+      refute Map.has_key?(Repo.get!(Document, doc.id).content["claim"], "expired_at")
+
+      assert {:ok, _} = Release.release(doc.id, "w-hold", observed_epoch: epoch)
+
+      claim = Repo.get!(Document, doc.id).content["claim"]
+      assert is_binary(claim["released_at"])
+      refute Map.has_key?(claim, "expired_at")
+    end
+
+    # THE MEASURED CORRECTION TO THE FILING, pinned. REAP -> RE-CLAIM -> RELEASE
+    # with the real verbs end to end. The re-claim, not the release, is what
+    # drops the reap's stamp today.
+    test "a RE-CLAIM after a reap already drops expired_at — claim.ex writes a FRESH map",
+         %{scope: scope} do
+      doc = claimed_task!(scope, "w-first")
+      _aged = age_live_claim!(doc, 7200)
+
+      assert {:ok, %{swept: swept}} = TtlSweeper.perform(%Oban.Job{})
+      assert swept >= 1, "the sweeper reaped nothing, so this test proves nothing"
+
+      reaped = Repo.get!(Document, doc.id).content["claim"]
+      assert is_binary(reaped["expired_at"])
+      assert reaped["previous_worker"] == "w-first"
+
+      {:ok, _} = Tasks.claim_by_id(doc.doc_id, "w-second", scope)
+      reclaimed = Repo.get!(Document, doc.id).content["claim"]
+
+      assert reclaimed["worker"] == "w-second"
+
+      refute Map.has_key?(reclaimed, "expired_at"), """
+      claim.ex now CARRIES the reap's expired_at into the new lease:
+
+        after reap:     #{inspect(reaped)}
+        after re-claim: #{inspect(reclaimed)}
+
+      The filing for task-7674bdd9964d953f assumed exactly this, and it was
+      not true when the fix landed. It is true now, which makes
+      apply_release_update/2's Map.delete("expired_at") the only thing
+      standing between a released row and a superseded lapse timestamp.
+      """
+
+      refute Map.has_key?(reclaimed, "previous_worker")
+
+      # …and the release after it is clean either way.
+      assert {:ok, _} =
+               Release.release(doc.id, "w-second", observed_epoch: reclaimed["epoch"])
+
+      released = Repo.get!(Document, doc.id).content["claim"]
+      assert is_binary(released["released_at"])
+      refute Map.has_key?(released, "expired_at")
     end
   end
 end

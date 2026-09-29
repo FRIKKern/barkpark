@@ -106,8 +106,8 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
       "feeds the fail-CLOSED Highlighter, not Envelope",
     "barkpark_web/controllers/schema_controller.ex:show" =>
       "serves the schema itself; a miss is a 404, not a render",
-    "mix/tasks/barkpark.workspace.provision_schemas.ex:provision_one" =>
-      "mix task copying schema rows between scopes",
+    "mix/tasks/barkpark.workspace.provision_schemas.ex:survey_one" =>
+      "mix task copying schema rows between scopes (source read + target existence/provenance probe)",
     "barkpark/content.ex:get_schema" => "the facade delegate — this IS the raw lookup",
     "barkpark/content.ex:owner_scoped?" => "reads the owner_scoped flag, not field visibility"
   }
@@ -122,7 +122,10 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
                               "barkpark_web/controllers/query_controller.ex:fetch_schema",
                               "barkpark_web/controllers/legacy_controller.ex:fetch_schema",
                               # the fourteen that had no fallback at all
-                              "barkpark/content/papers.ex:reader_source",
+                              # reader_source/3's body (task-f967486732a5a366
+                              # moved it verbatim; reader_source/3 and
+                              # reader_html/3 both call it)
+                              "barkpark/content/papers.ex:classify_reader_source",
                               "barkpark_web/live/sheets_reader_live.ex:seal",
                               "barkpark/media/delivery/asset_response.ex:asset_schema",
                               "barkpark_web/controllers/share_link_controller.ex:serve",

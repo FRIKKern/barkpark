@@ -105,7 +105,7 @@ check("bpTable content hole nests under a single <tbody> — the thead-drop, str
   );
 });
 
-const cellSpec = BpTableCell.config.renderHTML();
+const cellSpec = BpTableCell.config.renderHTML({ node: { attrs: {} }, HTMLAttributes: {} });
 check("bpTableCell renderHTML emits <td class=\"bp-table__td\"> (reader shared class)", () => {
   assert.equal(cellSpec[0], "td");
   assert.ok(
@@ -115,7 +115,18 @@ check("bpTableCell renderHTML emits <td class=\"bp-table__td\"> (reader shared c
   assert.equal(cellSpec[cellSpec.length - 1], 0, "bpTableCell lost its inline* content hole.");
 });
 
-const headSpec = BpTableHeaderCell.config.renderHTML();
+check("row headers retain scope, spans and alignment through HTML", () => {
+  const attrs = { rowspan: 2, style: "text-align:right" };
+  const spec = BpTableCell.config.renderHTML({ node: { attrs: { head: true } }, HTMLAttributes: attrs });
+  assert.equal(spec[0], "th");
+  assert.equal(spec[1].scope, "row");
+  assert.equal(spec[1].rowspan, 2);
+  assert.equal(spec[1].style, "text-align:right");
+  assert.equal(BpTableCell.config.addAttributes().head.parseHTML({ getAttribute: () => "row" }), true);
+  assert.equal(BpTableHeaderCell.config.parseHTML()[0].tag, "th:not([scope='row'])");
+});
+
+const headSpec = BpTableHeaderCell.config.renderHTML({ HTMLAttributes: {} });
 check("bpTableHeaderCell renderHTML emits <th class=\"bp-table__th\"> (reader shared class)", () => {
   assert.equal(headSpec[0], "th");
   assert.ok(

@@ -194,8 +194,9 @@ const ladderMaxRungs = 8
 
 // livePulseCriterion is the acceptance-criteria index a LIVE pulse names on
 // this task's claim, or -1: the claim must be worker-held, carry a now-pulse
-// naming a criterion, and the pulse must still be within the lease TTL
-// (charter D9 — staleness derives from claim.now.ts vs the lease). Exactly ONE
+// naming a criterion, and the pulse must still be within the PULSE horizon
+// (pulseTTL, 5 min — charter D9 staleness, NOT the 2700s claim lease; see
+// theme.go's two-horizon note, task-f30dab8c54c605e6). Exactly ONE
 // rung may spin, and only while the pulse is genuinely live — a stale pulse
 // spins nothing (motion is liveness; a dead pulse must not animate).
 func livePulseCriterion(t Task, now time.Time) int {
@@ -203,7 +204,7 @@ func livePulseCriterion(t Task, now time.Time) int {
 		return -1
 	}
 	p := t.Claim.Now
-	if p.Criterion < 0 || p.At.IsZero() || now.Sub(p.At) >= leaseTTL {
+	if p.Criterion < 0 || p.At.IsZero() || now.Sub(p.At) >= pulseTTL {
 		return -1
 	}
 	return p.Criterion
@@ -439,6 +440,24 @@ func priorityLabel(p string) string {
 		return "P" + p
 	}
 	return p
+}
+
+// draftLabel is THE DRAFT LABEL CONTRACT's word, spelled once for the whole
+// package. Studio's reader paints data-role="draft", text "DRAFT", amber
+// (var(--warn)) — deliberately the SAME hue as `blocked`, because a draft is
+// "not the real row yet", not an error. draftChip is the styled form every
+// reader in this package uses, so the board card and the detail view can never
+// disagree about the word or the hue.
+const draftLabel = "DRAFT"
+
+// draftChip is the amber DRAFT marker, or "" for a row that is not a draft.
+// Returning "" (rather than a blank-width placeholder) keeps a published row's
+// paint byte-identical to the pre-marker board — the aliveness budget.
+func draftChip(t Task) string {
+	if !t.Draft {
+		return ""
+	}
+	return warnStyle.Render(draftLabel)
 }
 
 // blockerCause is the amber `! cause` badge text for a blocked row (spec §3): a

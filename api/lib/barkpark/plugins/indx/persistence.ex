@@ -63,6 +63,12 @@ defmodule Barkpark.Plugins.Indx.Persistence do
   crashes the caller — the live pointer in `:persistent_term` is still
   authoritative for the running process.
   """
+  # `path_for/1` builds the path from the persistence root plus a slugified
+  # scope — the caller never supplies a path segment. Sobelow flags the
+  # File.mkdir_p/File.write/File.rm calls because the argument is a
+  # variable; the waiver travels with the function so a refactor that moves
+  # these calls out from under it makes the finding reappear.
+  # sobelow_skip ["Traversal.FileModule"]
   @spec save(scope(), entry()) :: :ok | {:error, term()}
   def save(scope, %{} = entry) when is_binary(scope) do
     path = path_for(scope)
@@ -95,7 +101,7 @@ defmodule Barkpark.Plugins.Indx.Persistence do
   # — the `rescue ArgumentError` below folds any such input into `:error`
   # ("treated as missing"). Sobelow flags every `binary_to_term` regardless of
   # `[:safe]`, so this justified use is annotated rather than left as a finding.
-  @sobelow_skip ["Misc.BinToTerm"]
+  @sobelow_skip ["Misc.BinToTerm", "Traversal.FileModule"]
   @spec load(scope()) :: {:ok, entry()} | :error
   def load(scope) when is_binary(scope) do
     path = path_for(scope)

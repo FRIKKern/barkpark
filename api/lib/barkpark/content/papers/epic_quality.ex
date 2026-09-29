@@ -15,6 +15,38 @@ defmodule Barkpark.Content.Papers.EpicQuality do
   `expandable`, following the canonical reference Paper's appendix treatment.
   When a producer declares a `reader_checks` suite, every required reader must
   pass; revision-pinned reader evidence is still sealed after publication.
+
+  ## The /ops door does NOT enforce this floor (a documented asymmetry)
+
+  `POST /v1/plugins/bulldocs/papers/:slug/ops` can append a 17th top-level
+  heading or an 81st top-level block onto a canonical Paper already sitting at
+  both caps, and answers 200. That is not an oversight in THIS module: the ops
+  door does not run `AuthoringWall.enforce/5` at all
+  (`BlockOps.apply_paper_block_op/4` writes the row directly and never calls
+  `enforce_blocks_wall/8`), so it enforces NONE of the wall's gates — not the
+  label spine, not the tag registry, not the dedup scan, not this floor.
+  Teaching it these two caps alone would make the edit door enforce 2 of 5 wall
+  gates by accident of which task was filed, which is a worse contract than a
+  stated asymmetry.
+
+  The edit door's own design is a set of narrow NON-REGRESSION ratchets
+  (`ratchet_hollow/2`, `reject_new_field_loss/2`): an op may not push a paper
+  across a quality edge it was on the good side of, while an already-bad paper
+  stays editable. This whole-document floor is re-applied in full on the next
+  publish (`POST /v1/plugins/bulldocs/papers`), which is where a Paper's
+  composition is authored; an in-place op sequence is an editor session, not a
+  publication. Closing the hole properly means mounting the wall on the ops
+  door for every gate, tag-scoped and ratcheted — a separate contract change,
+  not a two-cap patch.
+
+  The ruling is the same one recorded on the wire contract: the `/ops` door is
+  an EDIT door and this floor is a PUBLISH-TIME property, not an invariant of
+  the stored row. `docs/contracts/plugin-http-api.md` carries it for HTTP
+  callers, with the caveat that a Paper edited only via `/ops` after its last
+  publish can sit past this floor indefinitely.
+  (task-4ff0ef8d27e6453b ruled it here; task-14107740b20c92fa ruled it on the
+  HTTP contract and pinned it in
+  `test/barkpark_web/controllers/bulldocs_ops_door_edit_contract_test.exs`.)
   """
 
   @canonical_tag "epic-cycle-wave-paper"
@@ -83,6 +115,7 @@ defmodule Barkpark.Content.Papers.EpicQuality do
           %{
             "tag" => @canonical_tag,
             "failures" => Enum.map(failures, &failure_name/1),
+            "limits" => overload_limits(content, failures),
             "required_readers" => @required_readers
           }}}
       end
@@ -92,6 +125,49 @@ defmodule Barkpark.Content.Papers.EpicQuality do
   end
 
   def validate(_content), do: :ok
+
+  @doc """
+  The numeric budget behind each overload failure that actually FIRED, as
+  `%{"top_level_blocks" => %{"max" => 80, "actual" => 81}}`.
+
+  `details.failures` names the atom; the atom names a rule, not a number. An
+  author reading `top_level_heading_overload` learns that a cap exists and
+  nothing about what it is or how far past it they are — so the only way to
+  act on the refusal was to read this module's source. These two failures are
+  the ones a caller can fix by arithmetic (move sections into an
+  `expandable`, merge two headings), which is exactly why the count belongs on
+  the wire.
+
+  Only fired failures appear: a key here is a promise that THIS publish broke
+  THAT budget, never a catalogue of the module's constants.
+  """
+  @spec overload_limits(map(), [failure()]) :: map()
+  def overload_limits(content, failures) when is_map(content) and is_list(failures) do
+    blocks =
+      case Map.get(content, "blocks") do
+        list when is_list(list) -> list
+        _ -> []
+      end
+
+    %{}
+    |> maybe_put_limit(
+      :top_level_block_overload in failures,
+      "top_level_blocks",
+      @max_top_level_blocks,
+      length(blocks)
+    )
+    |> maybe_put_limit(
+      :top_level_heading_overload in failures,
+      "top_level_headings",
+      @max_top_level_headings,
+      Enum.count(blocks, &(is_map(&1) and Map.get(&1, "type") == "heading"))
+    )
+  end
+
+  defp maybe_put_limit(limits, false, _name, _max, _actual), do: limits
+
+  defp maybe_put_limit(limits, true, name, max, actual),
+    do: Map.put(limits, name, %{"max" => max, "actual" => actual})
 
   @doc "Return the deterministic hard failures for a canonical candidate."
   @spec failures(map()) :: [failure()]

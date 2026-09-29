@@ -31,11 +31,19 @@ defmodule BarkparkWeb.ScopedRoutingTest do
     {:ok, other_ws} = Tenancy.create_workspace(%{slug: "other-ws", name: "Other WS"})
     {:ok, _other_project} = Tenancy.create_project(other_ws, %{slug: "other-proj", name: "Other"})
 
-    # create_token/4 (no explicit workspace_id) binds to the seeded Default
-    # Workspace AND creates a membership — so this token is a Default member
-    # with read/write perms, but NOT a member of "other-ws".
+    # The mint NAMES the seeded Default workspace, which creates a membership
+    # there — so this token is a Default member with read/write perms, but NOT
+    # a member of "other-ws". The 403 arms below depend on exactly that split.
     raw = "scoped-routing-token-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "scoped routing", @dataset, ["read", "write"])
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "scoped routing",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, raw_token: raw}
   end

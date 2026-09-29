@@ -78,6 +78,7 @@ defmodule Barkpark.Tasks.PrimeTest do
     content =
       %{
         "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
         "lifecycle_status" => status,
         "description" => description,
         "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]

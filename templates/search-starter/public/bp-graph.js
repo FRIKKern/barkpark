@@ -39,25 +39,146 @@
   // Obsidian-faithful restyle: small flat dots, thin faint threads, near-
   // monochrome, generous void. Beauty through restraint. The luminous-nebula
   // language (orbs, corona, blast-rings, vignette, glyphs) is gone.
-  var ACCENT = "#9a8cff"; // root / active / selection — soft Obsidian violet
+  //
+  // EVERY concrete colour this renderer paints is GENERATED below from
+  // design/tokens.json (color.graphCanvas.graph) — Canvas 2D fillStyle cannot take
+  // var(), so the token compiler splices the resolved values in at emit time
+  // instead. Change a colour in tokens.json and run `node design/emit.mjs --write`;
+  // a hand edit inside the marker is deleted by the next regeneration and reds
+  // design/check.mjs. Non-colour constants (alphas, radii, fade multipliers, the
+  // font stack) stay hand-written OUTSIDE the marker.
+  /* BEGIN GENERATED: bp-graph-palette (design/tokens.json color.graphCanvas.graph via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
+  // Obsidian-faithful restyle: small flat dots, thin faint threads, near-
+  // monochrome, generous void. Beauty through restraint.
+  var ACCENT = "#9a8cff";
   var ACCENT_RGB = [154, 140, 255];
-  var A11Y_RING = "#60A5FA"; // keyboard-focus ring, kept DISTINCT from accent
-  var SLATE = "#94A3B8"; // _unknown + phantom + ash mix target
-  var AMBER = "#FBBF24"; // the only warm pixel — parse-error state
+  var A11Y_RING = "#60A5FA";
+  var SLATE = "#94A3B8";
+  var AMBER = "#FBBF24";
+
+  // LIGHT-ground siblings for the four hues above — the only colours this
+  // renderer paints RAW on whichever ground is active. The dark values land at
+  // 2.53/2.31/2.33/1.52 on BG_LIGHT, all under the 3.0 WCAG non-text floor, and
+  // A11Y_RING is the keyboard focus ring. accent()/a11yRing()/slate()/amber()
+  // below pick between the pair; dark keeps its original vivid values.
+  var ACCENT_LIGHT = "#604cf0";
+  var A11Y_RING_LIGHT = "#2563EB";
+  var SLATE_LIGHT = "#64748B";
+  var AMBER_LIGHT = "#B45309";
 
   // Monochrome node tint — one muted desaturated lavender-grey for EVERY node
-  // on dark (the default look). Per-type color is the opt-in "Full color" toggle.
-  var MONO_DARK = "#a6adc0"; // dark-theme resting node fill (soft cool blue-grey)
-  var MONO_LIGHT = "#5a5f6e"; // light-theme resting node fill (dark dot on white)
-  var NODE_WHITE = "#f2f3f8"; // hovered/neighbor brighten target (dark)
+  // on dark (the default look). Per-type colour is the opt-in "Full color" toggle.
+  var MONO_DARK = "#a6adc0";
+  var MONO_LIGHT = "#5a5f6e";
+  var NODE_WHITE = "#f2f3f8";
+  var NODE_INK_LIGHT = "#2a2e3a";
 
   // Flat theme backgrounds (no gradient, no vignette).
   var BG_DARK = "#16161a";
   var BG_LIGHT = "#f4f4f6";
 
-  // Link base color/opacity — very faint thin threads.
+  // Link base colour channels — very faint thin threads (alphas stay outside).
   var LINK_RGB_DARK = "170,180,205";
   var LINK_RGB_LIGHT = "40,44,58";
+
+  // Label colours: resting, hovered, and the mix targets a matched label walks to.
+  var LABEL_COLOR_DARK = "#8b92a3";
+  var LABEL_COLOR_LIGHT = "#5a5f6e";
+  var LABEL_HOT_DARK = "#e6e7f0";
+  var LABEL_HOT_LIGHT = "#2a2e3a";
+  var LABEL_MIX_DARK = "#e8e9f2";
+  var LABEL_MIX_LIGHT = "#1e2230";
+  var LABEL_HOV_DARK = "#d8dae6";
+  var LABEL_SHADOW_DARK = "rgba(10,10,14,0.85)";
+  var LABEL_SHADOW_LIGHT = "rgba(255,255,255,0.85)";
+
+  // Canvas toast pill + the hover tooltip's own glass.
+  var TOAST_BG_DARK = "rgba(19,20,27,0.55)";
+  var TOAST_BG_LIGHT = "rgba(255,255,255,0.6)";
+  var TOAST_BORDER = "rgba(255,255,255,0.07)";
+  var TOOLTIP_TITLE_DARK = "#fff";
+  var TOOLTIP_TITLE_LIGHT = "#16161a";
+  var TOOLTIP_META_DARK = "rgba(226,232,240,0.7)";
+  var TOOLTIP_META_LIGHT = "rgba(15,17,23,0.6)";
+  var TOOLTIP_BG_DARK = "rgba(19,20,27,0.92)";
+  var TOOLTIP_BG_LIGHT = "rgba(255,255,255,0.92)";
+  var TOOLTIP_BORDER_DARK = "rgba(255,255,255,0.08)";
+  var TOOLTIP_BORDER_LIGHT = "rgba(15,17,23,0.10)";
+
+  // Per-type hues — painted ONLY under the optional "Full color" toggle.
+  var TYPE_HEX = {
+    post: "#7C8CEF",
+    page: "#9B82ED",
+    paper: "#38BDF8",
+    task: "#FB7185",
+    author: "#34D399",
+    category: "#4ADE80",
+    book: "#FBBF24",
+    asset: "#FB923C",
+    mediaAsset: "#FB923C",
+    sheet: "#22D3EE",
+    project: "#A3E635",
+    "game-data": "#E879F9",
+    tag: "#2DD4BF",
+    command: "#C084FC",
+    metric: "#FACC15",
+    session: "#F472B6",
+    _unknown: "#94A3B8"
+  };
+
+  // Overlay chrome (legend, zoom strip, toggles, search) — inline styles on the
+  // injected DOM, rebuilt by setTheme() so canvas and chrome flip together.
+  var CHROME_PALETTE = {
+    light: {
+      panelBg: "rgba(255,255,255,0.72)",
+      panelBorder: "rgba(15,17,23,0.10)",
+      title: "rgba(15,17,23,0.45)",
+      row: "rgba(15,17,23,0.68)",
+      rowDim: "rgba(15,17,23,0.52)",
+      btnBg: "rgba(255,255,255,0.72)",
+      btnBgHover: "rgba(255,255,255,0.95)",
+      btnBorder: "rgba(15,17,23,0.10)",
+      btnBorderHover: "rgba(15,17,23,0.20)",
+      btnText: "rgba(15,17,23,0.72)",
+      btnTextHover: "rgba(15,17,23,0.95)",
+      togBgOn: "rgba(226,229,238,0.8)",
+      togBgOff: "rgba(226,229,238,0.45)",
+      togBorderOn: "rgba(15,17,23,0.14)",
+      togBorderOff: "rgba(15,17,23,0.07)",
+      togTextOn: "rgba(15,17,23,0.85)",
+      togTextOff: "rgba(15,17,23,0.55)",
+      dotOff: "rgba(15,17,23,0.25)",
+      inputText: "#16161a",
+      phantomRing: "rgba(90,95,110,0.55)",
+      mono: "#5a5f6e"
+    },
+    dark: {
+      panelBg: "rgba(15,17,23,0.55)",
+      panelBorder: "rgba(255,255,255,0.07)",
+      title: "rgba(255,255,255,0.45)",
+      row: "rgba(255,255,255,0.65)",
+      rowDim: "rgba(255,255,255,0.5)",
+      btnBg: "rgba(15,17,23,0.55)",
+      btnBgHover: "rgba(24,27,36,0.72)",
+      btnBorder: "rgba(255,255,255,0.07)",
+      btnBorderHover: "rgba(255,255,255,0.14)",
+      btnText: "rgba(255,255,255,0.75)",
+      btnTextHover: "rgba(255,255,255,0.95)",
+      togBgOn: "rgba(40,44,58,0.7)",
+      togBgOff: "rgba(40,44,58,0.4)",
+      togBorderOn: "rgba(255,255,255,0.12)",
+      togBorderOff: "rgba(255,255,255,0.06)",
+      togTextOn: "rgba(255,255,255,0.85)",
+      togTextOff: "rgba(255,255,255,0.6)",
+      dotOff: "rgba(255,255,255,0.25)",
+      inputText: "#fff",
+      phantomRing: "rgba(148,163,184,0.5)",
+      mono: "#a6adc0"
+    }
+  };
+  /* END GENERATED: bp-graph-palette */
+
+  // Link opacity — very faint thin threads.
   var LINK_A_DARK = 0.09; // resting link alpha (dark) — very faint thread
   var LINK_A_LIGHT = 0.14; // resting link alpha (light)
   var LINK_A_FOCUS = 0.5; // incident-to-hover link alpha (bright)
@@ -90,9 +211,7 @@
     return DEPTH_FAR + (1 - DEPTH_FAR) * Math.pow(DEPTH_RING, d - 1);
   }
 
-  // Label color (muted grey) + zoom-fade thresholds.
-  var LABEL_COLOR_DARK = "#8b92a3"; // muted grey
-  var LABEL_COLOR_LIGHT = "#5a5f6e";
+  // Label zoom-fade thresholds (LABEL_COLOR_* are generated above).
   // Obsidian text-fade is FIT-RELATIVE: the auto-fit scale for a spread layout
   // can land well below any fixed value, so we gate labels off the ratio of the
   // current camera scale to the captured fitScale rather than absolute scale.
@@ -106,32 +225,10 @@
   var FONT_STACK =
     "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', ui-sans-serif, system-ui, sans-serif";
 
-  // Per-type hues — used ONLY when the optional "Full color" toggle is on.
-  // The default look is monochrome (MONO_DARK/MONO_LIGHT), so this is capacity,
-  // not a mandate. Every node is a plain filled circle; type is not a shape or
-  // glyph channel anymore (Obsidian draws plain dots).
-  var TYPE_HEX = {
-    post: "#7C8CEF",
-    page: "#9B82ED",
-    paper: "#38BDF8",
-    task: "#FB7185",
-    author: "#34D399",
-    category: "#4ADE80",
-    book: "#FBBF24",
-    asset: "#FB923C",
-    mediaAsset: "#FB923C",
-    sheet: "#22D3EE",
-    project: "#A3E635",
-    "game-data": "#E879F9",
-    // Live dogfood-corpus types (search-starter flagship). Same Tailwind-400
-    // family as the rest of the palette; each hue is distinct from every type
-    // it actually co-occurs with (task=rose, paper=sky dominate that corpus).
-    tag: "#2DD4BF",
-    command: "#C084FC",
-    metric: "#FACC15",
-    session: "#F472B6",
-    _unknown: SLATE
-  };
+  // TYPE_HEX (per-type hues, used ONLY when the optional "Full color" toggle is
+  // on) is generated above. The default look is monochrome (MONO_DARK/MONO_LIGHT),
+  // so it is capacity, not a mandate: every node is a plain filled circle and type
+  // is not a shape or glyph channel (Obsidian draws plain dots).
 
   // ─────────────────────────────────────────────────────────── color utils ──
   function hexToRgb(hex) {
@@ -1194,6 +1291,33 @@
       return theme === "light" ? BG_LIGHT : BG_DARK;
     }
 
+    // The four hues painted RAW on whichever ground is active — everything else
+    // either already carries a *_LIGHT sibling or goes through shiftL(hex,-0.22).
+    // On BG_LIGHT the dark values measure 2.53 (accent), 2.31 (a11yRing),
+    // 2.33 (slate) and 1.52 (amber) against the 3.0 WCAG non-text floor, so on
+    // light we paint the deeper sibling instead: 5.05 / 4.71 / 4.33 / 4.57.
+    // A11Y_RING is the KEYBOARD FOCUS RING — under the floor a keyboard user
+    // cannot reliably see where focus is (WCAG 1.4.11 + 2.4.11). Dark is
+    // untouched: these return the original vivid values whenever theme !== "light".
+    function accent() {
+      return theme === "light" ? ACCENT_LIGHT : ACCENT;
+    }
+    function a11yRing() {
+      return theme === "light" ? A11Y_RING_LIGHT : A11Y_RING;
+    }
+    function slate() {
+      return theme === "light" ? SLATE_LIGHT : SLATE;
+    }
+    function amber() {
+      return theme === "light" ? AMBER_LIGHT : AMBER;
+    }
+    // "Lift" the accent for hover/active emphasis. On dark that means lighter;
+    // on light the whole file moves toward ink instead (see NODE_INK_LIGHT), and
+    // lightening there would walk the accent straight back under the floor.
+    function accentLift(dl) {
+      return shiftL(accent(), theme === "light" ? -dl : dl);
+    }
+
     function worldToScreen(x, y) {
       return [x * cam.scale + cam.tx, y * cam.scale + cam.ty];
     }
@@ -1362,14 +1486,14 @@
 
       // ── authored empty / error states share this bed ──
       if (errorState) {
-        drawCenterMessage(AMBER, 0.8, "Couldn't load graph data");
+        drawCenterMessage(amber(), 0.8, "Couldn't load graph data");
         return;
       }
       if (nodes.length === 0) {
         if (fetching) {
           drawFetchRing(t);
         } else {
-          drawCenterMessage(SLATE, 0.65, "No connections yet");
+          drawCenterMessage(slate(), 0.65, "No connections yet");
         }
         return;
       }
@@ -1427,7 +1551,7 @@
       var r = 0.22 * Math.min(W, H) * scale;
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      ctx.strokeStyle = rgba(ACCENT, a);
+      ctx.strokeStyle = rgba(accent(), a);
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -1451,9 +1575,9 @@
       var bx = cx - bw / 2,
         by = cy - bh / 2 + (1 - ease) * 12;
       roundRect(ctx, bx, by, bw, bh, 10);
-      ctx.fillStyle = theme === "light" ? "rgba(255,255,255,0.6)" : "rgba(19,20,27,0.55)";
+      ctx.fillStyle = theme === "light" ? TOAST_BG_LIGHT : TOAST_BG_DARK;
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.07)";
+      ctx.strokeStyle = TOAST_BORDER;
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.fillStyle = color;
@@ -1596,7 +1720,7 @@
     function nodeFill(node) {
       var mono = theme === "light" ? MONO_LIGHT : MONO_DARK;
       if (node.phantom) return mono;
-      if (node.id === rootId) return ACCENT;
+      if (node.id === rootId) return accent();
       if (fullColor) {
         var hex = TYPE_HEX[node.type] || SLATE;
         return theme === "light" ? shiftL(hex, -0.22) : hex;
@@ -1669,7 +1793,7 @@
         var ringR = r + (3 + 9 * sp) * cam.scale;
         ctx.save();
         ctx.globalAlpha = (1 - sp) * (1 - sp) * 0.7;
-        ctx.strokeStyle = forced ? "CanvasText" : ACCENT;
+        ctx.strokeStyle = forced ? "CanvasText" : accent();
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(p[0], p[1], ringR, 0, Math.PI * 2);
@@ -1683,12 +1807,12 @@
         fill = isRoot ? "Highlight" : "CanvasText";
       } else if (isRoot) {
         // active node: accent, lifting toward a lighter accent on hover.
-        fill = hovered || neighbor ? shiftL(ACCENT, 0.1) : ACCENT;
+        fill = hovered || neighbor ? accentLift(0.1) : accent();
       } else if (hovered) {
         // hovered node brightens toward white (dark) / dark (light).
-        fill = theme === "light" ? "#2a2e3a" : NODE_WHITE;
+        fill = theme === "light" ? NODE_INK_LIGHT : NODE_WHITE;
       } else if (neighbor) {
-        fill = theme === "light" ? mixHex(nodeFill(node), "#2a2e3a", 0.4) : mixHex(nodeFill(node), NODE_WHITE, 0.45);
+        fill = theme === "light" ? mixHex(nodeFill(node), NODE_INK_LIGHT, 0.4) : mixHex(nodeFill(node), NODE_WHITE, 0.45);
       } else {
         fill = nodeFill(node);
       }
@@ -1715,7 +1839,7 @@
       if (isRoot && !forced && !frosted) {
         ctx.save();
         ctx.globalAlpha = a;
-        ctx.strokeStyle = shiftL(ACCENT, 0.18);
+        ctx.strokeStyle = accentLift(0.18);
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.arc(p[0], p[1], r + 0.5, 0, Math.PI * 2);
@@ -1727,7 +1851,7 @@
       if (!frosted && node.type === "task" && node.status === "in_progress" && !forced) {
         ctx.save();
         ctx.globalAlpha = a;
-        ctx.strokeStyle = ACCENT;
+        ctx.strokeStyle = accent();
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(p[0], p[1], r + 2, -Math.PI / 2, 0);
@@ -1919,7 +2043,7 @@
         // active node label — accent-tinted, a hair larger. Not a sun, just
         // gently distinguished.
         font = "500 11px " + FONT_STACK;
-        color = ACCENT;
+        color = accent();
         track = "0.005em";
       } else if (node.phantom) {
         font = "italic 400 9px " + FONT_STACK;
@@ -1931,14 +2055,14 @@
         // high-legibility grey→white family).
         font = (mw >= 0.55 ? "500 " : "400 ") + (10 + Math.round(2 * mw)) + "px " + FONT_STACK;
         color = isHov
-          ? (theme === "light" ? "#2a2e3a" : "#e6e7f0")
-          : mixHex(baseColor, theme === "light" ? "#1e2230" : "#e8e9f2", 0.35 + 0.5 * mw);
+          ? (theme === "light" ? LABEL_HOT_LIGHT : LABEL_HOT_DARK)
+          : mixHex(baseColor, theme === "light" ? LABEL_MIX_LIGHT : LABEL_MIX_DARK, 0.35 + 0.5 * mw);
         track = "0.006em";
       } else {
         font = "400 10px " + FONT_STACK;
         // hovered node + neighbors brighten their label toward the node color.
         color = isHov
-          ? (theme === "light" ? "#2a2e3a" : "#d8dae6")
+          ? (theme === "light" ? LABEL_HOT_LIGHT : LABEL_HOV_DARK)
           : baseColor;
         track = "0.008em";
       }
@@ -1961,10 +2085,10 @@
       ctx.globalAlpha = node.alpha * labelA;
       // Subtle 1px dark drop shadow for legibility — no pill. Skip in light/forced.
       if (!forced && theme !== "light") {
-        ctx.fillStyle = "rgba(10,10,14,0.85)";
+        ctx.fillStyle = LABEL_SHADOW_DARK;
         ctx.fillText(text, x + 0.6, y + 0.8);
       } else if (theme === "light" && !forced) {
-        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.fillStyle = LABEL_SHADOW_LIGHT;
         ctx.fillText(text, x + 0.6, y + 0.8);
       }
       ctx.fillStyle = color;
@@ -1976,10 +2100,10 @@
       var p = worldToScreen(node.x, node.y);
       var r = node.r * cam.scale + 4;
       ctx.save();
-      ctx.strokeStyle = A11Y_RING;
+      ctx.strokeStyle = a11yRing();
       ctx.lineWidth = 3;
       if (!reduced) {
-        ctx.shadowColor = A11Y_RING;
+        ctx.shadowColor = a11yRing();
         ctx.shadowBlur = 8;
       }
       ctx.beginPath();
@@ -2005,10 +2129,10 @@
       // Hairline the title underline with the node's resolved hue for a bespoke
       // feel (vs. a generic popover). Title text stays high-contrast per theme
       // (white was invisible on the light tooltip's white glass).
-      var hue = node.phantom ? SLATE : TYPE_HEX[node.type] || SLATE;
+      var hue = node.phantom ? slate() : TYPE_HEX[node.type] || slate();
       var light = theme === "light";
       html +=
-        "<div style='font-weight:600;color:" + (light ? "#16161a" : "#fff") + ";margin-bottom:4px;padding-bottom:3px;" +
+        "<div style='font-weight:600;color:" + (light ? TOOLTIP_TITLE_LIGHT : TOOLTIP_TITLE_DARK) + ";margin-bottom:4px;padding-bottom:3px;" +
         "border-bottom:1.5px solid " + rgba(hue, 0.55) + "'>" + esc(title) + "</div>";
       if (node.phantom) {
         var line = node.via
@@ -2018,11 +2142,11 @@
       } else {
         html += "<div style='color:" + (light ? shiftL(ACCENT, -0.22) : rgba(ACCENT, 0.9)) + "'>" + esc(node.type) + "</div>";
         var cc = Object.keys(adj[node.id] || {}).length;
-        html += "<div style='color:" + (light ? "rgba(15,17,23,0.6)" : "rgba(226,232,240,0.7)") + ";margin-top:2px'>" + cc + " connection" + (cc === 1 ? "" : "s") + "</div>";
+        html += "<div style='color:" + (light ? TOOLTIP_META_LIGHT : TOOLTIP_META_DARK) + ";margin-top:2px'>" + cc + " connection" + (cc === 1 ? "" : "s") + "</div>";
       }
       tooltip.innerHTML = html;
-      tooltip.style.background = light ? "rgba(255,255,255,0.92)" : "rgba(19,20,27,0.92)";
-      tooltip.style.border = "1px solid " + (light ? "rgba(15,17,23,0.10)" : "rgba(255,255,255,0.08)");
+      tooltip.style.background = light ? TOOLTIP_BG_LIGHT : TOOLTIP_BG_DARK;
+      tooltip.style.border = "1px solid " + (light ? TOOLTIP_BORDER_LIGHT : TOOLTIP_BORDER_DARK);
       tooltip.style.backdropFilter = "blur(14px)";
       tooltip.style.opacity = "1";
 
@@ -2769,54 +2893,7 @@
     // live). Dark keeps the exact original values; light mirrors them on a
     // white glass. setTheme() rebuilds the chrome so both flip together.
     function chromeC() {
-      if (theme === "light") {
-        return {
-          panelBg: "rgba(255,255,255,0.72)",
-          panelBorder: "rgba(15,17,23,0.10)",
-          title: "rgba(15,17,23,0.45)",
-          row: "rgba(15,17,23,0.68)",
-          rowDim: "rgba(15,17,23,0.52)",
-          btnBg: "rgba(255,255,255,0.72)",
-          btnBgHover: "rgba(255,255,255,0.95)",
-          btnBorder: "rgba(15,17,23,0.10)",
-          btnBorderHover: "rgba(15,17,23,0.20)",
-          btnText: "rgba(15,17,23,0.72)",
-          btnTextHover: "rgba(15,17,23,0.95)",
-          togBgOn: "rgba(226,229,238,0.8)",
-          togBgOff: "rgba(226,229,238,0.45)",
-          togBorderOn: "rgba(15,17,23,0.14)",
-          togBorderOff: "rgba(15,17,23,0.07)",
-          togTextOn: "rgba(15,17,23,0.85)",
-          togTextOff: "rgba(15,17,23,0.55)",
-          dotOff: "rgba(15,17,23,0.25)",
-          inputText: "#16161a",
-          mono: MONO_LIGHT,
-          phantomRing: "rgba(90,95,110,0.55)"
-        };
-      }
-      return {
-        panelBg: "rgba(15,17,23,0.55)",
-        panelBorder: "rgba(255,255,255,0.07)",
-        title: "rgba(255,255,255,0.45)",
-        row: "rgba(255,255,255,0.65)",
-        rowDim: "rgba(255,255,255,0.5)",
-        btnBg: "rgba(15,17,23,0.55)",
-        btnBgHover: "rgba(24,27,36,0.72)",
-        btnBorder: "rgba(255,255,255,0.07)",
-        btnBorderHover: "rgba(255,255,255,0.14)",
-        btnText: "rgba(255,255,255,0.75)",
-        btnTextHover: "rgba(255,255,255,0.95)",
-        togBgOn: "rgba(40,44,58,0.7)",
-        togBgOff: "rgba(40,44,58,0.4)",
-        togBorderOn: "rgba(255,255,255,0.12)",
-        togBorderOff: "rgba(255,255,255,0.06)",
-        togTextOn: "rgba(255,255,255,0.85)",
-        togTextOff: "rgba(255,255,255,0.6)",
-        dotOff: "rgba(255,255,255,0.25)",
-        inputText: "#fff",
-        mono: MONO_DARK,
-        phantomRing: "rgba(148,163,184,0.5)"
-      };
+      return theme === "light" ? CHROME_PALETTE.light : CHROME_PALETTE.dark;
     }
     function buildChrome() {
       // On first build, fade the whole chrome layer in AFTER the constellation
@@ -2874,8 +2951,8 @@
         });
         b.addEventListener("pointerdown", function () { b.style.transform = "scale(0.92)"; });
         b.addEventListener("pointerup", function () { b.style.transform = "scale(1)"; });
-        // keyboard focus ring in the distinct A11Y_RING color.
-        b.addEventListener("focus", function () { b.style.boxShadow = "0 0 0 2px " + A11Y_RING; });
+        // keyboard focus ring in the distinct a11yRing() color (per-theme).
+        b.addEventListener("focus", function () { b.style.boxShadow = "0 0 0 2px " + a11yRing(); });
         b.addEventListener("blur", function () { b.style.boxShadow = "none"; });
         strip.appendChild(b);
       });
@@ -2923,7 +3000,7 @@
         legend.appendChild(mrow);
         var arow = document.createElement("div");
         arow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:" + cc.row + ";";
-        arow.innerHTML = "<span style='width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + ACCENT + "'></span> active";
+        arow.innerHTML = "<span style='width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + accent() + "'></span> active";
         legend.appendChild(arow);
       }
       // phantom ghost entry
@@ -2998,7 +3075,7 @@
       dot.style.cssText =
         "width:7px;height:7px;border-radius:50%;flex:0 0 auto;" +
         (on
-          ? "background:" + ACCENT + ";box-shadow:0 0 6px " + rgba(ACCENT, 0.8) + ";"
+          ? "background:" + accent() + ";box-shadow:0 0 6px " + rgba(accent(), 0.8) + ";"
           : "background:" + cc.dotOff + ";");
       var txt = document.createElement("span");
       txt.textContent = label;

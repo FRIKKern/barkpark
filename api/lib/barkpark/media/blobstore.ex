@@ -43,8 +43,10 @@ defmodule Barkpark.Media.Blobstore do
       existing hardened path: nosniff + type collapse stay in the controller).
     * `{:redirect, url}` — 302 to a time-limited presigned URL. The
       `opts` a caller passed (`:response_content_type` /
-      `:response_content_disposition`) are baked INTO the signed query so the
-      bucket echoes the same stored-XSS defenses the local path applies.
+      `:response_content_disposition` / `:response_cache_control`) are baked
+      INTO the signed query so the bucket echoes the same stored-XSS defenses
+      and D12 cache policy the local path applies. The local backend never
+      redirects, so it ignores these opts: its caller sets the headers itself.
     * `{:error, :not_found}` — the row outlived its blob; answer an honest 404.
   """
   @type serve_strategy ::

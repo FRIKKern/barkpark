@@ -120,6 +120,17 @@ func Execute(args []string) int {
 	// onboarding doctor) all read prov rather than re-deriving the precedence.
 	ctx, prov := resolveContextProv(g)
 
+	// The binding's receipt. resolveContextProv has ALREADY withheld the saved
+	// credential by this point — the notice is not the guard, it is the reason
+	// the operator gets to read. It prints HERE because the very next thing that
+	// happens is the /v1/capabilities fetch, which is the first request that
+	// would have carried the credential; on stderr, so `-o json` stdout stays a
+	// single parseable document.
+	if n := prov.withheldNotice(ctx.Server); n != "" {
+		out.userErr("%s", n)
+		out.errf("%s", prov.withheldFix())
+	}
+
 	// VERB-LEVEL built-ins (`task create`, `task frontier`, `server ls`,
 	// `mcp serve`, `context pack`, …) dispatch from ONE registry —
 	// nounBuiltins in noun_builtins.go — which is also what every noun's help
@@ -196,7 +207,30 @@ func Execute(args []string) int {
 		// surface of One Chat, Two Surfaces. A built-in because it is a full-screen
 		// interactive Bubble Tea program with its own SSE stream, not a manifest
 		// JSON verb.
-		return runChat(out, g, ctx, rest[1:])
+		//
+		// `chat approve` is the ONE chat verb peeled to MANIFEST dispatch, and it
+		// falls THROUGH this case (no return) the way the `task` alias block does.
+		// Measured on origin/main: `bp chat approve <id> <request_id> <decision>`
+		// exited 2 with `bp chat takes no arguments besides `ls` and `unarchive``,
+		// because this case routed the whole noun into runChat, which never reaches
+		// the manifest tree. The manifest has declared `chat.approve`
+		// (POST /v1/chat/sessions/:id/approval, writes:true) the whole time.
+		//
+		// WHY THE MANIFEST PATH AND NOT A BESPOKE BUILT-IN like runChatLs /
+		// runChatUnarchive: `chat.approve` is the ONLY manifest verb in the whole
+		// API that answers an empty 204 (api/.../chat_controller.ex — SCIM and the
+		// pulse OPTIONS preflight are the other empty-2xx emitters and neither is a
+		// manifest noun). The 204 arm of screenWriteReceipt (run.go) therefore had
+		// no CLI caller at all. A built-in would route to screenBuiltinWriteReceipt
+		// instead — the OTHER half of the fence — and leave the manifest arm just
+		// as unreachable as it was. Peeling it HERE is what makes that arm live.
+		//
+		// Exactly one verb, deliberately: every other chat verb stays intercepted
+		// because the TUI is the surface for it. Widening this is a decision, not
+		// a refactor.
+		if verb != "approve" {
+			return runChat(out, g, ctx, rest[1:])
+		}
 	case "task":
 		// Task-noun verb aliases (charter decision 12; census: 2,428 `task show`
 		// + 329 `task list` typed errors — 1.19 MB of pure context waste). The
@@ -284,9 +318,15 @@ func Execute(args []string) int {
 		// onramp: `context` is not a manifest noun, so this intercept shadows
 		// nothing and needs no server change. Local file I/O only — no network.
 		// Research trail: /papers/optical-compression-research-report.
-		// `pack` itself dispatches from the nounBuiltins registry above.
+		// `bp context map <keyword>` is the sibling verb: given a keyword
+		// instead of a file list it pictures the SHAPE of an epic (modules,
+		// gists, public defs, observed reference edges) and routes every
+		// trust-boundary sentence to an authoritative laws sidecar.
+		// Both verbs dispatch from the nounBuiltins registry above.
 		if g.help || verb == "" {
 			printContextPackHelp(out)
+			out.outf("\n")
+			printContextMapHelp(out)
 			return exitOK
 		}
 		return usageErrf(out, func() { printContextPackHelp(out) }, "unknown command %q %q", noun, verb)
@@ -366,7 +406,7 @@ func Execute(args []string) int {
 			printSitesHelp(out)
 			return exitOK
 		}
-		return runSites(out, rest[1:])
+		return runSites(out, g, rest[1:])
 	case "deploy":
 		// `bp deploy <site> --artifact-url <url>` — enqueue a deployment for a
 		// hosted site through the control plane (P6). Requires `bp login`.
@@ -523,6 +563,24 @@ func Execute(args []string) int {
 	m, err := loadManifest(g, ctx)
 	if err != nil {
 		out.userErr("%v", err)
+		// A HELP REQUEST THAT DIES HERE NEEDS A DIFFERENT SENTENCE
+		// (task-23c76938811ff2db). `bp <noun> <verb> --help` renders the
+		// manifest's own argument and flag table (usageCommand, below), so the
+		// per-command help pages are SERVED, not baked: 136 of the 143 commands
+		// in docs/cli/fixtures/full-manifest.json cannot print help with no
+		// config, no cache and no server, and the bare refusal above tells the
+		// reader to `bp setup` as if they had asked to DO something. They asked
+		// what the command is. Name the reason and the offline route, once,
+		// beside the refusal — the exit class is unchanged.
+		if g.help {
+			what := noun
+			if verb != "" {
+				what = noun + " " + verb
+			}
+			out.errf("  note: per-command help is rendered from the server's capabilities manifest,")
+			out.errf("        so `bp %s --help` needs one too. To read help offline, point at a saved", what)
+			out.errf("        copy: --manifest <file> or BARKPARK_MANIFEST=<file> (write it with `%s`).", manifestCaptureCmd)
+		}
 		return exitGeneric
 	}
 	tree := m.Tree()
@@ -551,6 +609,14 @@ func Execute(args []string) int {
 		if verb != "" {
 			if cmd, ok := tree.Lookup(noun, verb); ok {
 				usageCommand(out, *cmd)
+				// `bp task close --help` renders the manifest's arguments, which
+				// say nothing about what the REASON must NAME to stay checkable
+				// by the tree. The close-prose contract is appended here because
+				// this is the one page the next writer of a close reads before
+				// writing one. See tasks_close_evidence_contract.go.
+				if noun == "task" && verb == "close" {
+					printCloseEvidenceContract(out)
+				}
 				return exitOK
 			}
 		}
@@ -654,7 +720,7 @@ func Execute(args []string) int {
 	}
 
 	// `bp task close` and `bp task pulse` — the SAME read-back `bp task stamp`
-	// got in wave 26 (PDS-D359/D361), extended to its two siblings on this
+	// got in wave 26 (PDS-D359/PDS-D361), extended to its two siblings on this
 	// ledger. close is the seal and pulse writes the board's now-line; both
 	// reported success on an exit code alone. The POST is unchanged — each
 	// wrapper only adds the second read and renders the verdict from what the
@@ -714,6 +780,7 @@ func resolveContext(g globals) manifest.Context {
 // redirects the server, the saved token is for somewhere else and no shadow is
 // claimed. Whether that shadow is a PROBLEM is decided by the caller, which
 // knows whether the server actually refused the env token.
+// @canonical capability:bp-credential-server-pairing aka:token binding,withheld credential,mismatched server,credential leak,saved credential,server-credential pairing,TestResolvedCredentialIsNotBoundToTheResolvedServer
 func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 	// Persisted config is the ActiveContext layer. A missing/empty config is a
 	// no-op (empty ActiveContext); a malformed one is non-fatal here — we fall
@@ -842,6 +909,52 @@ func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 		prov.Source = tokenSourceNone
 	}
 
+	// THE BINDING — a saved credential is paired to the server it was saved for.
+	//
+	// THE MEASUREMENT THAT FORCED THIS (task-c05d0f7fa7bef688, reproduced live
+	// 2026-09-16 against a header-recording server): Server and Token are picked
+	// by two INDEPENDENT precedence walks with nothing comparing them, so a
+	// credential saved for host A rode `-s http://other.host` and
+	// BARKPARK_API_URL=http://other.host alike — and it left on the FIRST
+	// request, the /v1/capabilities manifest fetch, before any command dispatch.
+	// That is a bearer token disclosed to a host that was never meant to have it.
+	//
+	// THE DECISION, and it is a decision with a named loser. bp BINDS the saved
+	// credential and WITHHOLDS it on a mismatch. The predicate is deliberately
+	// narrow — it fires ONLY when the token won at the ACTIVE layer (the saved
+	// config / the repo file's saved entry), which is the only layer that RECORDS
+	// which server its credential belongs to. A --token typed on this command
+	// line, or a BARKPARK_API_TOKEN exported in this shell, is the operator
+	// pairing the two THEMSELVES in this invocation and is never touched; a
+	// `bp -s <saved-name>` carries the entry's server AND token together, so it
+	// matches by construction.
+	//
+	// WHAT IT COSTS, stated rather than discovered. The loser is the operator who
+	// deliberately points a saved credential at a host they did not save it for:
+	// they must now say so, with --token or BARKPARK_API_TOKEN. The dev flow that
+	// the earlier builder declined to break — BARKPARK_API_URL=http://localhost:4000
+	// on top of a saved remote config — does NOT break, because the withheld
+	// credential falls to bakedDefaults().Token ("barkpark-dev-token") rather
+	// than to EMPTY. Falling to empty is what would have manufactured the exact
+	// false-404 shape hq-doc-get-auth-tier-gap existed to kill; falling to the
+	// dev floor is what a localhost instance wants anyway. The floor is a public
+	// well-known constant, not a secret, so sending it is not the leak this
+	// block closes.
+	//
+	// WHAT IT DOES NOT DECIDE: whether an ANONYMOUS mode should exist at all.
+	// bakedDefaults() still floors the token and no invocation resolves an empty
+	// one — TestNoCLIInvocationResolvesAnEmptyToken still pins that, deliberately
+	// unchanged, because an anonymous tier is a separate contract change.
+	if srcs.Token == manifest.LayerActive && active.Server != "" && ctx.Server != "" &&
+		normalizeServerURL(active.Server) != normalizeServerURL(ctx.Server) {
+		prov.WithheldFrom = active.Server
+		prov.WithheldTail = tokenTail(ctx.Token)
+		ctx.Token = bakedDefaults().Token
+		srcs.Token = manifest.LayerDefault
+		prov.Source = tokenSourceDefault
+		prov.Tail = tokenTail(ctx.Token)
+	}
+
 	// The shadow: an env token in front of a DIFFERENT saved/repo token for the
 	// same server. Identical values are not a shadow (nothing is hidden), and a
 	// mismatched server is not a shadow either — the saved credential would not
@@ -958,14 +1071,16 @@ func bakedDefaults() manifest.Defaults {
 // default.
 func ResolvedAPIConfig() apiclient.Config {
 	ctx := resolveContext(globals{})
-	return apiclient.Config{
+	// The desk TUI closes tasks through this client (TaskCloseN), so it carries
+	// the same session headers `bp task close` sends (task-e4cbf4cd9f672c33).
+	return apiSessionConfig(apiclient.Config{
 		BaseURL:     ctx.Server,
 		Token:       ctx.Token,
 		Workspace:   ctx.Workspace,
 		Project:     ctx.Project,
 		Dataset:     ctx.Dataset,
 		Perspective: apiclient.PerspectiveFromEnv(),
-	}
+	}, globals{}, ctx)
 }
 
 // ServerSource describes where ResolvedAPIConfig's server came from, for the

@@ -25,7 +25,7 @@ Membership proves *which team*. It does **not** prove the `:id` in the path belo
 |---|---|---|
 | `resolve_team_barkpark/2` | private in `BarkparkCloud.Web.Router` | `Registry.get_barkpark/1`, then `%Barkpark{team_id: tid} when tid == team.id` → the row, else `nil` |
 | `proxy_instance_webhook/2` | private in `BarkparkCloud.Web.Router` | require_user → `current_team` → `resolve_team_barkpark/2` **before** proxying; the whole `/api/webhooks*` family |
-| `Registry.recent_events_for_team/3` | `BarkparkCloud.Registry` | same team-id match, `nil` cross-team; the events/telemetry read pair |
+| `Registry.recent_events_for_team/3` | `BarkparkCloud.Registry` | same team-id match, `nil` cross-team; the sole reader is `GET /v1/barkparks/:id/events` (the `/telemetry` twin was removed in #17169) |
 | inline `tid == team.id` | route bodies in `BarkparkCloud.Web.Router` | body pattern-matches the resolved `%Barkpark{team_id: tid}` against `current_team` inline |
 
 All four collapse to one rule: **resolve, then assert `team_id`, and return `nil` cross-team** so the route 404s. A cross-team id is indistinguishable from a missing one — the control plane does not confirm that another team's barkpark exists.

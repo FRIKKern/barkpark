@@ -8,6 +8,7 @@ defmodule Barkpark.Plugins.Github.Conflict do
   for the recorder that owns the dedup/list/resolve operations.
 
   `kind` is one of #{inspect(~w(out_of_band_edit detached dedup_refused))};
+  `workspace_id` is the owning tenant (nullable — see the field comment);
   `doc_id` is nullable (a `dedup_refused` intake never produced a task);
   a row is "open" until `resolved_at` is set.
   """
@@ -27,6 +28,17 @@ defmodule Barkpark.Plugins.Github.Conflict do
     field :issue, :integer
     field :doc_id, :string
     field :dataset, :string
+
+    # The OWNING workspace (migration 20260911120000). NULLABLE by design: a
+    # `dedup_refused` row has no `doc_id` to trace, and a `{doc_id, dataset}`
+    # pair under a slug two workspaces share names no single tenant. NULL means
+    # UNATTRIBUTED, never "everyone's" — `Github.Health` admits a NULL row only
+    # alongside the caller's own memberships, so it stays visible at the legacy
+    # dataset-string grain without widening anyone's read to a foreign tenant.
+    # Deliberately NOT part of the `github_sync_conflicts_open_key` dedup key:
+    # one GitHub issue is one issue regardless of which workspace mirrors it.
+    field :workspace_id, :binary_id
+
     field :kind, :string
     field :detail, :map, default: %{}
     field :resolved_at, :utc_datetime_usec
@@ -34,7 +46,7 @@ defmodule Barkpark.Plugins.Github.Conflict do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @fields [:repo, :issue, :doc_id, :dataset, :kind, :detail, :resolved_at]
+  @fields [:repo, :issue, :doc_id, :dataset, :workspace_id, :kind, :detail, :resolved_at]
 
   @doc "Name of the partial unique index enforcing one OPEN row per dedup key."
   def open_key_constraint, do: :github_sync_conflicts_open_key

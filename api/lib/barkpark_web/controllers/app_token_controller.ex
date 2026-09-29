@@ -121,12 +121,22 @@ defmodule BarkparkWeb.AppTokenController do
   depends on it. A selector the caller can guess (an email) and a selector the
   caller must already hold (the secret) are different powers.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, params) do
     bearer = conn.assigns.api_token
 
     cond do
       revoke_rate_limited?(conn) ->
-        ErrorResponse.emit(conn, {:error, :rate_limited})
+        rate_limited(conn)
 
       not Auth.has_permission?(bearer, "admin") ->
         ErrorResponse.emit(conn, {:error, :unauthorized})
@@ -267,7 +277,7 @@ defmodule BarkparkWeb.AppTokenController do
   def delete_by_id(conn, %{"id" => id}) do
     cond do
       revoke_rate_limited?(conn) ->
-        ErrorResponse.emit(conn, {:error, :rate_limited})
+        rate_limited(conn)
 
       not Auth.has_permission?(conn.assigns.api_token, "admin") ->
         ErrorResponse.emit(conn, {:error, :unauthorized})
@@ -311,12 +321,22 @@ defmodule BarkparkWeb.AppTokenController do
   After the 200, the same bearer is rejected by `:require_token` — a repeat
   call is the HTTP-level proof of fail-closed.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete_current(conn, _params) do
     token = conn.assigns.api_token
 
     cond do
       revoke_rate_limited?(conn) ->
-        ErrorResponse.emit(conn, {:error, :rate_limited})
+        rate_limited(conn)
 
       Auth.has_permission?(token, "admin") ->
         unprocessable(conn, "admin tokens cannot self-revoke through the app-token path")
@@ -409,6 +429,31 @@ defmodule BarkparkWeb.AppTokenController do
   # (Registry.revoke_app_token/3) still wins — a whole team does not share one
   # bucket keyed on the single Cloud egress IP — provided that egress address is
   # listed in BARKPARK_TRUSTED_PROXIES; unlisted, it is correctly disbelieved.
+  # THE 429 MUST CARRY THE REMEDY ITS OWN HINT NAMES (task-57081836b628df35).
+  #
+  # `Content.Errors`'s code-keyed hint for "rate_limited" reads "Back off and
+  # retry after the Retry-After header's value" — and `Errors.put_hint/1`
+  # dispatches on the CODE STRING ALONE, so that sentence is served at EVERY
+  # emitter of the code. The two rate-limit PLUGS (`TicketRateLimit`,
+  # `AuthWriteRateLimit`) honour it: they emit `{:error, :rate_limited,
+  # %{retry_after: s}}` AND set the header. These three revoke gates emitted the
+  # bare `{:error, :rate_limited}` and set NO header, so the refusal sent the
+  # caller to read a value off a header the response does not carry — a named
+  # remedy the caller cannot take, which is the defect this task governs.
+  # EXPOSE rather than un-name: the bucket's refill rate makes the wait
+  # computable, so it is published as the header AND `details.retry_after` —
+  # the same pair the plugs emit, from the same expression.
+  @revoke_retry_after_seconds max(
+                                1,
+                                div(60 + @revoke_bucket_capacity - 1, @revoke_bucket_capacity)
+                              )
+
+  defp rate_limited(conn) do
+    conn
+    |> Plug.Conn.put_resp_header("retry-after", Integer.to_string(@revoke_retry_after_seconds))
+    |> ErrorResponse.emit({:error, :rate_limited, %{retry_after: @revoke_retry_after_seconds}})
+  end
+
   defp revoke_rate_limited?(conn) do
     key = {:app_token_revoke, RateLimiter.client_ip(conn)}
 
@@ -433,7 +478,10 @@ defmodule BarkparkWeb.AppTokenController do
       label = fetch_label(params, email)
       dataset = fetch_dataset(params)
 
-      case Auth.create_token(raw, label, dataset, permissions, workspace.id) do
+      # `class: :app` — app tokens keep today's no-expiry mint: no max age and
+      # no configured default apply until the App shape exists
+      # (task-a0f8cfd7f4800236).
+      case Auth.create_token(raw, label, dataset, permissions, workspace.id, class: :app) do
         {:ok, minted} ->
           # Credential lifecycle event (the `revoke_token` twin): THAT a mint
           # happened, for whom, into which workspace — never the token value.
@@ -528,8 +576,7 @@ defmodule BarkparkWeb.AppTokenController do
 
   defp unprocessable(conn, message) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "unprocessable", message: message}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{code: "unprocessable", message: message})
   end
 
   # The list filter reuses the mint's OWN email discipline (trim, non-empty,

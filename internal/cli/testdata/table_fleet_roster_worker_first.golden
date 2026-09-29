@@ -1,0 +1,5 @@
+worker          status  agent     capacity  last_seen             scope  ttl_s
+--------------  ------  --------  --------  --------------------  -----  -----
+lead-cli-r20    idle    listener  2         2026-09-16T04:10:02Z  cli    900
+lead-api-r20    busy    listener  1         2026-09-16T04:09:47Z  api    900
+lead-gates-r20  stale   listener  4         2026-09-16T03:11:00Z  gates  900

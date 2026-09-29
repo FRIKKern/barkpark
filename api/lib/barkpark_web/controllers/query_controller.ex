@@ -28,19 +28,91 @@ defmodule BarkparkWeb.QueryController do
   @counts_perspectives ["published"]
 
   def index(conn, %{"dataset" => dataset, "type" => type} = params) do
-    cond do
-      not (preview?(conn) or authed?(conn) or
-               Content.schema_public?(type, dataset, scope_opts(conn))) ->
+    # THE AUTH-PATH READ IS ITS OWN REGION (task-66ec6750399f649f). The
+    # `schema_public?/3` leg of the gate below is a Repo read that sat OUTSIDE
+    # `query_index/4`'s rescue region — see `public_gate/5`. Its three answers
+    # are kept SEPARATE from each other on purpose: `false` is an authorization
+    # verdict, `{:error, …}` is a storage refusal, and they must never collapse.
+    case public_gate(
+           :index_auth,
+           "index/2 (dataset=#{inspect(dataset)} type=#{inspect(type)})",
+           conn,
+           type,
+           dataset
+         ) do
+      # The storage refusal answers from the SAME position in the ordering the
+      # raise used to leave from: after nothing, before the perspective check.
+      {:error, _} = fault ->
+        fault
+
+      false ->
         {:error, :not_found}
 
-      # An unsupported ?perspective is a 400, not a silent downgrade — the
-      # existence-hiding 404 above comes FIRST so the refusal can never become
-      # an existence probe, exactly the ordering counts/2 uses.
-      bad = unsupported_read_perspective(params) ->
-        refuse_read_perspective(conn, bad)
-
       true ->
-        query_index(conn, dataset, type, params)
+        cond do
+          # An unsupported ?perspective is a 400, not a silent downgrade — the
+          # existence-hiding 404 above comes FIRST so the refusal can never become
+          # an existence probe, exactly the ordering counts/2 uses.
+          bad = unsupported_read_perspective(params) ->
+            refuse_read_perspective(conn, bad)
+
+          true ->
+            query_index(conn, dataset, type, params)
+        end
+    end
+  end
+
+  # ─── THE AUTH-PATH READ, OUTSIDE BOTH REGIONS (task-66ec6750399f649f) ───
+  #
+  # THE GAP A RESCUE-SHAPED AUDIT CANNOT SEE. `index/2` and `show/2` each have
+  # a rescue region — `query_index/4` and `show_doc/5` — so both pass the
+  # predicate "does this action have a rescue?", which is the predicate the two
+  # previous rounds of this work used. But the gate they consult FIRST,
+  # `Content.schema_public?/3` (→ `Content.Schema.get_schema/3` → `Repo`), is
+  # evaluated in the action body, OUTSIDE its own region. A checkout refused at
+  # that one call rendered an opaque, non-retryable 500 on the two doors
+  # everyone believed were covered.
+  #
+  # WHY THIS IS A RESTRUCTURE AND NOT A WRAP. The call sat inside a `cond`
+  # whose CLAUSE ORDERING implements existence-hiding: the 404 arm must be
+  # decided BEFORE the `?perspective` 400, or the refusal becomes an existence
+  # probe (pinned by `query_controller_perspective_test.exs` "an ANONYMOUS
+  # caller on a private type gets 404, not the 400" and the sibling arm in
+  # `read_perspective_strict_test.exs`). You cannot hoist the call above the
+  # cond without either evaluating it for callers who never needed it, or
+  # moving the decision. So the SHORT-CIRCUIT is preserved literally — the
+  # Repo read still happens only when the caller is neither preview nor
+  # token-authed, exactly as `preview?(conn) or authed?(conn) or
+  # schema_public?(…)` did — and only its RESULT is widened from a boolean to
+  # three values.
+  #
+  # NO FAIL-OPEN, AND HERE THAT IS SHARPER THAN AT A LIST DOOR. The other
+  # doors' trap is an empty page; this one's is an AUTHORIZATION VERDICT. A
+  # rescue that recovered into `false` would render a refused checkout as
+  # "this type is not public" — a permanent 404, manufactured out of a
+  # transient fault, on a type that may well be public. The callers below
+  # match `true` and `false` EXPLICITLY and never `_`, so a fault value can
+  # never take the open branch by falling through, and this helper returns the
+  # `{:error, …}` tuple unchanged rather than folding it into a boolean.
+  #
+  # NARROW: `read_region/3` is reused verbatim (not a third spelling of the
+  # same refusal), so this arm matches `DBConnection.ConnectionError` and
+  # nothing wider, and answers the same 503
+  # `storage_unavailable`/`connection_unavailable` as the other seven doors.
+  #
+  # BLAST RADIUS. The `:index_auth` and `:doc_show_auth` seams are this
+  # helper's only sites; `backlinks/2`, `related/2`, `counts/2`,
+  # `tag_browse/2` and `tag_docs/2` gate on `preview?/1` + `authed?/1` alone,
+  # which read `conn.assigns` and reach no storage at all — derived by reading
+  # every module-level `def` in this file and classifying its storage reads,
+  # not by trusting the lists in the comments above.
+  @spec public_gate(atom(), String.t(), Plug.Conn.t(), String.t(), String.t()) ::
+          boolean() | {:error, {:connection_unavailable, :read, String.t()}}
+  defp public_gate(site, where, conn, type, dataset) do
+    if preview?(conn) or authed?(conn) do
+      true
+    else
+      read_region(site, where, fn -> Content.schema_public?(type, dataset, scope_opts(conn)) end)
     end
   end
 
@@ -80,10 +152,14 @@ defmodule BarkparkWeb.QueryController do
   # `Postgrex.Error`, an `Ecto.QueryError`, an `ArgumentError` from a bad filter
   # — propagates exactly as it did before.
   #
-  # BLAST RADIUS, STATED. This covers `GET /v1/data/query/:dataset/:type` and
-  # NOTHING ELSE in this controller. `backlinks/2`, `related/2`, `counts/2` and
-  # the document-show door are DELIBERATELY NOT WRAPPED and still raise as they
-  # did; the `:query_index` fault seam below is the only site, and a sibling
+  # BLAST RADIUS, STATED. This region covers `GET /v1/data/query/:dataset/:type`
+  # and NOTHING ELSE. It originally recorded `backlinks/2`, `related/2`,
+  # `counts/2` and the document-show door as DELIBERATELY NOT WRAPPED; all of
+  # them have since been brought to this same arm — show_doc/5 by
+  # pds-bl-census-read-path-500-under-load, and the rest (plus `tag_browse/2`
+  # and `tag_docs/2`, which this comment never knew about) by
+  # task-410d4f889ee526c1 via `read_region/3`. The `:query_index` fault seam
+  # below is still this region's only site, and a sibling
   # seam in `TasksController` pins the untouched graph doors the same way
   # #15489's `:upsert_prev_doc_lookup` seam pinned `upsert_document/4`.
   defp query_index(conn, dataset, type, params) do
@@ -129,6 +205,63 @@ defmodule BarkparkWeb.QueryController do
       _ ->
         :ok
     end
+  end
+
+  # ─── THE SAME CLASSIFICATION AT THE FIVE REMAINING READ DOORS (task-410d4f889ee526c1) ───
+  #
+  # THE RESIDUE THE TWO REGIONS ABOVE NAMED. `query_index/4` and `show_doc/5`
+  # each stated their blast radius and each named the doors left outside it.
+  # Those doors are in the SAME controller, answer the SAME pool fault, and
+  # were still rendering it as 500 `internal_error` — which
+  # `BarkparkCloud.Sites.Deploy.transient_refusal?/1` does not treat as
+  # transient, so a caller that retries transient failures does NOT retry
+  # these. A census or gate that reaches one of them during a degraded-pool
+  # minute reads a hard, permanent failure wearing a generic sentence.
+  #
+  # THE DOOR SET IS DERIVED, NOT INHERITED. Every public action in this
+  # controller that can reach storage: `index/2` and `show/2` (already inside
+  # their regions), and `backlinks/2`, `related/2`, `counts/2`, `tag_browse/2`
+  # and `tag_docs/2` — FIVE, not the three the filing named. `tag_browse/2` and
+  # `tag_docs/2` post-date the comments above and were never on anyone's list.
+  #
+  # AND THE DOOR-SHAPED DERIVATION WAS ITSELF TOO COARSE, which is the lesson
+  # this helper now carries: `index/2` and `show/2` were classified "already
+  # inside their regions" on the strength of the action HAVING a region, while
+  # their `Content.schema_public?/3` auth read sat outside it. The unit is a
+  # storage READ, not an action. `public_gate/5` (task-66ec6750399f649f) routes
+  # those two reads through this same helper, so `read_region/3` now has SEVEN
+  # sites: `:backlinks`, `:related`, `:counts`, `:tag_browse`, `:tag_docs`,
+  # `:index_auth` and `:doc_show_auth`.
+  #
+  # ONE REGION HELPER, BECAUSE THE ARGUMENT IS IDENTICAL AT ALL FIVE. Each door
+  # is a single storage region — `Content.Graph.reverse_referencers/2`,
+  # `Content.Related.related_documents/3`, the `published_type_counts/2`
+  # aggregate, `Content.TagDistribution.per_type/3`, `Content.docs_with_tag/4`
+  # — and at every one of them the caller's remedy is the same: resend.
+  #
+  # NARROW ON PURPOSE. `rescue e in DBConnection.ConnectionError` matches that
+  # ONE struct. A bare `rescue`, or one that also took `Ecto.QueryError`, would
+  # make the storage fault this exists to make LEGIBLE indistinguishable from a
+  # bug in the query. Every other exception propagates exactly as before.
+  #
+  # NO FAIL-OPEN. The arm returns an `{:error, …}` tuple and can never return a
+  # 200. These five doors all answer a COUNT or a LIST, so the trap here is the
+  # empty one: `{backlinks: [], count: 0}` read as "this document has no
+  # backlinks" is a false answer a caller cannot tell from a true one. They
+  # also all hide existence with 404, so degrading into not-found would be the
+  # same lie in the other direction. Both are asserted, per door.
+  defp read_region(site, where, fun) when is_function(fun, 0) do
+    inject_read_fault!(site)
+    fun.()
+  rescue
+    e in DBConnection.ConnectionError ->
+      Logger.error(
+        "BarkparkWeb.QueryController.#{where}: the database connection was lost mid-read " <>
+          "— answering 503 storage_unavailable/connection_unavailable. " <>
+          "exception=#{Exception.message(e)}"
+      )
+
+      {:error, {:connection_unavailable, :read, read_fault_message(e)}}
   end
 
   defp query_index!(conn, dataset, type, params) do
@@ -269,12 +402,17 @@ defmodule BarkparkWeb.QueryController do
   """
   def backlinks(conn, %{"dataset" => dataset, "id" => id}) do
     if preview?(conn) or authed?(conn) do
-      backlinks = Content.Graph.reverse_referencers(id, [dataset: dataset] ++ scope_opts(conn))
+      # See `read_region/3`: a pool checkout refused here used to render as an
+      # opaque, NON-retryable 500. `{backlinks: [], count: 0}` would be worse —
+      # a caller cannot tell it from "this document is referenced by nothing".
+      read_region(:backlinks, "backlinks/2 (dataset=#{inspect(dataset)} id=#{inspect(id)})", fn ->
+        backlinks = Content.Graph.reverse_referencers(id, [dataset: dataset] ++ scope_opts(conn))
 
-      json(conn, %{
-        result: %{backlinks: backlinks, count: length(backlinks)},
-        syncTags: ["bp:ds:#{dataset}:backlinks:#{id}"]
-      })
+        json(conn, %{
+          result: %{backlinks: backlinks, count: length(backlinks)},
+          syncTags: ["bp:ds:#{dataset}:backlinks:#{id}"]
+        })
+      end)
     else
       {:error, :not_found}
     end
@@ -294,17 +432,22 @@ defmodule BarkparkWeb.QueryController do
   """
   def related(conn, %{"dataset" => dataset, "id" => id} = params) do
     if preview?(conn) or authed?(conn) do
-      related =
-        Content.Related.related_documents(
-          id,
-          dataset,
-          [limit: parse_int(params["limit"], 10)] ++ scope_opts(conn)
-        )
+      # See `read_region/3`. Both legs of the fusion (the tags_meta SQL and
+      # `reverse_referencers/2`) can be refused a checkout, and an empty
+      # `related` list is indistinguishable from a genuinely unrelated document.
+      read_region(:related, "related/2 (dataset=#{inspect(dataset)} id=#{inspect(id)})", fn ->
+        related =
+          Content.Related.related_documents(
+            id,
+            dataset,
+            [limit: parse_int(params["limit"], 10)] ++ scope_opts(conn)
+          )
 
-      json(conn, %{
-        result: %{related: related, count: length(related)},
-        syncTags: ["bp:ds:#{dataset}:related:#{id}"]
-      })
+        json(conn, %{
+          result: %{related: related, count: length(related)},
+          syncTags: ["bp:ds:#{dataset}:related:#{id}"]
+        })
+      end)
     else
       {:error, :not_found}
     end
@@ -350,12 +493,17 @@ defmodule BarkparkWeb.QueryController do
         refuse_perspective(conn, unsupported_perspective(params))
 
       true ->
-        json(conn, %{
-          ok: true,
-          dataset: dataset,
-          perspective: "published",
-          counts: published_type_counts(conn, dataset)
-        })
+        # See `read_region/3`. The FROZEN shape's `counts` map is the trap: a
+        # pool checkout refused mid-aggregate must not render as `{}`, which a
+        # caller reads as "this dataset is empty".
+        read_region(:counts, "counts/2 (dataset=#{inspect(dataset)})", fn ->
+          json(conn, %{
+            ok: true,
+            dataset: dataset,
+            perspective: "published",
+            counts: published_type_counts(conn, dataset)
+          })
+        end)
     end
   end
 
@@ -434,15 +582,20 @@ defmodule BarkparkWeb.QueryController do
   """
   def tag_browse(conn, %{"dataset" => dataset} = params) do
     if preview?(conn) or authed?(conn) do
-      rows =
-        Content.TagDistribution.per_type(parse_types(params["type"]), dataset, scope_opts(conn))
+      # See `read_region/3`. This door is NOT in either older region's stated
+      # blast radius because it did not exist when they were written — it was
+      # found by enumerating the module, not by reading a list.
+      read_region(:tag_browse, "tag_browse/2 (dataset=#{inspect(dataset)})", fn ->
+        rows =
+          Content.TagDistribution.per_type(parse_types(params["type"]), dataset, scope_opts(conn))
 
-      tags = regroup_tag_rows(rows)
+        tags = regroup_tag_rows(rows)
 
-      json(conn, %{
-        result: %{tags: tags, count: length(tags)},
-        syncTags: ["bp:ds:#{dataset}:tags"]
-      })
+        json(conn, %{
+          result: %{tags: tags, count: length(tags)},
+          syncTags: ["bp:ds:#{dataset}:tags"]
+        })
+      end)
     else
       {:error, :not_found}
     end
@@ -466,18 +619,22 @@ defmodule BarkparkWeb.QueryController do
   """
   def tag_docs(conn, %{"dataset" => dataset, "tag" => tag} = params) do
     if preview?(conn) or authed?(conn) do
-      docs =
-        Content.docs_with_tag(
-          tag,
-          parse_types(params["type"]),
-          dataset,
-          [order: :strength, published_only: true] ++ scope_opts(conn)
-        )
+      # See `read_region/3`. Same derivation as `tag_browse/2`; an empty
+      # `documents` list here says "no document carries this tag".
+      read_region(:tag_docs, "tag_docs/2 (dataset=#{inspect(dataset)} tag=#{inspect(tag)})", fn ->
+        docs =
+          Content.docs_with_tag(
+            tag,
+            parse_types(params["type"]),
+            dataset,
+            [order: :strength, published_only: true] ++ scope_opts(conn)
+          )
 
-      json(conn, %{
-        result: %{tag: tag, documents: docs, count: length(docs)},
-        syncTags: ["bp:ds:#{dataset}:tags:#{tag}"]
-      })
+        json(conn, %{
+          result: %{tag: tag, documents: docs, count: length(docs)},
+          syncTags: ["bp:ds:#{dataset}:tags:#{tag}"]
+        })
+      end)
     else
       {:error, :not_found}
     end
@@ -512,28 +669,46 @@ defmodule BarkparkWeb.QueryController do
   end
 
   def show(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
-    cond do
-      # NO anonymous caller may fetch a draft by id — neither a read-only
-      # public share nor a plain tokenless read of a public schema (publish is
-      # the act of making content public; a `drafts.` id is unpublished by
-      # definition). Rejected as not-found BEFORE any get_document call — the
-      # same 404 path the controller already returns for a missing doc. An
-      # `:edit` share and any token/preview caller pass through unchanged.
-      AnonPerspective.anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") ->
-        {:error, :not_found}
+    # NO anonymous caller may fetch a draft by id — neither a read-only
+    # public share nor a plain tokenless read of a public schema (publish is
+    # the act of making content public; a `drafts.` id is unpublished by
+    # definition). Rejected as not-found BEFORE any get_document call — the
+    # same 404 path the controller already returns for a missing doc. An
+    # `:edit` share and any token/preview caller pass through unchanged.
+    #
+    # STILL FIRST. This clause reads `conn.assigns` and the id string only, so
+    # it reaches no storage and cannot fault; keeping it ahead of the auth gate
+    # preserves the original cond's first-clause-wins ordering exactly.
+    if AnonPerspective.anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") do
+      {:error, :not_found}
+    else
+      # See `public_gate/5` (task-66ec6750399f649f): the `schema_public?/3` leg
+      # of this gate is a Repo read that sat outside `show_doc/5`'s region.
+      case public_gate(
+             :doc_show_auth,
+             "show/2 (dataset=#{inspect(dataset)} type=#{inspect(type)} doc_id=#{inspect(doc_id)})",
+             conn,
+             type,
+             dataset
+           ) do
+        {:error, _} = fault ->
+          fault
 
-      not (preview?(conn) or authed?(conn) or
-               Content.schema_public?(type, dataset, scope_opts(conn))) ->
-        {:error, :not_found}
+        false ->
+          {:error, :not_found}
 
-      # AFTER the two existence-hiding 404s above, never before — otherwise the
-      # refusal answers "this document exists but your perspective is wrong" to
-      # a caller the endpoint is meant to tell nothing. Same ordering as counts/2.
-      bad = unsupported_read_perspective(params) ->
-        refuse_read_perspective(conn, bad)
+        true ->
+          cond do
+            # AFTER the two existence-hiding 404s above, never before — otherwise the
+            # refusal answers "this document exists but your perspective is wrong" to
+            # a caller the endpoint is meant to tell nothing. Same ordering as counts/2.
+            bad = unsupported_read_perspective(params) ->
+              refuse_read_perspective(conn, bad)
 
-      true ->
-        show_doc(conn, dataset, type, doc_id, params)
+            true ->
+              show_doc(conn, dataset, type, doc_id, params)
+          end
+      end
     end
   end
 
@@ -558,7 +733,63 @@ defmodule BarkparkWeb.QueryController do
   defp refuse_read_perspective(conn, value),
     do: ReadPerspective.refuse(conn, value, @document_perspectives)
 
+  # ─── THE SAME CLASSIFICATION AT THE DOC-GET DOOR (pds-bl-census-read-path-500-under-load) ───
+  #
+  # WHY THIS DOOR, AND WHY IT WAS THE ONE LEFT. The read-side rescue above
+  # covers `GET /v1/data/query/:dataset/:type` and says so: "`backlinks/2`,
+  # `related/2`, `counts/2` and the document-show door are DELIBERATELY NOT
+  # WRAPPED". That was a defensible line to draw until you read what the census
+  # actually does when the paginated door misbehaves. The filing this arm comes
+  # from records the remedy verbatim: "WORKAROUND USED THIS WAVE, not a fix:
+  # per-row verification switched to GET /v1/data/doc/production/task/<id>".
+  #
+  # So the fallback the board gate reaches for when the sweep door is unhappy —
+  # under exactly the concurrent write load that made the sweep door unhappy —
+  # was the one door still answering 500 `internal_error` for a pool checkout
+  # it was merely refused. `BarkparkCloud.Sites.Deploy.transient_refusal?/1`
+  # keys retry grace on the CODE and `internal_error` is not on its transient
+  # list, so the degraded-pool minute escalated as a hard failure on the very
+  # path chosen to survive it.
+  #
+  # THE FAULT SHAPE IS MEASURED, NOT ASSUMED. A starved real pool (a second
+  # `Barkpark.Repo` instance, `pool: DBConnection.ConnectionPool`, `pool_size:
+  # 1`, `queue_target: 10`, one held connection) refused the census read with
+  # `** (DBConnection.ConnectionError) connection not available and request was
+  # dropped from queue after 54ms` — raised, not exited, so a `rescue` on that
+  # one struct is the right instrument and `catch :exit` would be cargo.
+  #
+  # SAME REGION ARGUMENT, SAME NON-FAIL-OPEN. Every Repo call inside
+  # `show_doc!/5` can be refused a checkout — `get_document_for_perspective`,
+  # `fetch_schema`, `Expand.expand/4`, `maybe_resolve_tasks/3`,
+  # `Content.schema_hash_for_dataset/2` — and the remedy at all of them is
+  # resend. `rescue e in DBConnection.ConnectionError` matches that ONE struct;
+  # the arm returns an `{:error, …}` tuple and can never return `{:ok, _}`, a
+  # 404, or a 200 carrying a half-rendered document. The 404 matters here the
+  # way an empty list mattered next door: this door hides existence with
+  # not-found, so a rescue that degraded into 404 would tell a census the row
+  # was DELETED. Any other exception propagates exactly as before.
+  #
+  # BLAST RADIUS, STATED. `GET /v1/data/doc/:dataset/:type/:doc_id` (and its
+  # `/w/:ws/p/:project` mirror) and NOTHING else; the `:doc_show` seam is this
+  # region's only site. `backlinks/2`, `related/2` and `counts/2` were listed
+  # here as still raising — task-410d4f889ee526c1 closed them, and the two
+  # tag doors this comment never enumerated, through `read_region/3`.
   defp show_doc(conn, dataset, type, doc_id, params) do
+    show_doc!(conn, dataset, type, doc_id, params)
+  rescue
+    e in DBConnection.ConnectionError ->
+      Logger.error(
+        "BarkparkWeb.QueryController.show/2: the database connection was lost mid-read " <>
+          "(dataset=#{inspect(dataset)} type=#{inspect(type)} doc_id=#{inspect(doc_id)}) — " <>
+          "answering 503 storage_unavailable/connection_unavailable. " <>
+          "exception=#{Exception.message(e)}"
+      )
+
+      {:error, {:connection_unavailable, :read, read_fault_message(e)}}
+  end
+
+  defp show_doc!(conn, dataset, type, doc_id, params) do
+    inject_read_fault!(:doc_show)
     t0 = System.monotonic_time(:microsecond)
     expand_spec = parse_expand(params["expand"])
 
@@ -609,11 +840,28 @@ defmodule BarkparkWeb.QueryController do
   # drafts where they exist and published rows where they do not, so a
   # published-only document must not start 404ing under `?perspective=drafts`.
   #
-  # `:published` and `:raw` keep the exact-id lookup, and they genuinely coincide
-  # here: doc-get addresses ONE row by id, so "raw" (no perspective filter) and
-  # "published" resolve to the same row. A caller that spells `drafts.<id>`
-  # still gets that row — the documented bare-`bp doc get` asymmetry, which is a
-  # different thing from an explicit flag being ignored.
+  # `:raw` means NO perspective filter, so it prefers the row the id names and
+  # falls back to the draft twin when the bare id names nothing
+  # (task-aa22f3bd921e1c56). Before that fallback existed, `doc get <type>
+  # <publishedId> --perspective raw` answered not_found for an unpublished
+  # document that `doc patch`, `doc publish`, `doc discardDraft` and `doc
+  # delete` all reach by the SAME bare id — `Mutations.get_patch_base/4` and
+  # `Content.publish_document/4` each try `drafts.<id>`. So the read-back
+  # straight after a create reported the document did not exist, which is the
+  # false negative that makes an operator or an agent retry the create and
+  # produce duplicates. The accepted id set is now one set across read and
+  # write.
+  #
+  # The order is the opposite of `:drafts` on purpose. Under `:drafts` the twin
+  # WINS when both rows exist, because the caller asked for the unpublished
+  # edit. Under `:raw` the exact row wins, because the caller named a row; the
+  # twin is reached only when the bare id resolves to nothing, and
+  # `drafts.<id>` still names it explicitly.
+  #
+  # `:published` keeps the exact-id lookup with no fallback, and that is the
+  # correct answer rather than the same defect: publishing is the act of making
+  # a document public, so an unpublished document is genuinely absent from the
+  # published perspective.
   #
   # NO NEW EXPOSURE, and this is the part worth checking rather than assuming.
   # `AnonPerspective.resolve/2` pins every anonymous and `public-read` caller to
@@ -621,18 +869,29 @@ defmodule BarkparkWeb.QueryController do
   # names a `drafts.` id. For an authed caller nothing widens either: doc-get
   # already served `GET /v1/data/doc/:ds/:type/drafts.<id>` to any read token, so
   # honouring the flag reaches the SAME row by a different spelling. Pinned both
-  # ways in query_controller_perspective_test.exs.
+  # ways in query_controller_perspective_test.exs, and for `:raw` in
+  # doc_get_id_parity_test.exs.
   defp get_document_for_perspective(conn, doc_id, type, dataset, params) do
     case AnonPerspective.resolve(conn, params) do
-      :drafts ->
-        case Content.get_document(DraftId.draft_id(doc_id), type, dataset, scope_opts(conn)) do
-          {:ok, draft} -> {:ok, draft}
-          _ -> Content.get_document(doc_id, type, dataset, scope_opts(conn))
-        end
-
-      _ ->
-        Content.get_document(doc_id, type, dataset, scope_opts(conn))
+      :drafts -> first_hit(conn, [DraftId.draft_id(doc_id), doc_id], type, dataset)
+      :raw -> first_hit(conn, [doc_id, DraftId.draft_id(doc_id)], type, dataset)
+      _ -> Content.get_document(doc_id, type, dataset, scope_opts(conn))
     end
+  end
+
+  # Try each spelling in order and answer with the first row that resolves.
+  # `DraftId.draft_id/1` is idempotent, so a caller who already spelled
+  # `drafts.<id>` asks the same question twice and gets the same answer — no
+  # second row is reachable that the exact-id lookup would not have found.
+  defp first_hit(conn, spellings, type, dataset) do
+    opts = scope_opts(conn)
+
+    Enum.reduce_while(spellings, {:error, :not_found}, fn spelling, acc ->
+      case Content.get_document(spelling, type, dataset, opts) do
+        {:ok, _doc} = ok -> {:halt, ok}
+        _ -> {:cont, acc}
+      end
+    end)
   end
 
   # ─── ?resolve=tasks — the API resolve seam (p-resolve-seam) ────────────────
@@ -652,9 +911,9 @@ defmodule BarkparkWeb.QueryController do
   # /papers reader already exposes on the same paper. Underneath, the fetcher
   # (Tasks.Query.rows_for_query → Scope.scope_to_workspace) stays fail-closed:
   # a nil workspace resolves to zero rows, never to a cross-tenant leak.
-  defp maybe_resolve_tasks(rendered, conn, %{"resolve" => "tasks", "dataset" => dataset})
+  defp maybe_resolve_tasks(rendered, conn, %{"resolve" => "tasks", "dataset" => dataset} = params)
        when is_list(rendered) do
-    scope = api_task_scope(conn)
+    scope = api_task_scope(conn, params)
 
     Enum.map(rendered, fn doc ->
       case doc do
@@ -673,8 +932,15 @@ defmodule BarkparkWeb.QueryController do
 
   defp maybe_resolve_tasks(rendered, _conn, _params), do: rendered
 
-  defp api_task_scope(conn) do
+  # Perspective-threaded exactly like the resolved DOCUMENTS around it: the
+  # caller's `AnonPerspective.resolve/2` verdict (a plain anonymous or
+  # public-read caller is pinned to `:published`) decides whether the embedded
+  # task rows may include unpublished ones. Without this an anonymous
+  # `?resolve=tasks` read returned draft-only task titles that the very same
+  # response's document perspective would have hidden (task-b10e10b944f6f55b).
+  defp api_task_scope(conn, params) do
     opts = scope_opts(conn)
+    perspective = AnonPerspective.resolve(conn, params)
 
     ws_id =
       Keyword.get(opts, :workspace_id) ||
@@ -683,7 +949,11 @@ defmodule BarkparkWeb.QueryController do
           _ -> nil
         end
 
-    [workspace_id: ws_id, project_id: Keyword.get(opts, :project_id)]
+    [
+      workspace_id: ws_id,
+      project_id: Keyword.get(opts, :project_id),
+      published_only: perspective == :published
+    ]
   end
 
   # Query params that RESHAPE the body without moving the `(dataset, type,
@@ -998,7 +1268,8 @@ defmodule BarkparkWeb.QueryController do
   #
   # DELIBERATELY NOT a delegation to `Content.Query.validate_filter_map/1`. The
   # builder is FIELD-AWARE and accepts `@doc_id_only_ops` (`starts_with`,
-  # `not_starts_with`) on `doc_id`/`_id`, which `query.ex` records as
+  # `not_starts_with`, and since E9 `referencedBy` / `notReferencedBy`) on
+  # `doc_id`/`_id`, which `query.ex` records as
   # "builder-only spellings … no public wire form — QueryController's door
   # rejects them". The door is SUPPOSED to be narrower than the builder here;
   # delegating would put those spellings on the public wire. Pinned by

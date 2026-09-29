@@ -300,11 +300,17 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     end
 
     test "HTTP-date resolves to a positive, clamped delay" do
+      # `now` is 2023-11-14T22:13:20Z; the header names 22:14:05Z, exactly 45s later.
       now = 1_700_000_000
-      # 45s in the future relative to `now`.
       date = "Tue, 14 Nov 2023 22:14:05 GMT"
-      ms = Dispatcher.parse_retry_after([{"retry-after", date}], now)
-      assert is_integer(ms) and ms > 0 and ms <= 300_000
+
+      # The EXACT delay, never a range. `> 0` is the floor the code already
+      # applies (`max(_, 0)`) and `<= 300_000` is `@retry_after_max_ms`, the
+      # clamp it already applies — a range spanning both is satisfied by every
+      # wrong-but-positive answer. A one-hour timezone slip (`epoch - now + 3600`)
+      # yields 3_645_000ms, which the clamp launders into exactly 300_000: inside
+      # the old range, and invisible to it.
+      assert Dispatcher.parse_retry_after([{"retry-after", date}], now) == 45_000
     end
 
     test "past HTTP-date floors at 0" do
@@ -1068,6 +1074,70 @@ defmodule Barkpark.Webhooks.DispatcherTest do
       assert Process.alive?(self())
       # …and the delivery it was counting still lands.
       assert eventually(fn -> match?(%{status: "ok"}, Webhooks.get_delivery(wh.id, eid)) end)
+    end
+  end
+
+  describe "replay_delivery/3 — the row vanished between two statements (R1)" do
+    # THE FILED RACE, driven deterministically. `get_delivery` returns nil, the
+    # claim conflicts (`:already_delivered`), and the immediate re-fetch ALSO
+    # returns nil because the winning row was deleted in between. A BEFORE
+    # INSERT trigger that returns NULL reproduces exactly that observable pair:
+    # the INSERT ... ON CONFLICT DO NOTHING RETURNING yields no row (so
+    # `claim_delivery` reports `:already_delivered`) and no row is left behind
+    # (so the re-fetch is nil). The trigger lives inside the sandbox
+    # transaction and rolls back with it.
+    test "returns {:error, :delivery_gone} instead of raising BadMapError", %{webhook: wh} do
+      eid = new_event_id()
+      refute Webhooks.get_delivery(wh.id, eid)
+
+      Barkpark.Repo.query!("""
+      CREATE FUNCTION pg_temp.bp_skip_delivery_insert() RETURNS trigger AS $$
+      BEGIN RETURN NULL; END;
+      $$ LANGUAGE plpgsql;
+      """)
+
+      Barkpark.Repo.query!("""
+      CREATE TRIGGER bp_skip_delivery_insert
+      BEFORE INSERT ON webhook_deliveries
+      FOR EACH ROW EXECUTE FUNCTION pg_temp.bp_skip_delivery_insert();
+      """)
+
+      # Control: with the trigger armed the claim reports the conflict shape
+      # this race needs, and leaves nothing to re-fetch.
+      assert {:error, :already_delivered} = Webhooks.claim_delivery(wh.id, eid)
+      refute Webhooks.get_delivery(wh.id, eid)
+
+      FakeHTTP.start([{:ok, 200, []}])
+
+      assert {:error, :delivery_gone} = Dispatcher.replay_delivery(wh, "{}", eid)
+
+      # And it never posted against a delivery row that does not exist.
+      assert FakeHTTP.calls() == []
+    end
+
+    # The R2 window seen from the replay route: the source event is gone, so the
+    # claim cannot succeed. Before the fix this reached the old two-arm `case`
+    # as `{:error, %Ecto.Changeset{}}` and raised CaseClauseError (or, without
+    # the changeset constraint, Ecto.ConstraintError one layer down).
+    test "returns {:error, :event_gone} when the source event is gone", %{webhook: wh} do
+      missing_event_id = 2_147_000_043
+      assert Barkpark.Repo.get(Barkpark.Content.MutationEvent, missing_event_id) == nil
+
+      FakeHTTP.start([{:ok, 200, []}])
+
+      assert {:error, :event_gone} = Dispatcher.replay_delivery(wh, "{}", missing_event_id)
+      assert FakeHTTP.calls() == []
+    end
+
+    # Control: the happy path still records the attempt on the real row.
+    test "still records the attempt when the delivery row is there", %{webhook: wh} do
+      eid = new_event_id()
+      FakeHTTP.start([{:ok, 200, []}])
+
+      assert {:ok, delivery} = Dispatcher.replay_delivery(wh, "{}", eid)
+      assert delivery.status == "ok"
+      assert delivery.attempts == 1
+      assert length(FakeHTTP.calls()) == 1
     end
   end
 end

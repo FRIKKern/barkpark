@@ -19,6 +19,7 @@ defmodule BarkparkWeb.TicketKeysController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Plugins.Tickets.{Handoff, Keys}
+  alias BarkparkWeb.ErrorResponse
 
   @doc """
   `POST /v1/plugins/tickets/keys` — mint a named ticket key.
@@ -82,6 +83,16 @@ defmodule BarkparkWeb.TicketKeysController do
     do: stamp_response(conn, Keys.unpause(id, current_workspace_id(conn)))
 
   @doc "`DELETE /v1/plugins/tickets/keys/:id` — permanently revoke a key."
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, %{"id" => id}) do
     case Keys.revoke(id, current_workspace_id(conn)) do
       {:ok, key} -> json(conn, %{revoked: true, key: key_json(key)})
@@ -183,13 +194,11 @@ defmodule BarkparkWeb.TicketKeysController do
 
   defp unprocessable(conn, message) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "unprocessable", message: message}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{code: "unprocessable", message: message})
   end
 
   defp not_found(conn, message) do
     conn
-    |> put_status(:not_found)
-    |> json(%{error: %{code: "not_found", message: message}})
+    |> ErrorResponse.emit_fields(:not_found, %{code: "not_found", message: message})
   end
 end

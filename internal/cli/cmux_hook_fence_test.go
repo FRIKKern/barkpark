@@ -257,3 +257,98 @@ func TestHookStopDoesNotBypassANonDigestRefusal(t *testing.T) {
 		t.Errorf("close carried observed_rev = %q, want \"\"", revs[0])
 	}
 }
+
+// ── The bypass must re-prove acceptance on the row it CASes against ────────
+//
+// The gap this pins: hookCloseAtEpoch's drift arm re-reads the task ONLY to
+// harvest a rev, and then closes through the observed_rev CAS — which the
+// server honours by SKIPPING check_work_digest. So the verdict that authorises
+// that close is hookStopClose's ORIGINAL read, taken before the refusal that
+// proved the row had moved. When the field that moved IS acceptance_criteria
+// (`doc_changed_since_claim:acceptance_criteria`, the server's own reason), the
+// hook closed a task whose live criteria it had never judged.
+//
+// The fake server below models exactly that: the first GET (hookStopClose's
+// acceptance read) serves an all-met row, the fence then refuses the rev-less
+// close, and the SECOND GET (the fresh-rev read) serves the AMENDED row with an
+// unmet criterion. A hook that only harvests the rev sends the bypass close and
+// the amendment is lost; a hook that judges the fresh row declines.
+func newAmendingFenceServer(t *testing.T) (*httptest.Server, *fenceRec) {
+	t.Helper()
+	rec := &fenceRec{docRev: "r-fresh-1", reason: "doc_changed_since_claim:acceptance_criteria"}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		switch {
+		case strings.HasSuffix(p, "/claim"):
+			_, _ = w.Write([]byte(`{"ok":true,"doc":{"claim":{"epoch":11}}}`))
+		case strings.HasSuffix(p, "/close"):
+			rec.closes++
+			var body struct {
+				Epoch int    `json:"observed_epoch"`
+				Rev   string `json:"observed_rev"`
+			}
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &body)
+			rec.revs = append(rec.revs, body.Rev)
+			rec.lastEp = body.Epoch
+			if body.Rev == "" {
+				rec.fenced++
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"ok":false,"reason":"` + rec.reason + `"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"doc":{}}`))
+		case strings.Contains(p, "/v1/data/doc/") && strings.Contains(p, "/task/"):
+			rec.gets++
+			crit := []map[string]any{{"criterion": "c", "met": true}}
+			if rec.gets >= 2 {
+				// The amendment the fence just refused the close over.
+				crit = append(crit, map[string]any{"criterion": "c2 (added out of band)", "met": false})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+				"_id":                 "task-x",
+				"rev":                 rec.docRev,
+				"lifecycle_status":    "in_progress",
+				"acceptance_criteria": crit,
+			}})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, p)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, rec
+}
+
+func TestHookStopBypassRefusesWhenTheFreshRowIsNoLongerAllMet(t *testing.T) {
+	srv, rec := newAmendingFenceServer(t)
+	so, se, code := runFenceHook(t, srv.URL)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0 (the hook's cardinal contract)", code)
+	}
+	if so != "" {
+		t.Errorf("hook wrote to stdout: %q (must be empty)", so)
+	}
+	// PRECONDITION, not a control: the run must actually have reached the drift
+	// arm. Without the fenced refusal and the second GET this test would pass
+	// vacuously against a hook that never bypassed anything.
+	if rec.fenced != 1 {
+		t.Fatalf("fenced = %d, want 1 — the run never reached the observed_rev arm, so it measured nothing", rec.fenced)
+	}
+	if rec.gets != 2 {
+		t.Fatalf("gets = %d, want 2 (acceptance read + fresh-rev read) — the amended row was never served", rec.gets)
+	}
+	// THE ASSERTION: no close carried an observed_rev. Exactly one close was
+	// attempted (the fence-armed one, which the server refused).
+	for i, rv := range rec.revs {
+		if rv != "" {
+			t.Errorf("close #%d carried observed_rev = %q — the bypass skips the work-digest fence and must not fire on a row whose criteria are not all met", i+1, rv)
+		}
+	}
+	if rec.closes != 1 {
+		t.Errorf("closes = %d, want 1 (the fence-armed attempt only)", rec.closes)
+	}
+	if !strings.Contains(se, "acceptance is NOT proven") {
+		t.Errorf("stderr did not name the refusal reason; got: %q", se)
+	}
+}

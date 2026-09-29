@@ -40,6 +40,8 @@
 #   bash deploy/mcp-reachability-smoke.sh [host]     # default guerrilla.barkpark.cloud
 # Env: MCP_SMOKE_SCHEME (https) MCP_SMOKE_TIMEOUT (15) MCP_SMOKE_SERVER_NAME (barkpark-tasks)
 set -uo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/lib/bp-curl.sh"   # 429 backoff, shared (task-90059c5c680f6665)
 
 HOST="${1:-${BARKPARK_HEALTH_HOST:-guerrilla.barkpark.cloud}}"
 SCHEME="${MCP_SMOKE_SCHEME:-https}"
@@ -93,7 +95,7 @@ echo "mcp-smoke: public /mcp reachability matrix against $BASE (read-only, unaut
 
 # ---- LEG 1: POST /mcp initialize -> 200 + serverInfo.name
 body="$TMPD/init.body"; : > "$body"
-code="$(curl -s -o "$body" -w '%{http_code}' --max-time "$TIMEOUT" \
+code="$(bp_curl_code -s -o "$body" --max-time "$TIMEOUT" \
   -X POST \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
@@ -107,19 +109,19 @@ report mcp-initialize POST "$BASE/mcp" "$code" \
   "200 + serverInfo.name=$SERVER_NAME" "serverInfo.name=${got_name:-<none>}" "$ok"
 
 # ---- LEG 2: GET /mcp -> 405
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT" "$BASE/mcp" 2>/dev/null)"
+code="$(bp_curl_code -s -o /dev/null --max-time "$TIMEOUT" "$BASE/mcp" 2>/dev/null)"
 [ -n "$code" ] || code="000"
 ok=1; [ "$code" = "405" ] && ok=0
 report mcp-get-405 GET "$BASE/mcp" "$code" "405" "method-not-allowed" "$ok"
 
 # ---- LEG 3: GET /connectors/mcp -> 404 (by design: no MCP surface on the bridge)
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT" "$BASE/connectors/mcp" 2>/dev/null)"
+code="$(bp_curl_code -s -o /dev/null --max-time "$TIMEOUT" "$BASE/connectors/mcp" 2>/dev/null)"
 [ -n "$code" ] || code="000"
 ok=1; [ "$code" = "404" ] && ok=0
 report connectors-mcp-404 GET "$BASE/connectors/mcp" "$code" "404" "no-mcp-on-the-bridge" "$ok"
 
 # ---- LEG 4: GET /connectors/health -> 200 (the one unauthenticated bridge surface)
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT" "$BASE/connectors/health" 2>/dev/null)"
+code="$(bp_curl_code -s -o /dev/null --max-time "$TIMEOUT" "$BASE/connectors/health" 2>/dev/null)"
 [ -n "$code" ] || code="000"
 ok=1; [ "$code" = "200" ] && ok=0
 report connectors-health GET "$BASE/connectors/health" "$code" "200" "bridge-liveness" "$ok"

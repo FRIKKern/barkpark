@@ -5,8 +5,13 @@ Barkpark documentation site — Next.js 15 + Fumadocs v14.
 
 ## Quickstart
 
+This package belongs to the `js/` workspace, not the repository-root one, so
+`--filter @barkpark/docs` matches nothing when run from the root. Run both
+commands from anywhere in the repository:
+
 ```bash
-pnpm --filter @barkpark/docs dev
+pnpm -C js install
+pnpm -C js --filter @barkpark/docs dev
 ```
 
 Open <http://localhost:3000>.
@@ -15,4 +20,4 @@ Open <http://localhost:3000>.
 
 `getting-started`, `concepts`, `reference/errors` are the highest-priority pages. Content lives in `content/docs/`.
 
-CI-generated API reference lands at `docs-site/reference/<pkg>/` (Track A consumer).
+CI-generated API reference lands at `docs/site/reference/<pkg>/` (Track A consumer).

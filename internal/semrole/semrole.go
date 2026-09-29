@@ -125,8 +125,11 @@ func For(status string) string {
 	// rung above it, and rank 4 is warn. That the rung means "this box does not
 	// work right now" is carried by its RANK, which is what sorts the screen —
 	// not by a danger tone that would invert the ladder.
+	// "cannot_deploy" (dr-w15-s5) enters at rank 5, between "degraded" (4,
+	// warn) and "deploys_failing" (6, warn): warn for the same monotonicity
+	// reason — it may not shout louder than the rung above it.
 	case "degraded", "unknown", "suspended", "inactive", "near_limit",
-		"deploys_failing", "diverged",
+		"cannot_deploy", "deploys_failing", "diverged",
 		"strained", "filling", "unreported", "deploy_stalled", "unavailable":
 		return "warn"
 	// "over_limit" is a usage meter at or past its plan quota — a hard ceiling

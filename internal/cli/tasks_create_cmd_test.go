@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -868,5 +869,228 @@ func TestTaskCreateJSONReceiptNamesADraftOnlyWhenOneExists(t *testing.T) {
 	// `drafts.` id here points at nothing.
 	if pubPresent {
 		t.Errorf("a SUCCESSFUL --publish receipt still carries draft = %q; publishing consumes the draft, so that id resolves to nothing (probe: bp doc get task drafts.task-ccd184a652f95f76 --perspective raw → not_found)", gotPub)
+	}
+}
+
+// ── task-23c70e97c90809c6: the auto-stub ruling, pinned ──────────────────────
+//
+// RULING B: the "Complete the work described by …" stub in
+// ensureTaskPortableBrief STAYS, and bp task create does NOT refuse a
+// description-less task. The reasons live in the comment at the stub site in
+// tasks_create_cmd.go. These three tests are the mechanism: a later sweep that
+// re-files the 122-row table in
+// tooling/grip/ledger/brief-purpose-drift-2026-08-20.md as CLI drift and
+// "fixes" it -- by refusing the create, by deleting the stub, by dropping the
+// purpose block, or by weakening the publish wall the ruling rests on -- reds
+// here before it ships.
+
+// autoStubText is the exact stub the ruling preserves. It is duplicated from
+// the composer on purpose: a test that derived it from the code under test
+// could not catch a reworded stub, and the wording is what the Elixir resync
+// site (BriefMirror.stub_for/2) must stay identical to.
+const autoStubText = "Complete the work described by “Rule on the auto-stub” and record verifiable evidence."
+
+// purposeCopyText digs the purpose paragraph's text out of a composed brief.
+func purposeCopyText(t *testing.T, body map[string]any) string {
+	t.Helper()
+	brief, ok := body["brief"].(map[string]any)
+	if !ok {
+		t.Fatalf("no brief composed: %#v", body["brief"])
+	}
+	blocks, _ := brief["blocks"].([]any)
+	for _, raw := range blocks {
+		block, _ := raw.(map[string]any)
+		if block["id"] != "purpose-copy" {
+			continue
+		}
+		content, _ := block["content"].([]any)
+		if len(content) == 0 {
+			t.Fatalf("purpose-copy block carries no content: %#v", block)
+		}
+		first, _ := content[0].(map[string]any)
+		text, _ := first["value"].(string)
+		return text
+	}
+	t.Fatalf("no purpose-copy block in brief: %#v", blocks)
+	return ""
+}
+
+// REASON 1 OF THE RULING, as a test. A description-less create composes the
+// stub AND is refused by the publish wall, so the stub can only ever ride a
+// DRAFT. Reds if the stub is removed (first half) or if the wall that makes
+// keeping it safe is weakened -- wallMinDescription lowered, or the empty
+// description stops being a label_spine refusal (second half).
+func TestAutoStubRulingStubSurvivesOnlyOnDrafts(t *testing.T) {
+	// BOTH shapes that reach the stub, because the wall refuses them on
+	// DIFFERENT branches and only one of them pins the threshold. A first cut of
+	// this test used only the absent-key arm and stayed GREEN under
+	// wallMinDescription = 0 -- an absent key is refused for being absent, at any
+	// threshold. The blank arm is the one that measures the 20.
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+	}{
+		{"description key absent", map[string]any{"title": "Rule on the auto-stub"}},
+		{"description present but blank", map[string]any{"title": "Rule on the auto-stub", "description": "   "}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ensureTaskPortableBrief(tc.body)
+
+			if got := purposeCopyText(t, tc.body); got != autoStubText {
+				t.Fatalf("stub purpose = %q, want %q (ruling B keeps this wording verbatim)", got, autoStubText)
+			}
+
+			ref := checkLabelSpineLocal(tc.body)
+			if ref == nil {
+				t.Fatalf("the publish wall ACCEPTED a body carrying the auto-stub: the whole ruling rests on " +
+					"it refusing, because a stub that can reach a published row is the 122-row table all over again")
+			}
+			if ref.Field != "description" {
+				t.Fatalf("publish wall refused on %q, want a description refusal: %#v", ref.Field, ref)
+			}
+		})
+	}
+}
+
+// REASON 4 OF THE RULING, as a test. The purpose-copy block must exist even
+// with no description, because the Elixir resync path keys on it by id and
+// never appends a missing block. Reds if someone "fixes" the stub by emitting
+// no purpose section at all -- which would make the emptiness permanent.
+func TestAutoStubRulingKeepsThePurposeBlockAsTheResyncAnchor(t *testing.T) {
+	body := map[string]any{"title": "Rule on the auto-stub"}
+	ensureTaskPortableBrief(body)
+	// purposeCopyText t.Fatal's when the block is absent; the assertion is that
+	// it is reached at all, with non-empty text for the resync to overwrite.
+	if got := purposeCopyText(t, body); strings.TrimSpace(got) == "" {
+		t.Fatalf("purpose-copy block is present but empty: the resync anchor must carry text, got %q", got)
+	}
+}
+
+// THE RULING ITSELF, as a test. Criterion 1 of task-23c70e97c90809c6 requires
+// the reason and the 122-row 2026-08-20 count to be stated at the stub site so
+// a later sweep does not re-file it as drift. A comment is only a mechanism if
+// something reds when it is deleted.
+func TestAutoStubRulingIsRecordedAtTheStubSite(t *testing.T) {
+	src, err := os.ReadFile("tasks_create_cmd.go")
+	if err != nil {
+		t.Fatalf("read tasks_create_cmd.go: %v", err)
+	}
+	text := string(src)
+	for _, want := range []string{
+		"THE AUTO-STUB RULING",
+		"task-23c70e97c90809c6",
+		"ruling B: THE STUB STAYS",
+		"tooling/grip/ledger/brief-purpose-drift-2026-08-20.md",
+		"122 published",
+		"label_spine.ex",
+		"brief_mirror.ex",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the auto-stub ruling no longer states %q at the stub site; "+
+				"the ruling is the deliverable of task-23c70e97c90809c6 and deleting it "+
+				"re-opens the row", want)
+		}
+	}
+}
+
+// ── task-d0c4a5061e04fdcc: the purpose block is a LOSSY rendering ────────────
+//
+// REPRODUCE. A description carrying a backticked code span and a shell
+// substitution: the composed purpose-copy loses the backticks, while
+// body["description"] — the canonical field, stored verbatim since PR #18404 —
+// is byte-identical (sha256) before and after the composer runs. If a future
+// change "fixes" the disagreement by normalising the description to match the
+// brief, the sha arm reds: that is the wrong direction.
+func TestBriefPurposeIsALossyRenderingOfAVerbatimDescription(t *testing.T) {
+	description := "run `bp task ready` first, then $(echo x)\n__init__ is **not** kept"
+	body := map[string]any{"title": "lossy probe", "description": description}
+	before := sha256.Sum256([]byte(body["description"].(string)))
+
+	ensureTaskPortableBrief(body)
+
+	after := sha256.Sum256([]byte(body["description"].(string)))
+	if before != after {
+		t.Fatalf("ensureTaskPortableBrief rewrote body[\"description\"]: sha256 %x -> %x; the canonical field must stay byte-verbatim (PR #18404)", before, after)
+	}
+	got := purposeCopyText(t, body)
+	want := "run bp task ready first, then $(echo x)\ninit is not kept"
+	if got != want {
+		t.Fatalf("purpose-copy = %q, want the documented lossy rendering %q", got, want)
+	}
+	if strings.Contains(got, "`") {
+		t.Fatalf("purpose-copy kept a backtick: %q — the documented rendering drops them; update the statement beside briefPurposeDroppedSequences if this is intended", got)
+	}
+}
+
+// THE STATEMENT IS THE FIX, so something must red when it goes. The paragraph
+// beside briefPurposeDroppedSequences must exist, must call the rendering
+// lossy, must name `description` as canonical and verbatim, and its first
+// sentence must quote EXACTLY the sequences the code drops — so changing the
+// list without the prose (or the prose without the list) reds here.
+func TestBriefPurposeLossyRenderingIsDocumented(t *testing.T) {
+	src, err := os.ReadFile("tasks_brief_mirror_warn.go")
+	if err != nil {
+		t.Fatalf("read tasks_brief_mirror_warn.go: %v", err)
+	}
+	const marker = "// THE PURPOSE BLOCK IS A LOSSY RENDERING OF `description`, BY DESIGN."
+	text := string(src)
+	start := strings.Index(text, marker)
+	if start < 0 {
+		t.Fatalf("the lossy-rendering statement is gone from tasks_brief_mirror_warn.go (want a line %q); "+
+			"task-d0c4a5061e04fdcc chose to DOCUMENT the lossy derivation, and an undocumented lossy derivation is the defect", marker)
+	}
+	para := text[start:]
+	if end := strings.Index(para, "\n//\n"); end >= 0 {
+		para = para[:end]
+	}
+	flat := strings.Join(strings.Fields(strings.ReplaceAll(para, "//", " ")), " ")
+	for _, want := range []string{
+		"a code span loses its backticks",
+		"`description` is the canonical text and is stored byte-verbatim",
+		"display copy",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("the lossy-rendering statement no longer says %q", want)
+		}
+	}
+	first := flat
+	if i := strings.Index(flat, "nothing else."); i >= 0 {
+		first = flat[:i]
+	} else {
+		t.Fatalf("the statement no longer closes its dropped-set sentence with \"nothing else.\": %q", flat)
+	}
+	var named []string
+	for rest := first; ; {
+		i := strings.Index(rest, "every \"")
+		if i < 0 {
+			break
+		}
+		rest = rest[i+len("every \""):]
+		j := strings.Index(rest, "\"")
+		if j < 0 {
+			break
+		}
+		named = append(named, rest[:j])
+		rest = rest[j+1:]
+	}
+	if !reflect.DeepEqual(named, briefPurposeDroppedSequences) {
+		t.Fatalf("the statement names dropped sequences %q but briefPurposeDroppedSequences is %q — the prose and the code disagree", named, briefPurposeDroppedSequences)
+	}
+	for _, seq := range briefPurposeDroppedSequences {
+		if got := briefPurposeStripOnePass("a" + seq + "b"); got != "ab" {
+			t.Errorf("briefPurposeStripOnePass(%q) = %q; the documented set says %q is dropped", "a"+seq+"b", got, seq)
+		}
+	}
+	for _, kept := range []string{"*", "_", "~", "#", "[x](y)", "$(echo x)", "'", "\""} {
+		if got := briefPurposeStripOnePass("a" + kept + "b"); got != "a"+kept+"b" {
+			t.Errorf("briefPurposeStripOnePass dropped %q, which the statement says is kept (\"nothing else\"): got %q", kept, got)
+		}
+	}
+	cmd, err := os.ReadFile("tasks_create_cmd.go")
+	if err != nil {
+		t.Fatalf("read tasks_create_cmd.go: %v", err)
+	}
+	if !strings.Contains(string(cmd), "LOSSY, ON PURPOSE") {
+		t.Errorf("the composer call site (ensureTaskPortableBrief) no longer carries its LOSSY, ON PURPOSE note")
 	}
 }

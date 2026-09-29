@@ -209,9 +209,35 @@ defmodule Barkpark.PortableDoc.Render.ComponentsDetailTest do
     assert html =~ ~s(▸ charter)
   end
 
-  test "empty title or non-map yields empty string" do
-    assert Components.task_detail_html(%{"task" => %{"title" => ""}}) == ""
+  test "an unresolved task-detail renders the bp-tdetail--empty placeholder, not nothing" do
+    for block <- [
+          %{"task" => %{"title" => ""}},
+          %{"task" => %{"title" => "   "}},
+          %{"type" => "task-detail", "query" => %{"parent_id" => "nope"}},
+          %{"task" => %{}}
+        ] do
+      html = Components.task_detail_html(block)
+
+      assert html =~ ~s(class="bp-tdetail bp-tdetail--empty"),
+             "an unresolved task-detail must keep its place with a placeholder, got: #{inspect(html)}"
+
+      assert html =~ "No matching tasks."
+      refute html == ""
+      refute html =~ "bp-tdetail__title"
+    end
+  end
+
+  test "a non-map task-detail argument is not a block and still yields empty string" do
     assert Components.task_detail_html("x") == ""
+    assert Components.task_detail_html(nil) == ""
+    assert Components.task_detail_html([]) == ""
+  end
+
+  test "a resolved task-detail is untouched by the empty state" do
+    html = Components.task_detail_html(%{"task" => %{"title" => "real", "status" => "ready"}})
+    refute html =~ "bp-tdetail--empty"
+    refute html =~ "No matching tasks."
+    assert html =~ ~s(<div class="bp-tdetail"><div class="bp-tdetail__title">real</div>)
   end
 
   test "escapes hostile author strings" do
@@ -234,6 +260,235 @@ end
 defmodule Barkpark.PortableDoc.Render.ComponentsBoardRoadmapTest do
   use ExUnit.Case, async: true
   alias Barkpark.PortableDoc.Render.Components
+  alias Barkpark.PortableDoc.Render.StatusVocab
+
+  # ── the cancel lane (task-881952f8d8417f4b) ─────────────────────────────────
+  #
+  # THE RULING: a cancelled row renders in its OWN lane, LAST and de-emphasised,
+  # carrying the manifest's ✕ — never dropped, never homed in `open`.
+  #
+  # WHAT THIS SURFACE DID BEFORE: it DROPPED the row. `board_roles/0` was a
+  # hand-typed seven-role list with `cancel` subtracted, and `task_board_html/1`
+  # collects columns by iterating that list ALONE — so an abandoned row left the
+  # board with no symptom at all. A reader could not tell "this epic has no
+  # cancelled work" from "this surface does not render cancelled work", and the
+  # second reading was the true one.
+  #
+  # FAIL-BEFORE (c1): with `board_roles/0` reverted to origin/main's
+  # `~w(open ready progress blocked done considering researching)`, the first
+  # assertion below reds — `Assertion with =~ failed ... "bp-board__col--cancel"`.
+  test "task-board renders a cancelled row in its OWN cancel column, last, with the ✕ glyph" do
+    html =
+      Components.task_board_html(%{
+        "snapshot" => [
+          %{"title" => "Claim me", "status" => "ready"},
+          %{"title" => "Abandoned spike", "status" => "cancelled"},
+          %{"title" => "Shipped", "status" => "done"}
+        ]
+      })
+
+    # NEVER DROPPED: the row reaches the board, in a lane of its own.
+    assert html =~ "bp-board__col--cancel"
+    assert html =~ ~s(<span class="bp-board__label">Cancelled</span>)
+    assert html =~ "Abandoned spike"
+
+    # The manifest's ✕, through the shared glyph seam — not a hand-typed mark.
+    assert html =~ ~s(<span class="bp-g bp-g--cancel">✕</span>)
+    assert StatusVocab.glyph_for_role("cancel") == "✕"
+
+    # NEVER HOMED IN `open`: the snapshot carries no open row, so an `open`
+    # column appearing at all would BE the misfile.
+    refute html =~ "bp-board__col--open"
+
+    # LAST: the cancel column follows every live column in the emitted HTML.
+    cancel_at = :binary.match(html, "bp-board__col--cancel") |> elem(0)
+
+    for live <- ["bp-board__col--ready", "bp-board__col--done"] do
+      live_at = :binary.match(html, live) |> elem(0)
+
+      assert live_at < cancel_at,
+             "#{live} renders AFTER the cancel column — cancel must be LAST"
+    end
+  end
+
+  # c2, stated as a RULE rather than as a list: the `open` column holds ONLY rows
+  # whose own resolved role is `open`. Every manifest rung now has a column of its
+  # own, so nothing can fall back into the lane `bp task ready` serves.
+  #
+  # MUTATION: home cancelled rows in `open` (drop `cancel` from the lane order and
+  # add an `open` fallback in `task_board_html/1`) and this reds on "Abandoned
+  # spike" appearing inside the open column's card list.
+  test "task-board's open column holds only claimable rows — no terminal or thought state falls into it" do
+    statuses = [
+      "open",
+      "ready",
+      "in_progress",
+      "blocked",
+      "done",
+      "cancelled",
+      "considering",
+      "researching"
+    ]
+
+    html =
+      Components.task_board_html(%{
+        "snapshot" => Enum.map(statuses, fn s -> %{"title" => "row-" <> s, "status" => s} end)
+      })
+
+    # Slice the open column out: from its class to the start of the next column.
+    [_, after_open] =
+      String.split(html, ~s(<div class="bp-board__col bp-board__col--open">), parts: 2)
+
+    open_col = after_open |> String.split(~s(<div class="bp-board__col), parts: 2) |> hd()
+
+    # PRECONDITION: the slice really is the open column. Without this the loop
+    # below could pass on an empty string and measure nothing.
+    assert open_col =~ "row-open"
+
+    for s <- statuses -- ["open"] do
+      refute open_col =~ "row-" <> s,
+             "a #{s} row landed in the CLAIMABLE open column — `bp task ready` serves that lane"
+    end
+  end
+
+  # c3 — the DERIVATION LOCK. The lane order is computed from
+  # design/status-manifest.json roles[] (via StatusVocab.board_roles/0), so a rung
+  # added to the manifest becomes a column automatically and can never ship another
+  # silent drop. The expectation here is COMPUTED, never retyped: written as a
+  # literal it would be a second copy of the list and could not catch its own bug.
+  #
+  # MUTATION (c3): replace `defp board_roles, do: StatusVocab.board_roles()` with
+  # the retyped literal `~w(open ready progress blocked done considering
+  # researching)` and this reds — `manifest rung "cancel" has NO board column`.
+  test "every manifest rung is a board column, terminal cancel LAST — derived, not retyped" do
+    lanes = StatusVocab.board_roles()
+
+    for rung <- StatusVocab.roles() do
+      assert rung in lanes,
+             "manifest rung #{inspect(rung)} has NO board column, so its rows are silently " <>
+               "dropped; the lane order must be DERIVED from the manifest, not retyped beside it"
+    end
+
+    assert length(lanes) == length(StatusVocab.roles())
+    assert List.last(lanes) == "cancel"
+    assert lanes == Enum.reject(StatusVocab.roles(), &(&1 == "cancel")) ++ ["cancel"]
+
+    # And the emitter really uses it: every rung resolves to a column of its own.
+    html =
+      Components.task_board_html(%{
+        "snapshot" =>
+          Enum.map(lanes, fn r -> %{"title" => "row-" <> r, "status" => board_status(r)} end)
+      })
+
+    for rung <- lanes, do: assert(html =~ "bp-board__col--" <> rung)
+  end
+
+  # The manifest's statuses map, inverted to ONE stored status per role — so the
+  # test above drives the emitter through its real `role_of` seam instead of
+  # assuming a role name is also a status name (`progress` is not; `in_progress` is).
+  defp board_status(role) do
+    StatusVocab.statuses()
+    |> Enum.find_value(fn {status, r} -> if r == role, do: status end)
+  end
+
+  # ── the off-ladder fail-open (task-c29e16374107fb10) ────────────────────────
+  #
+  # THE RULING: a row whose stored status the manifest does not know still reaches
+  # the board, and it homes in `open` — the fail-open lane. Giving `cancel` its own
+  # lane (task-881952f8d8417f4b) removed the last LIFECYCLE status that could reach
+  # that default, so this behaviour became UNMEASURED on every surface at once.
+  # Go covers it (TestTaskBoardOffLadderStatusHomesInOpen); react covers it
+  # (js/packages/react/tests/taskboard-cancel-lane.test.ts). This is the Elixir arm.
+  #
+  # MEASURED ASYMMETRY — this is NOT a transcription of the react arm. React has a
+  # COLUMN-level fallback (`BOARD_ROLES.includes(role) ? role : 'open'`) plus a
+  # JS-only `unknown` glyph sentinel, so its arm asserts the row lands in `open`
+  # while painting the UNKNOWN glyph. Elixir has neither: the fail-open sits one
+  # level EARLIER, in `StatusVocab.role_for_status/1`, which answers @default_role
+  # ("open") for any unmapped status. So here the row lands in the open lane AND
+  # paints the OPEN glyph — the react arm's "not the open glyph" assertion has no
+  # Elixir counterpart and must not be copied over.
+  #
+  # PRECONDITIONS ARE DELIBERATELY NOT LANE-EXISTENCE CHECKS. "an open lane exists"
+  # is destroyed by the very mutations this test exists to catch (drop the row ->
+  # no open lane; widen the fallback -> no ready lane), so it would fire FIRST and
+  # the board-level assertion would never be reached. The two used instead — the
+  # derived status is not a manifest status, and a board rendered lanes at all —
+  # survive every mutation below.
+  #
+  # MUTATIONS RUN IN ISOLATION against api/lib/barkpark/portable_doc/render/status_vocab.ex:
+  #   M1 LOUD, row dropped — `Map.get(@statuses, status, status)` (no fail-open):
+  #      reds "the off-ladder row VANISHED from the board", both preconditions green.
+  #   M2 LOUD, wrong lane — `Map.get(@statuses, status, "cancel")`:
+  #      reds "did not home in the open lane".
+  #   M3 QUIET, fallback widened — `ready` folded into @default_role:
+  #      reds "a READY row was swept into the open fallback lane".
+  test "task-board homes an off-ladder status in the open lane, and the fallback does not widen" do
+    # DERIVED BY PREDICATE, never typed: grow a seed until the manifest's own
+    # `statuses` map disowns it. A pinned literal goes vacuous the day the ladder
+    # adopts that word, and the arm would keep passing while measuring a known rung.
+    off_ladder = off_ladder_status("offladder")
+
+    # PRECONDITION A: the subject really is off the ladder. Mutation-proof — no
+    # edit to the role fallback can put this string into the manifest.
+    refute Map.has_key?(StatusVocab.statuses(), off_ladder)
+
+    html =
+      Components.task_board_html(%{
+        "snapshot" => [
+          %{"title" => "row-offladder", "status" => off_ladder},
+          %{"title" => "row-ready", "status" => "ready"},
+          %{"title" => "row-cancelled", "status" => "cancelled"}
+        ]
+      })
+
+    # PRECONDITION B: a board rendered lanes at all. Mutation-proof — `ready` and
+    # `cancelled` are manifest rungs, so no fallback edit can empty the board.
+    assert html =~ ~s(<div class="bp-board__col),
+           "no board rendered at all — the assertions below would measure nothing"
+
+    open_col = board_col_slice(html, "open")
+
+    # LOUD 1 — never dropped. This is the BOARD-level assertion: it reads the whole
+    # emitted markup, not a lane, so it survives a missing open column and reds on
+    # the real symptom.
+    assert html =~ "row-offladder",
+           "the off-ladder row VANISHED from the board — an unknown status must fail " <>
+             "OPEN, never silently disappear"
+
+    # LOUD 2 — and it homes in `open`, the lane the fail-open default names.
+    assert open_col =~ "row-offladder",
+           "the off-ladder row did not home in the open lane — the fail-open fallback is gone"
+
+    # QUIET — the fallback did not WIDEN. A rung that resolves to its own role must
+    # never be swept into the fallback lane, and must keep a lane of its own.
+    refute open_col =~ "row-ready",
+           "a READY row was swept into the open fallback lane — the fallback widened"
+
+    refute open_col =~ "row-cancelled",
+           "a CANCELLED row was swept into the open fallback lane — `bp task ready` serves that lane"
+
+    assert board_col_slice(html, "ready") =~ "row-ready"
+    assert board_col_slice(html, "cancel") =~ "row-cancelled"
+  end
+
+  # Grow a seed status until the manifest disowns it. Recursion, not a literal:
+  # the predicate is the rule, so the arm cannot go vacuous when the ladder grows.
+  defp off_ladder_status(seed) do
+    if Map.has_key?(StatusVocab.statuses(), seed),
+      do: off_ladder_status(seed <> "-x"),
+      else: seed
+  end
+
+  # One board column's markup: from its class to the start of the NEXT column.
+  # Answers "" when the lane is absent, so a missing lane reds the assertion that
+  # names the symptom rather than raising inside the slice.
+  defp board_col_slice(html, role) do
+    case String.split(html, ~s(<div class="bp-board__col bp-board__col--#{role}">), parts: 2) do
+      [_, rest] -> rest |> String.split(~s(<div class="bp-board__col), parts: 2) |> hd()
+      _ -> ""
+    end
+  end
 
   test "task-board groups into columns by lifecycle, omits empty ones" do
     html =
@@ -330,13 +585,268 @@ defmodule Barkpark.PortableDoc.Render.ComponentsBoardRoadmapTest do
     assert html =~ "left:90%;width:10%"
   end
 
-  test "roadmap escapes titles + handles missing geometry" do
+  test "roadmap escapes titles + REFUSES to place a geometry-less row" do
+    # pp-b-offline-degrade: this row has no geometry of any kind, and the clamp
+    # default used to paint it as `left:0%;width:100%` — a full-width bar that,
+    # repeated per row, reads as a confident timeline nobody authored.
     html =
       Components.roadmap_html(%{"snapshot" => [%{"title" => "<b>x</b>", "status" => "open"}]})
 
     refute html =~ "<b>x</b>"
     assert html =~ "&lt;b&gt;x&lt;/b&gt;"
-    assert html =~ "left:0%"
+    refute html =~ "left:0%"
+    refute html =~ "bp-rm__bar"
+    assert html =~ Components.roadmap_unplaced_copy()
+  end
+end
+
+defmodule Barkpark.PortableDoc.Render.ComponentsRoadmapV2Test do
+  @moduledoc """
+  Roadmap v2 render lock. The geometry contract is Go's
+  (`internal/pdrender/taskblocks.go` — `roadmapSpan`/`roadmapLeftWidth`/
+  `roadmapTodayCell`, glyph precedence `today > milestone > note > fill`), so
+  this suite reads the SAME fixture the Go suite reads —
+  `internal/pdrender/testdata/sample_m22.json`, loaded by
+  `internal/pdrender/render_m22_test.go:19` — rather than a second copy that can
+  drift. One file, two suites.
+  """
+  use ExUnit.Case, async: true
+
+  alias Barkpark.PortableDoc.Render.Components
+
+  # The ONE shared v2 fixture. If this path ever moves, BOTH suites must move
+  # with it — which is the point.
+  @go_fixture Path.expand(
+                "../../../../../internal/pdrender/testdata/sample_m22.json",
+                __DIR__
+              )
+
+  defp v2_block do
+    assert File.exists?(@go_fixture),
+           "the shared Go v2 fixture is missing: #{@go_fixture}"
+
+    @go_fixture
+    |> File.read!()
+    |> Jason.decode!()
+    |> Map.fetch!("blocks")
+    |> Enum.find(&(&1["type"] == "roadmap"))
+  end
+
+  test "the shared Go fixture really carries the v2 shape (precondition)" do
+    block = v2_block()
+
+    assert block["start"] == "2026-01-01"
+    assert block["end"] == "2026-06-30"
+    assert block["today"] == "2026-03-20"
+
+    titles = Enum.map(block["snapshot"], & &1["title"])
+    assert "Discovery" in titles
+    assert "Kickoff" in titles
+    assert "Legacy plan" in titles
+
+    kickoff = Enum.find(block["snapshot"], &(&1["title"] == "Kickoff"))
+    assert kickoff["milestone"] == true
+
+    build = Enum.find(block["snapshot"], &(&1["title"] == "Build"))
+    assert build["note"] == true
+
+    legacy = Enum.find(block["snapshot"], &(&1["title"] == "Legacy plan"))
+    assert legacy["left"] == 5
+    assert legacy["width"] == 30
+    refute Map.has_key?(legacy, "start")
+  end
+
+  # c1 feature 1 — date rails.
+  test "a v2 row with ISO start/end DERIVES its geometry off the block span" do
+    html = Components.roadmap_html(v2_block())
+
+    # Discovery = 2026-01-01..2026-02-15 inside 2026-01-01..2026-06-30 (180 days).
+    # left = 0/180 = 0%; width = 45/180 = 25%.
+    assert html =~ ~s(<span class="bp-rm__bar bp-rm__bar--done" style="left:0.0%;width:25.0%">)
+
+    # Launch = 2026-05-01..2026-06-30 → left = 120/180, width = 180/180 - left.
+    launch_left = 120 / 180 * 100
+    launch_width = 100 - launch_left
+
+    assert html =~
+             ~s(style="left:#{launch_left}%;width:#{launch_width}%")
+
+    # The proof this is DERIVED and not the old fallback. MEASURED: running
+    # origin/main@a333e4b5's `roadmap_html/1` on this exact fixture emitted
+    # `style="left:0%;width:100%"` for EVERY dated lane (a dateless row reads
+    # left=0 and `clampf_width(nil, 0)` = 100 — a full-width bar).
+    refute html =~ ~s(style="left:0%;width:100%")
+  end
+
+  # c1 feature 1b — a dateless row inside a spanned block keeps its literal pct.
+  test "a row WITHOUT dates falls back to its literal pct even under a span" do
+    html = Components.roadmap_html(v2_block())
+
+    # "Legacy plan" carries left:5 width:30 and no dates — unchanged by the span.
+    assert html =~ ~s(style="left:5%;width:30%")
+  end
+
+  # c1 feature 2 — ISO today.
+  test "an ISO `today` derives its pct off the span; a number stays a pct" do
+    html = Components.roadmap_html(v2_block())
+
+    # 2026-03-20 is day 78 of the 180-day span.
+    iso_pct = 78 / 180 * 100
+    assert html =~ ~s(<span class="bp-rm__today" style="left:#{iso_pct}%"></span>)
+
+    # A numeric today is the v1 path and is untouched.
+    numeric =
+      Components.roadmap_html(%{
+        "today" => 34,
+        "snapshot" => [%{"title" => "a", "status" => "open", "left" => 0, "width" => 10}]
+      })
+
+    assert numeric =~ ~s(<span class="bp-rm__today" style="left:34%"></span>)
+
+    # An ISO today with NO block span draws nothing (Go returns cell -1).
+    spanless =
+      Components.roadmap_html(%{
+        "today" => "2026-03-20",
+        "snapshot" => [%{"title" => "a", "status" => "open", "left" => 0, "width" => 10}]
+      })
+
+    refute spanless =~ "bp-rm__today"
+  end
+
+  # c1 feature 3 — milestone marker at the bar's END edge.
+  test "milestone:true draws a marker at the bar's end edge" do
+    html = Components.roadmap_html(v2_block())
+
+    # Kickoff = 2026-01-08..2026-01-08 → left = width-floor start, a zero-length
+    # bar clamped to the 1% floor, so its marker sits at left + width.
+    assert html =~ ~s(<span class="bp-rm__ms" style=")
+
+    only =
+      Components.roadmap_html(%{
+        "snapshot" => [
+          %{"title" => "m", "status" => "done", "left" => 20, "width" => 30, "milestone" => true}
+        ]
+      })
+
+    assert only =~ ~s(<span class="bp-rm__ms" style="left:50%"></span>)
+  end
+
+  # c1 feature 4 — note marker at the bar's START edge.
+  test "note:true draws a marker at the bar's start edge" do
+    only =
+      Components.roadmap_html(%{
+        "snapshot" => [
+          %{"title" => "n", "status" => "ready", "left" => 20, "width" => 30, "note" => true}
+        ]
+      })
+
+    assert only =~ ~s(<span class="bp-rm__note" style="left:20%"></span>)
+  end
+
+  # c1 feature 5 — precedence, realized as PAINT order inside the track.
+  test "markers emit in Go's precedence order: bar, note, milestone, today" do
+    html =
+      Components.roadmap_html(%{
+        "today" => 50,
+        "snapshot" => [
+          %{
+            "title" => "all",
+            "status" => "done",
+            "left" => 20,
+            "width" => 30,
+            "note" => true,
+            "milestone" => true
+          }
+        ]
+      })
+
+    bar = :binary.match(html, ~s(class="bp-rm__bar)) |> elem(0)
+    note = :binary.match(html, ~s(class="bp-rm__note)) |> elem(0)
+    ms = :binary.match(html, ~s(class="bp-rm__ms)) |> elem(0)
+    today = :binary.match(html, ~s(class="bp-rm__today)) |> elem(0)
+
+    assert bar < note,
+           "fill must emit before note — Go: clsNote > clsFill"
+
+    assert note < ms,
+           "note must emit before milestone — Go: clsMilestone > clsNote"
+
+    assert ms < today,
+           "milestone must emit before today — Go: clsToday > clsMilestone"
+  end
+
+  # c2 — precomputed-geometry rows stay BYTE-IDENTICAL.
+  #
+  # Both strings below were captured by RUNNING `Components.roadmap_html/1` on
+  # origin/main@a333e4b588f1716e9e200cf9967f27f5d3224898, BEFORE the v2 change,
+  # and pasted here verbatim. They are not a re-derivation of the new code.
+  test "a v1 precomputed-geometry block renders byte-identical to pre-v2" do
+    input =
+      "test/support/fixtures/roadmap.golden.json"
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.fetch!("input")
+
+    assert Components.roadmap_html(input) ==
+             ~s(<div class="bp-roadmap"><div class="bp-rm__scale"><span>Q1</span><span>Q2</span><span>Q3</span></div><div class="bp-rm__lanes"><div class="bp-rm__lane bp-rm__lane--phase"><span class="bp-rm__lbl">Foundation</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--done" style="left:0%;width:40%"></span></div></div><div class="bp-rm__lane"><span class="bp-rm__lbl">Ship the board</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--progress" style="left:40%;width:35%"></span></div></div></div></div>)
+  end
+
+  test "a v1 numeric-today + width-clamp block renders byte-identical to pre-v2" do
+    html =
+      Components.roadmap_html(%{
+        "today" => 34,
+        "scale" => ["Jul 01", "Jul 08"],
+        "snapshot" => [
+          %{
+            "title" => "phase",
+            "status" => "in_progress",
+            "phase_row" => true,
+            "left" => 0,
+            "width" => 40
+          },
+          %{"title" => "over", "status" => "blocked", "left" => 90, "width" => 999}
+        ]
+      })
+
+    assert html ==
+             ~s(<div class="bp-roadmap"><div class="bp-rm__scale"><span>Jul 01</span><span>Jul 08</span></div><div class="bp-rm__lanes"><div class="bp-rm__lane bp-rm__lane--phase"><span class="bp-rm__lbl">phase</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--progress" style="left:0%;width:40%"></span><span class="bp-rm__today" style="left:34%"></span></div></div><div class="bp-rm__lane"><span class="bp-rm__lbl">over</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--blocked" style="left:90%;width:10%"></span><span class="bp-rm__today" style="left:34%"></span></div></div></div></div>)
+  end
+
+  # A malformed span must not activate the v2 path at all.
+  #
+  # RESTATED for pp-b-offline-degrade. The claim under test is unchanged — a bad
+  # span never derives geometry from the row dates — but "falls back to the pct
+  # path" is now proven by a row that HAS a pct, and the dates-only row proves
+  # the other half: with the v2 path shut off it has no geometry left, so it
+  # renders the explicit unplaced lane instead of the clamp's full-width bar.
+  test "a malformed or inverted block span leaves every lane on the pct path" do
+    for {s, e} <- [{"2026-06-30", "2026-01-01"}, {"not-a-date", "2026-06-30"}, {"2026-01-01", ""}] do
+      html =
+        Components.roadmap_html(%{
+          "start" => s,
+          "end" => e,
+          "snapshot" => [
+            %{
+              "title" => "pct",
+              "status" => "open",
+              "left" => 20,
+              "width" => 30,
+              "start" => "2026-02-01",
+              "end" => "2026-03-01"
+            },
+            %{"title" => "x", "status" => "open", "start" => "2026-02-01", "end" => "2026-03-01"}
+          ]
+        })
+
+      assert html =~ ~s(style="left:20%;width:30%"),
+             "span #{inspect({s, e})} must NOT derive geometry — the literal pct wins"
+
+      assert html =~ "bp-rm__lane--unplaced",
+             "span #{inspect({s, e})}: the dates-only row has no geometry left to use"
+
+      refute html =~ ~s(style="left:0%;width:100%"),
+             "span #{inspect({s, e})}: a geometry-less row must not clamp to a full-width bar"
+    end
   end
 end
 

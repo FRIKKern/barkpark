@@ -58,6 +58,16 @@ const card = await bp.doc('post', 'p1', { fields: ['title', 'slug'] }) // projec
 const many = await bp.getDocuments('post', ['p1', 'p2', 'p3'])
 const drafts = await bp.getDocuments('post', ['p1', 'p2'], { perspective: 'drafts' }) // per-call override
 
+// Opt-in server-side block resolution — fill query-shaped PortableDoc task blocks:
+const paper = await bp.doc('paper', 'plan', { resolve: 'tasks' }) // sends ?resolve=tasks
+const papers = await bp.docs('paper', { resolve: 'tasks' })
+// Without it, every query-shaped task block arrives with its `query` and no `snapshot`, so a
+// renderer that reads `snapshot` (@barkpark/react's task-board among them) draws nothing. With
+// it, the API runs the same resolver Studio runs and swaps each query block for a live,
+// perspective-threaded `snapshot` of the matching rows. Omit it and the request is unchanged.
+// (This detail used to live in docs/cards/js-sdk.md; it moved here when that card went over
+// its byte budget — the card now points at this file.)
+
 // Inbound references — documents that reference a given doc (reverse of `expand`):
 const { backlinks, count } = await bp.getBacklinks('p1')
 

@@ -63,11 +63,17 @@ defmodule BarkparkWeb.Studio.NilIconNeverCrashesTest do
 
   setup %{conn: conn} do
     {:ok, _} =
-      Auth.create_token(@admin_token, "nil icon guard admin", @dataset, [
-        "read",
-        "write",
-        "admin"
-      ])
+      Auth.create_token(
+        @admin_token,
+        "nil icon guard admin",
+        @dataset,
+        [
+          "read",
+          "write",
+          "admin"
+        ],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
   end

@@ -73,7 +73,7 @@ either mode).
 # report["round_done"]/["round_done_failures"] set before the json dump
 bash c2.sh --json --assert-round-done --anchor-from-paper pds-wave-27-2026-07-31 > b.out 2>b.err
 jq -e -r '.round_done' b.out     # false ; jq_rc=0
-bash scripts/pds-ledger-census_test.sh   # SELFTEST PASS: 80 checks
+bash scripts/pds-ledger-census_test.sh   # SELFTEST PASS: 80 checks (2026-07-31 reading; re-derive N, never quote it)
 ```
 
 ## 5. THE ONE CONSTRAINT THE BUILDER MUST RESPECT

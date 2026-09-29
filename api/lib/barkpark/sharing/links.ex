@@ -76,7 +76,7 @@ defmodule Barkpark.Sharing.Links do
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
-  # Cap the TTL at one year — mirrors Barkpark.Auth @share_token_max_ttl / the
+  # Cap the TTL at one year — mirrors the 1-year cap Barkpark.Auth once clamped share-edit ttls to / the
   # share_controller "cap 1y" contract. A JSON-decoded bignum ttl would otherwise
   # drive DateTime.add into a runaway bignum date computation (request hang) or
   # mint an effectively never-expiring link, defeating expiry/revocation.
@@ -370,7 +370,8 @@ defmodule Barkpark.Sharing.Links do
   @spec revoke(binary()) :: {:ok, ShareLink.t()} | {:error, :not_found}
   def revoke(id) when is_binary(id) do
     # Guard the :binary_id cast — a non-UUID id (from `DELETE /v1/shares/links/
-    # garbage`) would raise Ecto.CastError → 500; treat it as not_found instead.
+    # garbage`) would raise Ecto.Query.CastError → an opaque 400 (NOT
+    # Ecto.CastError); treat it as not_found instead.
     case Repo.uuid_or_nil(id) do
       nil ->
         {:error, :not_found}

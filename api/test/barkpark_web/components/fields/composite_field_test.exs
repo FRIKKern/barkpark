@@ -116,6 +116,37 @@ defmodule BarkparkWeb.Components.Fields.CompositeFieldTest do
       assert html =~ ~s(data-error-for="given")
     end
 
+    # Gyldendal parity E1.11 — a `check_tree/3` subtree: the subfield's own
+    # findings render under it, a nested composite's under ITS subfield, and
+    # warnings ride the same shape with their own marker.
+    test "nested error and warning subtrees render under the subfield they name" do
+      field = %Field{
+        name: "seo",
+        type: "composite",
+        fields: [
+          %Field{name: "description", type: "text"},
+          %Field{
+            name: "image",
+            type: "composite",
+            fields: [%Field{name: "alt", type: "string"}]
+          }
+        ]
+      }
+
+      html =
+        render_component(&CompositeField.composite_field/1, %{
+          field: field,
+          value: %{"description" => "x", "image" => %{}},
+          errors: %{"image" => %{"alt" => ["Required"], __self__: ["expected an object"]}},
+          warnings: %{"description" => ["Beskrivelsen bør være under 300 tegn."]}
+        })
+
+      assert html =~ ~s(data-warning-for="description">Beskrivelsen bør være under 300 tegn.<)
+      assert html =~ ~s(data-error-for="image">expected an object<)
+      assert html =~ ~s(data-error-for="alt">Required<)
+      refute html =~ "__self__"
+    end
+
     test "title falls back to humanized name when title is absent" do
       field = %Field{
         name: "shipping_address",

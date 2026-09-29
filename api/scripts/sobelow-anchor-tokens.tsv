@@ -1,0 +1,52 @@
+# GENERATED — the detector→anchor-token map, derived from the Sobelow detector
+# modules in api/deps/sobelow (0.14.1). DO NOT HAND-EDIT.
+#
+# ONE FILE, TWO READERS. sobelow-baseline-staleness-check.sh uses it to ask "does
+# file:line still hold a call of this entry's own type?"; sobelow-inline-overlap-
+# check.sh --binding uses it to ask "can the def this annotation binds to even be
+# flagged by the type it waives?" — the clean-transfer question. A second
+# transcription would fork in the UNSAFE direction: the two copies disagreeing
+# means one ratchet is reasoning about a detector the other does not have.
+#
+# Regenerate (a REVIEWED act, then READ THE DIFF):
+#   api/scripts/sobelow-baseline-staleness-check.sh --regen-tokens api/deps/sobelow
+# Verify without regenerating (runs in the advisory Sobelow job, where deps exist):
+#   api/scripts/sobelow-baseline-staleness-check.sh --verify-tokens api/deps/sobelow
+#
+# FORMAT: one line per detector, `TYPE<TAB>token<TAB>token…`. Lines beginning
+# with `#` and blank lines are stripped by both readers. A type with NO tokens is
+# a whole-file/router finding with no per-line anchor: SKIPPED by the staleness
+# check, and never used to decide a binding. A type absent from this file
+# entirely is an ERROR in the staleness check — an unknown detector is never
+# silently waved through.
+CI.OS	cmd
+CI.System	cmd	shell
+Config.CSP
+Config.CSRF
+Config.CSRFRoute
+Config.CSWH
+Config.HSTS
+Config.HTTPS
+Config.Headers
+Config.Secrets
+DOS.BinToAtom	binary_to_atom
+DOS.ListToAtom	to_atom
+DOS.StringToAtom	to_atom
+Misc.BinToTerm	binary_to_term
+RCE.CodeModule	eval_file	eval_quoted	eval_string
+RCE.EEx	eval_file	eval_string
+SQL.Query	query	query!
+SQL.Stream	stream
+Traversal.FileModule	chmod	chmod!	chown	chown!	copy	copy!	cp	cp!	cp_r	cp_r!	ln	ln!	ln_s	ln_s!	mkdir	mkdir!	mkdir_p	mkdir_p!	open	open!	read	read!	rm	rm!	rm_rf	stream	stream!	write	write!
+Traversal.SendDownload	send_download
+Traversal.SendFile	send_file
+Vuln.Coherence
+Vuln.Ecto
+Vuln.HeaderInject
+Vuln.Plug
+Vuln.PlugNull
+Vuln.Redirect
+XSS.ContentType	put_resp_content_type
+XSS.HTML	html
+XSS.Raw	raw
+XSS.SendResp	send_resp

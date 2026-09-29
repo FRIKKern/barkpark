@@ -84,3 +84,61 @@ case is proven to stop firing.
 ```bash
 node --test tooling/concept-map/ci-boundary.test.mjs   # 36 tests, the arms included
 ```
+
+## A LOCAL RUN GATES NOTHING IN A COLD TREE — read this before wording a criterion
+
+`ci-boundary.mjs` will not produce a verdict in a tree that was never warmed, and
+that refusal is correct: a cold run compares HEURISTIC edges against an
+EXACT-edge baseline and silently misstates the debt. In a fresh
+`git worktree add --detach <dir> origin/main` it refuses **twice**, in this
+order. Both lines are reproduced verbatim (each is one unwrapped line, so a
+`grep -F` against this file matches what the script actually prints):
+
+```
+ci-boundary: REFUSING to gate an unwarmed tree — no blast-radius index at tooling/blast-radius/index.json (this tree was never warmed); build it first: node tooling/blast-radius/build-index.mjs (a cold run compares HEURISTIC edges against an EXACT-edge baseline and silently misstates the debt; pass --allow-cold-index to override)
+```
+
+Then, after `node tooling/blast-radius/build-index.mjs` — which exits **0**, having
+built the js and go graphs and skipped Elixir (`[elixir] compile failed — falling
+back to regex scan`, `elixir: (none — best-effort skipped)`):
+
+```
+ci-boundary: REFUSING to gate an unwarmed tree — tooling/blast-radius/index.json carries no elixir.forward graph (mix compile or mix xref did not run); build it first: node tooling/blast-radius/build-index.mjs (a cold run compares HEURISTIC edges against an EXACT-edge baseline and silently misstates the debt; pass --allow-cold-index to override)
+```
+
+**The cost the second refusal implies is the whole trap.** Warming
+`elixir.forward` is not `build-index.mjs` again — that command already ran and
+already succeeded. It needs a full Elixir toolchain in *that* worktree:
+`mix deps.get` plus a `mix compile` / `mix xref` pass, a private
+`MIX_TEST_PARTITION`, and minutes of wall clock, to answer a one-line reviewer
+question. So a criterion worded "run `ci-boundary.mjs` on main" is in practice
+discharged by opening the GitHub UI and reading the job's colour — a different
+measurement, by hand, with no command anyone can paste.
+
+`--allow-cold-index` is **not** the cheap path. It is documented to produce a
+HEURISTIC verdict that may DISAGREE with CI's. Never cite it in a criterion.
+
+### The supported cheap path: `--from-ci <sha>`
+
+```bash
+node tooling/concept-map/ci-boundary.mjs --from-ci $(git rev-parse origin/main)
+node tooling/concept-map/ci-boundary.mjs --from-ci <sha> --repo FRIKKern/barkpark --json
+```
+
+It reads the **Boundary gate** check-run CI already published for that sha (via
+`gh api`), prints a verdict line plus the job URL, and compiles nothing — no
+`mix`, no symbol graph, no blast-radius index, no local artefact at all.
+
+| exit | line | when |
+|---|---|---|
+| 0 | `ci-boundary: CI VERDICT PASS — …` | the check-run concluded `success` |
+| 1 | `ci-boundary: CI VERDICT RED — …` | it completed with a non-success conclusion |
+| 2 | `ci-boundary: CANNOT READ CI VERDICT — …` | absent, `queued`, `in_progress`, a `null`/`neutral`/`skipped` conclusion, a malformed payload, or a failed API read |
+
+**A verdict it could not obtain is never byte-identical to a pass.** That is the
+contract the mode exists for, and `ci-boundary.test.mjs` drives all four
+CANNOT-READ shapes plus a mutation that proves the distinction is load-bearing.
+
+Word criteria in this family against `--from-ci <sha>`, or against the CI job
+itself — not against a bare local run, which no reviewer can afford. The same
+text is available as `node tooling/concept-map/ci-boundary.mjs --help`.

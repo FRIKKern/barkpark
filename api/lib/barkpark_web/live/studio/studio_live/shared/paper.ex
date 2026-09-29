@@ -20,14 +20,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   alias Barkpark.Access
   alias Barkpark.Content
-  alias Barkpark.Content.Labels
   alias Barkpark.Content.Papers.CanvasRunContext
+  alias Barkpark.Content.Papers.PreGateRegister
   alias Barkpark.PortableDoc.Render.SectionLayout
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, TaskResolver}
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
+  alias BarkparkWeb.Studio.StudioLive.PaperMastersSeam
+  alias BarkparkWeb.Studio.StudioLive.PaperTaskSeam
   alias BarkparkWeb.Studio.StudioLive.Shared
   alias BarkparkWeb.PaperCanvasLease
 
@@ -201,61 +203,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   hook-invisible door — must ask it too, and must ask THIS copy. Do not
   re-derive it; a fork here is a fork in the authorization answer.
 
-  Inert (`false`, no query) unless `grant_graded?/1`; fail-closed on an
+  Inert (`false`, no query) unless the socket is grant-graded; fail-closed on an
   unresolvable target for a socket that IS grant-graded.
+
+  THE LADDER ITSELF LIVES IN `Caps.grant_target_denied?/4` — one owner, shared
+  with the SheetGrid route (`Shared.sheet_grant_target_denied?/1`), which used
+  to restate it. What stays HERE is the PAPER surface's one deliberate
+  difference: the grant list is RELOADED FRESH per op, because this runs in
+  `handle_info` where a revocation must stop admitting immediately. The owner
+  takes that list as an argument and never chooses a load strategy.
   """
   def grant_target_denied?(socket, type, doc_id) do
-    grant_graded?(socket.assigns) and not grant_admits_target?(socket, type, doc_id)
+    Caps.grant_target_denied?(socket.assigns, active_grants(socket), type, doc_id)
   end
 
   # The doc's `type` / `doc_id`, read TOTALLY: a pane doc is a `%Content.Document{}`
   # in the live path but a bare map in the unit fixtures, so `doc.type` would
   # raise a KeyError on a shape that has always been legal here. A missing key
-  # yields nil, which `write_target_scope/3` treats as an unresolvable target
-  # (fail-closed for a grant-graded socket, inert for every other one).
+  # yields nil, which `Caps.grant_target_denied?/4` treats as an unresolvable
+  # target (fail-closed for a grant-graded socket, inert for every other one).
   defp doc_field(doc, key) when is_map(doc), do: Map.get(doc, key)
   defp doc_field(_doc, _key), do: nil
-
-  # The two assigns that mean "this socket's write descends from a GRANT":
-  # `LiveScope.assign_grant_scope/2` sets `caller_context`, and
-  # `attach_write_gate/2` sets `write_gate?`.
-  defp grant_graded?(assigns) do
-    not is_nil(Map.get(assigns, :caller_context)) or Map.get(assigns, :write_gate?) == true
-  end
-
-  defp grant_admits_target?(socket, type, doc_id) do
-    case write_target_scope(socket, type, doc_id) do
-      %{} = target ->
-        socket
-        |> active_grants()
-        |> Enum.any?(&(Access.validate(&1, :write, target) == :ok))
-
-      nil ->
-        false
-    end
-  end
-
-  # The desk levels come from the MOUNT and the leaf levels from the DOC being
-  # written — the same broad→narrow ladder `LiveScope.write_target/3` feeds
-  # `Access.validate/3`, including its `Content.published_id/1` normalisation so
-  # a draft id is matched against the grant by its published identity.
-  defp write_target_scope(socket, type, doc_id) do
-    ws = socket.assigns[:current_workspace]
-    proj = socket.assigns[:current_project]
-    dataset = socket.assigns[:dataset]
-
-    if is_map(ws) and is_binary(Map.get(ws, :id)) and is_map(proj) and
-         is_binary(Map.get(proj, :id)) and is_binary(dataset) and is_binary(type) and
-         is_binary(doc_id) do
-      %{
-        workspace_id: ws.id,
-        project_id: proj.id,
-        dataset: dataset,
-        type: type,
-        doc_id: Content.published_id(doc_id)
-      }
-    end
-  end
 
   # Grants bind to a grantee USER; only a `current_user` can hold any. Fresh,
   # active-filtered load — the same call `Caps.derive/1` makes for expiry truth.
@@ -530,7 +498,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             {:error, form_validation_failed(socket, request_id)}
 
           {:error, :precondition_failed} ->
-            socket = socket |> sync_paper_edit_doc() |> push_canvas_echo(request_id)
+            socket =
+              socket
+              |> sync_paper_edit_doc()
+              |> push_canvas_echo(request_id)
+              |> push_task_previews()
+              |> push_block_renders()
 
             {:error,
              socket
@@ -589,6 +562,248 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       )
     end
   end
+
+  # ── Paper masters, editor half (task-3b6e562e916c8ce4) ─────────────────────
+  #
+  # Save-as-master and insert-master ride the paper socket, not an HTTP route.
+  # Both answer the SAME principal ladder `paper_ops/6` walks before it writes
+  # (`master_write_refusal/1`); the insert then goes THROUGH `paper_ops/5`
+  # itself, so the op meets every guard, the request-identified replay store,
+  # the echo and the canvas lease exactly like a canvas batch. The master is
+  # resolved inside the open paper's own workspace, project and dataset —
+  # never wider.
+  #
+  # Masters are a Bulldocs capability, reached ONLY through
+  # `PaperMastersSeam.impl/1` (plugin registry + enablement). With the plugin
+  # off, `impl` is nil: no picker, no Save action, and both events answer
+  # `rejected: "masters_unavailable"`.
+
+  @doc """
+  The implementation module for the open paper, or nil when masters are
+  unavailable (plugin off / disabled for the workspace).
+  """
+  def paper_masters_impl(paper) do
+    if match?(%Content.Document{}, paper), do: PaperMastersSeam.impl(paper.workspace_id)
+  end
+
+  @doc """
+  The masters the open paper's picker lists, or `nil` when this socket may not
+  write the paper or masters are unavailable (no Save action, no picker).
+  Masters in the paper's own scope only (`list_for_paper/1`).
+  """
+  def paper_masters(socket, paper) do
+    with true <- match?(%Content.Document{}, paper) and canvas_resume_authorized?(socket, paper),
+         impl when not is_nil(impl) <- paper_masters_impl(paper) do
+      paper
+      |> impl.list_for_paper()
+      |> Enum.map(fn master ->
+        %{
+          "id" => impl.master_id(master),
+          "title" => master.title || get_in(master.content || %{}, ["block_type"]),
+          "tier" => get_in(master.content || %{}, ["tier"]),
+          "block_type" => get_in(master.content || %{}, ["block_type"])
+        }
+      end)
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Save block `block_id` of the open paper as a master. Returns
+  `{:ok, socket, %{id: id, title: title}}` or `{:error, socket, reason}`.
+  """
+  def paper_save_master(socket, block_id, title) when is_binary(block_id) do
+    paper = socket.assigns[:paper_doc]
+
+    with :ok <- master_write_refusal(socket),
+         impl when not is_nil(impl) <- paper_masters_impl(paper) do
+      opts =
+        ScopeHelpers.scope_opts(socket) ++
+          if(is_binary(title) and String.trim(title) != "", do: [title: title], else: [])
+
+      case impl.save_master(paper.doc_id, block_id, socket.assigns.dataset, opts) do
+        {:ok, master} ->
+          socket =
+            socket
+            |> assign(paper_masters: paper_masters(socket, paper))
+            |> put_flash(:info, "Saved as master: #{master.title}")
+
+          {:ok, socket, %{id: impl.master_id(master), title: master.title}}
+
+        {:error, reason} ->
+          {:error, put_flash(socket, :error, master_refusal_flash(reason)), reason}
+      end
+    else
+      {:refused, socket} -> {:error, socket, :write_denied}
+      nil -> {:error, socket, :masters_unavailable}
+    end
+  end
+
+  @doc """
+  Insert a DETACHED copy of master `master_id` after block `after_id` (or at
+  the end when `after_id` is nil) through `paper_ops/5`. Same return shape as
+  `paper_ops/5`; a master outside the paper's scope (or missing) is
+  `{:error, socket}` with `last_paper_save_result.rejected = "master_not_found"`,
+  and masters being unavailable is `rejected = "masters_unavailable"`.
+  """
+  def paper_insert_master(
+        socket,
+        master_id,
+        after_id,
+        request_id,
+        supplied_rev,
+        mode \\ :detached
+      )
+      when is_binary(master_id) do
+    paper = socket.assigns[:paper_doc]
+
+    with :ok <- master_write_refusal(socket),
+         impl when not is_nil(impl) <- paper_masters_impl(paper),
+         {:ok, op} <- master_insert_op(impl, mode, paper, master_id, after_id, request_id) do
+      paper_ops(socket, [op], request_id, supplied_rev)
+    else
+      {:refused, socket} ->
+        {:error, socket}
+
+      nil ->
+        {:error, master_insert_refused(socket, request_id, :masters_unavailable)}
+
+      {:error, :master_not_found} ->
+        {:error, master_insert_refused(socket, request_id, :master_not_found)}
+    end
+  end
+
+  # Detached (a copy, the #20110 default) or LINKED (a `master-ref` block that
+  # follows the master, task-59f078a2fd248698). Same scope rule either way.
+  defp master_insert_op(impl, :linked, paper, master_id, after_id, request_id),
+    do: impl.linked_insert_op(paper, master_id, after_id, request_id)
+
+  defp master_insert_op(impl, _detached, paper, master_id, after_id, request_id),
+    do: impl.insert_op(paper, master_id, after_id, request_id)
+
+  @doc """
+  DETACH linked instance `block_id` (task-59f078a2fd248698): replace the
+  `master-ref` block with a detached copy of the PUBLISHED content the public
+  reader shows for it (0010 §5b, task-01c812041613a8d3), through
+  `paper_ops/5` — the same guard ladder, request-identified replay and echo as
+  every paper op. Same return shape as `paper_insert_master/6`; a block that is
+  not a linked instance, or whose master is unavailable or has nothing
+  published to copy, is refused with `last_paper_save_result.rejected` set to
+  the reason.
+  """
+  def paper_detach_master(socket, block_id, request_id, supplied_rev)
+      when is_binary(block_id) do
+    linked_op(socket, :detach, request_id, supplied_rev, fn impl, paper ->
+      impl.detach_op(paper, block_id, request_id)
+    end)
+  end
+
+  @doc """
+  PIN (`pin? = true`) linked instance `block_id` to the master's latest
+  PUBLISHED revision (a master with none is refused, `master_unpublished`),
+  or UNPIN it back to following latest — one `patch-block` op
+  through `paper_ops/5`. Same return shape as `paper_detach_master/4`.
+  """
+  def paper_pin_master(socket, block_id, pin?, request_id, supplied_rev)
+      when is_binary(block_id) and is_boolean(pin?) do
+    linked_op(socket, :pin, request_id, supplied_rev, fn impl, paper ->
+      impl.pin_op(paper, block_id, pin?)
+    end)
+  end
+
+  defp linked_op(socket, action, request_id, supplied_rev, build) do
+    paper = socket.assigns[:paper_doc]
+
+    with :ok <- master_write_refusal(socket),
+         impl when not is_nil(impl) <- paper_masters_impl(paper),
+         {:ok, op} <- build.(impl, paper) do
+      paper_ops(socket, [op], request_id, supplied_rev)
+    else
+      {:refused, socket} ->
+        {:error, socket}
+
+      nil ->
+        {:error, master_insert_refused(socket, request_id, :masters_unavailable)}
+
+      {:error, reason}
+      when reason in [:master_not_found, :master_unpublished, :not_linked, :block_not_found] ->
+        {:error, master_insert_refused(socket, request_id, reason, linked_flash(action, reason))}
+    end
+  end
+
+  # The one refusal whose remedy differs by action: Pin and Detach both take
+  # the published version, but the author is doing something different.
+  defp linked_flash(:detach, :master_unpublished),
+    do:
+      "Publish the master before detaching: a detached copy takes the published version readers see, and there is none."
+
+  defp linked_flash(_action, _reason), do: nil
+
+  defp master_insert_refused(socket, request_id, reason, flash \\ nil) do
+    socket
+    |> put_flash(:error, flash || master_refusal_flash(reason))
+    |> assign(save_status: "Save failed", last_paper_save_ok?: false)
+    |> assign(
+      last_paper_save_result: %{
+        saved: false,
+        request_id: request_id,
+        rejected: Atom.to_string(reason)
+      }
+    )
+  end
+
+  # The principal ladder `paper_ops/6` applies before any write, for the two
+  # master seams (a save writes a new document, not a paper op, so it cannot
+  # borrow `paper_ops/6` itself). Same predicates, same refusals.
+  defp master_write_refusal(socket) do
+    {socket, revoked_token?} = refresh_replay_token(socket)
+    paper = socket.assigns[:paper_doc]
+
+    invalid_credential? =
+      socket.assigns[:api_token_credential_present?] == true and
+        is_nil(socket.assigns[:api_token]) and is_nil(socket.assigns[:current_user])
+
+    cond do
+      invalid_credential? ->
+        {:refused, refuse_write_denied(socket)}
+
+      revoked_token? and is_nil(socket.assigns[:current_user]) ->
+        {:refused, refuse_write_denied(socket)}
+
+      write_denied?(socket) ->
+        {:refused, refuse_write_denied(socket)}
+
+      doc_field(paper, :type) != Content.paper_type() ->
+        {:refused, refuse_read_only_pane(socket)}
+
+      grant_target_denied?(socket, doc_field(paper, :type), doc_field(paper, :doc_id)) ->
+        {:refused, refuse_outside_grant(socket)}
+
+      read_only_pane?(socket) ->
+        {:refused, refuse_read_only_pane(socket)}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp master_refusal_flash(:master_not_found), do: "That master is not available in this paper."
+  defp master_refusal_flash(:masters_unavailable), do: "Masters are not available here."
+
+  defp master_refusal_flash(:master_unpublished),
+    do:
+      "Publish the master before pinning: a pin freezes the master's published version, and this master has none."
+
+  defp master_refusal_flash(:block_not_found), do: "That block no longer exists."
+  defp master_refusal_flash(:not_linked), do: "That block is not a linked master instance."
+  defp master_refusal_flash(:not_masterable), do: "This block can't be saved as a master."
+  defp master_refusal_flash(:locked_block), do: "Template blocks can't be saved as a master."
+
+  defp master_refusal_flash(:bound_field),
+    do: "A block bound to a field can't be saved as a master."
+
+  defp master_refusal_flash(_), do: "Saving the master failed."
 
   @doc false
   def paper_history_step(socket, params) do
@@ -1149,6 +1364,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # paper_canvas.ex:@canvas_figure_types.
   @figure_render_types ~w(figure)
 
+  # scaffy-backlog-blocks-editable-studio — the TECHNICAL pair (`diff`, `filetree`).
+  # Both are EDITABLE canvas attr-atoms (paper_canvas.ex @canvas_attr_atom_types →
+  # bpDiff / bpFiletree, technical-node.js), NOT read-only fleet mirrors, so they are
+  # deliberately kept OUT of @fleet_render_types (which rides the 4-way lockstep with
+  # paper_editor.ex's classic boundary widget). But their PREVIEW still needs the ONE
+  # reader producer: unlike `diagram` (client-side Mermaid) there is no client runtime
+  # for a diff/filetree render, and D8 / canvas_reader_parity_gate_test.exs §3 forbid a
+  # hand-written JS producer. So they paint through the SAME `bp:block-html` channel,
+  # keyed by the block id, into the node-view's `[data-bp-fleet-body]` hole — the
+  # figure/task-list precedent (an editable island + a server-painted child).
+  #
+  # Keep aligned with paper_canvas.ex @canvas_attr_atom_types and
+  # run-convert.js TECHNICAL_ATOM_SHAPES.
+  @technical_render_types ~w(diff filetree)
+
   # pd-ee-dataviz-editors (charter D3) — the 5 DATA-VIZ kinds (Render.DataViz:
   # stat / stats / stat-grid / heatmap / chart; `stat-grid` is the accepted alias
   # of `stats`). They paint through the SAME `bp:block-html` channel + bpFleet atom
@@ -1188,6 +1418,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         |> Enum.filter(&fleet_block?/1)
         |> Enum.map(&fleet_render(&1, previews))
 
+      # The TECHNICAL pair's preview: the reader's OWN render_block(:article) — the
+      # same producer /papers uses — keyed by the block id, so the bpDiff / bpFiletree
+      # node-view's paint hole shows byte-identical reader HTML while its textarea
+      # island edits the verbatim source. No TaskResolver preview: neither type
+      # carries a query.
+      technical_renders =
+        render_blocks
+        |> Enum.filter(&technical_block?/1)
+        |> Enum.map(&fleet_render(&1, previews))
+
       # editable-figure: the CHILD-only render for every top-level figure, on the SAME
       # bp:block-html channel, keyed by the FIGURE id (so the bpFigure atom's paint
       # hole finds it with ZERO hook change). Concatenated with the fleet renders.
@@ -1196,8 +1436,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         |> Enum.filter(&figure_block?/1)
         |> Enum.map(&figure_render/1)
 
+      # Singular notes may remain opaque when their rich carrier is not safely
+      # editable. Paint the canonical reader row without changing that admission.
+      note_renders =
+        render_blocks
+        |> Enum.filter(&(is_map(&1) and &1["type"] == "note"))
+        |> Enum.map(&note_render/1)
+
       renders =
-        (fleet_renders ++ figure_renders)
+        (fleet_renders ++ technical_renders ++ figure_renders ++ note_renders)
         |> Enum.reject(&(&1["block_id"] in [nil, ""]))
 
       push_event(socket, "bp:block-html", %{renders: renders})
@@ -1220,6 +1467,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     do: Map.get(block, "type") in @figure_render_types
 
   defp figure_block?(_), do: false
+
+  # A block that paints its reader HTML through the fleet channel WITHOUT being a
+  # read-only fleet atom: the editable technical pair (diff / filetree).
+  defp technical_block?(block) when is_map(block),
+    do: Map.get(block, "type") in @technical_render_types
+
+  defp technical_block?(_), do: false
 
   @doc false
   # editable-figure — the CHILD-only reader render for one figure block, keyed by the
@@ -1244,6 +1498,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       end
 
     %{"block_id" => Map.get(block, "id"), "html" => html}
+  end
+
+  @doc false
+  def note_render(block) do
+    %{
+      "block_id" => Map.get(block, "id"),
+      "source_block" => block,
+      "html" => Render.Components.note_item_html(block)
+    }
   end
 
   # Render one fleet block's reader HTML. A query-carrying task or data-viz block
@@ -1278,29 +1541,39 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc false
   # Build the id-keyed live-task previews for `blocks` under the SESSION's tenant
-  # scope. Fail-closed: `scope_opts` carries the session's workspace/project — a
-  # nil workspace resolves to ZERO rows/aggregate values in Tasks.Query, never a
-  # cross-tenant leak. The row fetch may RAISE with the Tasks plugin off;
-  # `TaskResolver.preview/3` rescues each row fetch into an `{ error: true }` stub.
-  # Aggregate failure produces no preview entry, leaving the query block's dim
-  # placeholder unchanged. Returns ONLY previews — `blocks` stays unresolved.
+  # scope. Task rows and aggregates are read ONLY through the paper task resolver
+  # seam (`PaperTaskSeam.resolver/1` → `Barkpark.Content.PaperTaskResolver`,
+  # task-f4d19b64198780b6) — Studio never names the Tasks plugin's substrate.
+  # With no resolver (plugin out of the load order, or disabled for the
+  # workspace) every query-carrying task block gets an `unavailable` entry, and
+  # `TaskResolver.apply_preview/2` turns it into the reader's placeholder.
+  # Fail-closed: `scope_opts` carries the session's workspace/project — a nil
+  # workspace resolves to ZERO rows/aggregate values in the resolver, never a
+  # cross-tenant leak. A raising row fetch is rescued by `TaskResolver.preview/3`
+  # into an `{ error: true }` stub. Aggregate failure produces no preview entry,
+  # leaving the query block's dim placeholder unchanged. Returns ONLY previews —
+  # `blocks` stays unresolved.
   def task_previews(blocks, socket) do
     scope = ScopeHelpers.scope_opts(socket)
+    dataset = socket.assigns.dataset
 
-    TaskResolver.preview(
-      blocks,
-      # The preview path NEVER stamps `dataset` into the block query, so the
-      # visibility gate MUST be threaded the session dataset explicitly (the same
-      # `socket.assigns.dataset` the agg fetcher below already carries) — deriving
-      # it from the raw query map would seal against the wrong (production
-      # default) schema on a cross-dataset preview. Charter W-one decision 10.
-      fn query ->
-        Barkpark.Tasks.Query.rows_for_query(query, scope, dataset: socket.assigns.dataset)
-      end,
-      fn query ->
-        Barkpark.Tasks.Query.agg_for_query(query, scope, dataset: socket.assigns.dataset)
-      end
-    )
+    case PaperTaskSeam.resolver(Keyword.get(scope, :workspace_id)) do
+      nil ->
+        TaskResolver.unavailable_previews(blocks)
+
+      resolver ->
+        TaskResolver.preview(
+          blocks,
+          # The preview path NEVER stamps `dataset` into the block query, so the
+          # visibility gate MUST be threaded the session dataset explicitly (the
+          # same `socket.assigns.dataset` the agg fetcher below already carries) —
+          # deriving it from the raw query map would seal against the wrong
+          # (production default) schema on a cross-dataset preview. Charter W-one
+          # decision 10.
+          fn query -> resolver.rows_for_query(query, scope, dataset: dataset) end,
+          fn query -> resolver.agg_for_query(query, scope, dataset: dataset) end
+        )
+    end
   end
 
   @doc false
@@ -1745,6 +2018,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   defp document_op_once(socket, doc, type, dataset, op) do
+    op = stable_request_op(op, op["request_id"])
     source = Map.get(op, @server_form_source)
     opts = Shared.hook_opts(socket) ++ [if_rev: op["if_rev"]]
 
@@ -2021,26 +2295,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     |> Map.put("request_id", meta["request_id"])
   end
 
-  # Server-authored structural ops mint a block id before this shared seam.
-  # Derive that id from the retry-stable request id so the exact facade sees
-  # the same payload after a lost acknowledgement.
+  # Constructors seed request-stable trees before overrides. Retain the parent
+  # ID guard here for server-minted ops; never remap client-authored identities.
   defp stable_request_op(%{@server_minted_block => true, "block" => %{} = block} = op, request_id) do
     op
     |> Map.delete(@server_minted_block)
-    |> Map.put("block", Map.put(block, "id", request_block_id(request_id)))
+    |> Map.put("block", request_stable_block(block, request_id))
   end
 
   defp stable_request_op(op, _request_id), do: Map.delete(op, @server_minted_block)
 
-  defp request_block_id(request_id) do
-    suffix =
-      request_id
-      |> then(&:crypto.hash(:sha256, &1))
-      |> binary_part(0, 9)
-      |> Base.url_encode64(padding: false)
-
-    "b-" <> suffix
-  end
+  @doc false
+  def request_stable_block(block, request_id),
+    do: Map.put(block, "id", Blocks.new_block_id(request_id))
 
   # pdd-t2: whether a block is template-locked (nil-safe for Enum.at misses).
   defp locked_block?(block), do: is_map(block) and Map.get(block, "locked") == true
@@ -2060,7 +2327,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           paper_canvas_retained:
             PaperCanvas.refresh_retained(socket.assigns[:paper_canvas_retained], slug, blocks),
           paper_rev: Map.get(content, "rev") || 0,
-          paper_link_details: paper_link_details(socket, fresh, blocks)
+          paper_link_details: paper_link_details(socket, fresh, blocks),
+          paper_master_render: PaperMastersSeam.render_map(fresh, blocks)
         )
 
       _ ->
@@ -2177,19 +2445,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # `share_link_controller.ex` writes down where it refuses to copy it. Note
   # what that leaves ALONE, honestly: a principal-LESS socket on the open
   # public-demo desk is write-capable BY DESIGN, so nothing here narrows it.
+  #
+  # THE CACHE IS NOT READ FOR A BLOCKS PAPER (pt-backlog-kill-the-body-html-cache).
+  # On a write-capable socket, a paper whose content carries a block list opens
+  # in `paper_block_mode` (`reader_paper_blocks/2` returns that same
+  # `Projection.read_blocks/1` list), and the block arm renders from the blocks.
+  # The `raw(@paper_html)` arm is never reached for it, so the stored
+  # `body_html` cache is not read at all: `:paper_html` is `""`. Only a legacy
+  # paper with no block list reads `body_html`, because there it is the source.
   @doc """
   The `body_html` this SOCKET may be shown for `paper`.
 
-  A write-denied (non-editing) viewer gets `Content.Papers.reader_source/3`'s
-  verdict — redacted-safe, sanitized, and `""` where the reader refuses to name
-  a source at all (the never-blank arm then renders the honest notice).
-  Do not re-derive this: the three `:paper_html` feeds must not drift.
+  A write-denied (non-editing) viewer gets `Content.Papers.reader_html/3`'s
+  verdict — blocks rendered on this read, redacted-safe, sanitized, and `""`
+  where the reader refuses to name a source at all (the never-blank arm then
+  renders the honest notice). A write-capable socket reads the sanitized
+  `body_html` only for a legacy paper with no block list; a blocks paper gets
+  `""` because its body renders from blocks. Do not re-derive this: the three
+  `:paper_html` feeds must not drift.
   """
-  def reader_paper_html(socket, %{content: _} = paper) do
-    if write_denied?(socket) do
-      reader_source_html(socket, paper)
-    else
-      editor_body_html(Map.get(paper.content || %{}, "body_html"))
+  def reader_paper_html(socket, %{content: content} = paper) do
+    cond do
+      write_denied?(socket) -> reader_source_html(socket, paper)
+      is_list(Projection.read_blocks(content || %{})) -> ""
+      true -> editor_body_html(Map.get(content || %{}, "body_html"))
     end
   end
 
@@ -2267,26 +2546,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   def reader_paper_blocks(_socket, _paper), do: nil
 
+  # A `{:blocks, …}` verdict here means Envelope promoted a structured source
+  # this pane's `Projection.read_blocks/1` did not see; `reader_html/3` renders
+  # THOSE blocks (the reader's own canonical source, already visibility-redacted)
+  # rather than blanking a readable paper. `:redacted_source`, `:semantic_empty`,
+  # `:ambiguous_source`, … — the reader refuses to name a source, so there is
+  # nothing this viewer may be shown. Falling back to the cache is precisely the
+  # disclosure.
   defp reader_source_html(socket, paper) do
-    dataset = socket.assigns.dataset
-    scope = ScopeHelpers.scope_opts(socket)
-
-    case Content.Papers.reader_source(paper, dataset, scope) do
-      {:html, sanitized} ->
-        sanitized
-
-      # Envelope promoted a structured source this pane's `Projection.read_blocks/1`
-      # did not see. Render THOSE blocks (the reader's own canonical source,
-      # already visibility-redacted) rather than blanking a readable paper.
-      {:blocks, blocks} ->
-        style = Map.get(paper.content || %{}, "style")
-        Render.render_blocks(blocks, Labels.paper_render_opts(dataset, style, scope))
-
-      # `:redacted_source`, `:semantic_empty`, `:ambiguous_source`, … — the
-      # reader refuses to name a source, so there is nothing this viewer may be
-      # shown. Falling back to the cache is precisely the disclosure.
-      {:error, _reason} ->
-        ""
+    case Content.Papers.reader_html(
+           paper,
+           socket.assigns.dataset,
+           ScopeHelpers.scope_opts(socket)
+         ) do
+      {:ok, html} -> html
+      {:error, _reason} -> ""
     end
   end
 
@@ -2315,6 +2589,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_edit_mode: false,
         paper_canvas_retained: retained,
         paper_link_details: paper_link_details(socket, paper, blocks),
+        paper_masters: paper_masters(socket, paper),
+        paper_masters_impl: paper_masters_impl(paper),
+        paper_master_render: PaperMastersSeam.render_map(paper, blocks),
         backlinks_used_by: used_by,
         backlinks_linked: linked,
         backlinks_unlinked: unlinked
@@ -2324,7 +2601,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         content["blocks"] || [],
         canvas_resume_authorized?(socket, paper)
       )
-      |> assign(sidebar_assigns(paper))
+      |> assign_sidebar(paper)
       # pdd-t12b: with the canvas ON (the mainline default) a block paper opens
       # straight into the always-editable editor — the read-only streamed View
       # branch is unreachable, so resolving + rendering every block into the
@@ -2338,7 +2615,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         if(PaperCanvas.paper_canvas_enabled?(),
           do: [],
           else:
-            paper_stream_items(blocks, socket.assigns.dataset, ScopeHelpers.scope_opts(socket))
+            paper_stream_items(
+              blocks,
+              socket.assigns.dataset,
+              ScopeHelpers.scope_opts(socket),
+              paper
+            )
         ),
         reset: true
       )
@@ -2360,11 +2642,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_edit_mode: false,
         paper_canvas_retained: nil,
         paper_link_details: %{},
+        paper_masters: nil,
+        paper_masters_impl: nil,
+        paper_master_render: nil,
         backlinks_used_by: used_by,
         backlinks_linked: linked,
         backlinks_unlinked: unlinked
       )
-      |> assign(sidebar_assigns(paper))
+      |> assign_sidebar(paper)
       |> stream(:paper_blocks, [], reset: true)
     end
   end
@@ -2394,7 +2679,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # only reaches the server ~400ms after first paint, so a server-seeded close
   # would BE the flash D12 refused (measured: first paint t=20.1ms,
   # phx-connected t=419.5ms). The cascade closes it at first paint instead.
-  defp sidebar_assigns(paper) do
+  #
+  # `sidebar_open` has exactly one exception (spd-b1-pane-state-persistence):
+  # a user who collapsed the inspector at `wide` gets it seeded collapsed. That
+  # is NOT a server-seeded close in D12's sense — the pre-paint head script
+  # stamps `data-inspector-pref="closed"` from the same localStorage key before
+  # first paint, and the painted-closed rule already paints the strip, so the
+  # connected render only swaps `.is-open`-painted-as-strip for `.is-collapsed`,
+  # which is the same geometry. The pref reaches the socket only via
+  # connect_params (Mount.init), so on the static render it is always false.
+  defp assign_sidebar(socket, paper),
+    do: assign(socket, sidebar_assigns(paper, socket.assigns[:inspector_pref_closed] == true))
+
+  defp sidebar_assigns(paper, pref_closed?) do
     # NORMALISED through `published_id/1`, and that is not cosmetic. Since the
     # blocks branch resolves draft-first (spd-w17), a never-published paper
     # arrives here as `drafts.paper-…` — and `drafts.` is a STORAGE prefix, not
@@ -2410,7 +2707,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       end
 
     [
-      sidebar_open: true,
+      sidebar_open: not pref_closed?,
       sidebar_user_opened: false,
       sidebar_collapsed: MapSet.new(),
       sidebar_slug_draft: slug,
@@ -2480,12 +2777,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_edit_mode: false,
         paper_task_previews: %{},
         paper_link_details: %{},
+        paper_masters: nil,
+        paper_masters_impl: nil,
+        paper_master_render: nil,
         backlinks_used_by: [],
         backlinks_linked: [],
         backlinks_unlinked: []
       )
       |> PaperCanvasLease.reset_socket()
-      |> assign(sidebar_assigns(nil))
+      |> assign_sidebar(nil)
     else
       socket
       |> assign(
@@ -2501,19 +2801,45 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   @doc false
-  def paper_stream_items(blocks, dataset, scope) do
+  def paper_stream_items(blocks, dataset, scope, paper_or_id \\ nil) do
+    # The 4th argument is the open paper's document (or, for legacy callers,
+    # just its id). With the document, linked master instances resolve inside
+    # the paper's own tenant (task-59f078a2fd248698); with a bare id they render
+    # as unavailable.
+    {paper, paper_id} =
+      case paper_or_id do
+        %{} = paper -> {paper, paper_doc_id(paper)}
+        id -> {nil, id}
+      end
+
+    # Grandfather badge (task-597ea451072da061): the SAME seam the /papers
+    # reader uses — `PreGateRegister.annotate/3` on the stored (unresolved)
+    # blocks, before any resolution. Register membership AND a still-refused
+    # gate recheck insert ONE synthesised badge block under the byline; the
+    # stored `blocks` (the save baseline) are never touched, so the badge can
+    # not be saved back into the Paper.
+    stored = blocks
+    blocks = PreGateRegister.annotate(blocks, paper_id, stored)
+
     # pdd-t11 debt fix (2): resolve LIVE task/query blocks the SAME way the
     # /papers reader does — `Content.Papers.resolve_tasks_in_blocks/2`, the ONE
     # producer (doctrine rule 3). Without this, the Studio read-only VIEW render
     # left a paper's embedded board/list/roadmap as an empty query block while
     # the public reader showed real `bp` rows. Session-tenant scoped + fail-closed
-    # (a nil workspace resolves ZERO rows via Tasks.Query → Scope.scope_to_workspace,
+    # (a nil workspace resolves ZERO rows in the task resolver's scoped read,
     # never a cross-tenant leak). DISPLAY-ONLY (D5): this feeds the render stream
     # only — the paper_doc's stored `blocks` (the save baseline the canvas diffs
     # against) stay UNresolved, so a save right after a view never freezes a stale
     # snapshot into the doc (D3 byte-stability). An author-pinned literal snapshot
-    # (no `query`) is left untouched, so plugin-off papers still render.
-    blocks = Content.Papers.resolve_tasks_in_blocks(blocks, scope, dataset)
+    # (no `query`) is left untouched, so plugin-off papers still render. The
+    # reader's seam answers from the boot load order only; Studio also honours
+    # the workspace's plugin enablement (`PaperTaskSeam`, task-f4d19b64198780b6),
+    # so a workspace with Tasks disabled gets the same explicit placeholder here
+    # as in the editor preview.
+    blocks =
+      if PaperTaskSeam.resolver(Keyword.get(scope, :workspace_id)),
+        do: Content.Papers.resolve_tasks_in_blocks(blocks, scope, dataset),
+        else: TaskResolver.mark_unavailable(blocks)
 
     resolver = fn value, ref_type -> Content.reference_title(value, ref_type, dataset, scope) end
 
@@ -2546,6 +2872,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       wikilinks: wikilinks,
       embeds: embeds,
       values: values,
+      # Linked master instances (task-59f078a2fd248698): resolved per read in
+      # the paper's tenant, batched; `%{}` without masters or without the plugin.
+      masters: PaperMastersSeam.render_map(paper, blocks),
       # lvw-t2 (D4): Studio's OWN per-request view is the one surface carrying
       # the accept-baseline control on DRIFTED valuerefs (the walker gates the
       # button on this flag AND state == "drift"). The body_html cache, delta
@@ -2560,6 +2889,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       %{id: paper_stream_block_id(block, index), html: Render.render_block(block, opts)}
     end)
   end
+
+  # The pane doc's id for the pre-gate register lookup (a `%Content.Document{}`
+  # or a plain map); nil when there is no paper — the register answers nil too.
+  @doc false
+  def paper_doc_id(%{doc_id: doc_id}) when is_binary(doc_id), do: doc_id
+  def paper_doc_id(%{"doc_id" => doc_id}) when is_binary(doc_id), do: doc_id
+  def paper_doc_id(_), do: nil
 
   @doc false
   def paper_stream_block_id(block, index) do
@@ -2655,12 +2991,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket
             |> stream(
               :paper_blocks,
-              paper_stream_items(blocks, dataset, ScopeHelpers.scope_opts(socket)),
+              paper_stream_items(
+                blocks,
+                dataset,
+                ScopeHelpers.scope_opts(socket),
+                paper
+              ),
               reset: true
             )
             |> assign(:paper_doc, paper)
             |> assign(:paper_rev, Map.get(content, "rev") || 0)
             |> assign(:paper_link_details, paper_link_details(socket, paper, blocks))
+            |> assign(:paper_master_render, PaperMastersSeam.render_map(paper, blocks))
             |> assign(:paper_block_mode, true)
 
           _ ->

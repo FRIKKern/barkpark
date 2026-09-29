@@ -26,6 +26,7 @@ defmodule Barkpark.Content.TaskBirthFenceTest do
       forever. It is proven born ADJUDICATED (term + reason on the row read
       back) and proven NOT to 500, end-to-end through the real signed edge.
   """
+  # sync: swaps node-global Application env (the GitHub plugin config key) — one value for the whole node
   use BarkparkWeb.ConnCase, async: false
 
   import Ecto.Query, only: [from: 2]

@@ -15,6 +15,24 @@ export type ApiVersion = `${number}-${number}-${number}`
 /** Phoenix perspectives — the view a read resolves against (published docs, drafts, or raw). */
 export type Perspective = 'published' | 'drafts' | 'raw'
 
+/**
+ * Server-side BLOCK RESOLUTION for a read (`?resolve=…`) — an OPT-IN seam on
+ * `GET /v1/data/doc/…` and `GET /v1/data/query/…`
+ * (`api/lib/barkpark_web/controllers/query_controller.ex`, `maybe_resolve_tasks/3`).
+ *
+ * `'tasks'` runs the same resolver Studio runs: every PortableDoc task block
+ * that carries a `query` instead of a literal `snapshot` is answered with a
+ * live snapshot of the matching rows, perspective-threaded like the documents
+ * around it. WITHOUT it a query-shaped task block arrives with no rows at all,
+ * and a renderer that reads `snapshot` (e.g. `@barkpark/react`'s task-board)
+ * has nothing to draw — permanently, not staly.
+ *
+ * Author-pinned blocks (a literal `snapshot`/`task` and no `query`) are left
+ * untouched by design, so this is additive: it can only fill blocks that were
+ * empty.
+ */
+export type ResolveSpec = 'tasks'
+
 /** Options for `client.exportDataset()` (`GET /v1/data/export/:dataset`). */
 export interface ExportOptions {
   /** Restrict the export to one document type (server `?type=`). */
@@ -1287,7 +1305,8 @@ export interface BarkparkClient {
   withConfig(patch: Partial<BarkparkClientConfig>): BarkparkClient
   /** Fetch a single document by type + id. Returns `null` on 404. Pass
    *  `{ expand }` to inline reference fields (depth 1), e.g. `{ expand: 'author' }`,
-   *  and/or `{ fields }` to project (return only those content fields). */
+   *  `{ fields }` to project (return only those content fields), and/or
+   *  `{ resolve: 'tasks' }` to have the server fill query-shaped task blocks. */
   doc<T = BarkparkDocument>(
     type: string,
     id: string,
@@ -1296,6 +1315,7 @@ export interface BarkparkClient {
       fields?: string | string[]
       signal?: AbortSignal
       perspective?: Perspective
+      resolve?: ResolveSpec
     },
   ): Promise<T | null>
   /**
@@ -1305,7 +1325,7 @@ export interface BarkparkClient {
    */
   docs<T = BarkparkDocument>(
     type: string,
-    opts?: { perspective?: Perspective; signal?: AbortSignal },
+    opts?: { perspective?: Perspective; signal?: AbortSignal; resolve?: ResolveSpec },
   ): DocsBuilder<T>
   /**
    * Batch-fetch documents of `type` by id. Returns them in the SAME order as `ids`,

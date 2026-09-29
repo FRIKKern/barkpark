@@ -153,7 +153,31 @@ defmodule Barkpark.Content.Labels do
   # global; scoped Paper/document writers bind reference resolution to the row
   # they are rendering so a same-id document in another tenant cannot leak into
   # a cached HTML projection.
+  #
+  # pbw-backlog-cache-draft-ref-leak — THE PRINCIPAL IS PUBLISHED-ONLY BY
+  # DEFAULT. Every caller of this function renders into something a
+  # public/anonymous reader later reads: the persisted `body_html` cache and
+  # `content["body"]["html"]` projection (block_ops/writer/sheets/papers/
+  # proposals and the two backfills), the share-link static page, and the
+  # LiveView reader itself. The reader already passed `published_only: true`
+  # (BulldocsLive.reader_resolvers/3, D5) and DEGRADED a draft-only
+  # `field-reference` to its raw id — but the WRITE path forwarded the author's
+  # scope verbatim, which carries no such key, so `reference_title/4` kept the
+  # `drafts.` twin and baked a DRAFT-ONLY doc's title into the cached HTML.
+  # Measured on fedf38aed via `Content.upsert_paper/1` with a field-reference
+  # to a never-published post:
+  #
+  #     body_html        => …<span>Secret Draft Title</span>…
+  #     body["html"]     => …<span>Secret Draft Title</span>…
+  #
+  # i.e. the live reader refused the exact string the durable artifact served.
+  # `put_new`, not `put`: the reader's explicit `true` is idempotent, and a
+  # genuinely privileged renderer can still opt back in with
+  # `published_only: false` — but that decision now has to be WRITTEN DOWN,
+  # which is the point. The default is fail-closed.
   def render_opts(dataset, scope) when is_list(scope) do
+    scope = Keyword.put_new(scope, :published_only, true)
+
     %{
       ref_resolver: fn value, ref_type -> reference_title(value, ref_type, dataset, scope) end,
       codelist_resolver: fn plugin, codelist_id, code ->

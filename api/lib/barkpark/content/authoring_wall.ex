@@ -65,6 +65,7 @@ defmodule Barkpark.Content.AuthoringWall do
 
   alias Barkpark.Content.{DedupWall, Document, Exemptions, LabelSpine, TagRegistry, Warnings}
   alias Barkpark.Content.Papers.EpicQuality
+  alias Barkpark.PortableDoc.Tiers
 
   # The publish wall enforces the label spine on Barkpark's own knowledge
   # types — the corpus the epic exists to keep findable. Deliberately a module
@@ -156,6 +157,83 @@ defmodule Barkpark.Content.AuthoringWall do
   end
 
   @doc """
+  Re-run E4 ALONE, inside the caller's transaction, under the publish-scope
+  advisory lock — the cross-doc_id TOCTOU close (acrc-dedup-toctou-serialize).
+
+  `enforce/5` runs the whole wall BEFORE the write transaction opens, and must:
+  it is where the author-fixable 422s and the terminal 409 are decided, where
+  the exemption ratchet is spent, and where the `before_publish` hook seam sits.
+  But a gate that runs before a transaction opens says nothing about the state
+  at COMMIT. Two publishes with DIFFERENT doc_ids and near-duplicate titles both
+  pass `enforce/5` at t0 (each is excluded from its own candidate scan, neither
+  is committed when the other looks) and both commit — the duplicate pair the
+  wall exists to refuse.
+
+  This is the second half of that contract, and the ORDER inside it is the whole
+  mechanism:
+
+    1. `DedupWall.lock_publish_scope!/3` — taken FIRST, on the (type, workspace,
+       dataset) scope, and held to commit/rollback by `pg_advisory_xact_lock`.
+    2. `DedupWall.guard/4` — the SAME verdict `enforce/5` computed, recomputed
+       against the corpus as it stands now that this transaction owns the scope.
+
+  A concurrent publish in the same scope is therefore either fully committed
+  before this scan runs (and is SEEN, so this one is refused with the ordinary
+  `{:error, {:duplicate_of, _}}`) or blocked at step 1 until this one commits
+  (and sees it, and is refused). There is no interleaving in which both pass.
+
+  MUST be called inside an open transaction. Outside one, `pg_advisory_xact_lock`
+  acquires and releases within the single statement and serializes nothing —
+  silently, which is why both call sites take it as the first statement inside
+  their `Repo.transaction`.
+
+  Returns `:ok`, or the raw `{:error, {:duplicate_of, payload}}` /
+  `{:error, {:dedup_unavailable, message}}` tuple, telemetry emitted at the same
+  seam `enforce/5` uses. Non-walled types and grandfathered docs are `:ok`
+  without taking the lock — they never reach E4 through `enforce/5` either, so
+  locking for them would be pure throughput cost.
+  """
+  @spec recheck_dedup_under_scope_lock(
+          Document.t() | map(),
+          String.t(),
+          String.t() | nil,
+          String.t(),
+          keyword()
+        ) ::
+          :ok | {:error, {:duplicate_of, map()} | {:dedup_unavailable, String.t()}}
+  def recheck_dedup_under_scope_lock(ref, type, pid, dataset, opts \\ [])
+
+  def recheck_dedup_under_scope_lock(ref, type, pid, dataset, opts)
+      when type in @walled_types do
+    exempt? = is_binary(pid) and Exemptions.member?(pid, dataset)
+
+    if exempt? do
+      :ok
+    else
+      # The audit-chain pre-lock inside `lock_publish_scope!/3` must key on
+      # the workspace this DOCUMENT is audited under (`Audit.emit/1` keys on
+      # `doc.workspace_id`), not the caller's scope, which a publish may leave
+      # unset (task-0c397ec87de1f924).
+      scope_opts = Keyword.put(opts, :audit_workspace_id, audit_workspace(ref, opts))
+      :ok = DedupWall.lock_publish_scope!(type, dataset, scope_opts)
+
+      case DedupWall.guard(ref, type, dataset, Keyword.put(opts, :dedup_in_transaction, true)) do
+        :ok ->
+          :ok
+
+        {:error, {code, _}} = error when code in [:duplicate_of, :dedup_unavailable] ->
+          emit_wall_rejection(code, type, dataset)
+          error
+      end
+    end
+  end
+
+  def recheck_dedup_under_scope_lock(_ref, _type, _pid, _dataset, _opts), do: :ok
+
+  defp audit_workspace(%{workspace_id: ws}, _opts) when is_binary(ws) and ws != "", do: ws
+  defp audit_workspace(_ref, opts), do: Keyword.get(opts, :workspace_id)
+
+  @doc """
   Dry-run the whole wall and return EVERY failing gate at once (BPML
   masterplan W0's validate-all): where `enforce/5` is a `with` chain that
   stops at the first refusal — correct for a real write — this runs each gate
@@ -231,6 +309,7 @@ defmodule Barkpark.Content.AuthoringWall do
       :ok ->
         emit_tag_norm_advisory(ref, pid)
         emit_spacing_norm_advisory(ref, pid, type)
+        emit_unknown_block_children_advisory(ref, pid, type)
         {:ok, true}
 
       {:error, {:label_spine, _details}} = error ->
@@ -348,6 +427,138 @@ defmodule Barkpark.Content.AuthoringWall do
   end
 
   defp emit_spacing_norm_advisory(_ref, _pid, _type), do: :ok
+
+  # ── unknown_block_children — the unrendered-container advisory ──────────────
+  #
+  # Advisory, never blocking (charter D5): a block whose `"type"` no reader has
+  # a clause for falls to `Render.Compose.compose_block/2`'s degrade arm, which
+  # emits the `Unsupported block: <type>` placeholder and NOTHING ELSE — the
+  # block's nested `blocks`/`children` reach no surface at all. Proven live: a
+  # `container` block rendered the placeholder and DROPPED both of its
+  # children, silent content loss behind a 200.
+  #
+  # WHY AN ADVISORY AND NOT A REFUSAL. The comparable case the wall already
+  # refuses (`BlockOps.validate_block_elements/2`, "silent content LOSS behind
+  # a 200, so it is refused at the same door") refuses a shape NO producer is
+  # meant to write. An unknown block TYPE is different: the degrade arm exists
+  # on purpose because Papers are schemaless and a NEWER surface (the Go TUI,
+  # the JS SDK, a plugin) can persist a type an OLDER API release has no clause
+  # for — compose.ex's own comment names that forward-compat contract. A hard
+  # 422 here would refuse exactly the writes that degrade arm was built to
+  # survive, and the live-corpus blast radius of such a refusal is unmeasured
+  # (the same HIGH-FLIP-RISK the pe-w1 write-path normalizer arm was scoped
+  # against). The warnings channel reaches the author on the mutate success
+  # envelope — they learn before readers lose the content, and no live paper
+  # loses its ability to re-publish. Copy stays in the pe-w1 family: a
+  # POSITIONAL block path first, then what is lost, then the fix.
+  #
+  # Papers only, and at spine-pass for the same reason as the two advisories
+  # above: the request-scoped queue is dropped with a failed write.
+  defp emit_unknown_block_children_advisory(ref, pid, "paper") do
+    content = content_of(ref) || %{}
+
+    case unrendered_container_paths(List.wrap(content["blocks"]), "blocks") do
+      [] ->
+        :ok
+
+      paths ->
+        Warnings.put(
+          "unknown_block_children",
+          "#{pid}: #{Enum.join(paths, "; ")} — no reader has a render clause for that " <>
+            "type, so its nested block(s) are dropped from every surface while the paper " <>
+            "still answers 200; use a rendered container (section, columns, tabs) or lift " <>
+            "the children to the top level."
+        )
+    end
+
+    :ok
+  end
+
+  defp emit_unknown_block_children_advisory(_ref, _pid, _type), do: :ok
+
+  # The two container keys the render walk would have to descend for a block
+  # the composer never dispatched — the same pair `BlockOps` calls the nested
+  # block list (`validate_block_elements/2`, `render_shape_errors/2`).
+  @child_block_keys ~w(blocks children)
+
+  # `Tiers.classified?/1` is the predicate, never a hand-written list of known
+  # types: `tiers_test.exs` holds `PortableDoc.Tiers` COMPLETE against
+  # `render/compose.ex` (it fails if a renderable type is unclassified, or if
+  # Tiers claims a type the reader cannot produce), so "unclassified" IS "the
+  # reader has no clause" by construction. A new block type landing in compose
+  # lands in Tiers in the same change and can never silently start drawing this
+  # advisory. Descent reuses `EpicQuality.nested_keys/0` — the single owner of
+  # "which containers does the wall's walk descend" — for the same reason the
+  # spacing mirror below does; a list-of-lists key (`columns`) is flattened one
+  # level so a column's blocks are reached.
+  defp unrendered_container_paths(blocks, prefix) when is_list(blocks) do
+    blocks
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {block, index} when is_map(block) ->
+        unrendered_container_paths_in(block, "#{prefix}[#{index}]")
+
+      {nested, index} when is_list(nested) ->
+        unrendered_container_paths(nested, "#{prefix}[#{index}]")
+
+      _ ->
+        []
+    end)
+  end
+
+  defp unrendered_container_paths(_blocks, _prefix), do: []
+
+  defp unrendered_container_paths_in(%{} = block, path) do
+    case dropped_children(block) do
+      # The subtree under an unrendered type is dropped WHOLE, so the outermost
+      # offender is the only useful path — descending into it would report
+      # children that are lost for their parent's reason, not their own.
+      {key, count, type} ->
+        [
+          "#{path}.#{key} carries #{count} block(s) under unrendered type " <>
+            "\"#{type}\"#{block_id_suffix(block)}"
+        ]
+
+      nil ->
+        Enum.flat_map(EpicQuality.nested_keys(), fn key ->
+          case Map.get(block, key) do
+            children when is_list(children) ->
+              unrendered_container_paths(children, "#{path}.#{key}")
+
+            _ ->
+              []
+          end
+        end)
+    end
+  end
+
+  defp unrendered_container_paths_in(_block, _path), do: []
+
+  # Only a map carrying a BINARY `"type"` can be an unrendered block: an inline
+  # leaf or an item map with no `"type"` is not a block at all, and neither
+  # carries a nested block list, so descending `content`/`items`/`rows` cannot
+  # manufacture a false positive here.
+  defp dropped_children(%{"type" => type} = block) when is_binary(type) do
+    if Tiers.classified?(type) do
+      nil
+    else
+      Enum.find_value(@child_block_keys, fn key ->
+        case Map.get(block, key) do
+          [_ | _] = children -> {key, length(children), type}
+          _ -> nil
+        end
+      end)
+    end
+  end
+
+  defp dropped_children(_block), do: nil
+
+  # The authored block id is the token an author greps their own document for;
+  # a positional index is only as good as the caller's copy of the list. Same
+  # reason `BlockOps.structure_refusal_details/2` appends `block_ids` to the
+  # hard refusal — and omitted, never emitted empty, when the block has none.
+  defp block_id_suffix(%{"id" => id}) when is_binary(id) and id != "", do: " (id #{id})"
+  defp block_id_suffix(_block), do: ""
 
   # The advisory's counter mirrors the tagged HARD gate's semantics by CALLING
   # it: `EpicQuality.empty_paragraph?/1` is the single owner of "is this

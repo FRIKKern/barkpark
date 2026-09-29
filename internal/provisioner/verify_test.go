@@ -218,7 +218,7 @@ func TestProvisionVerifyFailsOn500Login(t *testing.T) {
 }
 
 // TestProvisionVerifyAllGreenSequence (C2 case b) proves the happy path narrates
-// the honest spine: after content/done comes verify/started, exactly THREE
+// the honest spine: after content/done comes verify/started, exactly FOUR
 // verify/progress lines (one green probe each, in order), verify/done, then
 // ready — in that order.
 func TestProvisionVerifyAllGreenSequence(t *testing.T) {
@@ -237,16 +237,16 @@ func TestProvisionVerifyAllGreenSequence(t *testing.T) {
 	assertOrder(t, rec.seq(),
 		"content/done",
 		"verify/started",
-		"verify/progress", "verify/progress", "verify/progress",
+		"verify/progress", "verify/progress", "verify/progress", "verify/progress",
 		"verify/done",
 		"ready/done",
 	)
 
 	progress := rec.details("verify", "progress")
-	if len(progress) != 3 {
-		t.Fatalf("want 3 verify/progress lines (one per probe), got %d: %v", len(progress), progress)
+	if len(progress) != 4 {
+		t.Fatalf("want 4 verify/progress lines (one per probe), got %d: %v", len(progress), progress)
 	}
-	for i, want := range []string{"verify.api", "verify.login", "verify.studio"} {
+	for i, want := range []string{"verify.api", "verify.login", "verify.studio", "verify.siteplane"} {
 		if !strings.HasPrefix(progress[i], want) {
 			t.Errorf("verify/progress[%d] = %q, want it to start with %q", i, progress[i], want)
 		}
@@ -318,8 +318,8 @@ func TestProvisionVerifyNeverLeaksToken(t *testing.T) {
 	if joined := cons.joined(); strings.Contains(joined, adminToken) || strings.Contains(joined, "bp_admin_") {
 		t.Errorf("a console line leaked the admin token; console=%q", joined)
 	}
-	// Non-vacuous: verify actually ran all three probes.
-	if got := len(rec.details("verify", "progress")); got != 3 {
-		t.Errorf("verify did not narrate its 3 probes; got %v", rec.details("verify", "progress"))
+	// Non-vacuous: verify actually ran all four probes.
+	if got := len(rec.details("verify", "progress")); got != 4 {
+		t.Errorf("verify did not narrate its 4 probes; got %v", rec.details("verify", "progress"))
 	}
 }

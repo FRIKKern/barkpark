@@ -60,6 +60,7 @@ defmodule Barkpark.Content.PublishEventAtomicityTest do
   `mutation_events`, which sits on the write path of every document mutation in
   the suite. Serialising this file keeps that lock window short.
   """
+  # sync: `CREATE TRIGGER` takes an ACCESS EXCLUSIVE lock on `mutation_events`, on every mutation's write path
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Content

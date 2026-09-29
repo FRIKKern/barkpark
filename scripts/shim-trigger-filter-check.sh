@@ -83,10 +83,13 @@ set -euo pipefail
 
 DEFAULT_DIR=".github/workflows"
 
-# The committed roster size: cloud, compose-smoke, console-harness, elixir,
+# The committed roster size: ci, cloud, compose-smoke, console-harness, elixir,
 # go-tests, security. RAISE it when a workflow gains a shim; lowering it is only
 # correct in the same commit that deliberately retires one.
-SHIMMED_WORKFLOW_FLOOR="${SHIMMED_WORKFLOW_FLOOR:-6}"
+# 6 -> 7 on 2026-09-11 (pds-bl-w48-web-gate-cannot-block-and-greens-vacuously):
+# ci.yml gained the shim — an always-running `changes` dispatcher and the
+# `Web gate` aggregator — when its `pull_request` paths filter was deleted.
+SHIMMED_WORKFLOW_FLOOR="${SHIMMED_WORKFLOW_FLOOR:-7}"
 
 scan() {
   local dir="$1" floor="$2"

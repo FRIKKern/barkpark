@@ -68,6 +68,15 @@ defmodule BarkparkCloud.Notifications.DigestRun do
   # `:settled` matches the telemetry event name and the log line's `phase=`.
   @phases ~w(settled)
 
+  # WHAT CAUSED THIS RUN (gr-backlog-operator-digest-send). Two members, and the
+  # distinction is not cosmetic: `scheduled` is the 06:00Z cron tick, which has
+  # no human behind it and never will; `operator` is a hand on
+  # `POST /v1/operator/digest/send`, which DOES have one and records it in
+  # `actor_user_id`. A closed list rather than a free string for the same reason
+  # `@events` is closed — an accounting table that cannot be grouped stops being
+  # one.
+  @triggers ~w(scheduled operator)
+
   schema "digest_runs" do
     field :event, :string
     field :phase, :string
@@ -77,6 +86,14 @@ defmodule BarkparkCloud.Notifications.DigestRun do
     field :covered, :integer
     field :reason, :string
     field :withheld, :integer
+
+    # The cause, and — when the cause is a person — WHICH person. `trigger` is
+    # NOT NULL (defaulted `"scheduled"`, so every pre-existing row carries the
+    # true word); `actor_user_id` is NULL on a scheduled run because there is
+    # nobody, not because nobody was recorded.
+    field :trigger, :string, default: "scheduled"
+
+    belongs_to :actor_user, BarkparkCloud.Accounts.User
 
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
@@ -90,6 +107,10 @@ defmodule BarkparkCloud.Notifications.DigestRun do
   @doc "The accounting phases this table records."
   @spec phases() :: [String.t()]
   def phases, do: @phases
+
+  @doc "The causes a digest run can have — the cron tick, or an operator's hand."
+  @spec triggers() :: [String.t()]
+  def triggers, do: @triggers
 
   @doc """
   The insert changeset. There is no update changeset: an accounting record that
@@ -111,11 +132,15 @@ defmodule BarkparkCloud.Notifications.DigestRun do
       :instances,
       :covered,
       :reason,
-      :withheld
+      :withheld,
+      :trigger,
+      :actor_user_id
     ])
-    |> validate_required([:event, :phase, :recipients, :sent, :instances, :covered])
+    |> validate_required([:event, :phase, :recipients, :sent, :instances, :covered, :trigger])
     |> validate_inclusion(:event, @events)
     |> validate_inclusion(:phase, @phases)
+    |> validate_inclusion(:trigger, @triggers)
+    |> assoc_constraint(:actor_user)
     |> validate_number(:recipients, greater_than_or_equal_to: 0)
     |> validate_number(:sent, greater_than_or_equal_to: 0)
     |> validate_number(:instances, greater_than_or_equal_to: 0)

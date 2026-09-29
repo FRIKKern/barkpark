@@ -40,7 +40,15 @@ defmodule Barkpark.Api.OpenApiIdempotentRoutesTest do
   @mounted_on [:scoped_mutate, :idempotent]
 
   setup do
-    {:ok, _} = Auth.create_token(@token, "test-openapi-idem", "test", ["read", "write", "admin"])
+    {:ok, _} =
+      Auth.create_token(
+        @token,
+        "test-openapi-idem",
+        "test",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     %{ws: ws, project: project}
   end

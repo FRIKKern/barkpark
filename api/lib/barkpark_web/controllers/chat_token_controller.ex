@@ -47,6 +47,7 @@ defmodule BarkparkWeb.ChatTokenController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Auth
+  alias BarkparkWeb.ErrorResponse
 
   @doc """
   Mint a `chat` token bound to the resolved workspace.
@@ -117,7 +118,6 @@ defmodule BarkparkWeb.ChatTokenController do
 
   defp unprocessable(conn, message) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "unprocessable", message: message}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{code: "unprocessable", message: message})
   end
 end

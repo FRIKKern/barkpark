@@ -181,7 +181,7 @@ const REGISTER_BLIND: Record<string, Reason> = {
   diff: 'mono-apparatus',
   filetree: 'mono-apparatus',
 
-  // ── label / row chrome (15)
+  // ── label / row chrome (16)
   action: 'label-chrome',
   // field-number (B085): a labelled numeric definition row — label + value
   // chrome with no prose measure to carry, the `stat` precedent
@@ -189,6 +189,10 @@ const REGISTER_BLIND: Record<string, Reason> = {
   'field-number': 'label-chrome',
   byline: 'label-chrome',
   eyebrow: 'label-chrome',
+  // The reader-synthesised pre-gate badge (#17199): a one-line caps micro mark
+  // under the byline rule, the byline/eyebrow class exactly — no prose measure
+  // to carry, so it is blind in both registers by construction.
+  'pre-gate-badge': 'label-chrome',
   toc: 'label-chrome',
   stat: 'label-chrome',
   stats: 'label-chrome',
@@ -402,7 +406,8 @@ describe('arm 3 — the register fingerprint (D50 REGISTER_BLIND)', () => {
     // every new row is a RULING that something legitimately ignores the
     // register. It cannot rot from the outside.
     // 43 → 44: field-number's label-chrome ruling (pbw-fix-field-number-react).
-    expect(Object.keys(REGISTER_BLIND)).toHaveLength(44)
+    // 44 → 45: pre-gate-badge's label-chrome ruling (docgates-s27, #17199).
+    expect(Object.keys(REGISTER_BLIND)).toHaveLength(45)
     // Derived from the map, never a second copy of the literal above: the
     // partition must be total, with no type both blind and sensitive.
     const sensitive = Object.keys(BLOCK_RENDERERS).filter((t) => REGISTER_BLIND[t] === undefined)

@@ -81,7 +81,13 @@ defmodule Barkpark.Structure do
       doc_id: nil,
       # Gyldendal parity E3.2 — a `:document_type_list` node may carry its own
       # sort ([%{"field", "direction"}]); nil = the schema's `desk.orderings`.
-      orderings: nil
+      orderings: nil,
+      # Gyldendal parity E3.3 — a `:document_type_list` node whose rows DRILL
+      # instead of opening: `%{"parent" => <content path>}` marks the list as a
+      # hierarchy (Sanity's «Hierarkisk struktur»). The node itself stays a type
+      # list (no new wire node type — old Go TUIs keep rendering it as the
+      # parentless root list); PaneBuilder walks the children pane by pane.
+      tree: nil
     ]
   end
 
@@ -147,7 +153,13 @@ defmodule Barkpark.Structure do
       [include_global: true] ++
         Keyword.take(opts, [:workspace_id, :grant_scoped, :caller_context])
 
-    schemas = Content.list_schemas(dataset, schema_opts)
+    # Named object types (Gyldendal parity E3.6) own no documents and are
+    # inlined into the schemas that reference them; the desk never lists them.
+    schemas =
+      dataset
+      |> Content.list_schemas(schema_opts)
+      |> Enum.reject(&(Map.get(&1, :kind) == "object"))
+
     schema_map = Map.new(schemas, &{&1.name, &1})
 
     %Node{
@@ -1150,7 +1162,8 @@ defmodule Barkpark.Structure do
   # `over` rows (bounded); an `over` type with no rows yields an empty group.
   #
   #   {"kind":"groupBy","title":"Etter kategori","type":"publication",
-  #    "by":"content.category","over":"category","orderings":[…]}
+  #    "by":"content.category","over":"category","orderings":[…],
+  #    "overFilter":{"_id":{"referencedBy":"publication"}}}
   @group_by_fanout 200
 
   defp declared_item_to_node(%{"kind" => "groupBy"} = item, idx, ctx) do
@@ -1159,11 +1172,18 @@ defmodule Barkpark.Structure do
     by = item["by"]
 
     if is_binary(type) and is_binary(over) and is_binary(by) do
+      # Gyldendal parity E9 — `overFilter`: Sanity's own "Etter kategori" does
+      # not group over EVERY category, it groups over the ones a publication
+      # points at (`count(*[_type == "publication" && references(^._id)]) > 0`).
+      # Without this the desk grows an empty child list per unused category.
+      over_filter = parse_filter(item["overFilter"])
+
       children =
         over
         |> Content.list_documents(
           ctx.dataset,
-          [perspective: :published, limit: @group_by_fanout] ++ ctx.scope
+          [perspective: :published, limit: @group_by_fanout, filter_map: over_filter] ++
+            ctx.scope
         )
         |> Enum.map(fn doc ->
           key = Barkpark.Content.DraftId.published_id(doc.doc_id)
@@ -1186,6 +1206,34 @@ defmodule Barkpark.Structure do
         icon: item["icon"],
         type: :list,
         items: children
+      }
+    end
+  end
+
+  # Gyldendal parity E3.3 — `tree`: Sanity's «Kategorier → Hierarkisk struktur».
+  # The node is the ROOT pane: a type list filtered to the documents whose
+  # `parent` path is null (Sanity's «Hovedkategorier»). Every deeper pane is
+  # built on the walk (PaneBuilder), because the children depend on the row
+  # the editor opened. `parent` is the content path the children point at
+  # (`content.parent` for a reference field named parent).
+  #
+  #   {"kind":"tree","title":"Hierarkisk struktur","type":"category",
+  #    "parent":"content.parent","orderings":[…]}
+  defp declared_item_to_node(%{"kind" => "tree"} = item, idx, _ctx) do
+    type = item["type"]
+    parent = item["parent"]
+
+    if is_binary(type) and type != "" and is_binary(parent) and parent != "" do
+      %Node{
+        id: item["id"] || "#{idx}-#{type}-tree",
+        title: item["title"] || type,
+        icon: item["icon"],
+        type: :document_type_list,
+        type_name: type,
+        visibility: :public,
+        filter: %{parent => %{"is" => "null"}},
+        orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
+        tree: %{"parent" => parent}
       }
     end
   end

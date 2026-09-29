@@ -108,6 +108,7 @@ defmodule BarkparkWeb.Studio.Caps do
 
   alias Barkpark.Access
   alias Barkpark.Auth.ApiToken
+  alias Barkpark.Content
   alias Barkpark.Repo
   alias Barkpark.Tenancy
 
@@ -139,6 +140,18 @@ defmodule BarkparkWeb.Studio.Caps do
   # The remedy IF that posture ever changes is NOT a tier bump but a
   # capability check in the handler itself (`Caps.derive(socket).read`), which
   # is the only place in this path that can tell an anonymous socket apart.
+  # `select-view` (Gyldendal parity E10) is the same shape as `search`,
+  # `ref-search` and `backlinks-refresh` above it: a UI event whose only effect
+  # is a SCOPED read through `Content.list_documents/3`, filtered to the open
+  # document's own id. It reads no capability the socket does not already hold
+  # to see the document it is standing on, and it writes nothing.
+  #
+  # `desk-search` / `desk-search-clear` (Gyldendal parity E8) sit beside
+  # `search` and `ref-search` below for the same reason: the only effect is a
+  # SCOPED read, through `Query.search_documents_across_types/4`, which carries
+  # the tenant, owner, grant and schema-visibility guards of the typeless batch
+  # read and refuses a caller with no workspace outright. Clearing writes
+  # nothing at all.
   @safe_events ~w(
     select select-group select-desk select-pane expand-pane
     switch-workspace switch-project switch-dataset toggle-create
@@ -147,6 +160,8 @@ defmodule BarkparkWeb.Studio.Caps do
     toggle-content-preview toggle-diff toggle-category editor-set-mode
     width-bucket
     search ref-search validate-upload reload-remote-doc
+    select-view
+    desk-search desk-search-clear
     open-image-picker close-image-picker open-ref-picker close-ref-picker
     show-history close-history close-delete close-discard
     close-unpublish-guard close-confirm-modal
@@ -195,6 +210,7 @@ defmodule BarkparkWeb.Studio.Caps do
     paper-move-block-to paper-callout-fold valueref-writeback-confirm
     access-revoke
     paper-publish sidebar-description-change sidebar-label-add
+    paper-save-master paper-insert-master paper-detach-master paper-pin-master
   )
 
   @doc """
@@ -679,6 +695,37 @@ defmodule BarkparkWeb.Studio.Caps do
     do: put_flash(socket, :error, "You don't have access to do that.")
 
   @doc """
+  THE `:admin` AFFORDANCE PREDICATE — the ONE function a render site asks
+  "may this seat see an admin-tier door?".
+
+  It takes the ALREADY-DERIVED caps map (the `:caps` assign, stamped by
+  `StudioLive.refresh_caps/1` from `derive/1`) and reads its `:admin` key. It
+  derives NOTHING: there is exactly one place in the system that decides
+  workspace-scoped seat authority (`derive/1` / `admin?/1`, both spelling the
+  seat through `Tenancy.Auth.seat_capabilities/3`), and this function's whole
+  job is to keep render sites from growing a SECOND one.
+
+  WHY IT EXISTS RATHER THAN `@caps.admin` INLINE. `schema_action` and
+  `bulk-publish` / `bulk-unpublish` are `:admin`-tier in `classify/1`, so the
+  gate refuses them for a write-tier member — but the editor rendered their
+  buttons to everyone, advertising a door already decided against
+  (task-ea341f86571c5981). The fix threads THIS answer to the two components as
+  an `admin?` attr. A role or tier comparison written at the button would
+  re-derive authorization at the render site, which is how duplicate predicates
+  accumulate.
+
+  HIDDEN IS NOT DENIED. This is cosmetic honesty layered ON TOP of the
+  server-side halt in `gate/3`, never a replacement for it: a forged
+  `schema_action` from a write-tier member is still halted by the gate whatever
+  this returns.
+
+  Fails CLOSED: a missing/false/non-boolean `:admin`, or a non-map, is `false`.
+  """
+  @spec admin_affordance?(any()) :: boolean
+  def admin_affordance?(caps) when is_map(caps), do: Map.get(caps, :admin) == true
+  def admin_affordance?(_), do: false
+
+  @doc """
   THE `:write` TIER, AND THE ONLY COPY OF IT. Takes an assigns MAP plus an
   already-derived caps map, so both enforcement points read one rule:
 
@@ -708,6 +755,116 @@ defmodule BarkparkWeb.Studio.Caps do
       restricted?(assigns) -> false
       has_principal?(assigns) -> false
       true -> true
+    end
+  end
+
+  @doc """
+  THE PER-TARGET NARROWING, AND THE ONLY COPY OF IT — is this write of
+  `type`/`doc_id`, on this desk, outside EVERY grant in `grants`?
+
+  The TARGET-aware companion to `write_capable?/2`: that predicate answers the
+  TIER ("may this socket write at all"), this one answers the LEAF ("may it
+  write THIS doc"). Every hook-invisible write seam must ask both.
+
+  Two surfaces ask it, and they ask THIS copy:
+
+    * `Shared.Paper.grant_target_denied?/3` — the paper pane's `handle_info`
+      doors (`paper_pane_op/2`, `do_autosave/2`, the lifecycle save arm);
+    * `Shared.sheet_grant_target_denied?/1` — the SheetGrid component route,
+      which a `phx-target`ed event reaches without ever passing `gate/3`.
+
+  Previously each surface RESTATED the ladder over `Access.validate/3` (pds-w41
+  bolted a second copy on because the first was `defp` here-not-there). Two
+  copies of an authorization ladder is exactly the drift this moduledoc warns
+  about everywhere else, so the ladder was hoisted here whole:
+  `grant_graded?/1`, the containment walk, and the broad→narrow target
+  derivation.
+
+  ## IT TAKES THE GRANT LIST; IT NEVER LOADS ONE
+
+  That is the ONE deliberate difference between the two surfaces, and it is
+  preserved by being pushed OUT of this function into its argument:
+
+    * the PAPER path runs in `handle_info` and passes a FRESH,
+      active-filtered load (`Access.list_active_grants_for_grantee/1`), so a
+      grant REVOKED mid-session stops admitting on the very next op;
+    * the SHEET path runs in RENDER, where a `Repo` round trip per parent
+      render is prohibited, and passes the grants CAPTURED in
+      `caller_context`. Expiry truth reaches that surface through
+      `write_capable_now?/1` instead; a revocation leaves its captured set
+      stale-WIDE for the render-time affordance, which costs a denied write at
+      the seam and never a persisted one.
+
+  A unified owner that CHOSE a load strategy would either put a query in render
+  or make the paper door stale. It chooses neither.
+
+  Inert (`false`, no walk) unless `grant_graded?/1`. FAIL-CLOSED on an
+  unresolvable target (no workspace / project / dataset / type / doc_id) for a
+  socket that IS grant-graded, matching `LiveScope.write_target/3`'s
+  `:error -> halt`.
+  """
+  # @canonical capability:studio-grant-write-target-gate aka:grant_target_denied?,sheet_grant_target_denied?,grant_admits_target?,grant_admits_sheet?,write_target_scope,sheet_write_target
+  @spec grant_target_denied?(map(), list(), term(), term()) :: boolean
+  def grant_target_denied?(assigns, grants, type, doc_id)
+      when is_map(assigns) and is_list(grants) do
+    grant_graded?(assigns) and not grant_admits_target?(assigns, grants, type, doc_id)
+  end
+
+  @doc """
+  The two assigns that mean "this socket's write descends from a GRANT":
+  `LiveScope.assign_grant_scope/2` sets `caller_context`, and
+  `attach_write_gate/2` sets `write_gate?`. The same pair `restricted?/1` reads,
+  named separately because the per-target arm must be INERT — not merely
+  false-by-luck — for a membership-derived socket.
+  """
+  @spec grant_graded?(map()) :: boolean
+  def grant_graded?(assigns) when is_map(assigns) do
+    not is_nil(Map.get(assigns, :caller_context)) or Map.get(assigns, :write_gate?) == true
+  end
+
+  @doc """
+  A doc's `{type, doc_id}` leaf, read TOTALLY.
+
+  A pane doc is a `%Content.Document{}` on the live path but a bare map in the
+  unit fixtures, so `doc.type` would raise a `KeyError` on a shape that has
+  always been legal at these callsites. A missing key yields `nil`, which
+  `grant_target_denied?/4` treats as an unresolvable target — fail-closed for a
+  grant-graded socket, inert for every other one.
+  """
+  @spec doc_leaf(term()) :: {term(), term()}
+  def doc_leaf(doc) when is_map(doc), do: {Map.get(doc, :type), Map.get(doc, :doc_id)}
+  def doc_leaf(_doc), do: {nil, nil}
+
+  # `Access.validate/3` — the SAME containment ladder `attach_write_gate/2`'s
+  # `write_target_permitted?/4` walks, so every route answers a target
+  # identically. Deliberately NOT `Access.admits_desk?/3`: that helper is
+  # desk-granular, and doc-granular escalation is the mechanism this closes.
+  defp grant_admits_target?(assigns, grants, type, doc_id) do
+    case write_target_scope(assigns, type, doc_id) do
+      %{} = target -> Enum.any?(grants, &(Access.validate(&1, :write, target) == :ok))
+      nil -> false
+    end
+  end
+
+  # The desk levels come from the MOUNT and the leaf levels from the DOC being
+  # written — the same broad→narrow ladder `LiveScope.write_target/3` feeds
+  # `Access.validate/3`, including its `Content.published_id/1` normalisation so
+  # a draft id is matched against the grant by its published identity.
+  defp write_target_scope(assigns, type, doc_id) do
+    ws = Map.get(assigns, :current_workspace)
+    proj = Map.get(assigns, :current_project)
+    dataset = Map.get(assigns, :dataset)
+
+    if is_map(ws) and is_binary(Map.get(ws, :id)) and is_map(proj) and
+         is_binary(Map.get(proj, :id)) and is_binary(dataset) and is_binary(type) and
+         is_binary(doc_id) do
+      %{
+        workspace_id: ws.id,
+        project_id: proj.id,
+        dataset: dataset,
+        type: type,
+        doc_id: Content.published_id(doc_id)
+      }
     end
   end
 

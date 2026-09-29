@@ -46,11 +46,14 @@ name: Deploy harnesses
 on:
   pull_request:
     # Mirrors the push list below, entry for entry, including the
-    # deploy_runner.ex entry and its @stage_names reasoning.
+    # deploy_runner.ex entry and its @stage_names reasoning, and the two
+    # internal/** entries and their handle_errors-predicate reasoning.
     paths:
       - "deploy/**"
       - ".github/workflows/deploy-harnesses.yml"
       - "api/lib/barkpark/sites/deploy_runner.ex"
+      - "internal/caddyfile/**"
+      - "internal/cli/setup/**"
   push:
     branches: [main]
     paths:
@@ -70,6 +73,44 @@ on:
       # api/test/barkpark/sites/deploy_runner_stage_names_test.exs, which rides
       # the required Elixir lane. This line just makes the shell half reachable.
       - "api/lib/barkpark/sites/deploy_runner.ex"
+      # THE PREDICATE MUST WATCH THE FILES IT GUARDS (task-34288e9bc37b6048,
+      # split from task-d06e8a2a42f1ed2f c5). `deploy/site-deploy.sh --self-test`
+      # — the "Site deploy engine self-test" step below — invokes
+      # `deploy/caddy-handle-errors-scope-check.sh`, a REPO-WIDE predicate over
+      # `git ls-files` that forbids a bare `handle_errors {` emission and a
+      # Content-Type-less maintenance `respond 503` ANYWHERE in the tree. With
+      # the list above it was the only gate on that predicate and it could never
+      # dispatch on a change under `internal/**` — which is where two of the
+      # four historical bare emitters live and still live today, now fixed:
+      # `internal/caddyfile/caddyfile.go:89` and
+      # `internal/cli/setup/assets/deploy.sh:456` both appear in the predicate's
+      # own SCOPED control output. A CLI-lane PR that re-introduced the bare
+      # form in either file was green BY CONSTRUCTION. A guard that does not
+      # watch the file it guards is the defect.
+      #
+      # WHY THESE TWO SUBTREES AND NOT `internal/**`. Broadening far enough to
+      # fire on everything is a loosening wearing a fix's clothes, so the added
+      # blast radius was MEASURED on origin/main rather than assumed
+      # (`git log origin/main --since=… -- <paths>`, 2026-09-18):
+      #
+      #   window   all merges   newly dispatched by THESE two entries   `internal/**`
+      #   30 days       3429      9  (0.26%, ~34 min of harness / month)      522 (15%)
+      #   90 days       8292     41  (0.49%)                                    —
+      #
+      # A `gh pr list -L 400` sample (PRs 18569..19248, the newest 400 merges —
+      # only ~1.5 days at this repo's current rate) shows 0 newly dispatched: all
+      # 2 PRs in it touching these subtrees ALSO touch `deploy/**` and already
+      # dispatched. The 30-day figure is the honest one and it is the number to
+      # revisit. `internal/**` whole would be a 58x wider net for the same two
+      # renderers — that is the set this deliberately is not.
+      #
+      # Same "belt-and-braces, not the fix" caveat as the entry above: this
+      # workflow is advisory and cannot block a merge (required set is
+      # "Elixir gate", "PR references an active task", "Cloud gate",
+      # "Console gate"). These two lines make the shell predicate REACHABLE on
+      # the PRs that can break it; they do not make it blocking.
+      - "internal/caddyfile/**"
+      - "internal/cli/setup/**"
   schedule:
     - cron: "20 3 * * *"
   workflow_dispatch:
@@ -159,7 +200,10 @@ jobs:
           # -- the firing control (task-6f18e71a351f8081 D): prove the step CAN red --
           ctl="$(mktemp -d)"
           trap 'rm -rf "$ctl"' EXIT
-          victim="$(ls deploy/*.sh | head -1)"
+          # The glob itself yields the first file; `ls … | head -1` puts a
+          # truncating reader in front of a producer under `set -euo pipefail`,
+          # which is the 141 shape this repo scans for.
+          for victim in deploy/*.sh; do break; done
           cp "$victim" "$ctl/planted.sh"
           # SC2034: assigned and never used. -S warning must catch this.
           printf '\nbp_planted_unused_variable="task-6f18e71a351f8081 D control"\n' >> "$ctl/planted.sh"
@@ -228,6 +272,79 @@ jobs:
         env:
           BARKPARK_SELFTEST_REQUIRE_E2E: "1"
         run: bash deploy/site-deploy-node.sh --self-test
+      # THE STRANGER'S FIRST RUN, offline half. site-spawner-first-run.sh walks
+      # DISCOVER -> CREATE -> DEPLOY -> VISIT -> UNDO from zero with no ssh and
+      # no fixture; --self-check drives all 15 of its typed reds against
+      # synthetic input, plus one REAL-CORPUS arm that greps every deploy/*.sh
+      # cleanup note for a Caddy marker the engine does not write (the
+      # documented manual recovery named `# barkpark-site:<slug>` for the whole
+      # of wave 8 while site-deploy.sh writes BARKPARK_SITE_ROUTE:<slug>, so a
+      # stranger following our own scripts grepped for a string nothing writes).
+      # That arm is the reason this step is registered rather than left to a
+      # human: it reds when ANY deploy script re-introduces the dead marker.
+      # Offline and ~0.1 s.
+      - name: Stranger first-run journey self-check
+        run: bash deploy/site-spawner-first-run.sh --self-check
+      # Its sibling's failure paths, which were NOT registered anywhere before
+      # this (found while writing the step above: the live proof ships a
+      # --self-check that drives ~60 judges and nothing in CI ran it, so its
+      # named reds were unexercised dead code between live walks). Offline and
+      # ~0.25 s.
+      - name: Site spawner live-proof judges self-check
+        run: bash deploy/site-spawner-live-proof.sh --self-check
+      # The SECOND runtime target's judges (task-5565bf10ac02be6d, 2026-09-12).
+      # site-spawner-node-live-proof.sh proves the Node/SSR deploy path — six
+      # stages to a live systemd slot, true per-request SSR, warm-standby
+      # rollback, fail-closed HEALTH — and its header (line 28) advertises
+      # `--self-check # offline; proves every red fires`. Nothing in CI ran it:
+      # 40 named reds sat as unexercised dead code between human live walks,
+      # exactly the hole the live-proof step above was written to close for the
+      # STATIC engine. Offline (no bp, no cloud session, no network) and ~0.11 s
+      # measured locally; the run ends in `SELF-CHECK PASSED — every named red
+      # fires` and exits non-zero the moment a judge stops firing.
+      - name: Site spawner Node live-proof judges self-check
+        run: bash deploy/site-spawner-node-live-proof.sh --self-check
+      # The auto-update capstone's judges, same bargain and same gap
+      # (task-5565bf10ac02be6d, 2026-09-12). site-spawner-autorebuild-proof.sh
+      # proves a PUBLISH re-deploys the site with NO manual `bp cloud site
+      # deploy` — including AUTOREBUILD_MANUAL_LEAKED, the judge whose whole job
+      # is to refuse the vacuous green where the harness deploys by hand and
+      # calls it automatic — plus the burst-coalescing ceiling. Its LIVE half
+      # needs a cloud session and a real box and is NOT registered here (a CI arm
+      # for it could only be a skip that prints green, the same reasoning the
+      # push-to-live note below records); its `--self-check` half is offline and
+      # ~0.11 s, drives all 26 judges with good AND bad input, and reds if any
+      # one of them stops firing.
+      - name: Site spawner auto-rebuild proof judges self-check
+        run: bash deploy/site-spawner-autorebuild-proof.sh --self-check
+      # THE FRESH-BOX PUSH-TO-LIVE ACCEPTANCE RUN, offline half
+      # (task jpf-bl-e2e-push-proof). site-push-live-proof.sh answers the one
+      # question none of the spawner proofs can: launch a box that did not
+      # exist, connect a repo, `git push` a sha, and is THAT sha live with zero
+      # manual steps — plus the watchdog rung (an unclaimable queued row must
+      # surface as deploy_stalled inside the 300 s horizon).
+      #
+      # Its LIVE half provisions a real Hetzner server and is deliberately NOT
+      # registered here: there is no provisioning Hetzner secret in this repo
+      # (the only one, HETZNER_DNS_TOKEN in renew-mail-cert.yml, is a DNS token
+      # that cannot create a server), so a CI arm for it could only ever be a
+      # skip that prints green. The live run is human-operated; its invocation
+      # and required env are at the top of the script.
+      #
+      # The three offline modes below are the same bargain the siblings above
+      # strike: --plan proves the rung list is printable and side-effect free,
+      # --self-check drives every judge with good AND bad input, and --negctl
+      # drives deliberately wrong fixtures through the REAL parsing path and
+      # asserts WHICH arm fired. --negctl caught a live defect on its first
+      # execution (a `grep -c … || printf 0` that made a clean run read as
+      # MANUAL_STEP_REQUIRED), which is the argument for registering all three
+      # rather than just the self-check. Offline, no credentials, ~0.3 s total.
+      - name: Push-to-live proof — plan (side-effect free)
+        run: bash deploy/site-push-live-proof.sh --plan
+      - name: Push-to-live proof — judges self-check
+        run: bash deploy/site-push-live-proof.sh --self-check
+      - name: Push-to-live proof — negative controls (fixture-driven)
+        run: bash deploy/site-push-live-proof.sh --negctl
       # Every timer-driven unit in deploy/systemd/ carries an OnFailure= handler,
       # that handler exists in-tree, and no scheduled service sets a Restart=
       # that would defer the failed state past it. Before task-0633ab45951a5780
@@ -247,6 +364,29 @@ jobs:
       # cannot mistake it for merge protection.
       - name: systemd OnFailure handler harness
         run: bash deploy/systemd-onfailure_test.sh
+
+      # task-f35c835bf18712c8. deploy/slot-memory-peaks.sh shipped in PR #18488
+      # with 35 offline checks and NO caller of any kind: `git grep -n
+      # slot-memory-peaks origin/main -- .github/` returned zero, and the only
+      # repo-wide hits outside the script were two deploy/README.md lines. The
+      # script's subject is a monotonic max() fold that persists per-slot swap
+      # peaks across a restart, so a census cannot silently lose a restarted
+      # slot; its restart-survival arm is mutation-proven (revert the fold and
+      # that arm reds) and four control arms stay quiet. A mutation-proven arm
+      # nothing executes cannot red when the fold is reverted, which is the
+      # exact failure it was written to catch.
+      #
+      # NO PATH ENTRY WAS NEEDED: `deploy/**` is already the first entry of both
+      # the pull_request and push lists above, so any edit to the script — the
+      # fold included — triggers this workflow and therefore this step. The
+      # check count is not pinned here on purpose; the harness prints its own
+      # ("35 checks, 0 failures") and asserts its README figure itself, so a
+      # number in this comment could only go stale.
+      #
+      # spec-authority: advisory-ok — same as the sibling steps above. This reds
+      # `Deploy harnesses`, which is not in the required set and cannot be.
+      - name: Slot memory peaks — monotonic max() fold self-test
+        run: bash deploy/slot-memory-peaks.sh --self-test
 
   git-2-34-fetch:
     # task-6f18e71a351f8081 B. The control-plane box is Ubuntu 22.04 with the
@@ -282,7 +422,11 @@ jobs:
             export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq >/dev/null && apt-get install -y -qq git ca-certificates >/dev/null
             git --version
-            git --version | grep -qE "git version 2\.34\." || { echo "::error::apt git on ubuntu:22.04 is no longer 2.34 — this probe no longer models the box; re-point it"; exit 1; }
+            # HERE-STRING, never `git --version | grep -q` — the same D37 shape
+            # this file spells out 200 lines below. `grep -q` exits on its first
+            # match, the producer takes SIGPIPE, and `bash -euo pipefail -c`
+            # turns the resulting 141 into a container failure.
+            grep -qE "git version 2\.34\." <<<"$(git --version)" || { echo "::error::apt git on ubuntu:22.04 is no longer 2.34 — this probe no longer models the box; re-point it"; exit 1; }
             git clone --quiet --depth 1 --branch main "$REPO_URL" /repo && cd /repo
             git -c core.hooksPath=/dev/null -c protocol.version=0 pull --ff-only origin main
             echo "pinned form (protocol.version=0): OK on $(git --version)"

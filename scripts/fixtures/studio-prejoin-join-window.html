@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>studio pre-join window fixture</title>
+<!--
+  THE PRE-JOIN WINDOW, MADE DETERMINISTIC (task-c2dd40c6f433a787).
+
+  Everything here is the SHIPPED code except the transport. `phoenix.js` and
+  `phoenix_live_view.js` are the repo's own vendored bundles, loaded from
+  api/priv/static/assets; the LiveSocket is constructed the way root.html.heex
+  constructs it; the pre-join queue under test is EXTRACTED from
+  root.html.heex at run time into #bp-injected-queue by
+  scripts/studio-prejoin-queue-control.mjs — nothing is hand-copied.
+
+  WHAT IS FAKE, AND WHY THAT IS THE POINT. `FakeWS` is a WebSocket that speaks
+  just enough of the Phoenix v2 protocol to answer `phx_join` and `event`, and
+  it answers them AFTER A DELAY THIS FIXTURE OWNS (window.__joinDelayMs,
+  window.__replyDelayMs). That turns the two windows the live desk shows at
+  193ms and 400ms into a parameter, so a test can assert the armed state
+  instead of racing it. `data-phx-ref-src` is never set by hand anywhere in
+  this file: when it appears it was stamped by LiveView's own `putRef`.
+-->
+<style>#bp-press-answer:empty { display: none; }</style>
+</head>
+<body>
+  <div id="bp-press-answer" class="bp-press-answer" role="status" aria-live="polite"></div>
+  <div id="studio-panes" class="pane-layout">
+    <div id="phx-ROOT" data-phx-main data-phx-session="FIXTURE-SESSION" data-phx-static="" data-phx-root-id="phx-ROOT">
+      <button id="item-paper" class="pane-item" phx-click="select" phx-value-id="paper">Papers</button>
+    </div>
+  </div>
+
+  <script src="../../api/priv/static/assets/phoenix.js"></script>
+  <script src="../../api/priv/static/assets/phoenix_live_view.js"></script>
+
+  <script>
+  // The wire recorder. A press is SENT only if a `"type":"click"` frame leaves
+  // here; everything else in this fixture is commentary on that one number.
+  window.__frames = [];
+  window.__joinedAt = null;
+  window.__t0 = performance.now();
+  window.__joinDelayMs = window.__joinDelayMs || 400;
+  window.__replyDelayMs = window.__replyDelayMs || 600;
+  (function () {
+    function FakeWS(url) {
+      this.url = url; this.readyState = 0; this.binaryType = "arraybuffer";
+      var self = this;
+      setTimeout(function () { self.readyState = 1; self.onopen && self.onopen({}); }, 0);
+    }
+    FakeWS.prototype.send = function (data) {
+      var msg = JSON.parse(data);
+      var joinRef = msg[0], ref = msg[1], topic = msg[2], event = msg[3], payload = msg[4];
+      window.__frames.push({
+        t: Math.round(performance.now() - window.__t0),
+        topic: topic, event: event,
+        type: payload && payload.type, name: payload && payload.event
+      });
+      var self = this;
+      function reply(resp, delay) {
+        setTimeout(function () {
+          self.onmessage && self.onmessage({ data: JSON.stringify(
+            [joinRef, ref, topic, "phx_reply", { status: "ok", response: resp }]) });
+        }, delay);
+      }
+      if (event === "phx_join" && topic.indexOf("lv:") === 0) {
+        reply({ rendered: { s: ['<button id="item-paper" class="pane-item" phx-click="select" phx-value-id="paper">Papers</button>'] } },
+              window.__joinDelayMs);
+        setTimeout(function () { window.__joinedAt = Math.round(performance.now() - window.__t0); }, window.__joinDelayMs);
+      } else if (event === "event") {
+        reply({ diff: {} }, window.__replyDelayMs);
+      } else {
+        reply({}, 0);
+      }
+    };
+    FakeWS.prototype.close = function () { this.readyState = 3; this.onclose && this.onclose({}); };
+    window.__FakeWS = FakeWS;
+  })();
+  </script>
+
+  <!-- the pre-join queue, extracted from root.html.heex at the ref under test -->
+  <script id="bp-injected-queue"></script>
+
+  <script>
+  window.__ls = new LiveView.LiveSocket("/live", Phoenix.Socket, {
+    transport: window.__FakeWS,
+    params: { _csrf_token: "fixture" }
+  });
+  window.__ls.connect();
+  </script>
+</body>
+</html>

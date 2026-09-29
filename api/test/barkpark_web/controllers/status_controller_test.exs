@@ -29,6 +29,32 @@ defmodule BarkparkWeb.StatusControllerTest do
     assert is_integer(body["uptime_seconds"])
   end
 
+  test "GET /status.json carries the codelists component, and a detail when one is degraded",
+       %{conn: conn} do
+    body = conn |> get("/status.json") |> json_response(200)
+
+    names = Enum.map(body["components"], & &1["name"])
+    assert "codelists" in names
+
+    # The seed signal is only worth publishing if it survives JSON: a degraded
+    # component whose payload is the word "degraded" tells an operator nothing,
+    # so `detail` must ride through and NAME the list. Rendered from the same
+    # component shape `Status.health/0` builds.
+    degraded = %{
+      component: :codelists,
+      status: :degraded,
+      detail: "codelist onixedit:thema is empty or stale: registered at issue 1.6 with 0 values"
+    }
+
+    rendered = BarkparkWeb.StatusController.component_json(degraded)
+
+    assert rendered.detail =~ "codelist onixedit:thema is empty or stale"
+
+    # And an operational probe with nothing to say does NOT invent a detail key.
+    clean = %{component: :database, status: :operational, detail: nil}
+    refute Map.has_key?(BarkparkWeb.StatusController.component_json(clean), :detail)
+  end
+
   test "GET /status.json publishes the running commit sha to an ANONYMOUS caller", %{conn: conn} do
     # No bearer, no session — this is the unattended owner's uptime monitor.
     body = scoped_conn() |> get("/status.json") |> json_response(200)
@@ -57,6 +83,84 @@ defmodule BarkparkWeb.StatusControllerTest do
     # And the key is always present in the payload, whatever the value.
     body = scoped_conn() |> get("/status.json") |> json_response(200)
     assert is_binary(body["commit"]) and body["commit"] != ""
+  end
+
+  describe "inventory: enabled capabilities + migration state (task-fe88bf2ed4df476d)" do
+    defp applied_versions do
+      %{rows: rows} = Barkpark.Repo.query!("SELECT version FROM schema_migrations")
+      Enum.map(rows, fn [v] -> v end)
+    end
+
+    test "an anonymous caller gets the enabled-plugin COUNT, never the names" do
+      plugins = Barkpark.Plugins.Registry.all()
+      # Precondition: with zero plugins registered the name check below is vacuous.
+      assert plugins != []
+
+      resp = scoped_conn() |> get("/status.json")
+      body = json_response(resp, 200)
+
+      assert body["capabilities"] == %{
+               "plugins_enabled" => length(plugins),
+               "inventory" => "/v1/plugins"
+             }
+
+      # The disclosure decision: no plugin NAME appears anywhere in the raw
+      # public body — not in `capabilities`, not in any other key.
+      raw = resp.resp_body
+
+      for %{name: name} <- plugins do
+        refute raw =~ ~s("#{name}"), "anonymous /status.json leaked plugin name #{name}"
+      end
+
+      # And the route the payload points at still refuses an anonymous caller.
+      assert scoped_conn() |> get("/v1/plugins") |> json_response(401)
+    end
+
+    test "reports the latest APPLIED migration version and a pending count of 0" do
+      applied = applied_versions()
+      assert applied != []
+
+      body = scoped_conn() |> get("/status.json") |> json_response(200)
+
+      assert body["migrations"] == %{"latest_applied" => Enum.max(applied), "pending" => 0}
+
+      assert Enum.find(body["components"], &(&1["name"] == "migrations"))["status"] ==
+               "operational"
+    end
+
+    test "a migration on disk but not applied is PENDING, and the component says so" do
+      # Staged inside this test's sandbox transaction (rolled back after): drop
+      # the newest applied row, so its on-disk file reads `:down` to the SAME
+      # Ecto.Migrator read /status.json takes.
+      applied = applied_versions() |> Enum.sort(:desc)
+      [newest, previous | _] = applied
+
+      Barkpark.Repo.query!("DELETE FROM schema_migrations WHERE version = $1", [newest])
+
+      body = scoped_conn() |> get("/status.json") |> json_response(200)
+
+      assert body["migrations"] == %{"latest_applied" => previous, "pending" => 1}
+      assert Enum.find(body["components"], &(&1["name"] == "migrations"))["status"] == "degraded"
+      refute body["status"] == "operational"
+    end
+
+    test "applied version comes from the DB, not files; a probe that raises is UNKNOWN, not 0" do
+      # A directory that does not exist has no migrations on disk: every applied
+      # row is `:up` with no file, and nothing is pending.
+      dir =
+        Path.join(System.tmp_dir!(), "bp-status-empty-#{System.unique_integer([:positive])}")
+
+      assert Barkpark.Status.migration_state([dir]) == %{
+               latest_applied: Enum.max(applied_versions()),
+               pending: 0
+             }
+
+      # A probe that raises must not read as "nothing pending".
+      assert Barkpark.Status.migration_state([:not_a_path]) == %{
+               latest_applied: nil,
+               pending: nil
+             }
+    end
   end
 
   test "GET /status renders a public HTML page", %{conn: conn} do

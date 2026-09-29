@@ -83,13 +83,13 @@
     </p>
 
     <details data-token-signin>
-      <summary>Sign in with an API token instead</summary>
+      <summary><%= gettext("Sign in with an API token instead") %></summary>
 
       <.form :let={_f} for={%{}} as={:session} action={~p"/login"} method="post">
         <input type="hidden" name="return_to" value={@return_to} />
 
         <div class="form-group">
-          <label class="form-label" for="session_token">API token</label>
+          <label class="form-label" for="session_token"><%= gettext("API token") %></label>
           <input
             type="password"
             name="token"
@@ -97,11 +97,11 @@
             class="form-input"
             autocomplete="off"
             required
-            placeholder="paste token"
+            placeholder={gettext("paste token")}
           />
         </div>
 
-        <button type="submit" class="bp-auth-btn bp-auth-btn-quiet">Sign in with token</button>
+        <button type="submit" class="bp-auth-btn bp-auth-btn-quiet"><%= gettext("Sign in with token") %></button>
       </.form>
     </details>
 

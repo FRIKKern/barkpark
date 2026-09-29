@@ -137,7 +137,16 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
   defp writer_conn(conn) do
     raw = "eol-writer-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "eol writer", @dataset, ["read", "write"])
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "eol writer",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     as_token(conn, raw)
   end
 
@@ -285,6 +294,97 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
     assert assigns_of(resumed).paper_rev == persisted_rev + 1
   end
 
+  test "a committed insertion whose reply and echo were lost replays once, then editing continues and View opens",
+       %{conn: conn, slug: slug} do
+    writer = writer_conn(conn)
+    {:ok, first, _html} = live(writer, "/papers/#{slug}")
+    render_click(first, "paper-toggle-edit", %{})
+    original_rev = assigns_of(first).paper_rev
+    request_id = Ecto.UUID.generate()
+
+    committed_payload = %{
+      "request_id" => request_id,
+      "if_rev" => original_rev,
+      "container_kind" => "document",
+      "container_run_ids" => ["b-head", "b-body", "b-extra"],
+      "ops" => [
+        %{
+          "op" => "append-block",
+          "block" => %{
+            "id" => "lost-reply-table",
+            "type" => "table",
+            "head" => [[], []],
+            "rows" => [[[], []]]
+          }
+        }
+      ]
+    }
+
+    # The write commits; the browser never reads this reply, its leases, or the
+    # echo, because the socket drops before they arrive.
+    render_hook(first, "paper-ops", committed_payload)
+    committed_rev = original_rev + 1
+    assert assigns_of(first).paper_rev == committed_rev
+    committed_blocks = stored_blocks(slug)
+    assert Enum.count(committed_blocks, &(&1["id"] == "lost-reply-table")) == 1
+
+    # A fresh LiveView process: the browser held no lease, only a pending batch.
+    reconnect = %{
+      "paper_editing_key" => "#{@dataset}:paper:#{slug}",
+      "paper_canvas_lease_key" => "#{@dataset}:paper:#{slug}",
+      "paper_canvas_leases" => [],
+      "paper_canvas_lease_pending" => true
+    }
+
+    {:ok, resumed, html} = live(put_connect_params(writer, reconnect), "/papers/#{slug}")
+    assert assigns_of(resumed).editing?
+    assert assigns_of(resumed).paper_canvas_resume_status == :pending
+    assert html =~ ~s(data-paper-canvas-resume-state="pending")
+
+    # The exact retry (stale if_rev included) replays the original receipt.
+    render_hook(resumed, "paper-ops", committed_payload)
+
+    assert_reply(resumed, %{
+      saved: true,
+      request_id: ^request_id,
+      replayed: true,
+      rev: ^committed_rev
+    })
+
+    assert stored_blocks(slug) == committed_blocks
+    assert assigns_of(resumed).paper_rev == committed_rev
+    assert assigns_of(resumed).paper_canvas_resume_status == :resumed
+    refute render(resumed) =~ ~s(data-paper-canvas-resume-halt="true")
+
+    # Editing typed while offline follows as its own batch on the replayed rev.
+    continued_id = Ecto.UUID.generate()
+
+    render_hook(resumed, "paper-ops", %{
+      "request_id" => continued_id,
+      "if_rev" => committed_rev,
+      "ops" => [
+        %{
+          "op" => "patch-block",
+          "id" => "b-body",
+          "patch" => %{"content" => [%{"type" => "text", "value" => "Typed after disconnect"}]}
+        }
+      ]
+    })
+
+    assert_reply(resumed, %{saved: true, request_id: ^continued_id, replayed: false})
+    assert assigns_of(resumed).paper_rev == committed_rev + 1
+    after_edit = stored_blocks(slug)
+    assert Enum.count(after_edit, &(&1["id"] == "lost-reply-table")) == 1
+
+    assert [%{"content" => [%{"value" => "Typed after disconnect"}]}] =
+             Enum.filter(after_edit, &(&1["id"] == "b-body"))
+
+    # Back to View on the same process: no remount, no refresh.
+    render_click(resumed, "paper-toggle-edit", %{})
+    refute assigns_of(resumed).editing?
+    assert Process.alive?(resumed.pid)
+  end
+
   describe "criterion 2 — anonymous: no editor markup, every edit event refused" do
     test "the anonymous render carries neither the toggle nor the editor", %{
       conn: conn,
@@ -356,28 +456,71 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert block_text(slug, "b-body") == "Original body text"
     end
 
-    test "the reader's OWN events keep working — the gate is not a blanket paper-* block",
+    test "the reader's socket-local events keep working — the gate is not a blanket paper-* block",
+         %{conn: conn, slug: slug} do
+      {:ok, view, _html} = live(conn, "/papers/#{slug}")
+
+      render_hook(view, "rail-select", %{"event-id" => "some-event"})
+      assert assigns_of(view).selected_event_id == "some-event"
+      refute flash_of(view)["error"]
+
+      render_hook(view, "close-diff", %{})
+      assert assigns_of(view).diff_open == false
+      refute flash_of(view)["error"]
+    end
+
+    # Ruling arpss-bulldocs-anon-paper-event-write-ruling (2026-09-10):
+    # `paper-action` used to run on THIS anonymous socket (it acked the click
+    # and wrote a paper_events row). It no longer does. It is still not an
+    # @edit_events member — the second, weaker gate catches it, with its own
+    # copy — which is exactly why the two arms are asserted separately.
+    test "paper-action is refused on an anonymous socket, with the anon copy",
          %{conn: conn, slug: slug} do
       {:ok, view, _html} = live(conn, "/papers/#{slug}")
 
       render_hook(view, "paper-action", %{"action" => "grill"})
 
-      # The handler ran (it acks the click inline); the gate never saw it.
+      assert assigns_of(view).last_action == nil
+      assert flash_of(view)["error"] == Edit.anon_denial()
+      refute flash_of(view)["error"] == Edit.denial()
+      assert Process.alive?(view.pid)
+    end
+
+    # The weaker gate, proved weaker: a READ-only token cannot edit, but it is
+    # a principal, so the reader's own control runs for it.
+    test "paper-action runs for a read-only token — a principal, not a writer",
+         %{conn: conn, slug: slug} do
+      raw = "eol-action-reader-#{System.unique_integer([:positive])}"
+
+      {:ok, _token} =
+        Auth.create_token(
+          raw,
+          "eol action reader",
+          @dataset,
+          ["read"]
+        )
+
+      {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
+
+      assert assigns_of(view).can_edit? == false
+      render_hook(view, "paper-action", %{"action" => "grill"})
+
       assert assigns_of(view).last_action == "grill"
       refute flash_of(view)["error"]
-
-      render_hook(view, "rail-select", %{"event-id" => "some-event"})
-      assert assigns_of(view).selected_event_id == "some-event"
-
-      render_hook(view, "close-diff", %{})
-      assert assigns_of(view).diff_open == false
     end
   end
 
   describe "criterion 2 — a read-only token is identified but refused identically" do
     test "no toggle, and every MVP event is refused", %{conn: conn, slug: slug} do
       raw = "eol-reader-#{System.unique_integer([:positive])}"
-      {:ok, _token} = Auth.create_token(raw, "eol reader", @dataset, ["read"])
+
+      {:ok, _token} =
+        Auth.create_token(
+          raw,
+          "eol reader",
+          @dataset,
+          ["read"]
+        )
 
       {:ok, view, html} = live(as_token(conn, raw), "/papers/#{slug}")
 
@@ -402,7 +545,15 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       slug: slug
     } do
       raw = "eol-reader-field-#{System.unique_integer([:positive])}"
-      {:ok, _token} = Auth.create_token(raw, "eol field reader", @dataset, ["read"])
+
+      {:ok, _token} =
+        Auth.create_token(
+          raw,
+          "eol field reader",
+          @dataset,
+          ["read"]
+        )
+
       {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
       before = stored_blocks(slug)
 
@@ -760,6 +911,51 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert reload_html =~ ~s(data-test-id="paper-canvas-run")
     end
 
+    test "an already connected anonymous reader keeps every block through repeated batch edits",
+         %{
+           conn: conn,
+           slug: slug
+         } do
+      {:ok, editor, _html} = live(writer_conn(conn), "/papers/#{slug}")
+      {:ok, reader, reader_html} = live(scoped_conn(), "/papers/#{slug}")
+      reader_pid = reader.pid
+
+      assert reader_html =~ "Original body text"
+      assert reader_html =~ "Spare block"
+      assert reader_html =~ "Edit on the link probe"
+      assert assigns_of(reader).can_edit? == false
+
+      render_click(editor, "paper-toggle-edit", %{})
+
+      for {body, extra} <- [
+            {"First batch body", "First batch extra"},
+            {"Second batch body", "Second batch extra"}
+          ] do
+        render_hook(editor, "paper-ops", %{
+          "request_id" => Ecto.UUID.generate(),
+          "if_rev" => assigns_of(editor).paper_rev,
+          "ops" => [
+            %{
+              "op" => "patch-block",
+              "id" => "b-body",
+              "patch" => %{"content" => [%{"type" => "text", "value" => body}]}
+            },
+            %{
+              "op" => "patch-block",
+              "id" => "b-extra",
+              "patch" => %{"content" => [%{"type" => "text", "value" => extra}]}
+            }
+          ]
+        })
+
+        assert block_text(slug, "b-body") == body
+        assert block_text(slug, "b-extra") == extra
+        assert eventually_renders(reader, body) =~ extra
+        assert reader.pid == reader_pid
+        assert render(reader) =~ "Edit on the link probe"
+      end
+    end
+
     test "paper-ops invalid payloads reject a prior successful save without mutating", %{
       conn: conn,
       slug: slug
@@ -895,7 +1091,16 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       slug: slug
     } do
       raw = "eol-replay-writer-#{System.unique_integer([:positive])}"
-      {:ok, token} = Auth.create_token(raw, "eol replay writer", @dataset, ["read", "write"])
+
+      {:ok, token} =
+        Auth.create_token(
+          raw,
+          "eol replay writer",
+          @dataset,
+          ["read", "write"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
+
       {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
       render_click(view, "paper-toggle-edit", %{})
 
@@ -959,7 +1164,16 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       slug: slug
     } do
       raw = "eol-structural-replay-#{System.unique_integer([:positive])}"
-      {:ok, token} = Auth.create_token(raw, "eol structural replay", @dataset, ["read", "write"])
+
+      {:ok, token} =
+        Auth.create_token(
+          raw,
+          "eol structural replay",
+          @dataset,
+          ["read", "write"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
+
       {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
       render_click(view, "paper-toggle-edit", %{})
 

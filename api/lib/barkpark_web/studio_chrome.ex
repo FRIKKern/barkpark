@@ -39,7 +39,7 @@ defmodule BarkparkWeb.StudioChrome do
       security boundary).
     * `instance_admin?` — HOST-LEVEL, deliberately NOT workspace-scoped.
       The self-update banner's oracle (see below).
-    * `nav_section` / `current_path` / `create_open` / `api_token` —
+    * `current_path` / `create_open` / `api_token` —
       nil-safe defaults so the layout never KeyErrors on a surface that
       doesn't care.
 
@@ -118,6 +118,10 @@ defmodule BarkparkWeb.StudioChrome do
 
   @studio_live BarkparkWeb.Studio.StudioLive
 
+  # `open_scope/2`'s single answer to every failed dataset pick — see the note
+  # above that function for why it is ONE sentence (no existence oracle).
+  @scope_open_refusal "Could not open that scope — it does not exist, or you do not have access to it"
+
   # Events StudioLive handles itself — the hook only intercepts them on
   # surfaces that would otherwise crash (no handler defined).
   @per_view_events ~w(switch-workspace switch-project switch-dataset shares-open
@@ -164,7 +168,6 @@ defmodule BarkparkWeb.StudioChrome do
           instance_admin?(s.assigns[:api_token], s.assigns[:current_user])
         )
       end)
-      |> assign_new(:nav_section, fn -> nil end)
       |> assign_new(:current_path, fn -> nil end)
       |> assign_new(:create_open, fn -> nil end)
       |> assign_new(:scope_menu, fn -> nil end)
@@ -405,6 +408,33 @@ defmodule BarkparkWeb.StudioChrome do
   # level is re-resolved and re-gated server-side — membership for the
   # workspace, containment for project and dataset — so forged
   # phx-value-* can never re-scope across the tenant boundary.
+  #
+  # ONE REFUSAL SENTENCE FOR EVERY FAILURE, ON PURPOSE (task-e6e0fd116d810b69).
+  # The `else` arm below covers five outcomes — workspace not found, workspace
+  # NOT REACHABLE (the authorization refusal), project not found, dataset blank,
+  # dataset not in the project — and the bodyless clause after it covers a
+  # press missing a key. All of them answer `@scope_open_refusal`, and that is
+  # a ruling, not an oversight waiting to be "fixed" by splitting the arm:
+  #
+  #   * Not-found and refused MUST read the same. `"ws"` is a client-supplied
+  #     slug, so a distinct "you cannot reach that workspace" would tell any
+  #     signed-in principal that a slug it guessed EXISTS — an existence
+  #     oracle that walks the tenant list one forged press at a time. This is
+  #     the reasoning `Handlers.Shares.target_workspace_admits?/2` records for
+  #     collapsing its unresolvable and foreign arms into one `false`.
+  #   * The three arms AFTER `can_reach?/2` leak nothing (only a principal who
+  #     reaches the workspace gets there, and the menu already lists its
+  #     projects and datasets), so they COULD have their own words. They do not,
+  #     because from a real click they share one cause — the menu went stale
+  #     under you (renamed, deleted, membership revoked) — and one remedy:
+  #     reopen it. Separate sentences would buy nothing and would leave a split
+  #     arm next to the one that must never split.
+  #
+  # The sentence names both possibilities and never says which one it was. It
+  # used to say nothing at all: the menu closed and the user was left guessing
+  # (the press-answer region stopped saying "Done." in #19933; the reason is
+  # the server's to give). Pinned by studio_chrome_open_scope_refusal_test.exs,
+  # which reds if any arm goes quiet or answers differently from the others.
   defp open_scope(socket, %{"ws" => ws_slug, "proj" => proj_slug, "ds" => ds}) do
     with %Tenancy.Workspace{} = ws <- Tenancy.get_workspace_by_slug(ws_slug),
          true <- can_reach?(socket, ws),
@@ -415,11 +445,17 @@ defmodule BarkparkWeb.StudioChrome do
       |> assign(:scope_menu, nil)
       |> push_navigate(to: scoped_root(socket, ws, project, ds))
     else
-      _ -> assign(socket, :scope_menu, nil)
+      _not_found_refused_or_stale -> refuse_scope_open(socket)
     end
   end
 
-  defp open_scope(socket, _params), do: assign(socket, :scope_menu, nil)
+  defp open_scope(socket, _params), do: refuse_scope_open(socket)
+
+  defp refuse_scope_open(socket) do
+    socket
+    |> assign(:scope_menu, nil)
+    |> put_flash(:error, @scope_open_refusal)
+  end
 
   # Keep the active workspace visible in the menu even when it isn't in the
   # membership list — the anonymous/dev session seeds `current_workspace`

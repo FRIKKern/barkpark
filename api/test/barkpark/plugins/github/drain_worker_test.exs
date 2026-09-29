@@ -33,6 +33,29 @@ defmodule Barkpark.Plugins.Github.DrainWorkerTest do
     end
   end
 
+  # Stop a test-local Agent from an `on_exit/1` callback without racing ExUnit's
+  # own teardown.
+  #
+  # Every Agent here is `start_link`ed FROM THE TEST PROCESS, so it is linked to
+  # a process that has already exited by the time on_exit callbacks run (they run
+  # in a separate process, afterwards). The previous shape —
+  # `if Process.alive?(a), do: Agent.stop(a)` — is a TOCTOU: `Process.alive?/1`
+  # can observe the Agent still up while its exit signal is in flight, and the
+  # Agent then dies before `Agent.stop/1` (i.e. `GenServer.stop/3`) reaches it:
+  #
+  #   ** (exit) exited in: GenServer.stop(#PID<...>, :normal, :infinity)
+  #       ** (EXIT) no process: the process is not alive ...
+  #
+  # which fails the test in teardown even though its body passed. Issuing the
+  # stop UNCONDITIONALLY and absorbing the exit removes the window rather than
+  # widening it: there is no budget to tune, and both reachable outcomes — we
+  # stopped it, or it was already gone — are the cleanup this callback wanted.
+  defp stop_agent(agent) do
+    Agent.stop(agent)
+  catch
+    :exit, _ -> :ok
+  end
+
   defp new_dataset, do: "ds-#{System.unique_integer([:positive])}"
 
   defp insert_event!(dataset, doc_id, source \\ "api", type \\ "task") do
@@ -245,7 +268,7 @@ defmodule Barkpark.Plugins.Github.DrainWorkerTest do
       ds = new_dataset()
       test_pid = self()
       {:ok, active} = Agent.start_link(fn -> false end)
-      on_exit(fn -> if Process.alive?(active), do: Agent.stop(active) end)
+      on_exit(fn -> stop_agent(active) end)
 
       # Boots DARK (whitelisted but uncredentialed): handle_continue must NOT seed
       # a cursor while inactive. `active_ttl_ms: 0` disables the active? memoize so
@@ -298,7 +321,7 @@ defmodule Barkpark.Plugins.Github.DrainWorkerTest do
       ds = new_dataset()
       test_pid = self()
       {:ok, counter} = Agent.start_link(fn -> 0 end)
-      on_exit(fn -> if Process.alive?(counter), do: Agent.stop(counter) end)
+      on_exit(fn -> stop_agent(counter) end)
 
       # Generous TTL (default 5 s) — every tick in this fast test lands inside it.
       pid =
@@ -325,7 +348,7 @@ defmodule Barkpark.Plugins.Github.DrainWorkerTest do
       ds = new_dataset()
       test_pid = self()
       {:ok, counter} = Agent.start_link(fn -> 0 end)
-      on_exit(fn -> if Process.alive?(counter), do: Agent.stop(counter) end)
+      on_exit(fn -> stop_agent(counter) end)
 
       pid =
         boot!(

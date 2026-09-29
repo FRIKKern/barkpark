@@ -97,6 +97,9 @@ defmodule BarkparkWeb.Plugs.Idempotency do
         is_nil(sent.status) ->
           safe_release(hash)
 
+        sent.state != :set ->
+          refuse_bodyless_send(hash, sent)
+
         sent.status < 500 ->
           body = IO.iodata_to_binary(sent.resp_body || "")
           headers = sent.resp_headers || []
@@ -108,6 +111,55 @@ defmodule BarkparkWeb.Plugs.Idempotency do
 
       sent
     end)
+  end
+
+  # THE `:set` ALLOWLIST — an idempotency receipt is only meaningful when the
+  # response body is a single term at before-send time.
+  #
+  # Plug runs `register_before_send/2` callbacks for FOUR distinct send shapes
+  # and stamps a DIFFERENT `conn.state` on each (`deps/plug/lib/plug/conn.ex`):
+  #
+  #   * `send_resp/3`       → `:set`         — `resp_body` is the body. CACHEABLE.
+  #   * `send_file/3..5`    → `:set_file`    — `resp_body` NIL'd first (:495)
+  #   * `send_chunked/2`    → `:set_chunked` — `resp_body` NIL'd first (:525)
+  #   * `upgrade_adapter/3` → `:set_upgrade` — status 101, no body (:1474)
+  #
+  # Under any of the last three the cache write below would store `""` against a
+  # live key and REPLAY AN EMPTY 200 for the whole lifetime of that key — the
+  # client's retry would receive a successful-looking empty response and never
+  # learn the mutation's real result.
+  #
+  # An ALLOWLIST on `:set`, not a denylist of the three: `:set_upgrade` did not
+  # exist in older Plug, and the next shape Plug adds would inherit the bug
+  # silently. `BarkparkWeb.Plugs.ResponseWarnings` fences its own before_send
+  # hook on exactly this predicate, for exactly this reason.
+  #
+  # NO SUCH ROUTE EXISTS TODAY: both Idempotency mounts are JSON mutate
+  # pipelines and every `send_chunked/2` in the tree is a GET/SSE action. This
+  # is a TRIPWIRE for the first streaming or file-sending mutate route: it
+  # releases the claim (so the key is never wedged), reports, and then RAISES —
+  # a loud 500 in test beats a silently poisoned key in prod. Idempotency is a
+  # safety guarantee; degrading it quietly on a mutating route is the worse
+  # outcome.
+  defp refuse_bodyless_send(hash, sent) do
+    safe_release(hash)
+
+    message =
+      "Idempotency refused to cache a #{inspect(sent.state)} response for #{hash}: " <>
+        "an Idempotency-Key request answered with send_chunked/send_file/upgrade has no " <>
+        "single response body, so caching it would replay an EMPTY #{sent.status} for the " <>
+        "lifetime of the key. The claim was released. Either do not mount " <>
+        "BarkparkWeb.Plugs.Idempotency on this route, or answer it with send_resp/3."
+
+    :telemetry.execute(
+      [:barkpark, :idempotency, :store_error],
+      %{count: 1},
+      %{key_hash: hash, reason: {:uncacheable_response_state, sent.state}}
+    )
+
+    Logger.error(message)
+
+    raise message
   end
 
   defp cache_response(hash, scope, status, body, headers) do

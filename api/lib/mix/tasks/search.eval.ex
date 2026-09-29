@@ -25,7 +25,17 @@ defmodule Mix.Tasks.Search.Eval do
 
   @impl Mix.Task
   def run(args) do
-    Mix.Task.run("app.start")
+    # Narrowed boot (task-e2c484370ef8fb51), not `app.start`: a full boot binds
+    # the LIVE slot's port when `PHX_SERVER` is set and puts up a second Oban
+    # on the live queues. MEASURED: `GoldenEval.run/3` is
+    # `Content.search_documents/3` / `Media.search_files/2` — Repo reads —
+    # and the search-intelligence event write behind them goes through
+    # `Barkpark.TaskSupervisor`, which `:one_shot` keeps; nothing on the path
+    # calls `Oban.insert/1` or reads the endpoint. The dev corpus reports the
+    # identical metrics (4 queries, 3 failures, MRR 0.0) under both boots
+    # (see the PR body).
+    Mix.Task.run("app.config")
+    Barkpark.OneShot.boot!()
 
     {opts, _, _} = OptionParser.parse(args, strict: @switches)
     surface = opts[:surface] || "documents"

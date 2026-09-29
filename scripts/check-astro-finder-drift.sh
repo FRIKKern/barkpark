@@ -39,6 +39,10 @@ DST_BASE="templates/astro-search-starter/src/finder"
 #   lib/*       <- lib/*                            (at src/finder/lib/*)
 #   globals.css <- app/globals.css                 (at src/styles/globals.css)
 # tokens.gen.ts is one of the 13 lib modules (src/finder/lib/tokens.gen.ts).
+# search-limits.ts joined the closure with task-19107773e2c41c5d: it is the ONE
+# declaration of MAX_HITS both transports import, so the Astro copy drifting
+# from it would put a DIFFERENT working-set cap on the island than on the
+# search-starter source it was copied from -- silently, on the wire.
 MAPPINGS="
 $SRC_BASE/components/finder.tsx|$DST_BASE/finder.tsx
 $SRC_BASE/lib/find.ts|$DST_BASE/lib/find.ts
@@ -54,6 +58,7 @@ $SRC_BASE/lib/stem.ts|$DST_BASE/lib/stem.ts
 $SRC_BASE/lib/fuzzy.ts|$DST_BASE/lib/fuzzy.ts
 $SRC_BASE/lib/tokens.gen.ts|$DST_BASE/lib/tokens.gen.ts
 $SRC_BASE/lib/base-path.ts|$DST_BASE/lib/base-path.ts
+$SRC_BASE/lib/search-limits.ts|$DST_BASE/lib/search-limits.ts
 $SRC_BASE/app/globals.css|templates/astro-search-starter/src/styles/globals.css
 "
 
@@ -131,6 +136,32 @@ if [ "${1:-}" = "--selftest" ]; then
   n="$(run_checks "$tmp")"
   if [ "$n" -ne 2 ]; then
     echo "SELFTEST FAIL: mutation+deletion reported $n drift(s), expected 2"
+    exit 1
+  fi
+
+  # THE VERDICT WIRING (task-92a213f01ca30817). Every case above grades
+  # run_checks IN PROCESS; none executes the real-check tail that turns a
+  # non-empty DRIFT_REPORT into the process exit code, so flipping its
+  # `exit 1` to `exit 0` kept this selftest green. Same idiom as PR #13405 /
+  # #20180: RE-EXEC THE WHOLE PROGRAM on the fixture root and assert the
+  # PROCESS exit code. REPO_ROOT derives from the script's own location, so a
+  # copy at $tmp/scripts/ reads only the fixture -- no override is added.
+  mkdir -p "$tmp/scripts"
+  cp "$0" "$tmp/scripts/check-astro-finder-drift.sh"
+  set +e
+  bash "$tmp/scripts/check-astro-finder-drift.sh" >/dev/null 2>&1; rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "SELFTEST FAIL: E2E whole program on a drifted fixture exited $rc, expected 1"
+    exit 1
+  fi
+  cp "$tmp/$SRC_BASE/lib/find.ts" "$tmp/$DST_BASE/lib/find.ts"
+  cp "$tmp/$SRC_BASE/components/finder.tsx" "$tmp/$DST_BASE/finder.tsx"
+  set +e
+  bash "$tmp/scripts/check-astro-finder-drift.sh" >/dev/null 2>&1; rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: E2E whole program on a restored fixture exited $rc, expected 0"
     exit 1
   fi
 

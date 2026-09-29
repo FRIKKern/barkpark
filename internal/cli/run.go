@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -28,9 +29,13 @@ import (
 )
 
 // cliVersion is the binary's CLI version, surfaced by `barkpark version` and
-// used for the manifest's min_cli gate when present. Injected at release time
-// via -ldflags -X (see Makefile LDFLAGS); "dev" for plain `go build` builds,
-// which makes untagged binaries self-evident in bug reports.
+// compared against the manifest's advertised min_cli floor by minCLICheck
+// (min_cli_gate.go) — an ADVISORY report on `bp capabilities`, never a refusal.
+// This comment previously claimed a "min_cli gate"; there was none, at any call
+// site, which is exactly how an inert guard reads as a working one.
+// Injected at release time via -ldflags -X (see Makefile LDFLAGS); "dev" for
+// plain `go build` builds, which makes untagged binaries self-evident in bug
+// reports — and which minCLICheck treats as UNKNOWN, never as satisfied.
 var cliVersion = "dev"
 
 // cliCommit and cliDate are release-build provenance, injected alongside
@@ -81,6 +86,29 @@ type manifestRequest struct {
 type dispatchError struct {
 	msg       string
 	withUsage bool
+	// code overrides the envelope error code. Empty means "usage" — the code
+	// every build-stage failure carried before the manifest-drift refusal.
+	code string
+	// exit overrides the process exit code. Zero means exitUsage — what every
+	// build-stage failure returned before the refused-credential refusal, which
+	// is an auth failure (exitAuth) and must not be spelled as a typo.
+	exit int
+}
+
+// envelopeCode is the error code this failure renders under.
+func (e *dispatchError) envelopeCode() string {
+	if e.code != "" {
+		return e.code
+	}
+	return "usage"
+}
+
+// exitCode is the process exit status this failure returns.
+func (e *dispatchError) exitCode() int {
+	if e.exit != 0 {
+		return e.exit
+	}
+	return exitUsage
 }
 
 func (e *dispatchError) Error() string { return e.msg }
@@ -93,8 +121,16 @@ func (e *dispatchError) Error() string { return e.msg }
 // so it must run exactly once per invocation.
 func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string, ownsProcessStdin bool) (*manifestRequest, *dispatchError) {
 	// Split tail into positional args and command-local flags.
-	posArgs, cmdFlags, err := splitArgs(cmd, tail)
+	posArgs, cmdFlags, err := splitArgsWithManifest(m, cmd, tail)
 	if err != nil {
+		// A manifest/parser DRIFT refusal is not a typo: it names the stale
+		// install and the one command that fixes it, so the per-command usage
+		// dump (which would invite retyping the flag away) is suppressed and
+		// the envelope carries its own named code. See manifest_flag_drift.go.
+		var drift *flagDriftError
+		if errors.As(err, &drift) {
+			return nil, &dispatchError{msg: err.Error(), withUsage: false, code: manifestFlagDriftCode}
+		}
 		return nil, &dispatchError{msg: err.Error(), withUsage: true}
 	}
 
@@ -102,6 +138,14 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	argMap, err := bindArgs(cmd, posArgs)
 	if err != nil {
 		return nil, &dispatchError{msg: err.Error(), withUsage: true}
+	}
+
+	// A CONFIGURED credential the server has already refused is an error, not a
+	// licence to read anonymously (refused_credential.go). Checked before any
+	// I/O and before buildBody can consume stdin, so a refused invocation sends
+	// nothing and reads nothing.
+	if msg := refusedCredentialRefusal(g, ctx, m); msg != "" {
+		return nil, &dispatchError{msg: msg, withUsage: false, code: refusedCredentialCode, exit: exitAuth}
 	}
 
 	needsPerspectiveAuth := nonPublishedPerspectiveRequiresAuth(cmd, cmdFlags)
@@ -123,7 +167,7 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	// A stated -w/-p this command's URL can neither carry nor mirror is refused
 	// BEFORE any I/O — the alternative is a successful answer about the wrong
 	// workspace (scope_honesty.go).
-	if msg := refuseUnrepresentableScope(cmd, ctx); msg != "" {
+	if msg := refuseUnrepresentableScope(cmd, ctx, m.Commands); msg != "" {
 		return nil, &dispatchError{msg: msg, withUsage: true}
 	}
 
@@ -159,6 +203,23 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 
 	// Tier-appropriate credential.
 	headers := authHeaders(cmd, ctx)
+	// THE SESSION DISCRIMINATOR (task-f79e39f4992749a5). Rides EVERY manifest
+	// request, not only the claim: a pulse, a stamp and a close are the writes
+	// a woken predecessor of the same lane makes, and they were the ones the
+	// ledger could not attribute. The server HMACs this and stores the result
+	// on `claim.session`; it never stores the key itself. A caller with no key
+	// sends no header and the row stays byte-identical to a pre-session write.
+	if key := sessionKey(); key != "" {
+		headers[sessionHeader] = key
+	}
+	// THE SESSION-DOC POINTER (task-9002f2b301329f1f). A SEPARATE header from
+	// the secret key above and never a replacement for it: that one identifies
+	// the claim session, this one names the type:session DOCUMENT the server
+	// appends a task-closed / paper-published event to. Only the two doors the
+	// server arms carry it (session_doc_header.go says why).
+	if slug := sessionDocFor(g, ctx, cmd); slug != "" {
+		headers[sessionDocHeader] = slug
+	}
 	if needsPerspectiveAuth || needsDraftIDAuth {
 		// doc get/ls/query are public at their default published perspective,
 		// so their manifest tier must remain `none`. Drafts and raw are
@@ -332,6 +393,22 @@ func execManifestCommand(g globals, ctx manifest.Context, m *manifest.Manifest, 
 func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
 	out.resolveOutputForCommand(g, cmd.DefaultOutput)
 
+	// THE NON-EVALUATING PROSE DOOR, for every MANIFEST command that declares a
+	// `--description` or `--title` flag (prose_text_file.go). `--description-file
+	// <path>` / `--title-file <path>` are rewritten into the ordinary inline
+	// spelling here, before splitArgs — which would otherwise refuse them as
+	// unknown command-local flags, exactly like `--criterion-text-file` and
+	// `task ls --match`. Scoped by proseFileScopeForCommand to the fields the
+	// command actually declares, so a command with no `--title` does not grow a
+	// `--title-file`. The same pass screens an implausible INLINE payload.
+	if scope := proseFileScopeForCommand(cmd); scope != nil {
+		resolved, perr := resolveProseTextFiles(tail, scope, out.errf)
+		if perr != nil {
+			return useError(out, proseTextSourceCode, perr.Error(), exitValidation)
+		}
+		tail = resolved
+	}
+
 	// webhook test-send verdict-aware exit (task-60887badc1d2900f decision
 	// (a)): the ONE additive, opt-in flag this command understands that the
 	// manifest never declares, so it must be stripped out of tail before
@@ -351,6 +428,61 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	var discardDeleteUnpublished bool
 	if cmd.ID == discardDraftCommandID {
 		discardDeleteUnpublished, tail = extractDiscardDraftDeleteFlag(tail)
+	}
+
+	// `bp doc patch --edit-claimed-draft`: the FOURTH additive, opt-in flag the
+	// manifest never declares, stripped here for the same reason as the ones
+	// above — it must never reach splitArgs. See claimed_draft_patch_guard.go
+	// for what it opts into; the guard itself runs below, beside the other
+	// write gates.
+	var editClaimedDraft bool
+	if cmd.ID == docPatchCommandID {
+		editClaimedDraft, tail = extractClaimedDraftPatchFlag(tail)
+	}
+
+	// `bp doc restore-revision --restore-onto-claimed`: the FIFTH additive,
+	// opt-in flag the manifest never declares, stripped here for the same reason
+	// as the ones above — it must never reach splitArgs. See
+	// claimed_restore_revision_guard.go for what it opts into; the guard itself
+	// runs below, beside the other write gates.
+	var restoreOntoClaimed bool
+	if cmd.ID == docRestoreRevisionCommandID {
+		restoreOntoClaimed, tail = extractClaimedRestoreRevisionFlag(tail)
+	}
+
+	// `--write-claimed-draft`: the SIXTH additive, opt-in flag the manifest
+	// never declares, stripped here for the same reason as the ones above. It
+	// is the FIRST one that is not scoped to a single cmd.ID, because the gate
+	// it opts into is not scoped to one either: guardClaimedDraftMutation reads
+	// the RESOLVED REQUEST BODY, so every verb that lands draft bytes through
+	// POST /v1/data/mutate reaches it — including `doc mutate`, which declares
+	// no positional arguments at all. The strip is keyed on the same shape the
+	// gate is (a write command), and stands down for any command whose manifest
+	// already declares a flag of this name, so it can never shadow a real one.
+	// See claimed_draft_mutation_guard.go.
+	var writeClaimedDraft bool
+	if claimedDraftMutationFlagApplies(cmd) {
+		writeClaimedDraft, tail = extractClaimedDraftMutationFlag(tail)
+	}
+
+	// `--store-unread`: the additive, opt-in flag that lets a secret write land
+	// under a name nothing on the instance reads back (secret_unread_name_guard.go).
+	// Stripped here for the same reason as the ones above — the manifest never
+	// declares it, so splitArgs would refuse it.
+	var storeUnreadSecret bool
+	if storeUnreadSecretFlagApplies(cmd) {
+		storeUnreadSecret, tail = extractStoreUnreadSecretFlag(tail)
+	}
+
+	// `bp task stage --keep-rerun`: the SEVENTH additive, opt-in flag the
+	// manifest never declares, stripped here for the same reason as the ones
+	// above — it must never reach splitArgs. See tasks_stage_rerun_guard.go for
+	// what it opts into (superseding a disposition_reason while KEEPING the
+	// disposition_rerun already on the row); the guard itself runs below, beside
+	// the other write gates.
+	var stageKeepRerun bool
+	if stageKeepRerunFlagApplies(cmd) {
+		stageKeepRerun, tail = extractStageKeepRerunFlag(tail)
 	}
 
 	// `bp task ls --match <substring>`: the THIRD additive, opt-in flag the
@@ -424,14 +556,14 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 
 	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, true)
 	if derr != nil {
-		if !renderErrorEnvelope(out, "usage", derr.msg, "", "") {
+		if !renderErrorEnvelope(out, derr.envelopeCode(), derr.msg, "", "") {
 			out.userErr("%v", derr)
-			humanErrorCode(out, "usage")
+			humanErrorCode(out, derr.envelopeCode())
 			if derr.withUsage {
 				usageCommand(out, cmd)
 			}
 		}
-		return exitUsage
+		return derr.exitCode()
 	}
 
 	// --status rides the RESOLVED url, so it is visible to --dry-run, to the
@@ -450,6 +582,25 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		req.url = stamped
 	}
 
+	// `--keep-rerun` back ONTO the wire (task-4d5a2dde8a02d057). The strip above
+	// keeps it away from splitArgs, which would refuse an undeclared flag; but
+	// since PR #18817 the SERVER refuses this same shape too (409
+	// rerun_would_orphan) and honours `keep_rerun` as one of its three ways
+	// through. A stripped-and-never-forwarded flag sent a BARE supersede, so the
+	// one flag an operator reaches for to get past the refusal was the one flag
+	// that could not reach the door that honours it. Stamped on the RESOLVED
+	// body — see stampStageKeepRerun for why not the manifest and not tail — and
+	// before the dry-run branch, so `--dry-run` previews what the server reads.
+	if stageKeepRerun {
+		if err := stampStageKeepRerun(req); err != nil {
+			if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
+				out.userErr("%v", err)
+				humanErrorCode(out, "usage")
+			}
+			return exitUsage
+		}
+	}
+
 	// Non-fatal notices from the writer-less build half (today: an unused
 	// redirected stdin). stderr, never stdout, so -o json stays one parseable
 	// document; before the dry-run branch, because --dry-run is exactly where a
@@ -464,6 +615,15 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// avoid naming a remedy the caller already applied. Set before both the
 	// paginated walk and the single send, so every refusal path sees it.
 	out.credentialSent = req.headers["Authorization"] != ""
+
+	// The caller's explicit column projection, read off the RESOLVED url (the
+	// only place that knows whether `--fields` actually reached the server).
+	// The table renderer honours it so a named column renders as empty cells
+	// instead of vanishing when no row on the page carries a value; an
+	// inferred column is unaffected. Set here, with the writer in hand, rather
+	// than inside the writer-less buildManifestRequest, and before both the
+	// single send and the --all walk so every page renders the same columns.
+	out.requestedColumns = requestedColumnsFromURL(cmd, req.url)
 
 	// --dry-run: print the resolved request and exit 0 WITHOUT sending (A1).
 	if g.dryRun {
@@ -503,6 +663,71 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// while this one is only destructive for SOME documents. So it probes, and
 	// refuses only when it has to. Runs last, immediately before the send.
 	if code, refused := guardDiscardDraft(out, g, ctx, m, cmd, tail, discardDeleteUnpublished); refused {
+		return code
+	}
+
+	// Claim-wall pre-flight (claimed_draft_patch_guard.go): `bp doc patch task
+	// drafts.<id>` on a row whose PUBLISHED twin is claimed mints a draft the
+	// publish wall will refuse forever, and the receipt prints that doomed
+	// publish as the remedy. Gate it here, beside the other write gates and
+	// immediately before the send, so the refusal arrives BEFORE the unlandable
+	// write rather than one command later.
+	if code, refused := guardClaimedDraftPatch(out, g, ctx, m, cmd, tail, editClaimedDraft); refused {
+		return code
+	}
+
+	// Claim-wall pre-flight, SECOND DOOR (claimed_restore_revision_guard.go):
+	// `bp doc restore-revision <rev_id> task` reaches the SAME trap the gate
+	// above closes — it writes the same unpublishable twin and answers a bare
+	// `ok`. It asks the same claim question through the same probe; all it adds
+	// is one hop turning the revision id into the document id. Gated here,
+	// immediately before the send, so the refusal arrives BEFORE the write
+	// rather than one failed publish later.
+	if code, refused := guardClaimedRestoreRevision(out, g, ctx, m, cmd, tail, restoreOntoClaimed); refused {
+		return code
+	}
+
+	// Claim-wall pre-flight, THE CHOKE POINT (claimed_draft_mutation_guard.go).
+	// The two gates above are keyed on POSITIONAL ARGUMENTS, and four more doors
+	// reach the same trap — `doc create`, `doc create-or-replace`,
+	// `doc create-if-not-exists` and `doc mutate`, all reproduced live on
+	// guerrilla 2026-09-16. `doc mutate` declares no positionals at all: its
+	// whole payload is a `--file` batch that can carry every other door's op in
+	// one request, so no argument-keyed guard can ever see it.
+	//
+	// So this one is keyed on the RESOLVED REQUEST instead — `req`, the single
+	// object every dispatch passes through — and refuses when the mutation batch
+	// would land bytes on the `drafts.` twin of a CLAIMED task row. It asks the
+	// same claim question through the same probePublishedClaim, adds no second
+	// definition of "claimed", and covers a seventh verb on this route the day
+	// it ships. Runs LAST so each argument-keyed gate keeps its verb-specific
+	// wording, and is the backstop underneath both if a call site is ever
+	// dropped. Still before the send: the refusal arrives BEFORE the write.
+	if code, refused := guardClaimedDraftMutation(out, g, ctx, m, cmd, req, writeClaimedDraft || editClaimedDraft || restoreOntoClaimed); refused {
+		return code
+	}
+
+	// Unread-secret-name pre-flight (secret_unread_name_guard.go): a
+	// `PUT …/secrets/<name>` whose name the instance reads from its ENVIRONMENT
+	// stores an encrypted row nothing resolves — `bp secret set anthropic_api_key`
+	// returned 200 and left Studio chat titles and the task judge exactly as
+	// keyless as before (task-512394bf1706afde). Keyed on the resolved request,
+	// so `secret set` and `secret scoped-set` are one check. Refuses naming the
+	// env var, the env file and the slot restart, unless --store-unread was given.
+	if code, refused := guardUnreadSecretName(out, req, storeUnreadSecret); refused {
+		return code
+	}
+
+	// Orphaned-rerun pre-flight (tasks_stage_rerun_guard.go): `bp task stage
+	// --note <different> --supersede` on a row carrying a content.disposition_rerun
+	// replaces the reason and leaves the PROBE byte-identical, so the row then
+	// presents a green, symbol-specific check for a claim it no longer makes —
+	// 136 such rows measured across the ledger, 125 minted by this exact call
+	// shape (task-5509618e1868d9f2). None of the gates above can see it: they are
+	// keyed on drafts and claims, and this one is keyed on two OPTIONAL FLAGS
+	// that were never bound to each other. Gated here, immediately before the
+	// send, so the refusal arrives BEFORE the write rather than one audit later.
+	if code, refused := guardStageRerunOrphan(out, g, ctx, m, cmd, tail, stageKeepRerun); refused {
 		return code
 	}
 
@@ -561,6 +786,17 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 			return code
 		}
 		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
+		// A zero-row page under a filter is indistinguishable from a filter
+		// naming a field that does not exist; the probe establishes the
+		// denominator rather than letting the caller assume one
+		// (zero_row_denominator.go).
+		warnIfZeroRowsUnderFilter(out, cmd, req.url, respBody, func(bare string) ([]byte, bool) {
+			st, body, _, perr := doRequestCT("GET", bare, req.headers, nil)
+			if perr != nil || st < 200 || st >= 300 {
+				return nil, false
+			}
+			return body, true
+		})
 		emitMovementDoctrine(out, cmd)
 		emitHelpHints(out, respBody)
 		// The lease a claim/next/pulse just granted or renewed — one line
@@ -568,6 +804,27 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		// minutes. Silent on every envelope without a `lease` object, so no
 		// other verb's receipt changes (tasks_lease.go).
 		emitClaimLease(out, respBody)
+		// A row that left `in_progress` WITHOUT being closed keeps its claim,
+		// and until that lease lapses it is invisible to BOTH `bp task pulse`
+		// and `bp task ready`. Shape-keyed on the response document, so the
+		// `stage` that makes the state AND a later `task get` on it both say
+		// so; silent on every other shape (tasks_stranded_claim.go).
+		emitStrandedClaim(out, respBody)
+		// The COMPLEMENT of the stranded shape: the claim has lapsed or been
+		// released (claim.worker null, claim.epoch preserved) and the row is
+		// back in the ready queue, but criteria are still unmet. Nothing
+		// refuses such a row, so nothing else ever mentions the arrears
+		// (tasks_arrears_claim.go).
+		emitArrearsClaim(out, respBody)
+		// The row's `brief` is a MIRROR of `description` and
+		// `acceptance_criteria`; 1,761 terminal rows carry one that disagrees
+		// with the fields it mirrors, and the ruling on that residue was to
+		// LEAVE it. This says so at the reader instead. Keyed on the SINGLE
+		// document envelope, never on a list page, and tolerant of the
+		// server's legacy three-pass strip so it does not fire on
+		// task-8ba550b59141bccb for the wrong reason
+		// (tasks_brief_mirror_warn.go).
+		emitBriefMirrorWarning(out, respBody)
 		// A ruling the row ALREADY carries (content.disposition_reason), shouted
 		// at claim time so a dispatcher cannot miss it. Verb-keyed (claim/next),
 		// stderr in every output mode, silent on a row with no ruling
@@ -587,6 +844,13 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		// and folds in #15851's fork advisory codes. stderr in every output
 		// shape, so `-o json` stays byte-identical (mutate_perspective.go).
 		emitMutatePerspective(out, cmd, respBody)
+		// A publish receipt is `rev: <n>` and nothing else, and a rev is minted
+		// by whichever server received the transaction — so the receipt reads
+		// identically whether the write landed on the server the author meant
+		// or on the one their active context happened to point at. This names
+		// the target, derived from the request URL that was actually sent.
+		// stderr in every output shape (publish_target_receipt.go, BP-ONB-18).
+		emitPublishTarget(out, cmd, req.url, status)
 	}
 	// `bp task get <id>` earns a better not_found than the noun-wide hint: the
 	// generic one names `bp task ls`, whose remedy costs the whole ledger. The
@@ -609,11 +873,62 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		out.errf("bp: %s", note)
 	}
 
+	// WHICH END the `task events` page came from. A bare `--limit` on the
+	// id-ASC keyset feed returns the OLDEST N events of the whole backlog, so a
+	// search for something recent answers zero — and a zero here is
+	// indistinguishable from a genuine absence. Fires only when --since was left
+	// at its default AND the server says has_more, i.e. only when the window
+	// really did sit at the start of history with newer events behind it.
+	// stderr only, so `-o json` stays byte-identical (tasks_events_window.go).
+	if note := taskEventsWindowAdvisory(cmd, req.url, status, respBody); note != "" {
+		out.errf("bp: %s", note)
+	}
+
+	// An unscoped index page WITHHOLDS every doc_id that lives in two datasets
+	// and the client used to discard the server's own list of what it withheld
+	// (`page.dataset_ambiguous`). Measured 2026-09-16: `bp task ls --all` served
+	// 9424 rows with all eleven live twins absent and nothing said. Silent on
+	// every envelope carrying no withheld set, so a single-dataset ledger renders
+	// byte-identically (dataset_ambiguous.go). The --all walk emits its own copy
+	// of this from inside paginatedAllWalk, where the stitch happens.
+	warnIfDatasetTwinsWithheld(out, unwrapResult(respBody))
+
+	// The claim lives at a DIFFERENT path per read verb and the wrong one never
+	// errors: `.doc.claim` is correct for `task get` and absent from every flat
+	// `ls`/`ready`/`prime` row, so a get-shaped reader answers UNCLAIMED on 30
+	// of 30 live claims and a reconciliation sweep steals them. One stderr line,
+	// only on a page that actually carries a live claim, never on stdout — so
+	// `-o json` stays byte-identical (tasks_claim_path.go).
+	emitTaskClaimPathAdvisory(out, cmd, status, out.machineOut(), respBody)
+	// task-46e82dc40c385ed2: the do-not-build half of the same page. Unlike the
+	// claim advisory above it fires in BOTH human and machine mode — its reader
+	// is a lead skimming the table, not a jq script — and writes only to stderr.
+	emitTaskDispatchAdvisory(out, cmd, status, respBody)
+
 	var hinter func() string
 	if typed := taskGetTypedID(cmd, tail); typed != "" {
 		hinter = func() string { return taskGetNotFoundHint(out, m, ctx, typed) }
 	}
 	code := handleResponseHinted(out, m, cmd, status, respBody, hinter)
+
+	// `bp doc get` reads the PUBLISHED perspective, so a draft-only id 404s with
+	// a server hint that says the resource does not exist — the one sentence that
+	// is false here. One probe on the drafts lens, paid only on this command's
+	// 404 with no explicit --perspective, turns that into a statement about which
+	// lens answered. stderr only, after the render, so the exit code and every
+	// byte of `-o json` stay unchanged (doc_get_draft_perspective.go).
+	emitDocGetDraftPerspective(out, g, ctx, m, cmd, tail, status)
+
+	// A claimed row's draft twin can never be published, and the refusal that
+	// says so prescribes `patch, then publish` — the one path the twin has
+	// already closed, so the two refusals point at each other. The wall is
+	// correct and stays; the SENTENCE is api/'s (lifecycle.ex, tracked as
+	// task-922e616cb9b99243). This adds the sequence that actually lands, read
+	// from the body the dispatch already holds — no probe — and keyed on the
+	// broken remedy phrase so it goes silent the day api/ stops printing it.
+	// stderr only, after the render, so the exit code and every byte of
+	// `-o json` stay unchanged (stale_draft_publish_remedy.go).
+	emitStaleDraftPublishRemedy(out, cmd, tail, status, respBody)
 
 	// The flag only ever overrides the HONEST success path (code == exitOK,
 	// meaning handleResponse's 2xx branch rendered it, not a screen's own
@@ -1264,11 +1579,78 @@ func warnIfDefaultPageMayBeTruncated(out *writer, g globals, cmd manifest.Comman
 	if g.limitSet {
 		limit, explicit = g.limit, true
 	}
+	body := unwrapResult(respBody)
+
+	// A LIMIT OF 0 USED TO RETURN HERE, BEFORE has_more WAS EVER READ. A
+	// paginated command that declares no `--limit` default and is called
+	// without one had no threshold to compare against, so the guard gave up —
+	// discarding the one field that needs no threshold at all. The check now
+	// falls through to the has_more backstop below instead of returning.
 	if limit <= 0 {
+		warnIfServerPromisesMoreRows(out, body)
 		return
 	}
-	rows, _ := extractListRows(unwrapResult(respBody))
+
+	// A SERVER-CLAMPED --limit FALLS THROUGH THE ROW-COUNT TEST BELOW, because
+	// a clamp makes the page SHORTER than what was asked. `--limit 2000`
+	// against the /v1/tasks cap of 1000 returns 1000 rows, and `1000 < 2000`
+	// reads as "the page did not fill, so there is nothing more" — the exact
+	// inference the cap invalidates. So asking for MORE bought LESS warning,
+	// and the remedy this function itself recommends ("raise --limit") was the
+	// action that silenced it. Measured on c42fde07c against guerrilla:
+	// `bp task ls --limit 1000` warned, `--limit 2000` printed nothing at all
+	// while the envelope said has_more:true, next_offset:1000.
+	//
+	// The row count cannot see a clamp; the ENVELOPE can. `page.limit` is the
+	// EFFECTIVE limit after clamping (api tasks_controller/params.ex page_meta
+	// documents it as "the number the caller asked for is not the number they
+	// got, and this field is about what they got"), so `page.limit < --limit`
+	// IS the clamp, stated by the only party that knows the cap. Reported here
+	// rather than guessed, because the cap differs per route (1000 tasks, 500
+	// events, 200 deployments, 50 related) and a client-side table of caps
+	// would be a copy that drifts.
+	//
+	// has_more DECIDES WHICH TRUTH IS TOLD. A clamp is not by itself
+	// incompleteness: if the population is smaller than the cap the page is
+	// genuinely whole, and saying "more may be available" there would be the
+	// same defect pointing the other way — an instrument that cries truncation
+	// at every read is as useless as one that never does. So the reduction is
+	// always named, and the continuation is promised only when the server
+	// promises it.
+	if explicit {
+		if served, ok := pageEffectiveLimit(body); ok && served < limit {
+			if pageHasMore(body) {
+				out.userErr("your --limit of %d was reduced to %d by the server's cap; more rows remain beyond this page — page with --offset or re-run with --all", limit, served)
+			} else {
+				out.userErr("your --limit of %d was reduced to %d by the server's cap; this page is complete (the server reports no further rows), but a larger page is not available", limit, served)
+			}
+			return
+		}
+	}
+
+	rows, _ := extractListRows(body)
 	if len(rows) < limit {
+		// A SHORT PAGE USED TO BE TREATED AS PROOF OF COMPLETENESS, and it is
+		// not. Every branch above reasons about ROW ARITHMETIC — did the page
+		// fill, was the limit clamped — and row arithmetic is a client-side
+		// INFERENCE about a server-side fact. `page.has_more` is that fact,
+		// stated by the only party that ran the query. The guard reached it in
+		// exactly one place (explicit limit AND a readable clamp), so every
+		// other way a page can come back short while more rows remain fell
+		// through in silence: a route that bounds a page by response BYTES
+		// rather than rows (GET /v1/data/query stops at 64MB), a server whose
+		// own default is lower than the manifest's declared default, a filter
+		// applied after the limit, or simply an envelope that omits
+		// `page.limit` so pageEffectiveLimit answers !ok.
+		//
+		// The asymmetry is the whole point of the row this fixes: a caller who
+		// gets a short page concludes "that is the population". Nothing else
+		// in the response contradicts them, and the resulting count is
+		// internally consistent and wrong. So has_more is consulted LAST and
+		// UNCONDITIONALLY — it only ever adds a warning, never removes one,
+		// which is why it cannot make any complete page noisy (a complete page
+		// reports has_more:false, and a missing block reads false too).
+		warnIfServerPromisesMoreRows(out, body)
 		return
 	}
 
@@ -1277,6 +1659,107 @@ func warnIfDefaultPageMayBeTruncated(out *writer, g globals, cmd manifest.Comman
 		return
 	}
 	out.userErr("result page reached the default limit of %d; more may be available — re-run with --all", limit)
+}
+
+// warnIfServerPromisesMoreRows is the backstop for every page that looks
+// complete by row count but is not. It speaks only when the server itself
+// promises further rows, so it is silent on a genuinely whole page and on any
+// envelope that carries no page block at all.
+//
+// The notice rides stderr for the same reason the others do: `-o json` stdout
+// must stay parseable. The MACHINE-readable half of this contract is the
+// server's own envelope, which the CLI passes through untouched — a script
+// reading `-o json` tests `.page.has_more` (tasks) or `.hasMore` (search, doc
+// query) and gets the same fact this line states in prose.
+func warnIfServerPromisesMoreRows(out *writer, body []byte) {
+	if !pageHasMore(body) {
+		return
+	}
+	out.userErr("this page did not fill, but the server reports more rows beyond it (page.has_more is true) — a short page is NOT the whole population here; page with --offset or re-run with --all")
+}
+
+// pageEffectiveLimit reads the limit the server ACTUALLY applied, after its own
+// clamp, from a list envelope. The second return is false when the envelope
+// carries no readable limit, which is the honest "this route told me nothing"
+// and must never be confused with a limit of 0: every caller treats !ok as "no
+// clamp evidence" and falls back to the row-count heuristic rather than
+// inventing a reduction.
+//
+// TWO SPELLINGS, SAME FACT — the same split pageHasMore was fixed for. The task
+// routes nest it (`page.limit`, snake_case); GET /v1/data/query and the search
+// route echo it at the TOP level (`limit`, alongside `hasMore`/`nextOffset`/
+// `count` — query_controller.ex clamps to [1,1000] and documents the echo as
+// existing precisely so a paginator can read back what was applied). Reading
+// only the nested spelling left the doc-query and search envelopes answering
+// !ok, which is the hole warnIfDefaultPageMayBeTruncated's own comment names.
+// The nested block wins when both are present; it is the more specific shape.
+func pageEffectiveLimit(payload []byte) (int, bool) {
+	var env struct {
+		Page *struct {
+			Limit *int `json:"limit"`
+		} `json:"page"`
+		Limit *int `json:"limit"`
+	}
+	if json.Unmarshal(payload, &env) != nil {
+		return 0, false
+	}
+	if env.Page != nil && env.Page.Limit != nil {
+		return *env.Page.Limit, true
+	}
+	if env.Limit != nil {
+		return *env.Limit, true
+	}
+	return 0, false
+}
+
+// pageHasMore reports the server's own `page.has_more`. A missing block or a
+// missing field reads false: this value only ever ADDS a promise of more rows,
+// so the absent case must be the one that promises nothing.
+// THE ENVELOPE HAS TWO SHAPES AND ONLY ONE WAS READ. The task routes nest the
+// page block (`page.has_more`, snake_case); GET /v1/data/query and the search
+// route state the same fact at the TOP LEVEL in camelCase (`hasMore`,
+// alongside `nextOffset` and `count`). Reading only the nested spelling meant
+// the two surfaces whose pages are bounded by response BYTES — precisely the
+// ones that can return short while more rows remain — were the two this
+// function always answered false for. Both spellings are read; either one
+// saying true is the server promising more rows.
+func pageHasMore(payload []byte) bool {
+	more, stated := pageHasMoreStated(payload)
+	return stated && more
+}
+
+// pageHasMoreStated is pageHasMore's three-valued form, for the callers that
+// must tell "the server says there is nothing more" apart from "the server said
+// nothing at all". A WARNING can collapse those two — an absent field must
+// promise nothing, so pageHasMore folds absent into false. A LOOP TERMINATION
+// cannot: a pager that reads an absent field as "drained" stops on the first
+// envelope that omits it, and a pager that reads it as "continue" never stops.
+// The second return is whether either spelling was present at all.
+func pageHasMoreStated(payload []byte) (more bool, stated bool) {
+	var env struct {
+		Page *struct {
+			HasMore *bool `json:"has_more"`
+		} `json:"page"`
+		HasMore *bool `json:"hasMore"`
+	}
+	if json.Unmarshal(payload, &env) != nil {
+		return false, false
+	}
+	if env.Page != nil && env.Page.HasMore != nil {
+		if *env.Page.HasMore {
+			return true, true
+		}
+		// The nested block stated false; a top-level true still wins, matching
+		// pageHasMore's "either one saying true is the server promising more".
+		if env.HasMore != nil && *env.HasMore {
+			return true, true
+		}
+		return false, true
+	}
+	if env.HasMore != nil {
+		return *env.HasMore, true
+	}
+	return false, false
 }
 
 func defaultPageLimit(cmd manifest.Command) int {
@@ -1306,7 +1789,20 @@ func authHeaders(cmd manifest.Command, ctx manifest.Context) map[string]string {
 	h := map[string]string{}
 	switch cmd.AuthTier {
 	case "none":
-		// Public, unauthenticated. Send nothing.
+		// Public — the command needs no credential, which is NOT the same as
+		// "must not carry one" (task-621bcf889e730f4c). Withholding a bearer
+		// the caller configured is what let BARKPARK_TOKEN=not-a-real-token
+		// read the whole task type at rc=0: the headerless GET
+		// /v1/data/query/production/task is a legitimate anonymous request, and
+		// the server answered it as one. The SAME read carrying the garbage
+		// bearer is a 401. So a public tier sends the bearer whenever one is
+		// configured; an OptionalToken read ignores a credential it does not
+		// need, and a refused one now fails loudly instead of being laundered
+		// into an anonymous 200. A caller with no token still sends no header,
+		// which is the public floor itself and is unchanged.
+		if ctx.Token != "" {
+			h["Authorization"] = "Bearer " + ctx.Token
+		}
 	case "read", "write", "admin", "scoped_admin":
 		if ctx.Token != "" {
 			h["Authorization"] = "Bearer " + ctx.Token
@@ -1332,17 +1828,42 @@ func authHeaders(cmd manifest.Command, ctx manifest.Context) map[string]string {
 }
 
 // ingestSecret resolves the shared ingest secret for an `auth_tier: ingest`
-// command. It reads BARKPARK_INGEST_TOKEN first, then the legacy
-// PAPERFLOW_INGEST_TOKEN env var the server still honours. As a last
-// resort it falls back to the resolved bearer token — best-effort only, for the
-// single-secret dev setup where both happen to be the same value. The server's
-// RequireIngestToken plug compares this against :ingest_token.
+// command. For an operator-local invocation it reads BARKPARK_INGEST_TOKEN
+// first, then the legacy PAPERFLOW_INGEST_TOKEN env var the server still
+// honours, and finally falls back to the resolved bearer token — best-effort,
+// for the single-secret dev setup where both happen to be the same value. The
+// server's RequireIngestToken plug compares whatever comes back against
+// :ingest_token.
+//
+// THE ENV LOOKUP IS GATED ON ctx.AmbientCredentialsOK, AND THAT GATE IS THE
+// SECURITY BOUNDARY. `ingest` is the only tier whose credential does not come
+// from ctx.Token, so it is the only tier that reaches around a per-request token
+// seam: `bp mcp serve --http` scrubs the process bearer and installs the
+// caller's own (newMCPHTTPHandler, mcp_serve.go), but an ingest-tier bridge tool
+// used to skip straight past that to os.Getenv and sign a remote, credential-
+// less caller's request with the SERVING PROCESS'S ingest secret. Measured
+// before the gate: a POST carrying no Authorization header at all reached the
+// downstream ingest route as `Bearer <the process's BARKPARK_INGEST_TOKEN>` and
+// the write was performed. That is a confused deputy — the env var authorises
+// whoever can reach the socket rather than whoever proved anything.
+//
+// The remedy is REQUEST-SCOPED, not advisory: with AmbientCredentialsOK false
+// the environment is never consulted and the only credential available is the
+// one the request itself carried (ctx.Token, i.e. its Authorization bearer). A
+// caller that legitimately holds the ingest secret presents it and is served
+// unchanged; a caller that holds nothing gets no header and the server's
+// RequireIngestToken plug refuses it. Deployment guidance ("do not set that var
+// in the unit file") was rejected as the boundary for the obvious reason: it is
+// not enforced by anything, and the next unit file, shell, or supervisor that
+// exports it silently re-opens the hole.
 func ingestSecret(ctx manifest.Context) string {
-	if s := os.Getenv("BARKPARK_INGEST_TOKEN"); s != "" {
-		return s
-	}
-	if s := os.Getenv("PAPERFLOW_INGEST_TOKEN"); s != "" {
-		return s
+	if ctx.AmbientCredentialsOK {
+		if s := os.Getenv("BARKPARK_INGEST_TOKEN"); s != "" {
+			return s
+		}
+		if s := os.Getenv("PAPERFLOW_INGEST_TOKEN"); s != "" {
+			return s
+		}
 	}
 	return ctx.Token
 }
@@ -1398,6 +1919,15 @@ func flagShaped(tok string, byName map[string]manifest.Flag) bool {
 // --filter: the rule is general and every non-repeatable flag on every command
 // is covered by it.
 func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[string][]string, err error) {
+	return splitArgsWithManifest(nil, cmd, tail)
+}
+
+// splitArgsWithManifest is splitArgs with the loaded manifest in hand. The
+// manifest is used for ONE thing: deciding whether an unknown flag is a stale
+// binary (drift) or a cross-reference to a flag some OTHER command declares —
+// see unknownFlagError. Every other parsing rule is identical, so the nil-
+// manifest wrapper above is behaviour-preserving for callers that have none.
+func splitArgsWithManifest(m *manifest.Manifest, cmd manifest.Command, tail []string) (pos []string, flags map[string][]string, err error) {
 	flags = map[string][]string{}
 	byName := map[string]manifest.Flag{}
 	for _, f := range cmd.Flags {
@@ -1420,7 +1950,7 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 			}
 			f, ok := byName[name]
 			if !ok {
-				return nil, nil, fmt.Errorf("unknown flag --%s for %s %s", name, cmd.Noun, cmd.Verb)
+				return nil, nil, unknownFlagError(m, cmd, "--"+name, name)
 			}
 			if f.Type == "bool" {
 				// `--force=false` must not silently set the flag true: an inline
@@ -1457,11 +1987,11 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 		if len(a) == 2 && a[0] == '-' && a != "-" {
 			long, aliased := shortFlagAliases[a]
 			if !aliased {
-				return nil, nil, fmt.Errorf("unknown flag %s for %s %s", a, cmd.Noun, cmd.Verb)
+				return nil, nil, unknownFlagError(m, cmd, a, "")
 			}
 			f, ok := byName[long]
 			if !ok {
-				return nil, nil, fmt.Errorf("unknown flag %s for %s %s", a, cmd.Noun, cmd.Verb)
+				return nil, nil, unknownFlagError(m, cmd, a, long)
 			}
 			if f.Type == "bool" {
 				if err := refuseRepeatedFlag(cmd, f, flags[long], "true"); err != nil {
@@ -1712,7 +2242,26 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 // contract and what it replaced). Headless dispatchers (MCP stdio and HTTP) do
 // not own process stdin: it may be a protocol transport, so they neither
 // inspect nor consume it, and `--file -` is refused outright.
+//
+// The assembled body then passes checkParkPayloadCeiling before it is handed
+// back — see park_ceiling.go for why that guard is a wrapper and not another
+// branch inside the assembly below.
 func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string, args map[string]string, ownsProcessStdin bool) (body []byte, stream io.Reader, contentType string, err error) {
+	body, stream, contentType, err = assembleBody(cmd, flags, args, ownsProcessStdin)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if err := checkParkPayloadCeiling(cmd, body); err != nil {
+		return nil, nil, "", err
+	}
+	return body, stream, contentType, nil
+}
+
+// assembleBody is the body assembly itself: --file/stdin, declared body args,
+// --set merges and the mutation wrapper. It has several return sites, which is
+// exactly why the ceiling check sits in the wrapper above rather than being
+// repeated at each of them.
+func assembleBody(cmd manifest.Command, flags map[string][]string, args map[string]string, ownsProcessStdin bool) (body []byte, stream io.Reader, contentType string, err error) {
 	if !cmd.Writes {
 		return nil, nil, "", nil
 	}
@@ -1732,7 +2281,7 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 	// An unused redirected stdin no longer aborts anything here — the notice is
 	// unusedStdinNotice's job and rides out on manifestRequest.warnings. See
 	// that function for the contract and why the refusal was the wrong shape.
-	var obj map[string]any
+	var fileObj map[string]any
 	if files, ok := flags["file"]; ok && len(files) > 0 {
 		path := files[len(files)-1]
 		if path == "-" && !ownsProcessStdin {
@@ -1751,30 +2300,61 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 		// verbatim. But when the command has body-membership flags set (e.g.
 		// bulldocs.patch --if-rev), the file is the base object those flags merge
 		// into — parse it so the guard joins the payload instead of being dropped.
-		if cmd.MutationOp == "" && !commandHasSetBodyFlags(cmd, flags) {
+		//
+		// A declared BODY-location arg that the caller actually supplied is the
+		// third reason to parse rather than ship verbatim. `bp bulldocs publish
+		// <slug> --file paper.json` posts to /v1/plugins/bulldocs/papers, whose
+		// path carries no :slug, so `slug` is a BODY arg — and shipping the file
+		// verbatim dropped it on the floor. The server then read the slug out of
+		// the file alone: a file with no slug answered "slug plus either blocks
+		// (list), body_html (string), or bpml (string) are required" on a command
+		// that had just been GIVEN one, and a file carrying a DIFFERENT slug
+		// published the paper under the file's slug with a receipt that never
+		// named it (BP-ONB-17). Parsing here routes the arg through the
+		// body-arg seeding loop below, where the user-given value lands.
+		if cmd.MutationOp == "" && !commandHasSetBodyFlags(cmd, flags) && !commandHasSuppliedBodyArgs(cmd, args) {
 			return raw, nil, "application/json", nil
 		}
 		bodyKind := "mutation body"
 		if cmd.MutationOp == "" {
 			bodyKind = "--file body"
 		}
-		if err := json.Unmarshal(raw, &obj); err != nil {
+		if err := json.Unmarshal(raw, &fileObj); err != nil {
 			return nil, nil, "", fmt.Errorf("read --file %q: %s must be a JSON object: %w", path, bodyKind, err)
 		}
-		if obj == nil {
+		if fileObj == nil {
 			return nil, nil, "", fmt.Errorf("read --file %q: %s must be a JSON object", path, bodyKind)
 		}
 	}
 
 	// Seed the body object from declared body-location args, then merge --set.
-	if obj == nil {
-		obj = map[string]any{}
+	//
+	// The --file object is the base ONLY where --set itself merges flat. A
+	// SetKey command nests its fields one level down (doc.patch: {patch: {id,
+	// type, set: {…}}}), and a --file object dropped at THIS level would land
+	// its fields as SIBLINGS of `set` inside the mutation wrapper — a body the
+	// writer does not read as field changes, with `set` left empty. See the
+	// setTarget assignment below, where a SetKey command's file object goes
+	// instead, and TestSetKeyFileBodyLandsUnderSetKey which pins both halves.
+	obj := map[string]any{}
+	if cmd.SetKey == "" && fileObj != nil {
+		obj = fileObj
 	}
 	for _, a := range cmd.Args {
 		if cmd.ArgLocation(a) != "body" {
 			continue
 		}
 		if v, ok := args[a.Name]; ok && v != "" {
+			// The typed arg wins over the same key in --file. That precedence is
+			// not new — TestBuildBodyDocCreateFileMergeAndDryRun has pinned it
+			// for `doc create <type>` since the flag was built (a file saying
+			// "type":"wrong" loses to the positional). What was missing is that
+			// the file-verbatim shortcut above returned before this loop ever
+			// ran, so on `bulldocs publish` the typed value did not merely lose
+			// a tie — it never reached the wire at all. The honesty half is the
+			// RECEIPT: renderMinimal names the slug the write landed on, so a
+			// file-vs-argument disagreement is visible in the output rather than
+			// settled in silence.
 			obj[a.Name] = v
 		}
 	}
@@ -1787,7 +2367,18 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 			// whose `criterion-text` needs the snake_case spelling the server
 			// reads. Routed through one helper so the exception cannot be
 			// applied in one call site and forgotten in another.
-			obj[stampBodyKey2(cmd, f.Name)] = values[len(values)-1]
+			key := stampBodyKey2(cmd, f.Name)
+			if f.Repeatable {
+				// A REPEATABLE body flag is a list, so it ships as a JSON array —
+				// EVEN AT LENGTH ONE. Last-wins here would send `"files": "a"` for
+				// a single `--files a`, and a server that types the field as a list
+				// refuses a bare string; the caller would then see a flag that works
+				// at two paths and 400s at one. The whole slice is copied so the
+				// body cannot alias the parsed flag map.
+				obj[key] = append([]string{}, values...)
+				continue
+			}
+			obj[key] = values[len(values)-1]
 		}
 	}
 	// --set fields target: nested under SetKey (e.g. patch's `set`) or, by
@@ -1795,6 +2386,12 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 	setTarget := obj
 	if cmd.SetKey != "" {
 		setTarget = map[string]any{}
+		if fileObj != nil {
+			// --file on a SetKey command IS the set payload: the whole point of
+			// the flag is a body too large for a command line, and on a patch
+			// that body is the fields to change. --set keys merge on top of it.
+			setTarget = fileObj
+		}
 	}
 	// Keys a `--set key:=null` retired: on a patch they ride the mutation's
 	// `unset` list instead of storing a null (see below).
@@ -1831,6 +2428,9 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 					unsetKeys = append(unsetKeys, key)
 					continue
 				}
+				if err := checkSetKeyIndexing(kv, key); err != nil {
+					return nil, nil, "", err
+				}
 				if err := checkSetKeyNesting(kv, key); err != nil {
 					return nil, nil, "", err
 				}
@@ -1855,6 +2455,9 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 				return nil, nil, "", fmt.Errorf("invalid --set %q (want key=value, or key:=json for typed values)", kv)
 			}
 			key := kv[:eq]
+			if err := checkSetKeyIndexing(kv, key); err != nil {
+				return nil, nil, "", err
+			}
 			if err := checkSetKeyNesting(kv, key); err != nil {
 				return nil, nil, "", err
 			}
@@ -1927,6 +2530,50 @@ func setNestingError(kv, key, example string) error {
 		kv, key, example)
 }
 
+// checkSetKeyIndexing refuses a --set key carrying a bracket segment —
+// `acceptance_criteria[5]`, `blocks[0].text`, anything shaped `name[…]`.
+//
+// task ve-bl-stamp-flatkey-bug: a row once carried two top-level content keys
+// literally named `acceptance_criteria[5].evidence` and
+// `acceptance_criteria[5].met` while the real acceptance_criteria array was
+// untouched. The merge at every write path is SHALLOW
+// (Barkpark.Content.Mutations.apply_one/3), so a bracket is never an index into
+// a stored list any more than a dot is a path: `--set
+// 'acceptance_criteria[5]:={…}'` stored the bracketed STRING as a key, returned
+// a rev and exited 0. The evidence landed where no reader looks and the
+// criterion stayed unmet — a success-shaped write with the canonical array
+// unchanged.
+//
+// The dotted-key refusal below did not catch it; worse, its hint SPELLED it.
+// Given `acceptance_criteria[5].evidence` it took the head up to the first dot
+// and advised `--set 'acceptance_criteria[5]:={…}'` — the one spelling that
+// lands the residue. So this check runs FIRST, and a bracketed key never
+// reaches that hint.
+//
+// The `key:=null` unset branch is deliberately upstream of this call: naming a
+// bracketed key literally is the only way its author can delete residue an
+// older CLI stored, exactly as for a dotted one.
+func checkSetKeyIndexing(kv, key string) error {
+	open := strings.IndexByte(key, '[')
+	if open < 0 && !strings.ContainsRune(key, ']') {
+		return nil
+	}
+	head := key
+	if open > 0 {
+		head = key[:open]
+	}
+	hint := "set the WHOLE field, e.g. --set '" + head + ":=[…]' with the full list"
+	if head == "acceptance_criteria" {
+		hint = "stamp the criterion through its own verb — `bp task stamp <id> <worker> <epoch> " +
+			"--criterion N --criterion-text-file crit.txt --met --evidence '…'` — which updates the array element"
+	}
+	return fmt.Errorf("invalid --set %q: --set fields are merged INTO the document's content by a SHALLOW merge, "+
+		"so %q is not an index into a stored list — it lands a literal key of that name beside the real %q, "+
+		"and the write still returns a rev. %s (use --file to send a body verbatim, or `--set '%s:=null'` on a patch "+
+		"to DELETE a literal key an older client stored)",
+		kv, key, head, hint, key)
+}
+
 // checkSetKeyNesting refuses a --set key containing a dot. The merge is SHALLOW
 // at every write path, so `--set content.description=x` stored a key literally
 // named "content.description" beside the real `description` and still returned
@@ -1984,6 +2631,28 @@ var setCreateFamilyOps = map[string]bool{
 	"create": true, "createOrReplace": true, "createIfNotExists": true, "replace": true,
 }
 
+// fileBodyAside is the "or --file to send a body verbatim" escape hatch these
+// refusals offer, DERIVED from the manifest rather than asserted.
+//
+// It exists because the refusal below hardcoded that aside on BOTH arms, and
+// the `patch` arm's command declares `[set]` only: `bp doc patch` names no
+// `file` flag, so splitArgs rejects `--file` outright (exit 2). The refusal was
+// therefore answering a wrong --set key with a flag the very next invocation
+// would refuse — the same lying-surface class the W4 help fix removed from
+// usage.go (writeBodyHint derives its hint from cmd.Flags for exactly this
+// reason), surviving in a surface that fix did not reach. See also
+// commandHasFileFlag's own doc comment: "help text and guard messages must
+// never mention --file for a command whose parser rejects it."
+//
+// Empty string when the command declares no file flag, so the sentence closes
+// cleanly without it.
+func fileBodyAside(cmd manifest.Command, key string) string {
+	if !commandHasFileFlag(cmd) {
+		return ""
+	}
+	return fmt.Sprintf(" (or --file to send a body verbatim if you really meant a content field named %q)", key)
+}
+
 // checkSetIDKeyRouting refuses a `--set` key the write will never route to the
 // document id. Scoped to mutation commands: only they have an address to miss.
 func checkSetIDKeyRouting(cmd manifest.Command, kv, key string) error {
@@ -1991,14 +2660,14 @@ func checkSetIDKeyRouting(cmd manifest.Command, kv, key string) error {
 	case setCreateFamilyOps[cmd.MutationOp] && key == "id":
 		return fmt.Errorf("invalid --set %q: %q %s here — `bp %s %s` keys the document as `_id` inside the payload, "+
 			"and a bare `id` is merged INTO content as an ordinary field while the row gets a GENERATED id. "+
-			"Use --set '_id=…' to choose the address (or --file to send a body verbatim if you really meant a content field named %q)",
-			kv, key, setIDKeyMechanism, cmd.Noun, cmd.Verb, key)
+			"Use --set '_id=…' to choose the address%s",
+			kv, key, setIDKeyMechanism, cmd.Noun, cmd.Verb, fileBodyAside(cmd, key))
 	case cmd.MutationOp == "patch" && (key == "id" || key == "_id"):
 		return fmt.Errorf("invalid --set %q: %q %s here — `bp %s %s <type> <id>` addresses the document by its `<id>` argument, "+
 			"and --set fields are merged INTO content, so %q would land as an ordinary content field and move nothing. "+
-			"Drop it (or --file to send a body verbatim if you really meant a content field named %q); "+
+			"Drop it%s; "+
 			"`--set %s:=null` deletes such a key if an older bp already stored one",
-			kv, key, setIDKeyMechanism, cmd.Noun, cmd.Verb, key, key, key)
+			kv, key, setIDKeyMechanism, cmd.Noun, cmd.Verb, key, fileBodyAside(cmd, key), key)
 	}
 	return nil
 }
@@ -2082,9 +2751,34 @@ func commandFlagBelongsInBody(cmd manifest.Command, name string) bool {
 	// key is pinned by a test rather than trusted.
 	if cmd.ID == "task.stamp" {
 		switch name {
-		case "evidence", "note", "criterion-text":
+		// `amended-criterion` is criterion wording too — the --amend
+		// replacement (task-f65368969b1a2471) — and rides the body under the
+		// snake_case key for the same reason criterion-text does.
+		case "evidence", "note", "criterion-text", "amended-criterion":
 			return true
 		}
+	}
+	// task.landed's `--files` MANIFEST rides the body, and it is the one flag on
+	// this command that MUST: it is a LIST, and the query string has no honest
+	// spelling for one here.
+	//
+	// The query-string form would be `files[]=a&files[]=b` — the bracket shape
+	// applyQuery gives a repeated flag, and the shape the server's own refusal
+	// sentence offers as an alternative. It breaks in the ONE-path case, which is
+	// the common case: a single occurrence keeps the plain `files=a` spelling,
+	// Plug decodes that to the STRING "a", and Landed.check_files/1 refuses a
+	// non-list outright — so `--files x` would 400 while `--files x --files y`
+	// worked, an arity-dependent failure no caller could guess. Riding the body
+	// as a JSON array (buildBody emits the whole []string for a repeatable body
+	// flag) makes one path and forty the same shape.
+	//
+	// And it keeps a 40-path manifest off the REQUEST LINE, which is where the
+	// measured wall is (see the task.stamp note above: ~9.9KB of encoded URI is
+	// refused as an unattributable stream error). 40 paths is the server's own
+	// verbatim limit, so the largest legal manifest is the one that would have
+	// come closest to it.
+	if cmd.ID == "task.landed" && name == "files" {
+		return true
 	}
 	return false
 }
@@ -2093,6 +2787,23 @@ func commandFlagBelongsInBody(cmd manifest.Command, name string) bool {
 // flag on cmd. When true, a --file payload for a non-mutation write must be parsed
 // and merged (so e.g. bulldocs.patch's --if-rev joins the ops object at the body
 // head) rather than shipped verbatim.
+// commandHasSuppliedBodyArgs reports whether the caller supplied a value for any
+// declared arg that lands in the request BODY. Such an arg has to be merged into
+// a --file payload rather than dropped, so its presence disqualifies the
+// ship-the-file-verbatim shortcut in buildBodyWithStdinOwnership. Args that ride
+// the path or the query string are already on the wire and do not count.
+func commandHasSuppliedBodyArgs(cmd manifest.Command, args map[string]string) bool {
+	for _, a := range cmd.Args {
+		if cmd.ArgLocation(a) != "body" {
+			continue
+		}
+		if v, ok := args[a.Name]; ok && v != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func commandHasSetBodyFlags(cmd manifest.Command, flags map[string][]string) bool {
 	for _, f := range cmd.Flags {
 		if commandFlagBelongsInBody(cmd, f.Name) && len(flags[f.Name]) > 0 {
@@ -2112,8 +2823,13 @@ func commandHasSetBodyFlags(cmd manifest.Command, flags map[string][]string) boo
 // "criterionText". Kept as a named seam rather than an if buried inside
 // bodyFlagKey so the exception is visible from either function.
 func stampBodyKey(name string) string {
-	if name == "criterion-text" {
+	switch name {
+	case "criterion-text":
 		return "criterion_text"
+	case "amended-criterion":
+		// Params.stamp_amended_criterion/1 reads "amended_criterion" or
+		// "amended-criterion"; the camelCase "amendedCriterion" is NO key.
+		return "amended_criterion"
 	}
 	return bodyFlagKey(name)
 }
@@ -2530,7 +3246,7 @@ func readCapped(r io.Reader, max int64) ([]byte, error) {
 // stops after one line should get the fact. Centralised so every error path
 // (single request, paginated reads) is identical.
 func renderError(out *writer, ae apiError) {
-	if renderErrorEnvelopeDetailed(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint(), ae.details) {
+	if renderErrorEnvelopeRemedy(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint(), ae.details, ae.datasetRemedy) {
 		return
 	}
 	out.userErr("%s", ae.errorMessage())
@@ -2539,6 +3255,9 @@ func renderError(out *writer, ae apiError) {
 	}
 	if h := ae.hint(); h != "" {
 		out.errf("  hint: %s", h)
+	}
+	if ae.datasetRemedy != "" {
+		out.errf("  bp: %s", ae.datasetRemedy)
 	}
 	humanErrorCode(out, ae.code)
 	if ae.requestID != "" {
@@ -2587,6 +3306,14 @@ func handleResponseHinted(out *writer, m *manifest.Manifest, cmd manifest.Comman
 	// one-size-fits-all document answer. serverHint still outranks it — the
 	// server knows more than we do — and notFoundHint returns "" rather than
 	// inventing a verb the manifest cannot confirm.
+	// The twin-resolver refusal, restated in argv. Unlike the not_found branch
+	// this does NOT wait for an empty serverHint: the server's hint is present,
+	// correct, and the very thing being translated — it names `?dataset=`, which
+	// a bp caller has nowhere to type. So this is an ADDITIONAL line below the
+	// hint, never a replacement for it.
+	if ae.code == ambiguousDatasetCode {
+		ae.datasetRemedy = ambiguousDatasetRemedy(cmd, manifestRoster(m), ae.details)
+	}
 	if ae.code == "not_found" && ae.serverHint == "" {
 		ae.localHint = ""
 		if hinter != nil {
@@ -2605,6 +3332,13 @@ func handleResponseHinted(out *writer, m *manifest.Manifest, cmd manifest.Comman
 // the payload, not the envelope. minimal/quiet prints rev + ids only.
 func renderSuccess(out *writer, cmd manifest.Command, respBody []byte) {
 	payload := unwrapResult(respBody)
+
+	// Document listings get their `_id` mirrored to `doc_id` and a `count` when
+	// the envelope carries none — one place, so the single-page passthrough and
+	// the stitched `--all` walk (both of which land here) emit the SAME shape.
+	// Every other command's body is returned byte-identical; see
+	// doc_listing_row_id_key.go.
+	payload = enrichDocListingRows(cmd, payload)
 
 	// Handoff-card shape: a 2xx object carrying a non-empty string "quickstart"
 	// (the ticket-key mint / rotate receipt) prints that block verbatim as the
@@ -2872,10 +3606,24 @@ func renderMinimal(out *writer, payload []byte) {
 	if rev != "" {
 		out.outf("rev: %s", rev)
 	}
+	// A write that answers with a top-level `slug` and no id is addressed BY that
+	// slug — the paper-ingest receipt ({"ok":true,"slug":…,"rev":…}) is the
+	// case. Printing it is the only way a caller can see WHICH paper the write
+	// landed on: `bp bulldocs publish` used to answer a bare `rev: 2` while the
+	// paper went to a slug the caller never typed (BP-ONB-17). collectIDs is
+	// deliberately left alone — adding "slug" to its key list would re-key every
+	// slug-bearing LIST row too.
+	slugPrinted := false
+	if m, isMap := v.(map[string]any); isMap && len(ids) == 0 {
+		if slug, ok := m["slug"].(string); ok && slug != "" {
+			out.outf("slug: %s", slug)
+			slugPrinted = true
+		}
+	}
 	for _, id := range ids {
 		out.outf("id: %s", id)
 	}
-	if rev == "" && len(ids) == 0 {
+	if rev == "" && len(ids) == 0 && !slugPrinted {
 		out.outf("ok")
 	}
 }
@@ -3226,6 +3974,13 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 	// its page — the row this page must open with. Empty before the first page,
 	// and empty for any boundary the server left unverifiable.
 	anchor := ""
+	// The doc_ids the server WITHHELD from these pages because they exist in
+	// more than one dataset. Unioned across pages and re-attached to the stitch
+	// below: the re-wrap emits `{key: rows}` and drops every sibling of the row
+	// array, so `--all` — the one mode whose premise is "this is the whole
+	// population" — was the one mode that lost the server's own statement of
+	// what it left out (dataset_ambiguous.go).
+	var twins []datasetTwin
 	for {
 		pageURL := withOffsetLimit(baseURL, offset, pageSize+1)
 		status, respBody, err := doRequest(cmd.HTTP.Method, pageURL, headers, nil)
@@ -3263,6 +4018,7 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 		if key == "" {
 			key = k
 		}
+		twins = mergeDatasetTwins(twins, datasetTwinsFromPage(unwrapResult(respBody)))
 		// Split the lookahead off the page. It anchors the NEXT request and is
 		// never rendered, so the emitted rows stay exactly the pageSize windows
 		// the walk has always emitted.
@@ -3334,6 +4090,9 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 			// re-wrap below, whose mustArray pins an empty result to [] rather
 			// than null.
 			if offset == 0 && filter == nil {
+				// The verbatim body still carries page.dataset_ambiguous, so the
+				// machine half needs nothing here — only the prose half.
+				warnIfDatasetTwinsWithheld(out, unwrapResult(respBody))
 				renderSuccess(out, cmd, respBody)
 				return exitOK, false
 			}
@@ -3356,6 +4115,14 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 	// any page it could not read a key from, so an unknown envelope can no
 	// longer reach the success renderer.
 	wrapped, _ := json.Marshal(map[string]any{key: json.RawMessage(mustArray(all))})
+	// Carry the withheld set across the stitch, under the SAME
+	// `page.dataset_ambiguous` path a single page uses, so one jq expression
+	// reads both modes. A no-op when nothing was withheld — the stitch of a
+	// twin-free ledger stays byte-identical, because a field that is always
+	// present measures nothing. Rows are untouched: this REPORTS the omission,
+	// it does not un-collapse the page.
+	wrapped = attachDatasetTwins(wrapped, twins)
+	warnIfDatasetTwinsWithheld(out, wrapped)
 	renderSuccess(out, cmd, mustResult(wrapped))
 	return exitOK, false
 }

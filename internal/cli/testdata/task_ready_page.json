@@ -1,0 +1,125 @@
+{
+  "ok": true,
+  "page": {
+    "dataset": null,
+    "dataset_scope": "all-datasets-in-scope",
+    "datasets": [
+      "production"
+    ],
+    "has_more": true,
+    "limit": 300,
+    "next_offset": 300,
+    "offset": 0,
+    "returned": 300
+  },
+  "docs": [
+    {
+      "child_count": 3,
+      "criteria_met": 1,
+      "criteria_total": 3,
+      "dispatch": "undecided",
+      "doc_id": "chat-local-cloud-context-w3",
+      "labels": [
+        "proj:chat-local-cloud-context",
+        "phase:design",
+        "studio-chat",
+        "local-execution",
+        "context-identity"
+      ],
+      "parent_id": "task-aafff98c7169f534",
+      "priority": 0,
+      "title": "Make local-first Barkpark Chat show its connected cloud and project context",
+      "updated_at": "2026-08-22T16:30:52Z"
+    },
+    {
+      "child_count": 0,
+      "criteria_met": 0,
+      "criteria_total": 3,
+      "doc_id": "legendary-quality-takeover-experiment-readers",
+      "labels": [
+        "proj:authoring-excellence",
+        "phase:experiment",
+        "files:.omx/state/legendary-experiments/E22;.omx/state/legendary-experiments/round-07-plan;bin/barkpark-pg",
+        "legendary-quality-takeover"
+      ],
+      "parent_id": "legendary-quality-takeover-root",
+      "priority": 0,
+      "title": "Run Experiment 15 on five real readers with the local E22 allocator",
+      "updated_at": "2026-07-23T06:42:35Z"
+    },
+    {
+      "child_count": 0,
+      "criteria_met": 0,
+      "criteria_total": 4,
+      "dispatch": "upstream",
+      "disposition": "open",
+      "doc_id": "task-08b05ad1e792a850",
+      "parent_id": "task-c31a4f0a6c5be3ea",
+      "priority": 0,
+      "title": "GOAL: drive the mobile epic to the seal — rounds until every child closes",
+      "updated_at": "2026-09-08T08:29:51Z"
+    },
+    {
+      "assignee": "lane-guerrilla-deploy",
+      "child_count": 359,
+      "criteria_met": 2,
+      "criteria_total": 7,
+      "dispatch": "delegated",
+      "disposition": "open",
+      "doc_id": "task-fb4fb869490b4213",
+      "priority": 0,
+      "title": "Guerrilla deployments fail 69% of the time and nothing says so — repair the failure classes, gi…",
+      "updated_at": "2026-09-06T01:27:00Z"
+    },
+    {
+      "assignee": "lead-console",
+      "child_count": 0,
+      "claim": {
+        "epoch": 10,
+        "worker": "lead-console"
+      },
+      "criteria_met": 0,
+      "criteria_total": 3,
+      "doc_id": "gh-1",
+      "labels": [
+        "deploy-button",
+        "github",
+        "decision",
+        "proj:deploy-button",
+        "phase:decision"
+      ],
+      "lifecycle_status": "blocked",
+      "parent_id": "dwb",
+      "priority": 0,
+      "title": "GitHub App registration + credential wiring",
+      "updated_at": "2026-09-02T00:04:21Z"
+    },
+    {
+      "assignee": "legendary-e22-experimenter",
+      "child_count": 0,
+      "claim": {
+        "epoch": 3,
+        "now": {
+          "criterion": 0,
+          "text": "E22 harness committed; local gates and two replays pass; authorized isolated runtime authority remains absent",
+          "ts": "2026-07-15T05:46:12Z"
+        },
+        "worker": "legendary-e22-experimenter"
+      },
+      "criteria_met": 0,
+      "criteria_total": 3,
+      "doc_id": "ae-legendary-e22-real-readers",
+      "labels": [
+        "proj:legendary-quality-takeover-root",
+        "phase:experiment",
+        "files:.omx/state/legendary-experiments/E22;.omx/state/legendary-experiments/round-07-plan;bin/barkpark-pg",
+        "legendary-quality-takeover"
+      ],
+      "lifecycle_status": "blocked",
+      "parent_id": "legendary-quality-takeover-root",
+      "priority": 0,
+      "title": "E22 proves real authenticated Studio, public reader, and CLI on an isolated candidate",
+      "updated_at": "2026-07-23T06:42:26Z"
+    }
+  ]
+}

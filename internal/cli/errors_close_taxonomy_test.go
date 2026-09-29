@@ -169,3 +169,70 @@ func TestTaskCloseExit_CloseReasonNeedsArtifactIsValidationWithTheRulingVerbatim
 		t.Errorf("the server's hint did not reach the caller VERBATIM.\n got: %s\nwant substring: %s", out, hint)
 	}
 }
+
+// THE FIFTH (task-d10d9eb47f2cc5e4, PR #16891's stated residual), and the five
+// the coverage arm found beside it.
+//
+// criteria_raised_on_abandon is the honesty gate refusing a `cancelled` or
+// `blocked` close that would RAISE an acceptance criterion's met from false to
+// true. It arrived AFTER the 2026-08-24 sweep fixed four siblings, and landed
+// on the same exit 2 they had — which is why the durable answer is the arm in
+// errors_close_refusal_coverage_test.go and not this list. This test is the
+// MEASUREMENT criterion 1 asks for: the number a caller actually receives from
+// the real `bp task close` dispatch, not a codeExit row read back to itself.
+//
+// BEFORE (this branch, with the codeExit rows reverted): exit 2 for all six.
+//
+// Three of the six (invalid_criteria, evidence_required, observed_rev_required)
+// are minted on the STAMP path. They are probed through the close dispatch
+// anyway and that measures the right thing: both routes answer through
+// tasks_controller conflict/3 with the identical {"ok":false,"reason":…} shape,
+// so it is the same classifyError branch and the same table lookup. What the
+// probe proves is the branch's fallback, which is the defect.
+func TestTaskCloseExit_TheCloseRefusalVocabularyIsNeverUsage(t *testing.T) {
+	for _, c := range []struct {
+		token string
+		want  int
+		why   string
+	}{
+		{"criteria_raised_on_abandon:0,1", exitValidation,
+			"a cancel may ABANDON criteria, never assert them; nothing moved under the caller " +
+				"and there is no override flag, so the fix is an act outside this request"},
+		{"invalid_criteria", exitValidation, "the criteria payload is the wrong shape"},
+		{"evidence_required", exitValidation, "a --met stamp with no evidence"},
+		{"observed_rev_required", exitValidation, "no live claim to fence against; pin --observed-rev"},
+		{"stale_rev", exitConflict, "lost a rev-CAS race — the world moved, re-read and retry"},
+		{"unknown_task", exitNotFound, "the row is gone; no retry brings it back"},
+	} {
+		t.Run(c.token, func(t *testing.T) {
+			got := closeRefusalExit(t, c.token)
+			if got == exitUsage {
+				t.Fatalf("close refused with %s exited %d — the malformed-command-line code, "+
+					"which means the codeExit row is missing (%s)", c.token, exitUsage, c.why)
+			}
+			if got != c.want {
+				t.Errorf("close refused with %s exited %d, want %d (%s)", c.token, got, c.want, c.why)
+			}
+		})
+	}
+}
+
+// THE QUIET ARM. Bucketing six more tokens is exactly the change that turns an
+// honest "unknown" into a confident wrong answer, so the fallback must survive
+// intact: a reason nobody has mapped still exits 2 through this same dispatch,
+// and the compound-token family lookup must not swallow a stranger just because
+// it carries a colon.
+func TestTaskCloseExit_UnmappedRefusalsStillFallToUsage(t *testing.T) {
+	for _, token := range []string{
+		"a_reason_the_server_has_never_minted",
+		"a_reason_the_server_has_never_minted:0,1",
+		"criteria_raised_on_abandonment", // near-miss: NOT the family name
+	} {
+		t.Run(token, func(t *testing.T) {
+			if got := closeRefusalExit(t, token); got != exitUsage {
+				t.Errorf("unmapped reason %s exited %d, want exitUsage (%d) — the fallback "+
+					"must survive the backfill", token, got, exitUsage)
+			}
+		})
+	}
+}

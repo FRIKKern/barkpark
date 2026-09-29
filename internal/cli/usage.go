@@ -86,6 +86,7 @@ func usageTop(out *writer) {
 	out.errf("      --dry-run          print the request, do not send")
 	out.errf("      --yes              skip the prod write confirmation")
 	out.errf("      --limit/--offset/--all   pagination")
+	out.errf("      --session <slug>   session doc a task close / paper publish logs to (or BARKPARK_SESSION)")
 	// The help line NAMES THE WRITER. A flag that takes a file and never says
 	// which file sent every reader to `bp capabilities -o json`, whose rendered
 	// brief this loader cannot use (task-9f726e783347b60e).
@@ -262,6 +263,27 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		out.errf("%s", line)
 	}
 
+	// The envelope key was only half the guess. WHERE THE CLAIM SITS INSIDE A
+	// ROW also differs per verb — `.doc.claim` on `task get`, `.claim` on the
+	// flat `ls`/`ready`/`prime` rows — and each verb's path is ABSENT on the
+	// others, so the wrong one answers null on every row and reads as UNCLAIMED.
+	// Derived from taskReadShapes() so help and behaviour cannot drift
+	// (tasks_claim_path.go).
+	for _, line := range taskClaimPathHelpLines(cmd) {
+		out.errf("%s", line)
+	}
+
+	// WHICH END `bp task events --limit N` READS. The server's summary is
+	// accurate ("omit --since to replay from the start") and still does not
+	// reach the reader who types `--limit 200` wanting to know what JUST
+	// happened: they get the two hundred OLDEST events in the ledger, zero
+	// recent hits, and no error. The generic truncation notice cannot cover it
+	// — that one is gated on cmd.Paginated and this feed is keyset, not offset
+	// (tasks_events_window.go).
+	for _, line := range taskEventsHelpLines(cmd) {
+		out.errf("%s", line)
+	}
+
 	// `--match` is honoured entirely client-side (see tasks_match.go), so the
 	// manifest cannot declare it and the flags block above cannot show it. A
 	// flag nobody can discover is a flag nobody uses — and this one exists
@@ -304,6 +326,18 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		}
 		out.errf("")
 		for _, line := range stampCriterionTextHelpLines() {
+			out.errf("%s", line)
+		}
+		out.errf("")
+		for _, line := range stampAmendHelpLines() {
+			out.errf("%s", line)
+		}
+		// The out-of-row pin is undeclarable for the same reason
+		// --criterion-text-file is (tasks_stamp_expect_pin.go), and it is the
+		// ONLY guard on this verb that a scripted caller cannot satisfy by
+		// echoing the row back at itself — so it has to be discoverable here.
+		out.errf("")
+		for _, line := range stampExpectPinHelpLines() {
 			out.errf("%s", line)
 		}
 	}
@@ -467,7 +501,21 @@ func suggestUnknownNoun(out *writer, tree *manifest.Tree, tier, typed string, pr
 			out.errf("run `barkpark login` — or pass `--token <tok>` — with a credential that grants it, then retry.")
 		}, tierHiddenHint(prov), tierHiddenMsg(prov), typed, label, cred)
 	}
-	return usageErrHintf(out, func() { usageSuggestNouns(out, tree, typed) }, nounHint(tree, typed), "unknown command %q", typed)
+	return usageErrHintf(out, func() {
+		usageSuggestNouns(out, tree, typed)
+		// A REFUSAL FROM A CLIENT THAT KNOWS IT IS BEHIND MUST SAY SO
+		// (pds-bl-bp-search-false-negative). `unknown command "search"` is
+		// literally how six independent agents in one wave concluded the verb
+		// did not exist and fell back to grep — dispatch is manifest-driven, so
+		// the server had declared it the whole time and only their bp's copy was
+		// old. staleClientNote reads the already-persisted update-check cache
+		// (no network, no latency, "" whenever staleness is not PROVEN), and it
+		// lives inside this closure, which usageErrHintf runs only on human
+		// output — so -o json/yaml stdout stays byte-identical.
+		if note := staleClientNote(); note != "" {
+			out.errf("%s", note)
+		}
+	}, nounHint(tree, typed), "unknown command %q", typed)
 }
 
 // tierHiddenMsg is the machine-readable refusal for a tier-hidden noun. The

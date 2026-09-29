@@ -29,7 +29,10 @@ defmodule Barkpark.Content.Related do
   `title`, `score`, `sources` (`[:tags]` / `[:references]` / both) and the
   `shared_tags` detail (`[%{tag, src_strength, cand_strength}]`) so surfaces
   can render WHY. A source with zero weighted tags degrades honestly to
-  backlink-only related (the ~35% untagged corpus) — never empty-by-crash.
+  backlink-only related — never empty-by-crash. Sources with no weighted
+  tag: 1120/10863 = 10.3% of published `production` docs, 0/1056 papers
+  (census 2026-09-23: `bp doc ls <type> --perspective published --fields
+  tags --all` over every type; supersedes charter D68's 2026-07-22 ~35%).
 
   ## The clamp set — ONE definition, BOTH legs (task-0e2bb63990e505fa)
 
@@ -394,7 +397,7 @@ defmodule Barkpark.Content.Related do
   # ONE PREDICATE, not a third copy: the tier test is
   # `Schema.bypasses_visibility_gate?/1` and the allowlist is
   # `Schema.public_type_names/2` — the exact pair `Content.Query`'s
-  # `restrict_to_visible_types/3` applies (query.ex:1719-1726, the canonical
+  # `restrict_to_visible_types/3` applies (query.ex, `restrict_to_visible_types/3`, the canonical
   # shape). Copied locally rather than called cross-module: that function is
   # private to Query and query.ex is owned by another task this cycle.
   #

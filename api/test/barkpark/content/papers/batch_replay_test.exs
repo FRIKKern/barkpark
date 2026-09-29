@@ -1,4 +1,5 @@
 defmodule Barkpark.Content.Papers.BatchReplayTest do
+  # sync: spawns concurrent `Task.async` Repo callers; data_case.ex keys `shared:` on the async tag
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Content
@@ -401,6 +402,8 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
   end
 
   test "concurrent callers sharing one request identity produce one write and one replay" do
+    Barkpark.DeletedWorkspaceResidue.purge_on_exit()
+
     Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
       ws = TenancyFixtures.create_workspace!()
       project = TenancyFixtures.create_project!(ws)

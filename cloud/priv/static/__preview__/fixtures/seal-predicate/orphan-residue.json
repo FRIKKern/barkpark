@@ -1,5 +1,5 @@
 {
-  "_comment": "CONTROL. The successor resolves, so no refusal fires — and clause (a) still reds on one unforwarded live row. Proves the refusals were added BEFORE the clauses, not INSTEAD of them.",
+  "_comment": "CONTROL. The successor resolves, so no refusal fires — and clause (a) still reds on one unforwarded live row. Proves the refusals were added BEFORE the clauses, not INSTEAD of them. `gr-fixture-forwarded-1` is on the successor’s own roster ONLY: until task-8532dae7b075f4b3 it was ALSO in the epic’s `children`, a row with two parents that `parent_id` cannot produce.",
   "successor": "cch-fixture-successor-epic",
   "tasks": {
     "cch-fixture-successor-epic": {
@@ -12,8 +12,7 @@
   },
   "children": [
     { "_id": "gr-fixture-done-1", "lifecycle_status": "done" },
-    { "_id": "gr-fixture-orphan-1", "lifecycle_status": "open" },
-    { "_id": "gr-fixture-forwarded-1", "lifecycle_status": "in_progress" }
+    { "_id": "gr-fixture-orphan-1", "lifecycle_status": "open" }
   ],
   "forwarded": ["gr-fixture-forwarded-1"],
   "gates": {

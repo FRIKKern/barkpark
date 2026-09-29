@@ -53,11 +53,21 @@ defmodule BarkparkWeb.LiveAuthTargetWorkspaceTest do
   end
 
   # The W24 escalation shape: a token minted with the flat global admin
-  # permission (auto-bound as an admin of its Default home workspace) that is
-  # only a MEMBER of the target workspace B.
+  # permission and seated as an admin of its Default home workspace — the
+  # workspace is named at the mint, because the test asserts that seat exists —
+  # that is only a MEMBER of the target workspace B.
   defp token_outsider!(ws_b) do
     raw = "tgt-outsider-#{System.unique_integer([:positive])}"
-    {:ok, tok} = Auth.create_token(raw, "tgt outsider", @dataset, ["read", "write", "admin"])
+
+    {:ok, tok} =
+      Auth.create_token(
+        raw,
+        "tgt outsider",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     {:ok, _} = TenancyAuth.create_membership(ws_b.id, tok.id)
     {raw, tok}
   end

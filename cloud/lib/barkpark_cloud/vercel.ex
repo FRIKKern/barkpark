@@ -91,13 +91,31 @@ defmodule BarkparkCloud.Vercel do
   @doc """
   The non-secret-by-default deploy state for the dashboard/ready screen:
 
-      %{configured:, deployed:, deployment_url:, claim_url:}
+      %{configured:, deployed:, deployment_url:, claim_url:, claimed:}
 
   `claim_url` is the `vercel.com/claim-deployment?code=…` link (the SPA appends
   its own `returnUrl`), present only while the stored code is fresh (< 23h) —
   a stale code renders as `nil` so the SPA offers a re-mint instead of a dead
   link. Owner-facing only: the route this rides is team-admin-gated, same
   custody as the bootstrap read token.
+
+  `claimed` is the CLAIM-COMPLETION FACT (cch-w48) and is deliberately
+  THREE-valued, because claiming is irreversible and "we don't know" is a
+  different answer from "no":
+
+    * `false` — nothing to claim yet, or the platform says the project is still
+      ours;
+    * `true`  — the platform says the project has left our team: the user
+      already completed the transfer;
+    * `nil`   — the read failed (no token, transport down, an unexpected
+      status). The console must SAY it cannot tell; it may not re-offer an
+      irreversible transfer on a guess.
+
+  It is read through `Vercel.Client.claimed?/1` on every call, never from a
+  local column: the mint stamp records only what WE did, and the transfer
+  happens entirely inside Vercel's UI. `claim_url` and `claimed` are ORTHOGONAL
+  facts — the former is about our code's freshness, the latter about the
+  project's ownership — so both ride the payload and the console combines them.
   """
   @spec state(Barkpark.t()) :: map()
   def state(%Barkpark{} = bp) do
@@ -105,11 +123,25 @@ defmodule BarkparkCloud.Vercel do
       configured: configured?(),
       deployed: present?(bp.vercel_project_id),
       deployment_url: bp.vercel_deploy_url,
-      claim_url: claim_url(bp)
+      claim_url: claim_url(bp),
+      claimed: claimed(bp)
     }
   end
 
   ## Internals ───────────────────────────────────────────────────────────────
+
+  # Nothing deployed → nothing has been claimed; that needs no platform call.
+  defp claimed(%Barkpark{vercel_project_id: pid}) when not is_binary(pid), do: false
+  defp claimed(%Barkpark{vercel_project_id: ""}), do: false
+
+  defp claimed(%Barkpark{vercel_project_id: pid}) do
+    case client().claimed?(pid) do
+      {:ok, claimed} when is_boolean(claimed) -> claimed
+      # Fail to "cannot tell", never to "not claimed": a false negative here
+      # re-offers an IRREVERSIBLE transfer for a project the user already owns.
+      _ -> nil
+    end
+  end
 
   defp claim_url(%Barkpark{vercel_claim_encrypted: nil}), do: nil
 

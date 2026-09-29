@@ -18,9 +18,12 @@
 //   • Eyebrow reads "Link to page" (vs slash menu's "Insert block").
 
 export class WikilinkMenu {
-  constructor({ onChoose, onDismiss }) {
+  constructor({ onChoose, onDismiss, eyebrow, kind } = {}) {
     this._onChoose = onChoose || (() => {});
     this._onDismiss = onDismiss || (() => {});
+    // The same popup serves [[ / # / : — the eyebrow and data-kind say which.
+    this._eyebrow = eyebrow || "Link to page";
+    this._kind = kind || "wikilink";
     this._open = false;
     this._active = 0;       // index into the flat selectable results list
     this._results = [];     // current candidate list ({ title, id, type }[])
@@ -116,6 +119,7 @@ export class WikilinkMenu {
     const el = document.createElement("div");
     el.className = "bp-wikilink-menu";
     el.setAttribute("role", "listbox");
+    el.setAttribute("data-kind", this._kind);
     el.style.display = "none";
     document.body.appendChild(el);
     this._el = el;
@@ -129,7 +133,7 @@ export class WikilinkMenu {
     // the scrollable row list. Mirrors the slash menu's "Insert block" eyebrow.
     const eyebrow = document.createElement("div");
     eyebrow.className = "bp-wikilink-menu__eyebrow";
-    eyebrow.textContent = "Link to page";
+    eyebrow.textContent = this._eyebrow;
     this._el.appendChild(eyebrow);
 
     // Scrollable list region so the eyebrow + footer stay pinned at top/bottom.

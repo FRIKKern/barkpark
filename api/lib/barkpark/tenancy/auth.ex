@@ -37,8 +37,11 @@ defmodule Barkpark.Tenancy.Auth do
   `phoenix_ecto`, so the non-castable-STRING class was a 400 `internal_error`;
   only the `nil` / non-binary `FunctionClauseError` class fell through to
   Plug's `Any` fallback and was a **500**. Both are now a clean denial.
-  (Comments elsewhere in this repo phrase this class as "CastError -> 500"; on
-  this path that phrasing is wrong on both the module and the status.)
+  (Comments elsewhere in this repo used to phrase this class as
+  "Ecto.CastError -> 500", which is wrong on BOTH the module and the status;
+  arpss-w9-bl-castError-500-folklore-comment-sweep corrected the tree. The
+  ground truth lives in `Barkpark.Repo.uuid_or_nil/1`'s docstring and is pinned
+  by `test/barkpark/casterror_status_contract_test.exs`.)
 
   Do NOT read the seam as "a malformed id never reaches the query".
   `Ecto.UUID.cast/1` accepts any 16-byte binary as raw UUID bytes — a 16-byte

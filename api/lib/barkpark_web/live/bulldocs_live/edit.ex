@@ -16,9 +16,25 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   `attach_gate/1` attaches a `:handle_event` lifecycle hook that HALTS every
   event in `@edit_events` unless `socket.assigns[:can_edit?] == true`, flashing
-  the same refusal for all of them. The reader's own events (`paper-action`,
-  `simplify-*`, `rail-select`, `open-diff`, `close-diff`) are not in that list
-  and pass through untouched.
+  the same refusal for all of them. `rail-select`, `open-diff` and `close-diff`
+  are pure socket-local reads and pass through untouched.
+
+  The SAME hook carries a second, weaker gate: `@reader_write_events` —
+  `paper-action`, `simplify-request`, `simplify-accept`, `simplify-reject`.
+  These are the reader's own controls; they do not edit the document, but each
+  one PERSISTS a `paper_events` row (`Events.create_event/1`, stamped with the
+  paper's own scope). On the flat public `/papers/:slug` surface there is no
+  auth `on_mount`, so before this gate an anonymous visitor could push them and
+  mutate the paper's event history. Ruling (task
+  `arpss-bulldocs-anon-paper-event-write-ruling`, 2026-09-10): anonymous
+  visitors are READ ONLY on the public reader. These four now REQUIRE a
+  principal — `principal?/1` — and fail closed on an anonymous socket.
+
+  The two gates are deliberately different strengths. `@edit_events` needs
+  `:can_edit?` (write authority on the paper's OWN workspace); the reader
+  controls need only that SOMEONE identifiable is behind the socket, because
+  the row they write is an expression of reader intent, not a document write.
+  A read-only api token may therefore request a Simplify and may not edit.
 
   The gate is keyed on `:can_edit?` and NOTHING ELSE. In particular it does not
   reuse `BarkparkWeb.Studio.Caps.write_capable?/2`: that predicate deliberately
@@ -100,8 +116,25 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     paper-publish
   )
 
+  # The reader's OWN controls: they persist a `paper_events` row rather than
+  # editing the document, so they need a principal but not write authority.
+  # Derived from the code, not from a filing: `grep -n 'Events.create_event'
+  # bulldocs_live.ex` has exactly three call sites, reachable from exactly
+  # these four `handle_event/3` clauses (`simplify-accept` / `simplify-reject`
+  # share one through `record_simplify_decision/3`). There is no fifth writer.
+  @reader_write_events ~w(
+    paper-action
+    simplify-request
+    simplify-accept
+    simplify-reject
+  )
+
   # One vocabulary for every refusal, whichever event asked.
   @denial "You don't have access to do that."
+
+  # The anonymous refusal for the reader controls. Distinct copy: the visitor
+  # is not denied on authority, she is simply not identified yet.
+  @anon_denial "Sign in to act on this paper."
 
   @doc "The event names the gate refuses without `:can_edit?`."
   @spec edit_events() :: [String.t()]
@@ -110,6 +143,37 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   @doc "The refusal copy every denied edit event gets."
   @spec denial() :: String.t()
   def denial, do: @denial
+
+  @doc """
+  The reader-control events that PERSIST a `paper_events` row and therefore
+  require a principal.
+  """
+  @spec reader_write_events() :: [String.t()]
+  def reader_write_events, do: @reader_write_events
+
+  @doc "The refusal copy an anonymous socket gets for a reader-control event."
+  @spec anon_denial() :: String.t()
+  def anon_denial, do: @anon_denial
+
+  @doc """
+  Whether SOMEONE identifiable is behind this socket.
+
+  `BarkparkWeb.PaperViewer.on_mount(:viewer, …)` resolves every credential a
+  browser can arrive with and summarises it as `:viewer`; `:anonymous` is what
+  a mount with no credential at all gets, and it is also what
+  `BulldocsLive.mount/3` falls back to when the hook never ran. Fail-closed on
+  every other shape: a missing, nil, or unrecognised `:viewer` is NOT a
+  principal.
+  """
+  @spec principal?(map()) :: boolean()
+  def principal?(assigns) when is_map(assigns) do
+    case Map.get(assigns, :viewer) do
+      %{kind: kind} when kind in [:user, :token, :share] -> true
+      _ -> false
+    end
+  end
+
+  def principal?(_assigns), do: false
 
   @doc """
   Seed the edit-mode assigns from the mounted paper. Always called, for every
@@ -131,18 +195,24 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   end
 
   @doc """
-  Attach the edit-event gate. Halts every `@edit_events` member for a socket
-  whose `:can_edit?` is not exactly `true`; passes everything else through.
+  Attach the reader event gate. Halts every `@edit_events` member for a socket
+  whose `:can_edit?` is not exactly `true`, and every `@reader_write_events`
+  member for a socket with no principal; passes everything else through.
   """
   def attach_gate(socket) do
     attach_hook(socket, :paper_edit_gate, :handle_event, &gate/3)
   end
 
   defp gate(event, _params, socket) when is_binary(event) do
-    if event in @edit_events and socket.assigns[:can_edit?] != true do
-      {:halt, put_flash(socket, :error, @denial)}
-    else
-      {:cont, socket}
+    cond do
+      event in @edit_events and socket.assigns[:can_edit?] != true ->
+        {:halt, put_flash(socket, :error, @denial)}
+
+      event in @reader_write_events and not principal?(socket.assigns) ->
+        {:halt, put_flash(socket, :error, @anon_denial)}
+
+      true ->
+        {:cont, socket}
     end
   end
 
@@ -482,7 +552,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   @doc "The `+ Add block` form → `insert-after` when anchored, else `append-block`."
   def add_block(socket, %{"block-type" => type} = params) when is_binary(type) do
-    new = Blocks.default_block(type, Blocks.new_block_id())
+    new = Blocks.default_block(type, Blocks.new_block_id(params["request_id"]))
 
     op =
       case params["after-id"] do
@@ -575,7 +645,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   @doc "Materialize one supported optional template slot through the canonical op path."
   def materialize_slot(socket, %{"kind" => kind} = params) do
-    case materialize_slot_block(kind) do
+    case materialize_slot_block(kind, Blocks.new_block_id(params["request_id"])) do
       nil ->
         failed_save(socket, params["request_id"])
 
@@ -598,7 +668,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   @doc "Insert a slash-menu block after its anchor, or append it for a blank anchor."
   def slash_insert(socket, %{"type" => type} = params) when is_binary(type) do
-    id = Blocks.new_block_id()
+    id = Blocks.new_block_id(params["request_id"])
 
     block =
       type
@@ -1030,28 +1100,17 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> Map.put("request_id", params["request_id"])
   end
 
-  # Structural handlers mint block ids before they reach this seam. A lost
-  # acknowledgement rebuilds that op on retry, so bind the minted id to the
-  # stable request id before the exact-once facade fingerprints the payload.
+  # Constructors seed request-stable trees before overrides. Retain the parent
+  # ID guard here for server-minted ops; never remap client-authored identities.
   defp stable_request_op(%{@server_minted_block => true, "block" => %{} = block} = op, request_id) do
     op
     |> Map.delete(@server_minted_block)
-    |> Map.put("block", Map.put(block, "id", request_block_id(request_id)))
+    |> Map.put("block", SharedPaper.request_stable_block(block, request_id))
   end
 
   defp stable_request_op(op, _request_id), do: Map.delete(op, @server_minted_block)
 
   defp server_minted_block(op), do: Map.put(op, @server_minted_block, true)
-
-  defp request_block_id(request_id) do
-    suffix =
-      request_id
-      |> then(&:crypto.hash(:sha256, &1))
-      |> binary_part(0, 9)
-      |> Base.url_encode64(padding: false)
-
-    "b-" <> suffix
-  end
 
   # ── slice 4 internals ───────────────────────────────────────────────────────
 
@@ -1154,25 +1213,25 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   defp socket_task_previews(socket), do: socket.assigns[:paper_task_previews] || %{}
 
-  defp materialize_slot_block("featured") do
+  defp materialize_slot_block("featured", id) do
     %{
-      "id" => Blocks.new_block_id(),
+      "id" => id,
       "type" => "image",
       "role" => "featured",
       "locked" => true
     }
   end
 
-  defp materialize_slot_block("ingress") do
+  defp materialize_slot_block("ingress", id) do
     %{
-      "id" => Blocks.new_block_id(),
+      "id" => id,
       "type" => "paragraph",
       "role" => "ingress",
       "content" => []
     }
   end
 
-  defp materialize_slot_block(_kind), do: nil
+  defp materialize_slot_block(_kind, _id), do: nil
 
   defp maybe_put_field_name(block, %{"fieldName" => name})
        when is_binary(name) and name != "",

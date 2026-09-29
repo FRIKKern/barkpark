@@ -342,7 +342,7 @@ defmodule BarkparkCloud.BootstrapTemplateTest do
       assert conn.status == 401
     end
 
-    test "a NON-UUID id → 404, not an Ecto.CastError 500 (binary_id guard)" do
+    test "a NON-UUID id → 404, not an Ecto.Query.CastError 500 (binary_id guard)" do
       {owner, _team} = user_with_team()
       {:ok, owner_token} = Accounts.create_user_session_token(owner)
 

@@ -22,3 +22,9 @@ declare module 'node:path' {
 }
 
 declare const __dirname: string
+
+declare module 'node:crypto' {
+  export function createHash(algorithm: string): {
+    update(data: string): { digest(encoding: 'hex'): string }
+  }
+}

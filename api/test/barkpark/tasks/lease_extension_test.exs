@@ -91,8 +91,6 @@ defmodule Barkpark.Tasks.LeaseExtensionTest do
   describe "an OPEN PR extends the lease past the normal lapse" do
     test "the extended row is retained and the control row is reaped, by ONE sweep",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       # Two rows in the same state: claimed by worker-A, lease stale by 10 min
       # against a 300 s TTL. The ONLY difference is the renew.
       extended = claimed_and_aged!(scope, 600)
@@ -137,8 +135,6 @@ defmodule Barkpark.Tasks.LeaseExtensionTest do
     end
 
     test "a renew is refused on a row whose lease already lapsed", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       row = claimed_and_aged!(scope, 600)
       _ = TtlSweeper.sweep(300)
 
@@ -147,6 +143,13 @@ defmodule Barkpark.Tasks.LeaseExtensionTest do
       assert {:error, :not_claimed} = Tasks.renew_lease_by_id(row.id, pr: 15_234)
       assert is_nil(extension_of(reload(row)))
     end
+
+    # task-888cded6b75503ee: Renew's `nil -> {:error, :not_found}` arm had no
+    # witness anywhere — delete it and a renew on a missing row crashed with a
+    # CaseClauseError that no test observed. This is its home witness.
+    test "a renew on a task id that names no row is :not_found, not a crash" do
+      assert {:error, :not_found} = Tasks.renew_lease_by_id(Ecto.UUID.generate(), pr: 15_234)
+    end
   end
 
   # ─── Criterion 2 — a closed/merged PR stops extending ─────────────────────
@@ -154,8 +157,6 @@ defmodule Barkpark.Tasks.LeaseExtensionTest do
   describe "a closed or merged PR stops extending the lease" do
     test "state=merged clears the extension and the next sweep releases on schedule",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       row = claimed_and_aged!(scope, 600)
       epoch_before = claim_of(row)["epoch"]
 
@@ -177,8 +178,6 @@ defmodule Barkpark.Tasks.LeaseExtensionTest do
     end
 
     test "an ELAPSED window releases with no clear message at all", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       # The safety property: nobody has to tell the ledger a PR closed. When
       # nothing renews, `until` slides into the past and the next sweep reaps.
       row = claimed_and_aged!(scope, 600)
@@ -200,8 +199,6 @@ defmodule Barkpark.Tasks.LeaseExtensionTest do
 
     test "closing a DIFFERENT pr does not cancel the grace this one bought",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       row = claimed_and_aged!(scope, 600)
       assert {:ok, _} = Tasks.renew_lease_by_id(row.id, pr: 15_234)
 
@@ -218,8 +215,6 @@ defmodule Barkpark.Tasks.LeaseExtensionTest do
   describe "the extension is capped from the first grant" do
     test "renewing past the cap is refused, and the next sweep releases",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       row = claimed_and_aged!(scope, 600)
       assert {:ok, renewed} = Tasks.renew_lease_by_id(row.id, pr: 15_234)
 
@@ -249,8 +244,6 @@ defmodule Barkpark.Tasks.LeaseExtensionTest do
     end
 
     test "a renewal naming a NEW pr re-anchors the cap", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       row = claimed_and_aged!(scope, 600)
       assert {:ok, first} = Tasks.renew_lease_by_id(row.id, pr: 15_234)
       assert {:ok, second} = Tasks.renew_lease_by_id(row.id, pr: 15_999)
@@ -262,8 +255,6 @@ defmodule Barkpark.Tasks.LeaseExtensionTest do
 
     test "a second renewal for the SAME pr keeps the anchor and counts up",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       row = claimed_and_aged!(scope, 600)
       assert {:ok, first} = Tasks.renew_lease_by_id(row.id, pr: 15_234)
       assert {:ok, second} = Tasks.renew_lease_by_id(row.id, pr: 15_234)

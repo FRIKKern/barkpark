@@ -1,0 +1,103 @@
+{
+  "_comment": "cch-w36: THE PACED ROSTER, AND THE TWO DEPARTURES TOLD APART. Three census rows left the epic: two were re-parented onto the successor's wave (charter D93's ~10-rows-a-wave forwarding) and one simply is not there any more and still resolves `open`. Pre-fix all three read as one bucket — `3 row(s) LEFT the counted population without a transition` — so an honest paced forwarding was indistinguishable from a population swept to look smaller. The committed file prints the two re-homed rows under RE-HOMED UNDER with → and counts them on the forwarding line, and the one true disappearance under FILING EVENT(S) with ✗. The seal is still refused, by the ONE row that earned it.",
+  "successor": "cch-fixture-successor-epic",
+  "tasks": {
+    "cch-fixture-successor-epic": {
+      "_id": "cch-fixture-successor-epic",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-goal"
+    }
+  },
+  "children": [
+    {
+      "_id": "gr-fixture-done-1",
+      "lifecycle_status": "done"
+    },
+    {
+      "_id": "gr-fixture-done-2",
+      "lifecycle_status": "done"
+    },
+    {
+      "_id": "gr-fixture-cancelled-1",
+      "lifecycle_status": "cancelled"
+    }
+  ],
+  "forwarded": [],
+  "subtrees": {
+    "cch-fixture-successor-epic": [
+      {
+        "_id": "cch-fixture-successor-wave-1",
+        "lifecycle_status": "open"
+      }
+    ],
+    "cch-fixture-successor-wave-1": [
+      {
+        "_id": "gr-fixture-paced-1",
+        "lifecycle_status": "open"
+      },
+      {
+        "_id": "gr-fixture-paced-2",
+        "lifecycle_status": "in_progress"
+      }
+    ]
+  },
+  "priorCensus": {
+    "gr-fixture-paced-1": "open",
+    "gr-fixture-paced-2": "open",
+    "gr-fixture-vanished": "open",
+    "gr-fixture-done-1": "done"
+  },
+  "departed": {
+    "gr-fixture-paced-1": {
+      "_id": "gr-fixture-paced-1",
+      "lifecycle_status": "open",
+      "parent_id": "cch-fixture-successor-wave-1"
+    },
+    "gr-fixture-paced-2": {
+      "_id": "gr-fixture-paced-2",
+      "lifecycle_status": "in_progress",
+      "parent_id": "cch-fixture-successor-wave-1"
+    },
+    "gr-fixture-vanished": {
+      "_id": "gr-fixture-vanished",
+      "lifecycle_status": "open",
+      "parent_id": "some-unrelated-parent"
+    }
+  },
+  "gates": {
+    "gr-ops-platform-admin-emails": {
+      "_id": "gr-ops-platform-admin-emails",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "gr-backlog-qr-live-scan-proof": {
+      "_id": "gr-backlog-qr-live-scan-proof",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "cch-hg-compose-network-recreation": {
+      "_id": "cch-hg-compose-network-recreation",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    }
+  },
+  "landed": [
+    "481d6f231",
+    "8fd00b6afb1eca55d3c991f7921ed6ec2b7d77b4",
+    "d157d098c78bc6604d00d84e22d038bdb176ef58",
+    "26acc7a91be0f0352efdb3e89b2017accb786367",
+    "58862f621"
+  ],
+  "unmeasuredWaivers": [
+    "CCH-D5-rate-limiter-sees-every-user-as-one"
+  ],
+  "defectCommits": {}
+}

@@ -36,7 +36,9 @@ defmodule Barkpark.Tasks.Release do
       generate_rev: 0,
       fenced_content_write: 4,
       insert_mutation_event!: 5,
+      caller_stamp: 2,
       check_holder: 2,
+      holder: 1,
       task_broadcast: 4,
       emit_broadcasts: 1
     ]
@@ -49,6 +51,12 @@ defmodule Barkpark.Tasks.Release do
 
   def release(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
     observed_epoch = Keyword.fetch!(opts, :observed_epoch)
+    # task-56adb45f973e242f: release was the ONE mutation in the derived emit
+    # set that threaded no server identity at all — its `released_by` is the
+    # caller's own worker string and nothing else. Both values are optional, so
+    # an internal caller that names neither emits the same event byte for byte.
+    caller_token_id = Keyword.get(opts, :caller_token_id)
+    session = Keyword.get(opts, :session)
 
     result =
       Repo.transaction(fn ->
@@ -82,6 +90,7 @@ defmodule Barkpark.Tasks.Release do
                       "new_epoch" => observed_epoch + 1
                     }
                   }
+                  |> Map.merge(caller_stamp(caller_token_id, session))
                 )
 
               {:ok, updated, [task_broadcast(updated, @event_task_released, ev, doc.rev)]}
@@ -156,16 +165,16 @@ defmodule Barkpark.Tasks.Release do
 
   defp check_holder_for_mode(:stranded, _doc, _worker_id), do: :ok
 
-  defp holder_present?(content), do: not is_nil(holder_in(content))
+  # ONE definition of "held", shared with every other door: `Internal.holder/1`
+  # / `Internal.held?/1`. Keyed on `claim.worker` and NOTHING ELSE — this module
+  # is the reason why. `apply_release_update/1` below leaves the claim OBJECT,
+  # its `epoch`, and the `worker` KEY all in place on a released row, so
+  # `claim != nil`, `claim.epoch != nil` and `has_key?(claim, "worker")` each
+  # answer "held" about a row nobody holds. See the doctrine block above
+  # `Internal.held?/1`.
+  defp holder_present?(content), do: not is_nil(holder(content))
 
-  defp holder_of(%Document{content: content}), do: holder_in(content || %{})
-
-  defp holder_in(content) do
-    case get_in(content, ["claim", "worker"]) do
-      worker when is_binary(worker) -> if String.trim(worker) == "", do: nil, else: worker
-      _ -> nil
-    end
-  end
+  defp holder_of(%Document{content: content}), do: holder(content || %{})
 
   # check_holder/2 → Tasks.Internal (D7 extraction, expressive-agent-loops):
   # one holder-check definition shared with `Tasks.Stamp` (and future
@@ -200,6 +209,32 @@ defmodule Barkpark.Tasks.Release do
       # same way, or `bp task get` disagrees with itself depending on WHICH
       # verb freed the lease.
       |> Map.delete("resources")
+      # SAME REASON, SECOND FIELD (task-7674bdd9964d953f). `expired_at` is
+      # written by ONE writer, `TtlSweeper.apply_reap/1`, and it means "this
+      # lease LAPSED, at this time". A RELEASE means a worker WALKED AWAY, so
+      # a lapse timestamp on the claim this function stores describes a
+      # SUPERSEDED event: beside a fresh `released_at` it makes the map state
+      # two mutually exclusive reasons at once, and every reader then has to
+      # compare two timestamps to recover which one is current
+      # (`scripts/pr-task-gate.sh` does exactly that, and says so in its CURE
+      # string). The next reader will not know to. Same ruling as `resources`
+      # directly above: a field that no longer describes the row does not
+      # survive the verb that superseded it.
+      #
+      # MEASURED, so nobody re-derives it: the reap -> re-claim -> release
+      # path does NOT reach here carrying `expired_at` today, because
+      # `Tasks.Claim.do_claim_resolved/7` builds its claim as a FRESH map
+      # literal and the re-claim drops the field first. This delete is
+      # therefore the STRUCTURAL guarantee, holding for any claim map handed
+      # to this function — an older engine's row, a `bp doc patch`, or a
+      # future claim path that merges. `release_test.exs` pins the claim-side
+      # behaviour so that future reds here rather than going unnoticed.
+      #
+      # NOT `previous_worker`, deliberately: it records WHO held the lease,
+      # which stays true after a release, and pr-task-gate.sh's `prev_worker`
+      # clause depends on it. NOT `epoch` either — the CAS fence rides on it.
+      # This deletes the one field whose meaning the release falsifies.
+      |> Map.delete("expired_at")
 
     # RULING (task-lifecycle-visibility wave, 2026-07-21): release ALWAYS
     # lands "open" — deliberately NOT a restore of the pre-claim status.

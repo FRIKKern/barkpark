@@ -83,3 +83,4 @@
 # to guess. If Registry.reset/0 ever stops restoring the snapshot, these rows
 # are where a reader looks first.
 2	barkpark/plugins/registry_cache_test.exs	:persistent_term/@snapshot_key	KNOWN false positive, not a leak — RegistryCase's on_exit restores @snapshot_key via Registry.reset/0, a call the scanner will not follow into api/lib
+1	barkpark_web/request_stats_test.exs	:barkpark/*	KNOWN false positive, not a leak — the module body configures its OWN test endpoint under the key :barkpark/BarkparkWeb.RequestStatsTest.HookEndpoint (a module-private key no other test or lib reads), and Phoenix.Endpoint reads it at start_link, so it cannot live inside a test-scoped on_exit; nothing outside this file can inherit it

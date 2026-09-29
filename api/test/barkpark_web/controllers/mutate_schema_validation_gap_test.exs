@@ -45,7 +45,14 @@ defmodule BarkparkWeb.MutateSchemaValidationGapTest do
 
   setup do
     token = "barkpark-dev-token-mutate-gap-#{System.unique_integer([:positive])}"
-    Auth.create_token(token, "dev", "mutate-schema-validation-gap", ["read", "write", "admin"])
+
+    Auth.create_token(
+      token,
+      "dev",
+      "mutate-schema-validation-gap",
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
 
     %{token: token}
   end

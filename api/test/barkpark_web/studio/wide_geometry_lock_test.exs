@@ -196,7 +196,8 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
   # desk never carries, or behind a variant class (`--collapsed`,
   # `.sheet-editor`, `.editor-with-preview`) that is opt-in per surface.
   #
-  # COUNT, wave 11: 15 entries -> 26. The delta is exactly ELEVEN, every one of
+  # COUNT, wave 11: 15 entries -> 26; then 27 with the standard-bucket dock
+  # (task inspector-dock-260px-and-the-1024-900-non-monotonicity) declared below. The delta is exactly ELEVEN, every one of
   # them a `.bp-doc-sidebar` rule that `pane_family?/1` could not see until
   # this wave: seven declaring the inspector's own tiers (the element, the
   # docked and overlaid `.is-open` rules, `.is-collapsed`, and the three
@@ -249,9 +250,19 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
     # and the narrow/phone pair never matches there. That scoping is the whole
     # reason these rules were allowed to move geometry at all (charter D92):
     # epic criterion 2 is measured at 1280/1440 and they may not reach it.
-    {~S|html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened])|,
+    #
+    # spd-b1-pane-state-persistence widened BOTH painted-closed rules by one
+    # alternative each: `html[data-inspector-pref="closed"]`. That half DOES
+    # match at `wide` — but only on a client that collapsed the inspector at
+    # `wide` on an earlier visit (the pre-paint head script stamps it from
+    # localStorage). The default wide desk never carries the attribute, so
+    # epic criterion 2's 1280/1440 rows are untouched; and what it paints is
+    # the user's own `.is-collapsed` strip, which the connected render then
+    # takes over at identical geometry. Opt-in exactly like
+    # `html[data-editor-focus="beta"]` below, and admitted on that ground.
+    {~S|html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]), html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened])|,
      ~w(flex width)},
-    {~S|html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title, html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body|,
+    {~S|html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title, html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body, html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title, html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body|,
      ~w(display)},
     {~S|html[data-width-bucket="narrow"] .bp-doc-sidebar.is-open[data-user-opened], html[data-width-bucket="phone"] .bp-doc-sidebar.is-open[data-user-opened]|,
      ~w(width)},
@@ -270,6 +281,20 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
     {~S|html[data-width-bucket="narrow"] .bp-doc-sidebar.is-open[data-user-opened] .bp-doc-sidebar__collapse, html[data-width-bucket="phone"] .bp-doc-sidebar.is-open[data-user-opened] .bp-doc-sidebar__collapse|,
      ~w(min-width)},
 
+    # --- the STANDARD-bucket dock, 260px: bucket-scoped, wide-unreachable ---
+    #
+    # A DELIBERATE WIDENING of this census, not boilerplate (task
+    # inspector-dock-260px-and-the-1024-900-non-monotonicity). It declares
+    # `flex-basis` on `.bp-doc-sidebar.is-open`, which is exactly the property
+    # this file learned to watch in wave 11 — so the census fired on it, and
+    # this entry is the declaration the tripwire demands rather than a way
+    # around it. The reason it is ALLOWED to move geometry at all is the
+    # positive bucket equality: `html[data-width-bucket="standard"]` cannot
+    # match a wide desk, so epic criterion 2's band is untouched and the
+    # 300px pin below still measures viewport 1280 and 1440.
+    {~S|html[data-width-bucket="standard"] .bp-doc-sidebar.is-open[data-user-opened]|,
+     ~w(flex-basis)},
+
     # --- phone bucket: html[data-width-bucket="phone"], never wide ---
     {~S|html[data-width-bucket="phone"] .pane-layout:has(> .editor-panel) .pane-column|,
      ~w(display)},
@@ -277,6 +302,15 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
      ~w(display)},
     {~S|html[data-width-bucket="phone"] .pane-column--last|, ~w(flex)},
     {~S|html[data-width-bucket="phone"] .editor-panel|, ~w(min-width)},
+    # task-134dd8b12b5ce305: phone-only residue fixes. The nothing-selected
+    # placeholder yields so the lone list owns the width, and the CLOSED
+    # inspector toggle gets a 24px target (its -4px margin keeps the 16px flex
+    # footprint, so the strip does not move). Both are phone-scoped; wide
+    # cannot match either.
+    {~S|html[data-width-bucket="phone"] .pane-layout:has(> .pane-column--last) > .editor-empty[data-reason="nothing_selected"]|,
+     ~w(display)},
+    {~S|html[data-width-bucket="phone"] .bp-doc-sidebar:not([data-user-opened]) .bp-doc-sidebar__collapse|,
+     ~w(min-width)},
 
     # --- beta editor focus: opt-in attribute, off by default ---
     {~S|html[data-editor-focus="beta"] .pane-column.bp-doc-list|, ~w(display)},
@@ -552,6 +586,62 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
       assert value!(overlay, ".bp-doc-sidebar.is-open (overlay)", "width") == "300px",
              "the overlaid inspector's width drifted from the docked tier's 300px"
     end
+
+    test "the STANDARD bucket docks at 260px, and it cannot reach the wide desk" do
+      [standard] =
+        blocks!(~S|html[data-width-bucket="standard"] .bp-doc-sidebar.is-open[data-user-opened]|)
+
+      # THE NUMBER. 260px is the shell's own `.pane-column` basis — the second
+      # term of the measured [44, 260] pane shell — deliberately NOT 292.42px,
+      # which is the exact width at which ONE face (forced Georgia at 18px,
+      # 11.0469 px/ch) would cross 55ch. Trimming a shipped dock to a single
+      # face's arithmetic ceiling is the threshold-gerrymandering D83 and D103
+      # forbid by name, and a value pinned here is the only thing in this repo
+      # that says which of the two this sheet chose.
+      #
+      # Replica-measured effect, user-opened, forced Georgia: viewport 1165
+      # content 481px = 43.54ch -> 521px = 47.16ch; viewport 1224 540px =
+      # 48.88ch -> 580px = 52.50ch; viewports 1280 and 1440 byte-identical.
+      # Revert this value to 300px and those three cells collapse back.
+      assert value!(standard, "the standard-bucket dock", "flex-basis") == "260px",
+             """
+             The standard-bucket inspector dock moved off 260px.
+
+             This is the standard bucket's whole share of the reading measure:
+             at viewport 1165-1223 the reading column is `vw - 304 - this`, so
+             every pixel added here is a pixel of prose removed. It is also
+             the value that keeps the trim OFF the wide desk — the moment
+             someone "simplifies" it back into the global `flex: 0 0 300px`
+             rule, viewport 1280 moves 40px and epic criterion 2's band is a
+             casualty of a cleanup.
+             """
+
+      # THE SCOPING. `blocks!/1` matches an EXACT selector line, so finding the
+      # 260px body under the bucket-scoped selector above already says the trim
+      # is behind the `standard` stamp. The other half of the property is that
+      # it is behind that stamp ONLY: neither unscoped `.bp-doc-sidebar.is-open`
+      # rule — the docked flex item or the overlay inside the 860px at-rule —
+      # may carry the number, or the wide desk picks it up in the cascade with
+      # this file still green. (The census's own prefix check below proves the
+      # `standard` prefix is scoping of the same strength as phone/narrow.)
+      for body <- blocks!(".bp-doc-sidebar.is-open") do
+        refute String.contains?(body, "260px"),
+               """
+               An unscoped `.bp-doc-sidebar.is-open` rule now declares 260px.
+
+               The standard-bucket trim escaped its bucket. Whichever rule this
+               is applies at viewport 1280 and 1440, which is epic criterion
+               2's own band — the one place this task's ruling promised to move
+               zero pixels.
+               """
+      end
+
+      # And the GLOBAL basis is still 300px — the two statements together are
+      # the ruling: one shape, tier-scoped, wide's zero-pixel constraint
+      # preserved rather than renegotiated.
+      [docked] = blocks!(".bp-doc-sidebar.is-open") |> Enum.filter(&String.contains?(&1, "flex:"))
+      assert value!(docked, ".bp-doc-sidebar.is-open (docked)", "flex") == "0 0 300px"
+    end
   end
 
   describe "the reading measure's own cap — the binder at viewport 1280 (spd-b42)" do
@@ -666,10 +756,21 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
         # move real geometry (`flex`, `width`) and are allowed to precisely
         # because `html:not([data-width-bucket="wide"])` cannot match in
         # epic criterion 2's own band (charter D92).
+        # POSITIVE bucket equality on `standard`, added with the 260px
+        # dock. It is the same strength of scoping as the phone/narrow
+        # prefixes above and NOT the weaker `:not(...)` form: an attribute
+        # equality on the literal value `standard` cannot match a desk
+        # stamped `wide`, so a rule behind it is structurally absent from
+        # epic criterion 2's band rather than merely believed to be.
+        # `html[data-inspector-pref="closed"]` (spd-b1) is the remembered wide
+        # collapse: opt-in per client like the beta editor-focus attribute,
+        # absent from the default desk, and it only ever paints the strip.
         scoped? =
           String.starts_with?(selector, ~S|html[data-width-bucket="phone"] |) or
             String.starts_with?(selector, ~S|html[data-width-bucket="narrow"] |) or
+            String.starts_with?(selector, ~S|html[data-width-bucket="standard"] |) or
             String.starts_with?(selector, ~S|html[data-editor-focus="beta"] |) or
+            String.starts_with?(selector, ~S|html[data-inspector-pref="closed"] |) or
             String.starts_with?(selector, ~S|html:not([data-width-bucket="wide"]) |) or
             selector in [
               # Inspector variants and children. `.is-collapsed` is a state the

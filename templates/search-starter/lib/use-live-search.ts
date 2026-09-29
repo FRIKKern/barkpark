@@ -8,6 +8,7 @@ import {
   type UpstreamSearchJson,
 } from "@/lib/find-shape";
 import { DATASET, WS_SCOPE } from "@/lib/config";
+import { MAX_HITS } from "@/lib/search-limits";
 
 /**
  * Per-keystroke live search over ONE persistent WebSocket, browser → Barkpark
@@ -74,7 +75,6 @@ const HIT_FIELDS =
   "title,name,excerpt,description,bio,slug,publishedAt,status,author,category";
 // WS_SCOPE (the `<ws>:<proj>` topic segment) is imported from lib/config so it
 // stays in lock-step with find-search's `/w/:ws/p/:proj` HTTP scope.
-const MAX_HITS = 100;
 
 export interface LiveSearchArgs {
   q: string;

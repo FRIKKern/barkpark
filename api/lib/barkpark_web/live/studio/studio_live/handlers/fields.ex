@@ -164,7 +164,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   def save(_params, socket), do: {:noreply, socket}
 
   defp do_save(params, socket) do
-    socket = Shared.do_autosave(socket, params)
+    socket = Shared.do_autosave(socket, params, :save)
 
     case socket.assigns[:save_status] do
       "Saved" ->
@@ -197,17 +197,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     {:noreply, socket}
   end
 
+  # Generate derives the slug from the field's declared SOURCE — Sanity's
+  # `options.source` (Gyldendal parity E1.6, task-cd8e10ca44ccb932 criterion
+  # 2): the twin's author slug comes from `name`, everything else from
+  # `title`. Before this the source was hard-coded to `title`, so Generate on
+  # an author did nothing. The form buffer is read first (the value the
+  # author sees), then the stored document (title column for `title`, content
+  # otherwise).
   def slug_generate(%{"field" => field}, socket) do
-    title =
-      case Map.get(socket.assigns[:editor_form] || %{}, "title") do
-        t when is_binary(t) and t != "" -> t
-        _ -> socket.assigns[:editor_doc] && socket.assigns.editor_doc.title
+    source = BarkparkWeb.Components.FieldInputs.slug_source(socket.assigns[:editor_schema], field)
+    form = socket.assigns[:editor_form] || %{}
+    doc = socket.assigns[:editor_doc]
+
+    value =
+      case Map.get(form, source) do
+        t when is_binary(t) and t != "" ->
+          t
+
+        _ ->
+          cond do
+            is_nil(doc) -> nil
+            source == "title" -> doc.title
+            true -> get_in(doc.content || %{}, [source])
+          end
       end
 
-    case title do
+    case value do
       t when is_binary(t) and t != "" ->
         {:noreply,
-         mark_dirty(Shared.do_autosave(socket, %{field => Barkpark.Tenancy.slugify(t)}))}
+         mark_dirty(
+           Shared.do_autosave(socket, %{field => Barkpark.Tenancy.slugify(t)}, :slug_derive)
+         )}
 
       _ ->
         {:noreply, socket}
@@ -218,7 +238,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     socket = track_touched(socket, params)
 
     case fold_dot_paths(params, socket) do
-      %{"doc" => doc} -> {:noreply, mark_dirty(Shared.do_autosave(socket, doc))}
+      %{"doc" => doc} -> {:noreply, mark_dirty(Shared.do_autosave(socket, doc, :change))}
       _ -> {:noreply, socket}
     end
   end
@@ -481,7 +501,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         end
 
       new_form = StudioLive.put_value_at(form, key_path, new_list)
-      {:noreply, mark_dirty(Shared.do_autosave(socket, new_form))}
+      {:noreply, mark_dirty(Shared.do_autosave(socket, new_form, :array_op))}
     end
   end
 

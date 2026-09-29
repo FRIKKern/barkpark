@@ -26,6 +26,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # in this file stay literal — the icons tripwire owns those.
   alias BarkparkWeb.Icons
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
   alias BarkparkWeb.Studio.StudioLive.Shared
@@ -51,6 +52,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # the Edit-mode boundary widgets paint (Shared.push_task_previews fills it).
   attr(:task_previews, :map, default: %{})
   attr(:paper_links, :map, default: %{})
+  # Paper masters (task-3b6e562e916c8ce4): the open paper's in-scope masters,
+  # or nil when this pane may not write (no Save action, no slash picker).
+  attr(:paper_masters, :any, default: nil)
+  attr(:paper_masters_impl, :any, default: nil)
+  # Linked master instances (task-59f078a2fd248698): `%{key => html}` or nil.
+  attr(:paper_master_render, :any, default: nil)
   attr(:shares_admin?, :boolean, default: false)
   attr(:dataset, :string, required: true)
   attr(:api_token_raw, :string, default: "")
@@ -343,6 +350,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   canvas_resume_state={@paper_canvas_resume_status}
                   task_previews={@task_previews}
                   paper_links={@paper_links}
+                  masters={@paper_masters}
+                  masters_impl={@paper_masters_impl}
+                  master_render={@paper_master_render}
                   save_status={@save_status}
                   paper_halt={@paper_halt}
                 />
@@ -484,6 +494,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               a paper carries a single calm metadata column. Collapsing it (or any
               section) never reflows or transforms the body — chrome around
               content. --%>
+        <%!-- PAPERS ONLY, BY DECISION (inspector-destination-for-sheet-graph-media,
+              ruled by main 2026-09-23): sheet, graph and media editors get NO
+              metadata inspector and no Tier-3 summoned destination. They have no
+              metadata surface to show, so this :if is the intended scope, not a
+              gap; sidebar_user_opened is seeded only on the paper path
+              (Shared.Paper sidebar_assigns). Widening it is a new product row. --%>
         <.paper_metadata_sidebar
           :if={@paper_doc}
           paper_doc={@paper_doc}
@@ -634,6 +650,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:backlinks_linked, :list, default: [])
   attr(:backlinks_unlinked, :list, default: [])
 
+  # Rendered for PAPERS ONLY (the caller gates it on @paper_doc). Sheet, graph
+  # and media editors deliberately have no inspector: see the ruling recorded at
+  # the render site (inspector-destination-for-sheet-graph-media, 2026-09-23).
   def paper_metadata_sidebar(assigns) do
     paper = assigns.paper_doc
     status = (paper && Map.get(paper, :status)) || "draft"
@@ -1359,6 +1378,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             @sidebar_user_opened
           ) %>
         <% collapsed = display == :strip %>
+        <% desk_searching = String.trim(@desk_search || "") != "" %>
         <% doc_count = Enum.count(pane.items, &(&1.type == :doc)) %>
         <.pane_column
           :if={display != :hidden}
@@ -1388,8 +1408,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 class="pane-add-btn"
                 phx-click="airdrop-open"
                 phx-value-type={pane.type_name}
-                title={"Share access to #{pane.type_name}"}
-                aria-label={"Share access to #{pane.type_name}"}
+                title={gettext("Share access to %{type}", type: pane.type_name)}
+                aria-label={gettext("Share access to %{type}", type: pane.type_name)}
                 data-test-id="airdrop-open-type"
               ><.icon name="share-2" size={14} /></button>
               <%!-- Access panel entry (airdrop-grants): review + revoke scoped
@@ -1398,8 +1418,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 :if={@airdrop_can_share?}
                 class="pane-add-btn"
                 phx-click="access-open"
-                title="Review scoped access grants"
-                aria-label="Review scoped access grants"
+                title={gettext("Review scoped access grants")}
+                aria-label={gettext("Review scoped access grants")}
                 data-test-id="access-open-type"
               ><.icon name="clock" size={14} /></button>
               <%!-- Icon-only: without an explicit label its accessible name
@@ -1408,8 +1428,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 class="pane-add-btn"
                 phx-click="new-document"
                 phx-value-type={pane.type_name}
-                title={"New #{pane.type_name}"}
-                aria-label={"New #{pane.type_name}"}
+                title={gettext("New %{type}", type: pane.type_name)}
+                aria-label={gettext("New %{type}", type: pane.type_name)}
               ><.icon name="plus" size={14} /></button>
             <% end %>
           </:header_actions>
@@ -1431,7 +1451,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   aria-current="true" exactly like the sibling pane rows (the
                   vocabulary is written down once, in StudioComponents.Panes'
                   moduledoc). --%>
-            <div class="bp-desk-filter" role="group" aria-label="Desk filters">
+            <div class="bp-desk-filter" role="group" aria-label={gettext("Desk filters")}>
               <%= for grp <- pane.desk_groups do %>
                 <% gname = Map.get(grp, "name") || Map.get(grp, :name) %>
                 <% gtitle = Map.get(grp, "title") || Map.get(grp, :title) || gname %>
@@ -1459,7 +1479,70 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             </div>
           <% end %>
 
-          <div class="pane-body">
+          <%!-- DESK SEARCH (Gyldendal parity E8). Sanity puts a global search in
+                the navbar; Barkpark puts it at the top of the ROOT pane, which is
+                the one pane every desk has and the only one whose contents are
+                not already a single type. Typing swaps THIS pane's body for the
+                hits and leaves every other pane untouched, so a drilled path
+                stays on screen behind the results. A hit is an ordinary link to
+                `/…/studio/<type>/<id>`, so it is deep-linkable, middle-clickable,
+                and opens a type the desk does not list at its root through the
+                E3.5 dead-head alias. --%>
+          <div :if={idx == 0} class="bp-desk-search" data-test-id="desk-search">
+            <span class="bp-desk-search-icon" aria-hidden="true"><.icon name="search" size={14} /></span>
+            <input
+              type="search"
+              name="desk-search"
+              class="form-input bp-desk-search-input"
+              autocomplete="off"
+              placeholder={gettext("Search documents…")}
+              aria-label={gettext("Search documents…")}
+              value={@desk_search}
+              phx-keyup="desk-search"
+              phx-debounce="250"
+              data-test-id="desk-search-input"
+            />
+            <button
+              :if={@desk_search != ""}
+              type="button"
+              class="pane-add-btn"
+              phx-click="desk-search-clear"
+              title={gettext("Clear search")}
+              aria-label={gettext("Clear search")}
+              data-test-id="desk-search-clear"
+            ><.icon name="x" size={14} /></button>
+          </div>
+
+          <div
+            :if={idx == 0 and desk_searching}
+            class="pane-body"
+            data-test-id="desk-search-results"
+          >
+            <%= if String.length(String.trim(@desk_search)) < 2 do %>
+              <div class="bp-pane-notice" role="status" data-test-id="desk-search-too-short">
+                <%= gettext("Type at least 2 characters") %>
+              </div>
+            <% else %>
+              <%= if @desk_search_hits == [] do %>
+                <div class="bp-pane-notice" role="status" data-test-id="desk-search-empty">
+                  <%= gettext("No documents match “%{query}”", query: String.trim(@desk_search)) %>
+                </div>
+              <% else %>
+                <a
+                  :for={hit <- @desk_search_hits}
+                  class="pane-doc-item bp-desk-search-hit"
+                  data-test-id="desk-search-hit"
+                  data-hit-type={hit.type}
+                  href={Paths.studio_path(@scope_prefix, [hit.type, hit.id], @dataset)}
+                >
+                  <span class="pane-doc-title"><%= hit.title %></span>
+                  <span class="pane-doc-sub"><%= hit.type %></span>
+                </a>
+              <% end %>
+            <% end %>
+          </div>
+
+          <div :if={not (idx == 0 and desk_searching)} class="pane-body">
             <%= if pane.items == [] and pane[:type_name] != nil and pane[:filter_error] == nil do %>
               <.pane_empty message="No documents yet">
                 <%!-- `drawable_name/2`, not `||` (icons-tab-icon-tenant-guard):
@@ -1554,6 +1637,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     is_draft={item.is_draft}
                     badge={item[:badge]}
                     meta={item[:meta] || item[:updated]}
+                    media={item[:media]}
+                    media_slot={item[:media_slot] == true}
                     selected={item.id == pane[:selected]}
                     selectable={pane[:type_name] != nil}
                     checked={MapSet.member?(@selected_doc_ids, item.id)}
@@ -1628,6 +1713,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_edit_mode={@paper_edit_mode}
           task_previews={@paper_task_previews}
           paper_links={@paper_link_details}
+          paper_masters={Map.get(assigns, :paper_masters)}
+          paper_masters_impl={Map.get(assigns, :paper_masters_impl)}
+          paper_master_render={Map.get(assigns, :paper_master_render)}
           save_status={Map.get(assigns, :save_status, "")}
           paper_halt={Map.get(assigns, :paper_halt)}
           shares_admin?={@caps.admin}
@@ -1753,7 +1841,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               type="button"
               class="btn btn-ghost btn-sm"
               phx-click="access-open"
-              title="Review scoped access grants"
+              title={gettext("Review scoped access grants")}
               data-test-id="access-open"
             >
               <.icon name="clock" size={14} /> Access
@@ -1814,6 +1902,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           </div>
         <% else %>
           <.studio_editor_shell
+            admin?={Caps.admin_affordance?(@caps)}
             focus_on_mount={@focus_doc_on_open}
             editor_doc={@editor_doc}
             editor_schema={@editor_schema}
@@ -1822,6 +1911,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             editor_is_draft={@editor_is_draft}
             dataset={@dataset}
             validation_errors={@validation_errors}
+            validation_warnings={@validation_warnings}
             cross_violations={@cross_violations}
             save_status={@save_status}
             doc_conflict={@doc_conflict}
@@ -1829,6 +1919,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             presences={@presences}
             parent_assigns={assigns}
             nav_group={@nav_group}
+            nav_view={@nav_view}
+            nav_view_docs={@nav_view_docs}
+            scope_prefix={@scope_prefix}
             content_preview_rendered={@content_preview_rendered}
             content_preview_visible={@content_preview_visible}
             diff_visible={@diff_visible}
@@ -1889,11 +1982,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
            the editor-header action list. See Goal barkpark-cjs s4. -->
 
       <!-- E2 secondary editor (read-only) — sits in the layout flex
-           row so it lands to the right of the primary editor pane. -->
+           row so it lands to the right of the primary editor pane.
+           `width_bucket` is load-bearing, not decoration: below `standard`
+           the card yields SERVER-SIDE instead of being painted and then
+           hidden by D36's `display: none`, so no reader, screen reader or
+           Tab key ever meets a pane the desk has decided not to show. The
+           header gains a "Close reference" action at those buckets (see
+           DocActions) because this card carries the only ✕. -->
       <.secondary_editor_card
         secondary_doc={@secondary_doc}
         secondary_schema={@secondary_schema}
         secondary_type={@secondary_type}
+        width_bucket={@width_bucket}
       />
 
       <!-- E2 secondary picker modal -->
@@ -1904,7 +2004,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       />
 
       <!-- E3 bulk publish floating action bar -->
-      <.bulk_action_bar selected_doc_ids={@selected_doc_ids} />
+      <.bulk_action_bar
+        selected_doc_ids={@selected_doc_ids}
+        admin?={Caps.admin_affordance?(@caps)}
+      />
 
       <!-- Schema-action ConfirmModal — gated by `confirm_modal` assign -->
       <%= if @confirm_modal do %>
@@ -1925,6 +2028,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         show_profile={@show_profile}
         user_name={@user_name}
         user_color={@user_color}
+        account_path={account_path(assigns)}
         image_picker_field={@image_picker_field}
         uploads={@uploads}
         media_files={@media_files}
@@ -2238,6 +2342,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     do: JS.push("sidebar-toggle-panel") |> JS.focus(to: return_to)
 
   defp dismiss_or_toggle(_not_destination, _return_to), do: "sidebar-toggle-panel"
+
+  # The profile modal's "Download or erase your data" link. Only a scoped
+  # surface (non-empty `scope_prefix`) can address `…/d/:dataset/studio/_account`;
+  # anywhere else the link is not rendered.
+  defp account_path(%{scope_prefix: prefix, dataset: dataset})
+       when is_binary(prefix) and prefix != "" and is_binary(dataset),
+       do: Paths.studio_path(prefix, ["_account"], dataset)
+
+  defp account_path(_assigns), do: nil
 
   # spd-w18 — "this body renders NOTHING a reader can see", the gate on the
   # never-blank arm. It is deliberately NOT `html == ""`:

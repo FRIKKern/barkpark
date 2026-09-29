@@ -15,7 +15,7 @@ defmodule BarkparkWeb.Contract.PDSDeleteReceiptDifferentialTest do
     * media_controller.ex:365      DELETE /media/:id
     * share_controller.ex:141      DELETE /v1/shares/tokens/:token_id
     * share_link_controller.ex:221 DELETE /v1/shares/links/:id
-    * webhook_controller.ex:53     DELETE /v1/webhooks/:dataset/:id
+    * webhook_controller.ex delete/2  DELETE /v1/webhooks/:dataset/:id
 
   THE DIFFERENTIAL, which is the whole point: every test asserts a field the
   REQUEST CANNOT PRODUCE — a store-assigned binary_id, the store's `rev`, the
@@ -97,7 +97,15 @@ defmodule BarkparkWeb.Contract.PDSDeleteReceiptDifferentialTest do
   @png_b64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
 
   setup do
-    {:ok, admin_token} = Auth.create_token(@admin, "pds-w39", "test", ["read", "write", "admin"])
+    {:ok, admin_token} =
+      Auth.create_token(
+        @admin,
+        "pds-w39",
+        "test",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     # The struct is returned as context (rather than recovered later through
     # `Auth.verify_token/1`) so the share-link receipt test can grant this admin
     # a membership in the workspace it acts on — see that test's own note.
@@ -209,7 +217,18 @@ defmodule BarkparkWeb.Contract.PDSDeleteReceiptDifferentialTest do
   describe "DELETE /v1/shares/tokens/:token_id" do
     test "the receipt's `revoked` descends from the stamped row, not from a literal `true`",
          %{conn: conn} do
-      {:ok, token} = Auth.create_token(uniq("pdsw39share"), "w39-share", "test", ["read"])
+      # The revoke route resolves :token_id INSIDE the caller's workspace, so the
+      # subject token has to sit in the same workspace as `admin()` for the
+      # receipt (not a 404) to be the thing under test.
+      {:ok, token} =
+        Auth.create_token(
+          uniq("pdsw39share"),
+          "w39-share",
+          "test",
+          ["read"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
+
       assert is_nil(token.revoked_at)
 
       body = conn |> admin() |> delete("/v1/shares/tokens/#{token.id}") |> json_response(200)

@@ -514,7 +514,7 @@ selftest() {
   echo
   echo "selftest 3/12: deleting the DB (login) probe must FAIL"
   awk '
-    /dbcode="\$\(curl/ { drop = 1 }
+    /dbcode="\$\((curl|bp_curl_code)/ { drop = 1 }
     !drop { print }
     drop && /test "\$dbcode" = "401"/ { drop = 0 }
   ' "$real" > "$tmp/noprobe.yml"
@@ -535,7 +535,7 @@ selftest() {
   # they assert nothing. Before the step boundary became `- ` this read
   # "OK: the control-plane smoke can fail on a DB-dead box".
   awk '
-    /dbcode="\$\(curl/ { drop = 1 }
+    /dbcode="\$\((curl|bp_curl_code)/ { drop = 1 }
     !drop && /^  instance:/ {
       print "      - run: |"
       print "          echo \047probe reference: /v1/auth/login bad creds should be 401\047"
@@ -726,7 +726,7 @@ YML
   awk '
     /^  instance:/ { injob = 1 }
     /^  [a-zA-Z0-9_-]+:/ && !/^  instance:/ { injob = 0 }
-    injob && /dbcode="\$\(curl/ { drop = 1 }
+    injob && /dbcode="\$\((curl|bp_curl_code)/ { drop = 1 }
     !drop { print }
     drop && /test "\$dbcode" = "401"/ { drop = 0 }
   ' "$real" > "$tmp/noinstprobe.yml"

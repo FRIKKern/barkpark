@@ -48,7 +48,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
     assert html =~ "Card body"
     assert html =~ ~s(src="/image.png")
 
-    assert form_value(form, "card-title") == ["Card title"]
+    assert form_value(form, "card-title") == []
     assert form_value(form, "card-media-src") == []
     assert form_value(form, "card-media-alt") == ["Cover"]
     assert Enum.empty?(LazyHTML.query(form, "[name='card-action-label']"))
@@ -64,7 +64,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
     assert selected_value(form, "card-action-priority") == ["primary"]
     assert selected_value(form, "card-tone") == ["info"]
     assert Enum.empty?(LazyHTML.query(form, "[name*='body'], textarea"))
-    assert Enum.count(LazyHTML.query(tree, "form")) == 2
+    assert Enum.count(LazyHTML.query(tree, "form")) == 3
     assert Enum.count(LazyHTML.query(tree, "bp-paper-editor[data-editor-mode='card-body']")) == 1
 
     assert Enum.count(LazyHTML.query(card_frame, "bp-paper-editor[data-editor-mode='card-body']")) ==
@@ -72,8 +72,15 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardContextualEditorTest do
 
     assert length(:binary.matches(html, "Card body")) == 1
 
-    assert child_kinds(card_frame) == ["div", "h3", "div", "div"]
-    assert LazyHTML.attribute(LazyHTML.query(card_frame, "h3"), "class") == []
+    assert child_kinds(card_frame) == ["div", "form", "div", "div"]
+
+    assert LazyHTML.attribute(LazyHTML.query(card_frame, "h3"), "class") == [
+             "bp-paper-card-title-heading bp-paper-card-title-owner"
+           ]
+
+    assert Enum.count(LazyHTML.query(card_frame, "[data-paper-card-title-owner]")) == 1
+    assert Enum.count(LazyHTML.query(card_frame, "textarea[name='card-title']")) == 1
+    assert Enum.count(LazyHTML.query(form, "[data-test-id='paper-card-title-focus']")) == 1
     assert LazyHTML.attribute(LazyHTML.query(card_frame, "img"), "src") == ["/image.png"]
 
     media_owner = LazyHTML.query(card_frame, "[data-test-id='paper-card-image-preview']")

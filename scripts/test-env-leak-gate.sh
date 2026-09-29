@@ -32,6 +32,8 @@
 # (scoped to the enclosing test/setup/def block); a `def`/`defp` helper an
 # on_exit calls; a CASE TEMPLATE's on_exit, credited to whoever `use`s it; and a
 # SUPPORT MODULE's writes, credited to whoever calls it from a restore context.
+# Helper credit follows the CALL CHAIN to whatever depth the file uses (a
+# fixpoint closure, not a depth limit) — see Helpers.collect/1.
 #
 # A site is a LEAK when its module registers no matching restore: an `on_exit`
 # (or `ExUnit.Callbacks.on_exit`) callback anywhere in the module whose body
@@ -72,6 +74,24 @@
 # registrations, which is a real extension of the walk, not a tightening of it.
 # Until then: a green from this gate means "a restore is written", NOT "a
 # restore runs".
+#
+# SAY IT ONCE MORE, PLAINLY, BECAUSE A GREEN HERE IS EASY TO OVER-READ:
+# this gate asserts a restore EXISTS. It cannot assert the restore RAN, and it
+# cannot assert it ran BEFORE the next module read the key. A static reader has
+# no ordering. That limit is not a bug to be closed by widening the walk — it is
+# why this gate was GREEN AND CORRECT throughout the 2026-09-18 nightly
+# :boot_mode leak: the leaking module had a real, matching on_exit.
+#
+# WHAT CATCHES AN ORDERING LEAK, since this gate cannot (both shipped in #19480):
+#   * the boot-mode sandbox's POST-RESTORE RE-READ at the source — after putting
+#     the key back it reads it again and fails loudly if the value did not take;
+#   * the ExUnit.after_suite PROBE in api/test/test_helper.exs — it inspects the
+#     key once the whole suite has finished and exits 1 if it escaped, exit 0
+#     when clean. That is a RUNTIME observation of the value, which is the only
+#     thing that can separate "a restore is written" from "a restore ran in
+#     time".
+# Read this gate's green as "every mutation has a paired restore", and read
+# those two as "no mutation actually escaped". Neither substitutes for the other.
 #
 # WHY AN AST WALK AND NOT A REGEX
 # -------------------------------
@@ -200,7 +220,73 @@ defmodule Helpers do
   # was 21 of the first 162 hits, including the two largest. So pass A collects
   # the names an on_exit callback invokes, and pass B treats the bodies of
   # def/defp clauses with those names as restore context.
+  #
+  # DEPTH IS DERIVED, NOT ENUMERATED.
+  # ---------------------------------
+  # The seed above is only the FIRST link. A restore routinely reaches its
+  # `Application.put_env` through a helper that calls ANOTHER helper:
+  #
+  #     defp put_boot_mode(v),     do: Application.put_env(:barkpark, :boot_mode, v)
+  #     defp restore_boot_mode(v), do: put_boot_mode(v)
+  #     …
+  #     on_exit(fn -> restore_boot_mode(prev) end)
+  #
+  # That is exactly the shape a boot-mode sandbox takes, BECAUSE the sandbox is
+  # the mechanism that fixes the leak — so a one-link rule reds the remedy. It
+  # was measured: this file reported `2 unrestored mutation(s) of
+  # :barkpark/:boot_mode` on a module whose restore is present and correct, and
+  # named the restore STATEMENT itself as one of the two hits.
+  #
+  # The fix is NOT "credit two links". Two is the same enumeration one deeper,
+  # and the next honest three-helper restore reds again; the author then reaches
+  # for an allowlist row, which teaches the tree to route around the gate. So
+  # `collect/1` closes the call graph to a FIXPOINT: a helper the restore
+  # context names lends its own callees the same credit, and so on, to whatever
+  # depth the file actually uses. The set only grows and is bounded by the
+  # distinct function names in the one file, so the walk always terminates —
+  # including through mutual recursion, which simply stops adding names.
+  #
+  # Direction of error, unchanged and deliberate: a wider restore context is
+  # conservative toward false NEGATIVES, which is the same trade every other
+  # rule here makes. A ratchet that reds a correct fix gets turned off, and a
+  # gate that is off measures nothing at all.
   def collect(ast) do
+    close(direct(ast), clause_bodies(ast))
+  end
+
+  defp close(names, bodies) do
+    next =
+      Enum.reduce(names, names, fn name, acc ->
+        Enum.reduce(Map.get(bodies, name, []), acc, &locals(&1, &2))
+      end)
+
+    if MapSet.equal?(next, names), do: names, else: close(next, bodies)
+  end
+
+  # Every def/defp clause body in the file, indexed by function name. One name
+  # can have several clauses (`set_or_delete(k, nil)` / `set_or_delete(k, v)`)
+  # and all of them are restore machinery once the name is credited.
+  def clause_bodies(ast) do
+    {_a, acc} =
+      Macro.prewalk(ast, %{}, fn
+        {kind, _m, [head | rest]} = n, acc when kind in [:def, :defp] ->
+          case fname(head) do
+            nil -> {n, acc}
+            name -> {n, Map.update(acc, name, [rest], &[rest | &1])}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    acc
+  end
+
+  defp fname({:when, _, [head | _]}), do: fname(head)
+  defp fname({name, _, _}) when is_atom(name), do: name
+  defp fname(_), do: nil
+
+  defp direct(ast) do
     {_ast, names} =
       Macro.prewalk(ast, MapSet.new(), fn
         {:on_exit, _m, args} = n, acc when is_list(args) -> {n, locals(args, acc)}
@@ -479,7 +565,17 @@ defmodule RestoreCalls do
   # machinery as the case-template credit below — a module defined in the
   # scanned population lends its restores — with a different trigger: CALLED
   # from a restore context rather than `use`d.
-  def of(ast) do
+  #
+  # THE SAME DEPTH RULE APPLIES HERE. The remote call is just as likely to sit
+  # one link in — `on_exit(fn -> reset_boot_mode() end)`, with
+  # `defp reset_boot_mode, do: Barkpark.BootModeSandbox.restore(prior)` — so the
+  # module names are read out of the restore context AND out of the body of
+  # every local helper `Helpers.collect/1` has already credited, at whatever
+  # depth the closure reached. Reading only the lexical on_exit body would
+  # credit the local helper's own writes (Walk does that) while dropping the
+  # support module it delegates to, which is the same one-link blindness in a
+  # second place.
+  def of(ast, helper_names, bodies) do
     {_a, acc} =
       Macro.prewalk(ast, MapSet.new(), fn
         {:on_exit, _m, args} = n, acc when is_list(args) ->
@@ -498,7 +594,9 @@ defmodule RestoreCalls do
           {n, acc}
       end)
 
-    acc
+    Enum.reduce(helper_names, acc, fn name, acc ->
+      Enum.reduce(Map.get(bodies, name, []), acc, &mods(&1, &2))
+    end)
   end
 
   defp mods(subtree, acc) do
@@ -572,9 +670,11 @@ scanned =
 
     with {:ok, src} <- File.read(file),
          {:ok, ast} <- Code.string_to_quoted(src) do
-      {muts, rests} = Walk.go(ast, false, Helpers.collect(ast), MapSet.new(), {[], MapSet.new()})
+      hs = Helpers.collect(ast)
+      bodies = Helpers.clause_bodies(ast)
+      {muts, rests} = Walk.go(ast, false, hs, MapSet.new(), {[], MapSet.new()})
       {defined, used} = Modules.scan(ast)
-      {:ok, rel, muts, rests, defined, used, RestoreCalls.of(ast), Writes.of(ast)}
+      {:ok, rel, muts, rests, defined, used, RestoreCalls.of(ast, hs, bodies), Writes.of(ast)}
     else
       _ -> {:parse_fail, rel}
     end
@@ -676,7 +776,16 @@ if [ "${1:-}" = "--selftest" ]; then
   T="$WORKD/selftest"
   mkdir -p "$T/tree"
   fails=0
-  arm() { printf '  %-5s %s\n' "$1" "$2"; [ "$1" = "FAIL" ] && fails=$((fails + 1)); return 0; }
+  arms=0
+  # The total is COUNTED, never written as a literal: a hardcoded "6 of 6" is an
+  # enumeration that goes stale the moment an arm is added, and a stale total is
+  # a number that stops measuring the thing it names.
+  arm() {
+    printf '  %-5s %s\n' "$1" "$2"
+    arms=$((arms + 1))
+    [ "$1" = "FAIL" ] && fails=$((fails + 1))
+    return 0
+  }
 
   echo "test-env-leak-gate --selftest"
   echo
@@ -763,12 +872,76 @@ EX
     arm "FAIL" "(e) an unparseable file was skipped silently — the scanner reports a tree it never read"
   fi
 
+  # (f) a restore reaching its put_env through TWO helpers must PASS. The gate
+  #     used to credit only the first link, so this exact shape — the one a
+  #     boot-mode sandbox takes, because the sandbox is the FIX — reported
+  #     "2 unrestored mutation(s) of :barkpark/:boot_mode" and exited 1. A gate
+  #     that reds the remedy teaches the next author to reach for an allowlist
+  #     row, which is how a waiver file becomes the real policy.
+  mkdir -p "$T/chain"
+  cat > "$T/chain/chain_test.exs" <<'EX'
+defmodule ChainTest do
+  use ExUnit.Case
+
+  defp write_boot_mode(v), do: Application.put_env(:barkpark, :boot_mode, v)
+  defp thread_it(v), do: write_boot_mode(v)
+  defp restore_boot_mode(v), do: thread_it(v)
+
+  setup do
+    prev = Application.get_env(:barkpark, :boot_mode)
+    Application.put_env(:barkpark, :boot_mode, :test)
+    on_exit(fn -> restore_boot_mode(prev) end)
+    :ok
+  end
+
+  test "restored through a three-link chain" do
+    assert Application.get_env(:barkpark, :boot_mode) == :test
+  end
+end
+EX
+  if TEST_ENV_LEAK_SCANDIR="$T/chain" TEST_ENV_LEAK_ALLOWLIST="$T/allow" \
+    bash "$0" > "$T/outf" 2>&1; then
+    arm "ok" "(f) a restore reached through a CHAIN of helpers passes at whatever depth the file uses"
+  else
+    arm "FAIL" "(f) a correct multi-helper restore reddened — the gate is punishing its own remedy"
+    sed 's/^/        /' "$T/outf"
+  fi
+
+  # (g) the SAME chain shape, restoring a DIFFERENT key, must still RED. Arm (f)
+  #     alone would also pass if the closure had simply pardoned everything it
+  #     could reach; this is what proves the credit still tracks the KEY.
+  mkdir -p "$T/chainleak"
+  cat > "$T/chainleak/chain_leak_test.exs" <<'EX'
+defmodule ChainLeakTest do
+  use ExUnit.Case
+
+  defp write_plugins(v), do: Application.put_env(:barkpark, :plugins, v)
+  defp restore_plugins(v), do: write_plugins(v)
+
+  setup do
+    Application.put_env(:barkpark, :boot_mode, :test)
+    on_exit(fn -> restore_plugins([]) end)
+    :ok
+  end
+
+  test "boot_mode escapes" do
+    assert Application.get_env(:barkpark, :boot_mode) == :test
+  end
+end
+EX
+  out="$(TEST_ENV_LEAK_SCANDIR="$T/chainleak" TEST_ENV_LEAK_ALLOWLIST="$T/allow" bash "$0" 2>&1 || true)"
+  if grep -q "chain_leak_test.exs:8" <<<"$out"; then
+    arm "ok" "(g) a chain restoring a DIFFERENT key still reds — following the chain widened depth, not the key"
+  else
+    arm "FAIL" "(g) a chain restoring another key pardoned :boot_mode — the closure has become an amnesty"
+  fi
+
   echo
   if [ "$fails" -gt 0 ]; then
-    echo "SELFTEST FAILED: $fails of 6 arms failed" >&2
+    echo "SELFTEST FAILED: $fails of $arms arms failed" >&2
     exit 1
   fi
-  echo "SELFTEST PASSED: 6 of 6 arms"
+  echo "SELFTEST PASSED: $arms of $arms arms"
   exit 0
 fi
 

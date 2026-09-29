@@ -6,6 +6,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexContractTest do
   alias Barkpark.StudioChat.Runtime.Codex
   alias Barkpark.StudioChat.Runtime.Codex.Protocol
   alias Barkpark.StudioChat.Runtime.Event
+  alias Barkpark.TestTmp
 
   @fake_app_server Path.expand("../../../fixtures/codex_app_server/fake_app_server.py", __DIR__)
 
@@ -133,8 +134,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexContractTest do
   end
 
   test "readiness performs only version, initialize, and account/read against the fixture" do
-    log =
-      Path.join(System.tmp_dir!(), "codex_contract_readiness_#{System.unique_integer()}.jsonl")
+    log = TestTmp.path("codex_contract_readiness_#{System.unique_integer()}.jsonl")
 
     on_exit(fn -> File.rm(log) end)
 

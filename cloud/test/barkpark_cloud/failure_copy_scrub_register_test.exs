@@ -61,11 +61,18 @@ defmodule BarkparkCloud.FailureCopyScrubRegisterTest do
     """
     def offenders(sources) do
       Enum.flat_map(sources, fn {path, text} ->
+        # Resolve the names ONCE per file. Calling `names(text)` inside the
+        # per-line filter re-ran the alias Regex.scan over the whole file for
+        # EVERY line — quadratic in file size, and on a loaded CI runner the
+        # whole-tree scan blew ExUnit's 60 s timeout (Cloud gate flapped twice
+        # on main on 2026-09-10 with this test as the single failure).
+        needles = Enum.map(names(text), &(&1 <> ".scrub("))
+
         text
         |> String.split("\n")
         |> Enum.with_index(1)
         |> Enum.filter(fn {line, _n} ->
-          Enum.any?(names(text), &String.contains?(line, &1 <> ".scrub("))
+          Enum.any?(needles, &String.contains?(line, &1))
         end)
         |> Enum.map(fn {line, n} -> {path, n, String.trim(line)} end)
       end)

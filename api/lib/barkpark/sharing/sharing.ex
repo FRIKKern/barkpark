@@ -238,6 +238,75 @@ defmodule Barkpark.Sharing do
   def add_share(_other), do: {:error, :invalid}
 
   @doc """
+  Whether the scope currently carries a `:media` share — the ONE question the
+  "public" asset label must answer honestly.
+
+  A thin, named read over `shared?/4` so every operator surface (Studio media
+  library, `bp`'s asset output, the publish affordance's receipt) asks it the
+  same way instead of open-coding the surface atom. Same Default-OFF /
+  Default-DENY semantics; never raises.
+  """
+  @spec media_shared?(term(), term(), term()) :: boolean()
+  def media_shared?(ws_slug, proj_slug, dataset),
+    do: shared?(ws_slug, proj_slug, dataset, :media)
+
+  @doc """
+  THE AFFORDANCE (task-cbb112a9b4c600cc): publish this scope's media by adding
+  the `:media` surface to the scope's STORED share — never by touching any
+  asset's `bp_visibility`.
+
+  Anonymous reads of a non-Default tenant's scoped media are granted ONLY by a
+  `:read` share on the scope for the `:media` surface
+  (`BarkparkWeb.Plugs.RequireShareScope`, RULED 2026-09-06). This is the one
+  write that creates it, and it goes through the ordinary stored-share path
+  (`add_share/1` → upsert → `refresh/0`), so it validates through the SAME
+  `parse/1` every env share does and the live list is correct without a
+  restart.
+
+  ADDITIVE, NEVER A DOWNGRADE. Existing surfaces on the scope are preserved and
+  `:media` is unioned in; the existing access level is preserved when the scope
+  already has one (an `:edit` share is never silently narrowed to `:read`) and
+  defaults to `:read` for a scope with no share at all — `:read` is all an
+  anonymous `<img>` needs, and `RequireShareScope` serves GET/HEAD off it.
+
+  Returns `{:ok, Share.t()}`, or `{:error, :invalid}` for a malformed/wildcard
+  scope (the same refusal `add_share/1` gives).
+  """
+  @spec publish_media(binary()) :: {:ok, Share.t()} | {:error, term()}
+  def publish_media(scope) when is_binary(scope) do
+    case parse_scope(scope) do
+      {:ok, {ws, proj, dataset}} ->
+        {surfaces, access} = existing_grant(ws, proj, dataset)
+        surfaces = surfaces |> Enum.concat([:media]) |> Enum.uniq() |> Enum.map(&Atom.to_string/1)
+
+        add_share("#{ws}/#{proj}/#{dataset}:#{Enum.join(surfaces, ",")}:#{access}")
+
+      {:error, _reason} ->
+        {:error, :invalid}
+    end
+  end
+
+  def publish_media(_other), do: {:error, :invalid}
+
+  # The surfaces + access the scope already grants, across BOTH inputs of the
+  # live list. Reading the live list (not only the store) is deliberate: an env
+  # baseline share is not a row this upsert can merge into, and dropping its
+  # surfaces here would make "publish media" look like a narrowing to an
+  # operator reading `bp share ls`.
+  @spec existing_grant(binary(), binary(), binary()) :: {[Share.surface()], Share.access()}
+  defp existing_grant(ws, proj, dataset) do
+    matching =
+      Enum.filter(shares(), fn %Share{} = s ->
+        s.workspace_slug == ws and s.project_slug == proj and s.dataset == dataset
+      end)
+
+    surfaces = matching |> Enum.flat_map(& &1.surfaces) |> Enum.uniq()
+    access = access_for(ws, proj, dataset) || :read
+
+    {surfaces, access}
+  end
+
+  @doc """
   Delete the persisted share for the exact `(workspace, project, dataset)` triple
   and `refresh/0` the live list. Returns `{:ok, count_deleted}` (0 if none).
 

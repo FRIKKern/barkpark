@@ -59,6 +59,14 @@ const (
 // spec so a bare `--provider azure` renders without the caller filling
 // region/type/image. Env overrides win so a size/region change needs no rebuild.
 // Name is left for the caller to fill.
+//
+// STAGED, NOT DEAD (reviewed 2026-09-16, wbqs-go-dead-exports). This and the two
+// option constructors below (WithCredential, WithSSHPublicKey) have zero callers
+// on main. That is the expected state of a provider whose go-live is still behind
+// a human gate: the azure host-creation wiring lands with azh-go-live-human-gate,
+// and these are the seams it plugs into. Their absence of callers is therefore a
+// measure of THAT task, not evidence of residue — do not sweep them out while the
+// gate is open; if it closes without wiring them, delete them then.
 func DefaultSpec() cloud.ServerSpec {
 	spec := cloud.ServerSpec{
 		Region:     DefaultLocation,

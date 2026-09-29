@@ -19,7 +19,7 @@
       "cell": "stat-partial-row__light__1280",
       "file": "stat-partial-row__light__1280.jpeg",
       "scale": 2,
-      "bytes": 508457,
+      "bytes": 559643,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -54,7 +54,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 72.6,
+      "proseCpl": 71.8,
       "proseCplSamples": 4,
       "captionCpl": null,
       "captionWidth": null,
@@ -113,15 +113,15 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8,
-        8
+        7,
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 11,
-          "emptyTracks": 5,
+          "emptyTracks": 3,
           "probe": {
             "hit": "div.bp-stats",
             "hitIsStrip": true,
@@ -129,9 +129,9 @@
           }
         },
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 11,
-          "emptyTracks": 5,
+          "emptyTracks": 3,
           "probe": {
             "hit": "div.bp-stats",
             "hitIsStrip": true,
@@ -142,18 +142,19 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 3,
+        "total": 47,
         "heavy": 3,
         "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
+          "1": 44,
           "2": 3
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 564.8,
-            "width": 580,
+            "y": 548.8,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -162,8 +163,8 @@
           },
           {
             "px": 2,
-            "y": 1154,
-            "width": 580,
+            "y": 1184,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -172,8 +173,8 @@
           },
           {
             "px": 2,
-            "y": 1809.9,
-            "width": 580,
+            "y": 1891.7,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -182,13 +183,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "stat-partial-row__light__1920",
       "file": "stat-partial-row__light__1920.jpeg",
       "scale": 2,
-      "bytes": 553898,
+      "bytes": 610087,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -223,7 +224,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 72.6,
+      "proseCpl": 71.8,
       "proseCplSamples": 4,
       "captionCpl": null,
       "captionWidth": null,
@@ -311,18 +312,19 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 3,
+        "total": 47,
         "heavy": 3,
         "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
+          "1": 44,
           "2": 3
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 564.8,
-            "width": 580,
+            "y": 548.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -331,8 +333,8 @@
           },
           {
             "px": 2,
-            "y": 1154,
-            "width": 580,
+            "y": 1203.2,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -341,8 +343,8 @@
           },
           {
             "px": 2,
-            "y": 1809.9,
-            "width": 580,
+            "y": 1930.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -351,13 +353,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "stat-partial-row__dark__1280",
       "file": "stat-partial-row__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 508439,
+      "bytes": 553691,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -392,7 +394,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 72.6,
+      "proseCpl": 71.8,
       "proseCplSamples": 4,
       "captionCpl": null,
       "captionWidth": null,
@@ -451,15 +453,15 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8,
-        8
+        7,
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 11,
-          "emptyTracks": 5,
+          "emptyTracks": 3,
           "probe": {
             "hit": "div.bp-stats",
             "hitIsStrip": true,
@@ -467,9 +469,9 @@
           }
         },
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 11,
-          "emptyTracks": 5,
+          "emptyTracks": 3,
           "probe": {
             "hit": "div.bp-stats",
             "hitIsStrip": true,
@@ -480,18 +482,19 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 3,
+        "total": 47,
         "heavy": 3,
         "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
+          "1": 44,
           "2": 3
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 564.8,
-            "width": 580,
+            "y": 548.8,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -500,8 +503,8 @@
           },
           {
             "px": 2,
-            "y": 1154,
-            "width": 580,
+            "y": 1184,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -510,8 +513,8 @@
           },
           {
             "px": 2,
-            "y": 1809.9,
-            "width": 580,
+            "y": 1891.7,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -520,13 +523,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "stat-partial-row__dark__1920",
       "file": "stat-partial-row__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 553294,
+      "bytes": 604694,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 6,
@@ -561,7 +564,7 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 72.6,
+      "proseCpl": 71.8,
       "proseCplSamples": 4,
       "captionCpl": null,
       "captionWidth": null,
@@ -649,18 +652,19 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 3,
+        "total": 47,
         "heavy": 3,
         "structuralHeavy": 3,
         "strayHeavy": 0,
         "byWeight": {
+          "1": 44,
           "2": 3
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 564.8,
-            "width": 580,
+            "y": 548.8,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -669,8 +673,8 @@
           },
           {
             "px": 2,
-            "y": 1154,
-            "width": 580,
+            "y": 1203.2,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -679,8 +683,8 @@
           },
           {
             "px": 2,
-            "y": 1809.9,
-            "width": 580,
+            "y": 1930.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -689,7 +693,7 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     }
   ]
 }

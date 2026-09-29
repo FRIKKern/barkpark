@@ -175,6 +175,52 @@ defmodule Barkpark.Tasks.QueryRowsTest do
   # explicit `opts[:dataset]` first, then `query["dataset"]`, then "production" —
   # both paths are proven below, plus the nil-schema (unregistered dataset)
   # allow-all degrade.
+  # PDS-D749 / task-b258d691989c7a99 — the END-TO-END arm. The unit arms in
+  # task_resolver_test prove `row_from_task/1` derives the marker from `doc_id`;
+  # only THIS one proves the DB projection still CARRIES `doc_id` that far. Drop
+  # `"doc_id"` from `to_render_map/3` and every unit arm stays green while every
+  # real paper board goes back to painting a draft as an ordinary card — so this
+  # is the arm that reds.
+  #
+  # The two rows are inserted at the Repo, not through `Content.create_document/4`,
+  # because that writer is DRAFT-FIRST (it stores `drafts.<id>`) and publishing
+  # runs the label-spine wall — neither of which this projection is about. Here
+  # the id SPELLING is the whole subject, so it is spelled directly.
+  test "a draft-only task's drafts. spelling survives the DB projection", %{scope: scope} do
+    epic = "epic-#{System.unique_integer([:positive])}"
+    pub = "pub-#{System.unique_integer([:positive])}"
+    dft = "dft-#{System.unique_integer([:positive])}"
+
+    insert_task!(pub, scope, epic, "published")
+    insert_task!("drafts." <> dft, scope, epic, "draft")
+
+    rows = TaskQuery.rows_for_query(%{"parent_id" => epic, "dataset" => @dataset}, scope)
+
+    # Precondition, asserted not assumed: a draft with NO published twin is not
+    # collapsed away, so there really are two rows to discriminate between.
+    assert length(rows) == 2,
+           "collapse_twins ate a row: #{inspect(Enum.map(rows, & &1["title"]))}"
+
+    assert row_for(rows, "drafts." <> dft)["draft"] == true,
+           "draft row lost its marker: #{inspect(row_for(rows, "drafts." <> dft))}"
+
+    refute Map.has_key?(row_for(rows, pub), "draft")
+  end
+
+  defp insert_task!(doc_id, scope, parent, status) do
+    Barkpark.Repo.insert!(%Barkpark.Content.Document{
+      doc_id: doc_id,
+      type: "task",
+      dataset: @dataset,
+      status: status,
+      title: doc_id,
+      rev: "rev-#{doc_id}",
+      workspace_id: Keyword.fetch!(scope, :workspace_id),
+      project_id: Keyword.fetch!(scope, :project_id),
+      content: %{"kind" => "task", "lifecycle_status" => "open", "parent_id" => parent}
+    })
+  end
+
   describe "rows_for_query/3 field-visibility seal" do
     setup %{scope: scope} do
       seal_task_schema!(scope, ["assignee", "claim", "labels"])

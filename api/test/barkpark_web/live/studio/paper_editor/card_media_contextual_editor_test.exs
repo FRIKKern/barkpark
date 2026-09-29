@@ -78,6 +78,9 @@ defmodule BarkparkWeb.Studio.PaperEditor.CardMediaContextualEditorTest do
     assert Enum.empty?(LazyHTML.query(tree, "[data-test-id='paper-card-image-preview']"))
     assert Enum.empty?(LazyHTML.query(tree, "[data-paper-figure-image-picker]"))
     assert Enum.count(LazyHTML.query(tree, "[data-test-id='paper-card-body-editor']")) == 1
+    assert Enum.count(LazyHTML.query(tree, "[data-paper-card-title-owner]")) == 1
+    assert Enum.count(LazyHTML.query(tree, "textarea[name='card-title']")) == 1
+    assert Enum.empty?(LazyHTML.query(tree, "#card-form-null-type [name='card-title']"))
 
     assert LazyHTML.attribute(LazyHTML.query(tree, "input[name='card-media-src']"), "value") ==
              [media["src"]]

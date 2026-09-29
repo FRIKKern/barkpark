@@ -212,9 +212,14 @@ live_turn() {
 
   echo "==> asserting terminal result frame (field-matched to the committed fixture) ..."
   local ok=1
-  echo "$result_line" | grep -q '"is_error":[[:space:]]*true' || { echo "FAIL: is_error != true" >&2; ok=0; }
-  echo "$result_line" | grep -q "\"api_error_status\":[[:space:]]*$EXPECT_STATUS" || { echo "FAIL: api_error_status != $EXPECT_STATUS" >&2; ok=0; }
-  echo "$result_line" | grep -q "$EXPECT_RESULT_SUBSTR" || { echo "FAIL: result missing '$EXPECT_RESULT_SUBSTR'" >&2; ok=0; }
+  # HERE-STRINGS, NEVER `echo "$v" | grep -q`.  Under this script's `set -o
+  # pipefail` a matching `grep -q` exits first, the producer takes SIGPIPE, and
+  # the pipeline hands back 141 — so a TRUE assertion reads as FAIL once the
+  # frame outgrows the pipe buffer.  A here-string has no producer process to
+  # kill, so the verdict stops depending on the payload's length.
+  grep -q '"is_error":[[:space:]]*true' <<<"$result_line" || { echo "FAIL: is_error != true" >&2; ok=0; }
+  grep -q "\"api_error_status\":[[:space:]]*$EXPECT_STATUS" <<<"$result_line" || { echo "FAIL: api_error_status != $EXPECT_STATUS" >&2; ok=0; }
+  grep -q "$EXPECT_RESULT_SUBSTR" <<<"$result_line" || { echo "FAIL: result missing '$EXPECT_RESULT_SUBSTR'" >&2; ok=0; }
 
   rm -f "$stdout_f" "$stderr_f"
   if [ "$ok" -ne 1 ]; then
@@ -241,7 +246,10 @@ assert_no_orphans() {
     for sb in "${SANDBOXES[@]}"; do
       # A removed sandbox may show transiently as 'stopping'/'stopped'; only a
       # still-'running' row is a real orphan leak.
-      if printf '%s' "$ls_out" | grep -E "\<$sb\>" | grep -qi "running"; then
+      # No pipe on either stage: `grep -E … | grep -qi …` makes the FIRST grep a
+      # producer that SIGPIPEs the moment the second matches, and `set -o
+      # pipefail` then reports 141 — a running orphan would read as "clean".
+      if grep -qi "running" <<<"$(grep -E "\<$sb\>" <<<"$ls_out" || true)"; then
         leaked="$sb"
       fi
     done

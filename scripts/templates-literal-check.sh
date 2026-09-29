@@ -191,6 +191,7 @@ def run_check():
             print(f"templates-literal-check: FAILED — scan root missing: "
                   f"templates/{scan_root}")
             return 1
+        root_scanned = 0
         for dirpath, dirs, files in os.walk(base):
             dirs[:] = [d for d in dirs if d not in {"node_modules", ".next", "dist", ".astro"}]
             for fn in sorted(files):
@@ -201,8 +202,16 @@ def run_check():
                 if rel in EXEMPT:
                     continue
                 scanned += 1
+                root_scanned += 1
                 for ln, tok, why, text in scan_file(path):
                     failures.append((rel, ln, tok, why, text))
+        # THE FLOOR (task-92a213f01ca30817): a scan root that exists but holds
+        # no scannable .tsx would scan nothing and print PASS. A green over zero
+        # files is not a green, so it is the same refusal as a missing root.
+        if root_scanned == 0:
+            print(f"templates-literal-check: FAILED — scan root holds no "
+                  f"scannable .tsx file: templates/{scan_root}")
+            return 1
 
     if not failures:
         print(f"templates-literal-check: PASS — {scanned} starter-template .tsx "
@@ -293,11 +302,46 @@ def run_selftest():
           f"through the file reader (1 hit, got {disk_hits})")
     bad += disk_hits != 1
 
+    # THE VERDICT WIRING, graded on the whole program (task-92a213f01ca30817).
+    # Every case above grades scan_text/scan_file IN PROCESS; none executes the
+    # `sys.exit(... run_check())` line that turns the verdict into the PROCESS
+    # exit, so disarming it kept this selftest green while CI certified a
+    # planted literal. Same idiom as PR #13405 / #20180: RE-EXEC THE WHOLE
+    # PROGRAM on a fixture root and assert the PROCESS exit. ROOT derives from
+    # the script's own location, so a copy at <fixture>/scripts/ scans only the
+    # fixture — no override is added.
+    import shutil, subprocess
+    with tempfile.TemporaryDirectory() as td:
+        os.makedirs(os.path.join(td, "scripts"))
+        shutil.copy(os.path.join(root, "scripts", "templates-literal-check.sh"),
+                    os.path.join(td, "scripts", "templates-literal-check.sh"))
+        for r in SCAN_ROOTS:
+            os.makedirs(os.path.join(td, "templates", r))
+        clean_tsx = '<p className="text-muted-text">x</p>\n'
+        a = os.path.join(td, "templates", SCAN_ROOTS[0], "a.tsx")
+        b = os.path.join(td, "templates", SCAN_ROOTS[1], "b.tsx")
+        run = lambda: subprocess.run(["bash", os.path.join(td, "scripts", "templates-literal-check.sh")],
+                                     capture_output=True, text=True).returncode
+        rc_empty = run()
+        with open(b, "w", encoding="utf-8") as fh:
+            fh.write(clean_tsx)
+        with open(a, "w", encoding="utf-8") as fh:
+            fh.write('<p className="text-zinc-400">x</p>\n')
+        rc_planted = run()
+        with open(a, "w", encoding="utf-8") as fh:
+            fh.write(clean_tsx)
+        rc_removed = run()
+    for ok_, label in ((rc_planted == 1, f"the WHOLE PROGRAM exits 1 on a planted text-zinc-400 (got {rc_planted})"),
+                       (rc_removed == 0, f"…and exits 0 once it is removed (got {rc_removed})"),
+                       (rc_empty != 0, f"a fixture whose scan roots hold no .tsx is never green (got {rc_empty})")):
+        print(f"  [{'ok' if ok_ else 'FAIL'}] {label}")
+        bad += 0 if ok_ else 1
+
     if bad:
         print(f"\ntemplates-literal-check --selftest: FAILED — {bad} case(s) wrong. "
               f"The gate does not do what its header claims.")
         return 1
-    print(f"\ntemplates-literal-check --selftest: PASS — {len(cases) + 3} cases, "
+    print(f"\ntemplates-literal-check --selftest: PASS — {len(cases) + 6} cases, "
           f"including a mutation that reds and every allow mechanism that suppresses.")
     return 0
 

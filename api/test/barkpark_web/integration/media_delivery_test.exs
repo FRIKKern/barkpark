@@ -235,4 +235,94 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
       cleanup(created)
     end
   end
+
+  # ── D12 on the object-storage arm (task-4479653714f6a809) ─────────────────
+  # The redirect arm used to leave the BYTES' cache policy to the bucket, so
+  # D12 held only for locally-served files. The presigned URL now carries
+  # `response-cache-control`. Each test serves the SAME asset through BOTH arms
+  # and asserts the signed value EQUALS the header the file arm actually sent —
+  # never a literal, so the two cannot drift apart unnoticed.
+  describe "GET /media/files/* — D12 policy on bucket-served bytes" do
+    test "a PUBLIC asset's presigned URL signs the file arm's public policy", %{conn: conn} do
+      created = upload!(conn)
+      url = created["result"]["originalUrl"]
+
+      file_arm = get(scoped_conn(), url)
+      assert file_arm.status == 200
+      assert [file_policy] = get_resp_header(file_arm, "cache-control")
+      assert file_policy == Media.Delivery.file_cache_control("public")
+
+      use_s3_backend!()
+      redirect = get(scoped_conn(), url)
+
+      assert redirect.status == 302
+      assert signed_cache_control(redirect) == file_policy
+
+      cleanup(created)
+    end
+
+    test "a PRIVATE asset's presigned URL signs the file arm's no-store policy", %{conn: conn} do
+      created = upload!(conn)
+      id = created["result"]["id"]
+      url = created["result"]["originalUrl"]
+
+      conn
+      |> authed()
+      |> patch(~p"/v1/media/production/#{id}", %{"bp_visibility" => "private"})
+      |> json_response(200)
+
+      file_arm = scoped_conn() |> authed() |> get(url)
+      assert file_arm.status == 200
+      assert [file_policy] = get_resp_header(file_arm, "cache-control")
+      assert file_policy == Media.Delivery.file_cache_control("private")
+      refute file_policy == Media.Delivery.file_cache_control("public")
+
+      use_s3_backend!()
+      redirect = scoped_conn() |> authed() |> get(url)
+
+      assert redirect.status == 302
+      assert signed_cache_control(redirect) == file_policy
+
+      cleanup(created)
+    end
+  end
+
+  defp upload!(conn) do
+    conn
+    |> authed()
+    |> post(~p"/v1/media/production/upload", %{"file" => png_upload()})
+    |> json_response(201)
+  end
+
+  # The `response-cache-control` value signed into the 302's Location.
+  defp signed_cache_control(conn) do
+    [location] = get_resp_header(conn, "location")
+    assert location =~ "X-Amz-Signature="
+
+    location
+    |> URI.parse()
+    |> Map.fetch!(:query)
+    |> URI.decode_query()
+    |> Map.get("response-cache-control")
+  end
+
+  # `:media_storage` is process-GLOBAL VM state (this module is async: false).
+  # No network: `S3.serve_strategy/2` only SIGNS a URL.
+  defp use_s3_backend! do
+    previous = Application.get_env(:barkpark, :media_storage)
+
+    Application.put_env(:barkpark, :media_storage,
+      backend: :s3,
+      s3: [
+        endpoint: "https://test.r2.example.com",
+        bucket: "bp-media-delivery-test",
+        region: "auto",
+        access_key_id: "test-access-key",
+        secret_access_key: "test-secret-key"
+      ]
+    )
+
+    on_exit(fn -> Application.put_env(:barkpark, :media_storage, previous) end)
+    :ok
+  end
 end

@@ -252,6 +252,72 @@ defmodule BarkparkWeb.Studio.PaperEditor.SectionColumnsEditorTest do
     assert css =~ ".bp-paper-contextual-controls--columns-empty {"
   end
 
+  test "Columns first contextual paragraph clears only the nested wrapper margin" do
+    selector =
+      ".bp-cols__c > :is(.bp-paper-edit-canvas, .bp-paper-edit-wc):first-child .bp-paper-editor-body .ProseMirror > :first-child"
+
+    columns = %{
+      "id" => "columns",
+      "type" => "columns",
+      "columns" => [[paragraph("first", "First"), paragraph("second", "Second")]]
+    }
+
+    # The server emits the hosts; JS mounts this editor body inside each host.
+    body =
+      ~s|<div class="bp-paper-editor-body"><div class="ProseMirror"><p>First</p><p>Second</p></div></div>|
+
+    for {canvas_enabled, wrapper, host} <- [
+          {true, ".bp-paper-edit-canvas", "bp-paper-canvas"},
+          {false, ".bp-paper-edit-wc", "bp-paper-editor"}
+        ] do
+      html = render_fields(columns, canvas_enabled: canvas_enabled)
+      tree = LazyHTML.from_fragment(html)
+
+      assert Enum.count(LazyHTML.query(tree, ".bp-cols__c > #{wrapper}:first-child > #{host}")) ==
+               1
+
+      mounted =
+        html
+        |> String.replace("</#{host}>", body <> "</#{host}>")
+        |> LazyHTML.from_fragment()
+
+      # LazyHTML cannot match this :is(...) + :first-child combination. Query each
+      # equivalent arm; the source assertion below still pins the full CSS selector.
+      arm = String.replace(selector, ":is(.bp-paper-edit-canvas, .bp-paper-edit-wc)", wrapper)
+
+      # Only the first paragraph in the first wrapper, never later paragraphs/runs.
+      assert Enum.count(LazyHTML.query(mounted, arm)) == 1
+      assert LazyHTML.text(LazyHTML.query(mounted, arm)) == "First"
+    end
+
+    outside =
+      LazyHTML.from_fragment("""
+      <div class="bp-paper-editor">
+        <div class="bp-paper-edit-canvas"><bp-paper-canvas>#{body}</bp-paper-canvas></div>
+        <div class="bp-paper-edit-wc"><bp-paper-editor>#{body}</bp-paper-editor></div>
+      </div>
+      <div class="bp-canvas-section"><div class="bp-section__grid">
+        <div class="bp-cols"><div class="bp-cols__c"><p>Native wrapperless column</p></div></div>
+        <p>Native section paragraph</p>
+      </div></div>
+      <div class="bp-cols__c"><p>Earlier block</p>
+        <div class="bp-paper-edit-canvas"><bp-paper-canvas>#{body}</bp-paper-canvas></div>
+      </div>
+      """)
+
+    for wrapper <- [".bp-paper-edit-canvas", ".bp-paper-edit-wc"] do
+      arm = String.replace(selector, ":is(.bp-paper-edit-canvas, .bp-paper-edit-wc)", wrapper)
+      assert Enum.empty?(LazyHTML.query(outside, arm))
+    end
+
+    css = File.read!(@editor_shell_css)
+    assert css =~ selector <> " {\n  margin-top: 0;\n}"
+
+    # The top-level first paragraph deliberately retains its paragraph margin.
+    assert css =~
+             ".ProseMirror > :first-child:not(p) { margin-top: 0; }"
+  end
+
   test "stack Section keeps reader chrome and mounts maximal contextual canvas runs" do
     section = %{
       "id" => "section",

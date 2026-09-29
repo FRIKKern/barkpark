@@ -104,9 +104,9 @@ defmodule BarkparkCloud.Azure.PricingLatchTest do
       # The refresh RAISES. WITHOUT the fix, :refresh_done never fires and this
       # flush parks forever (GenServer.call times out → this test fails). WITH
       # the fix, the try/after sends :refresh_done on the raising path, so the
-      # guard clears and flush returns :ok. The spawned process still dies (an
-      # unlinked crash, harmless to the GenServer) — capture its log so the
-      # green run stays quiet.
+      # guard clears and flush returns :ok. The refresh task no longer DIES of
+      # the exception (it rescues and logs inside itself, before signalling) —
+      # capture that log so the green run stays quiet.
       test_pid = self()
 
       capture_log(fn ->
@@ -124,6 +124,43 @@ defmodule BarkparkCloud.Azure.PricingLatchTest do
       assert Pricing.monthly_prices(@ttl_ms + 2)["Standard_D2s_v5"] == 70.08
       assert Pricing.flush() == :ok
       assert Pricing.monthly_prices(@ttl_ms + 3)["Standard_D2s_v5"] == 36.5
+    end
+
+    test "NO ESCAPE: the raising refresh's failure is reported INSIDE this test, and nothing leaks into a later capture window" do
+      # The original witness (task-356892c42c691504): `azure pricing transport
+      # exploded` appeared EXACTLY ONCE in a CI job log — not on this module's
+      # console, but inside BarkparkCloud.Push.FanoutResultTest's capture buffer,
+      # failing its `assert log == ""`. ExUnit.CaptureLog captures the WHOLE VM,
+      # so an unmonitored spawn whose crash report is emitted AFTER `after` has
+      # released flush/0 lands in whatever window is open next.
+      #
+      # RED before the fix: the bare `spawn` dies of the exception, the VM's
+      # error handler emits the report asynchronously AFTER flush/0 returned, so
+      # `log` below does not carry the message (and the trailing window can).
+      put_client(good_client())
+      assert Pricing.monthly_prices(0)["Standard_D2s_v5"] == 70.08
+
+      test_pid = self()
+
+      log =
+        capture_log(fn ->
+          put_client(raising_client(test_pid))
+          assert Pricing.monthly_prices(@ttl_ms + 1)["Standard_D2s_v5"] == 70.08
+          assert Pricing.flush() == :ok
+        end)
+
+      # Non-vacuous: the raising transport really ran on the refresh path.
+      assert_received :transport_raised
+
+      # The failure is diagnosed, and it is diagnosed HERE — flush/0 is a real
+      # barrier for it because the task logs before signalling completion.
+      assert log =~ "azure pricing transport exploded"
+
+      # The victim's shape: a LATER capture_log window (what FanoutResultTest
+      # opens) must stay empty. The sleep gives an escaping asynchronous report
+      # every chance to land in it.
+      later = capture_log(fn -> Process.sleep(100) end)
+      assert later == ""
     end
   end
 end

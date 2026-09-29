@@ -10,10 +10,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   unchanged.
   """
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias Phoenix.LiveView.JS
 
   import BarkparkWeb.Icons
+
+  alias BarkparkWeb.Studio.StudioLive.Handlers.Views
+  alias BarkparkWeb.Studio.StudioLive.Paths
 
   alias BarkparkWeb.Components.FieldInputs
   alias BarkparkWeb.Components.Fields.Visibility
@@ -96,7 +100,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             {0,1,3} dots x {1400,1280,760,520,360,260}px: 22/36 -> 36/36. --%>
       <div style="display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 70%;">
         <%= if @back_href do %>
-          <a href={@back_href} class="btn btn-ghost btn-sm" aria-label="Back to Studio">&larr;</a>
+          <a href={@back_href} class="btn btn-ghost btn-sm" aria-label={gettext("Back to Studio")}>&larr;</a>
         <% end %>
         <%= render_slot(@status_pill) %>
         <span class="pane-header-title"><%= @title %></span>
@@ -137,6 +141,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :type, :string, default: nil
   attr :required, :boolean, default: false
   attr :errors, :list, default: []
+  # Gyldendal parity E1.6 — warning-level findings (schema `"level": "warning"`
+  # rules): rendered under the input like errors, in the warning colour, and
+  # never a gate. `has-warning` on the wrapper, no `has-error`.
+  attr :warnings, :list, default: []
   attr :onix_element, :string, default: nil
   # Gyldendal parity E1.5 — the schema field's `description`, rendered as
   # Sanity does: muted helper text directly under the title, above the input.
@@ -145,7 +153,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   def editor_field(assigns) do
     ~H"""
-    <div class={"editor-field #{if @errors != [], do: "has-error"}"}>
+    <div class={"editor-field #{if @errors != [], do: "has-error"} #{if @warnings != [], do: "has-warning"}"}>
       <label class="editor-field-label">
         <%= @label %>
         <%= if @required do %><span class="field-required">*</span><% end %>
@@ -160,6 +168,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <%= render_slot(@inner_block) %>
       <%= if @errors != [] do %>
         <div class="field-errors"><%= Enum.join(@errors, ", ") %></div>
+      <% end %>
+      <%= if @warnings != [] do %>
+        <div class="field-warnings" role="note"><%= Enum.join(@warnings, ", ") %></div>
       <% end %>
     </div>
     """
@@ -260,7 +271,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     <div class="editor-empty" data-test-id="studio-editor-nothing-selected" data-reason="nothing_selected">
       <div style="color: var(--fg-dim); text-align: center;">
         <div style="margin-bottom: 12px; opacity: 0.4;"><.icon name="file-text" size={40} /></div>
-        <div class="text-sm">No document is open. Pick one from the list to start editing.</div>
+        <div class="text-sm"><%= gettext("No document is open. Pick one from the list to start editing.") %></div>
       </div>
     </div>
     """
@@ -280,30 +291,25 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       data-cause={@cause}
     >
       <p class="bp-paper-unrenderable-title">
-        Studio could not open this document.
+        <%= gettext("Studio could not open this document.") %>
       </p>
       <p :if={@reason == :not_found and @cause == :elsewhere} class="bp-paper-unrenderable-reason">
-        No <%= @doc_type %> with the id <code><%= @doc_id %></code> exists in this workspace —
-        but a document with that id lives in the workspace <strong><%= @elsewhere_name %></strong>.
+        <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this workspace — but a document with that id lives in the workspace") %> <strong><%= @elsewhere_name %></strong>.
       </p>
       <p :if={@cause == :out_of_reach} class="bp-paper-unrenderable-reason">
-        <%= if @reason == :unknown_node do %>The type <code><%= @doc_type %></code> exists in this dataset<% else %>A <%= @doc_type %> with the id <code><%= @doc_id %></code> exists in this dataset<% end %>, but your
-        access grant does not cover it<%= if @grant_scope && @grant_scope != "" do %> (it covers <%= @grant_scope %>)<% end %>.
-        Ask whoever shared access with you to widen the grant.
+        <%= if @reason == :unknown_node do %><%= gettext("The type") %> <code><%= @doc_type %></code> <%= gettext("exists in this dataset") %><% else %><%= gettext("A %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset") %><% end %>, <%= gettext("but your access grant does not cover it") %><%= if @grant_scope && @grant_scope != "" do %> (<%= gettext("it covers %{scope}", scope: @grant_scope) %>)<% end %>.
+        <%= gettext("Ask whoever shared access with you to widen the grant.") %>
       </p>
       <p :if={@reason == :not_found and @cause not in [:elsewhere, :out_of_reach]} class="bp-paper-unrenderable-reason">
-        No <%= @doc_type %> with the id <code><%= @doc_id %></code> exists in this dataset. It may
-        have been deleted.
+        <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset. It may have been deleted.") %>
       </p>
       <p :if={@reason == :no_schema} class="bp-paper-unrenderable-reason">
-        No schema for <code><%= @doc_type %></code> is installed in this dataset, so Studio has no
-        fields to show its documents with<%= if @doc_id && @doc_id != @doc_type do %> (you asked for <code><%= @doc_id %></code>)<% end %>.
-        Whatever is stored under that type is untouched.
+        <%= gettext("No schema for") %> <code><%= @doc_type %></code> <%= gettext("is installed in this dataset, so Studio has no fields to show its documents with") %><%= if @doc_id && @doc_id != @doc_type do %> (<%= gettext("you asked for") %> <code><%= @doc_id %></code>)<% end %>.
+        <%= gettext("Whatever is stored under that type is untouched.") %>
       </p>
       <p :if={@reason == :unknown_node and @cause != :out_of_reach} class="bp-paper-unrenderable-reason">
-        This desk has no section named <code><%= @doc_type %></code>, so the path could not be
-        walked to a document<%= if @doc_id && @doc_id != @doc_type do %> (<code><%= @doc_id %></code>)<% end %>.
-        The link may predate a structure change, or the plugin that owned it may be disabled.
+        <%= gettext("This desk has no section named") %> <code><%= @doc_type %></code>, <%= gettext("so the path could not be walked to a document") %><%= if @doc_id && @doc_id != @doc_type do %> (<code><%= @doc_id %></code>)<% end %>.
+        <%= gettext("The link may predate a structure change, or the plugin that owned it may be disabled.") %>
       </p>
       <div class="bp-paper-unrenderable-actions">
         <a
@@ -312,14 +318,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           class="btn btn-primary btn-sm"
           data-test-id="studio-unresolved-open-elsewhere"
         >
-          Open it in <%= @elsewhere_name %>
+          <%= gettext("Open it in %{workspace}", workspace: @elsewhere_name) %>
         </a>
         <a
           href={@list_href || @desk_href}
           class={["btn btn-sm", if(@cause == :elsewhere and @elsewhere_href, do: "btn-ghost", else: "btn-primary")]}
           data-test-id="studio-unresolved-recovery"
         >
-          <%= if @list_href, do: "Back to the #{@doc_type} list", else: "Back to the desk" %>
+          <%= if @list_href, do: gettext("Back to the %{type} list", type: @doc_type), else: gettext("Back to the desk") %>
         </a>
         <a
           :if={@list_href}
@@ -327,7 +333,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           class="btn btn-ghost btn-sm"
           data-test-id="studio-unresolved-back-to-desk"
         >
-          Back to the desk
+          <%= gettext("Back to the desk") %>
         </a>
       </div>
     </div>
@@ -359,6 +365,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :editor_form, :map, required: true
   attr :dataset, :string, default: "production"
   attr :validation_errors, :map, default: %{}
+  attr :validation_warnings, :map, default: %{}
   attr :parent_assigns, :map, default: %{}
   attr :doc_key, :string, default: "doc"
   attr :doc_type, :string, default: "document"
@@ -368,13 +375,17 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     ~H"""
     <% field_name = @field["name"] %>
     <% type = @field["type"] %>
-    <% rules = @field["validation"] || %{} %>
+    <% rules = Barkpark.Content.Validation.rules_at(@field["validation"], :error) %>
     <% required? = rules["required"] == true %>
-    <% errors = Map.get(@validation_errors, field_name, []) %>
+    <%!-- Only the field's OWN findings here; a composite / array subtree
+         (Gyldendal parity E1.11) is handed to the component, which renders
+         each finding under the subfield or row it names. --%>
+    <% errors = own_findings(Map.get(@validation_errors, field_name, [])) %>
+    <% warnings = own_findings(Map.get(@validation_warnings, field_name, [])) %>
     <%= if self_titled?(type) do %>
       <%!-- v2 structural types render their own <legend>; skip outer label,
            but keep error display + onix hint as inline rows below the field. --%>
-      <div class={"editor-field editor-field-self-titled #{if errors != [], do: "has-error"}"}>
+      <div class={"editor-field editor-field-self-titled #{if errors != [], do: "has-error"} #{if warnings != [], do: "has-warning"}"}>
         <%= if PluginAdapter.v2?(@field) do %>
           <%= PluginAdapter.render(@parent_assigns, @field) %>
         <% else %>
@@ -397,6 +408,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         <%= if errors != [] do %>
           <div class="field-errors"><%= Enum.join(errors, ", ") %></div>
         <% end %>
+        <%= if warnings != [] do %>
+          <div class="field-warnings" role="note"><%= Enum.join(warnings, ", ") %></div>
+        <% end %>
       </div>
     <% else %>
       <%!-- Gyldendal parity E1.5: the type name is NOT shown next to the
@@ -406,6 +420,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         label={@field["title"] || field_name}
         required={required?}
         errors={errors}
+        warnings={warnings}
         onix_element={onix_element(@field)}
         description={field_description(@field)}
       >
@@ -472,6 +487,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :editor_is_draft, :boolean, default: false
   attr :dataset, :string, required: true
   attr :validation_errors, :map, default: %{}
+  attr :validation_warnings, :map, default: %{}
   attr :save_status, :string, default: ""
 
   # ── Concurrent-edit conflict (studio-concurrent-edit) ──────────────
@@ -491,6 +507,15 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :presences, :list, default: []
   attr :parent_assigns, :map, default: %{}
   attr :nav_group, :string, default: nil
+
+  # ── Document views (Gyldendal parity E10) ──────────────────────────
+  # `nav_view` is the open view's id, nil for the field form. `nav_view_docs`
+  # are the related documents that view resolved. A schema that declares no
+  # `desk.views` renders neither the tab row nor the list, byte-identical to
+  # before.
+  attr :nav_view, :string, default: nil
+  attr :nav_view_docs, :list, default: []
+  attr :scope_prefix, :string, default: ""
 
   # ── Cross-field validations (Task barkpark-cgn) ────────────────────
   # List of unsatisfied rule maps (string-keyed: name, title, level,
@@ -529,6 +554,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # spd-bl-focus-after-select — threaded through to document_header above.
   attr :focus_on_mount, :boolean, default: false
 
+  # THE ADMIN-TIER AFFORDANCE ANSWER, THREADED IN — NEVER RE-DERIVED HERE
+  # (task-ea341f86571c5981). `Caps.admin_affordance?/1` at the StudioLive call
+  # site reads the already-derived `:caps` assign; this component only consults
+  # the boolean. Default FALSE fails closed: a caller that forgets to thread it
+  # hides the admin-tier doc actions rather than advertising them.
+  attr :admin?, :boolean, default: false
+
   slot :extra_actions
   slot :empty_state
 
@@ -552,7 +584,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <div class="editor-panel" data-role="content">
         <.document_header
           dataset={@dataset}
-          title={@editor_doc.title || singleton_title(@editor_schema) || "Untitled"}
+          title={@editor_doc.title || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || "Untitled"}
           focus_on_mount={@focus_on_mount}
         >
           <:status_pill>
@@ -588,6 +620,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   action={action}
                   editor_doc={@editor_doc}
                   dataset={@dataset}
+                  admin?={@admin?}
                   workspace_slug={scope_slug(@parent_assigns, :current_workspace)}
                   project_slug={scope_slug(@parent_assigns, :current_project)}
                 />
@@ -622,7 +655,53 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               schema={@editor_schema}
             />
           <% else %>
-            <%= if schema_groups(@editor_schema) != [] do %>
+            <%!-- DOCUMENT VIEWS (Gyldendal parity E10). Sanity's
+                  `defaultDocumentNode` puts tabs beside «Felt» that list OTHER
+                  documents related to this one. The row renders only for a
+                  schema that declares `desk.views`, and «Felt» is always the
+                  first tab so the form is one click away. --%>
+            <% doc_views = Views.views_for(@editor_schema) %>
+            <div :if={doc_views != []} class="bp-view-bar" role="tablist" data-test-id="document-views">
+              <button
+                type="button"
+                phx-click="select-view"
+                phx-value-view=""
+                role="tab"
+                aria-selected={@nav_view == nil}
+                class={"bp-view-tab " <> if(@nav_view == nil, do: "is-active", else: "")}
+                data-test-id="document-view-form"
+              ><%= gettext("Fields") %></button>
+              <button
+                :for={v <- doc_views}
+                type="button"
+                phx-click="select-view"
+                phx-value-view={v["id"]}
+                role="tab"
+                aria-selected={@nav_view == v["id"]}
+                title={v["title"]}
+                class={"bp-view-tab " <> if(@nav_view == v["id"], do: "is-active", else: "")}
+                data-test-id="document-view-tab"
+                data-view-id={v["id"]}
+              ><%= v["title"] %></button>
+            </div>
+
+            <div :if={@nav_view != nil} class="bp-view-list" data-test-id="document-view-list">
+              <p :if={@nav_view_docs == []} class="bp-pane-notice" role="status" data-test-id="document-view-empty">
+                <%= gettext("No documents yet") %>
+              </p>
+              <a
+                :for={rel <- @nav_view_docs}
+                class="pane-doc-item bp-view-row"
+                data-test-id="document-view-row"
+                data-row-type={rel.type}
+                href={Paths.studio_path(@scope_prefix, [rel.type, rel.id], @dataset)}
+              >
+                <span class="pane-doc-title"><%= rel.title %></span>
+                <span :if={rel.is_draft} class="status-pill status-draft"><%= gettext("draft") %></span>
+              </a>
+            </div>
+
+            <%= if @nav_view == nil and schema_groups(@editor_schema) != [] do %>
               <div class="bp-tab-bar" role="tablist">
                 <%= for grp <- schema_groups(@editor_schema) do %>
                   <button
@@ -639,7 +718,15 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               </div>
             <% end %>
 
-            <form phx-submit="save" phx-change="autosave" id="editor-form">
+            <%!-- phx-auto-recover="ignore" (Gyldendal friction 65/66): LiveView
+                  1.1 re-posts EVERY id-bearing form[phx-change] on socket rejoin
+                  (getFormsForRecovery filters only on the ignore attribute), so a
+                  deploy restart, a laptop waking, or a network blip turned an
+                  untouched editor into an "autosave" of the browser's whole form
+                  — a draft with no keystroke, and before Forms.coerce_params a
+                  corrupt one. Autosave already persists each change within its
+                  500 ms debounce, so recovery has nothing to restore. --%>
+            <form :if={@nav_view == nil} phx-submit="save" phx-change="autosave" phx-auto-recover="ignore" id="editor-form">
               <%!-- The synthetic Title input backs the `title` column every
                     list row shows. A SINGLETON that declares no `title`
                     field (the twin's Forside — Sanity's `preview.prepare`
@@ -648,9 +735,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     back to the schema title instead (Gyldendal parity E1.5). --%>
               <.editor_field
                 :if={title_input?(@editor_schema)}
-                label="Title"
+                label={title_label(@editor_schema)}
                 required={(get_title_validation(@editor_schema) || %{})["required"] == true}
                 errors={Map.get(@validation_errors, "title", [])}
+                warnings={Map.get(@validation_warnings, "title", [])}
               >
                 <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
               </.editor_field>
@@ -662,6 +750,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     editor_form={@editor_form}
                     dataset={@dataset}
                     validation_errors={@validation_errors}
+                    validation_warnings={@validation_warnings}
                     parent_assigns={@parent_assigns}
                     doc_key={@editor_doc.doc_id}
                     doc_type={@editor_doc.type}
@@ -671,6 +760,16 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               <% end %>
               <div class="editor-actions">
                 <span class="save-status" role="status" aria-live="polite"><%= @save_status %></span>
+                <%!-- Gyldendal parity E1.6 — the publish bar's warning count:
+                      Sanity's warning-level validation nags here and never
+                      blocks; the fields carry the wording inline. --%>
+                <% warning_count = Barkpark.Content.Validation.leaf_count(@validation_warnings) %>
+                <span
+                  :if={warning_count > 0}
+                  class="bp-validation-warnings"
+                  role="status"
+                  data-test-id="validation-warnings"
+                ><%= ngettext("%{count} warning — publishing is still allowed", "%{count} warnings — publishing is still allowed", warning_count) %></span>
               </div>
             </form>
           <% end %>
@@ -734,6 +833,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
     * `"event"` → `<button phx-click=<opts.event>>`
     * `"modal"` → `<button phx-click="schema_action" phx-value-name=<name>>`
+      — rendered ONLY when `@admin?`, because `schema_action` is `:admin`-tier
+      in `BarkparkWeb.Studio.Caps.classify/1`
     * `"link"`  → `<a href=<interpolated-href>>`
 
   Class / style / `data-test-id` are read off `opts` so the host's built-in
@@ -749,6 +850,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # carry :workspace / :project placeholders alongside :dataset / :id.
   attr :workspace_slug, :string, default: ""
   attr :project_slug, :string, default: ""
+  # See `studio_editor_shell/1`'s note: the `"modal"` kind dispatches
+  # `schema_action`, which `Caps.classify/1` rules :admin-tier, so it renders
+  # only for an admin seat. `"event"` and `"link"` actions are unaffected.
+  attr :admin?, :boolean, default: false
 
   def doc_action_button(assigns) do
     ~H"""
@@ -773,6 +878,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         ><.doc_action_glyph action={@action} /></a>
       <% "modal" -> %>
         <button
+          :if={@admin?}
           type="button"
           class={action_button_class(@action)}
           style={action_button_style(@action)}
@@ -1056,8 +1162,31 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # Gyldendal parity E1.5 — see the Title input comment in the shell.
   defp title_input?(nil), do: true
 
+  # Gyldendal parity E1.8: a type with no `title` field renders no synthetic
+  # Title input when something else backs the list rows — a singleton (the
+  # header shows the schema title) OR a `list_preview.title` field (the title
+  # column is derived from it on write). A titleless type with neither keeps
+  # the input: it is the only thing that can name its rows.
   defp title_input?(schema) do
-    not (singleton?(schema) and is_nil(Enum.find(schema.fields, &(&1["name"] == "title"))))
+    has_title_field = not is_nil(Barkpark.Content.TitleDerivation.title_field(schema))
+
+    has_title_field or
+      not (singleton?(schema) or
+             is_binary(Barkpark.Content.TitleDerivation.preview_title_field(schema)))
+  end
+
+  defp preview_title(doc, schema),
+    do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)
+
+  # Gyldendal parity E7 follow-up: the synthetic Title input backs the
+  # schema's OWN `title` field when there is one, so it wears that field's
+  # declared title («Tittel»), not a hard-coded «Title». A schema with no title
+  # field (or none loaded) keeps the localised chrome word.
+  defp title_label(schema) do
+    case schema && Barkpark.Content.TitleDerivation.title_field(schema) do
+      %{"title" => t} when is_binary(t) and t != "" -> t
+      _ -> gettext("Title")
+    end
   end
 
   defp singleton_title(schema) do
@@ -1073,7 +1202,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   defp get_title_validation(schema) do
     case Enum.find(schema.fields, &(&1["name"] == "title")) do
-      %{"validation" => v} -> v
+      # Error-level rules only: a warning-level `required` nags, it does not
+      # paint the asterisk (Gyldendal parity E1.6).
+      %{"validation" => v} -> Barkpark.Content.Validation.rules_at(v, :error)
       _ -> nil
     end
   end
@@ -1118,4 +1249,12 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   def visible_fields(fields, group_name) when is_binary(group_name) do
     Enum.filter(fields, fn f -> Map.get(f, "group") == group_name end)
   end
+
+  # A top-level field's own findings out of a `Validation.check_tree/3` half:
+  # a leaf is a plain list; a composite / array node keeps its own under
+  # `:__self__` and its subfields' under their names (rendered by the
+  # component, never joined into the top-level line).
+  defp own_findings(list) when is_list(list), do: list
+  defp own_findings(%{__self__: list}) when is_list(list), do: list
+  defp own_findings(_), do: []
 end

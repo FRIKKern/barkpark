@@ -138,7 +138,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContainerBlocksTest do
              })
   end
 
-  test "invalid remove indices preserve rows and blank bar title and max clear explicitly" do
+  test "invalid remove indices preserve rows and title metadata while max clears explicitly" do
     ref = %{"slug" => "day", "unknown" => "keep"}
     bar = %{"label" => "feat", "value" => 1, "color" => "mint"}
 
@@ -159,8 +159,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.ContainerBlocksTest do
         }
       )
 
-    assert patch["title"] == nil
-    assert patch["max"] == nil
+    refute Map.has_key?(patch, "title")
+    assert Map.fetch!(patch, "max") == nil
     assert patch["bars"] == [bar]
   end
 

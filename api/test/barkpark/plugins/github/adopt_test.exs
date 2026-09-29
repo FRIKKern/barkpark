@@ -120,7 +120,11 @@ defmodule Barkpark.Plugins.Github.AdoptTest do
           %{
             "doc_id" => "plain-1",
             "title" => "A normal task",
-            "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+            "content" => %{
+              "kind" => "task",
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
+              "lifecycle_status" => "open"
+            }
           },
           @dataset,
           scope
@@ -230,6 +234,7 @@ defmodule Barkpark.Plugins.Github.AdoptTest do
         Barkpark.LabelFixtures.with_labels(
           %{
             "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => "open",
             "labels" => ["src:github", "needs-human"],
             "github" => %{"state" => "intake", "repo" => "FRIKKern/barkpark", "issue" => number}

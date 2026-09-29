@@ -236,21 +236,43 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
 
     for title <-
           Enum.map(0..1, fn n -> "#{Enum.at(list_titles, title_offset + n)} #{uniq}" end) do
+      task_id = "rqb-lt-#{System.unique_integer([:positive])}"
+
       {:ok, _} =
         Content.create_document(
           "task",
           %{
-            "doc_id" => "rqb-lt-#{System.unique_integer([:positive])}",
+            "doc_id" => task_id,
             "title" => title,
-            "content" => %{
-              "kind" => "task",
-              "lifecycle_status" => "open",
-              "parent_id" => epic
-            }
+            "content" =>
+              Barkpark.LabelFixtures.with_labels(%{
+                "kind" => "task",
+                "lifecycle_status" => "open",
+                # The Tasks plugin's :before_publish brief wall (inert until
+                # #19303) fires on the first publish these rows take below.
+                "brief" => Barkpark.TaskBriefFixtures.brief(),
+                "parent_id" => epic,
+                # The `label_spine` publish gate requires a >=20-char
+                # `description` (and `with_labels` supplies the required weighted
+                # `tags`), exactly as the driven rows below satisfy it.
+                "description" => "Anonymous reader census task-list fixture row."
+              })
           },
           @dataset,
           scope
         )
+
+      # PUBLISH the task-list rows. The anonymous `/papers/:slug` reader resolves
+      # a live task-list under the PUBLISHED perspective — `reader_task_scope/1`
+      # hard-codes `published_only: true` (#17964, D5), so `docs_for_query/2`'s
+      # `maybe_published_only/2` conjunct drops every unpublished `drafts.<id>`
+      # row. This block is embedded in a PUBLISHED paper and the census below
+      # asserts an anonymous view renders "Collect crawler samples", so the two
+      # rows the block matches must themselves be published — a draft-only row is
+      # correctly invisible to an anonymous reader. #17964 applied exactly this
+      # fixture remedy to every other reader lock it touched but missed this file,
+      # leaving the task-list block resolving to zero rows here.
+      {:ok, _} = Content.publish_document(task_id, "task", @dataset, scope)
     end
 
     # The target: heading + paragraph + one query-carrying task-list block.
@@ -329,6 +351,9 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
               Barkpark.LabelFixtures.with_labels(%{
                 "kind" => "task",
                 "lifecycle_status" => "open",
+                # The Tasks plugin's :before_publish brief wall (inert until
+                # #19303) fires on the first publish these rows take below.
+                "brief" => Barkpark.TaskBriefFixtures.brief(),
                 "design_doc" => slug,
                 "acceptance_criteria" => [
                   %{"criterion" => "budget proven", "met" => true, "evidence" => "harness run"},
@@ -477,6 +502,9 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
     # app in every env) put `chat_messages 1` into the dead-leg census on main
     # at 2c5b658d41 and pushed 18 -> 19. This test reproduces that
     # DETERMINISTICALLY instead of once per 60s.
+    # its witness statement reads chat_messages, so it needs the plugin/fleet tables present
+    # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
+    @tag :owned_tables
     test "a statement from a process outside the request never enters the census",
          %{conn: conn, scope: scope} do
       slug = seed_fixture!(scope)

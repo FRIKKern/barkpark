@@ -52,7 +52,7 @@ func siteHelpUsage(t *testing.T, help string) string {
 // stranger's finding was `delete`: dispatched, undocumented, and the ONLY undo.
 func TestCloudSiteHelpDocumentsEveryDispatchedVerb(t *testing.T) {
 	usage := siteHelpUsage(t, siteHelpText(t))
-	for _, verb := range []string{"ls", "create", "deploy", "rollback", "delete", "status", "open", "preflight", "settings"} {
+	for _, verb := range []string{"ls", "create", "deploy", "rollback", "delete", "status", "doctor", "open", "preflight", "settings"} {
 		if !strings.Contains(usage, "bp cloud site "+verb) {
 			t.Errorf("`bp cloud site %s` is dispatched but absent from the -h USAGE block — a stranger cannot discover it:\n%s", verb, usage)
 		}

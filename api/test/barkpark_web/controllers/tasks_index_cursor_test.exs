@@ -160,8 +160,24 @@ defmodule BarkparkWeb.TasksIndexCursorTest do
 
       assert Map.keys(body) |> Enum.sort() == ["docs", "ok", "page"]
 
+      # The four `dataset*` keys joined that set with task-8483029782444df4,
+      # when the index started honouring `?dataset=`. Same reasoning as
+      # `next_offset` above: the additive promise is about not BREAKING a
+      # reader, and a route that narrows on a param must state the scope it
+      # served or the narrowing is unobservable. Still an EXACT key set, so a
+      # tenth key cannot arrive unannounced.
       assert Map.keys(body["page"]) |> Enum.sort() ==
-               ["has_more", "limit", "next_offset", "offset", "returned"]
+               [
+                 "dataset",
+                 "dataset_ambiguous",
+                 "dataset_scope",
+                 "datasets",
+                 "has_more",
+                 "limit",
+                 "next_offset",
+                 "offset",
+                 "returned"
+               ]
 
       refute Map.has_key?(body["page"], "next_cursor")
       assert body["ok"] == true
@@ -177,7 +193,12 @@ defmodule BarkparkWeb.TasksIndexCursorTest do
                "offset" => 2,
                "returned" => 2,
                "has_more" => true,
-               "next_offset" => 4
+               "next_offset" => 4,
+               # task-8483029782444df4 — see the key-set test above.
+               "dataset" => nil,
+               "datasets" => ["production"],
+               "dataset_scope" => "all-datasets-in-scope",
+               "dataset_ambiguous" => []
              }
     end
   end

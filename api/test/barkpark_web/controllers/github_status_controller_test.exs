@@ -18,13 +18,14 @@ defmodule BarkparkWeb.GithubStatusControllerTest do
     :ok
   end
 
-  # Inject a stub Health snapshot that records the dataset filter it was called
-  # with and returns `snapshot`.
+  # Inject a stub Health snapshot that records the SCOPE FILTER it was called
+  # with and returns `snapshot`. The filter is a keyword carrying `:dataset` (the
+  # D18 token pin) and `:workspace_ids` (the w9 membership fence).
   defp stub_status(snapshot) do
     test = self()
 
-    Application.put_env(:barkpark, :github_status_fun, fn dataset ->
-      send(test, {:status_called, dataset})
+    Application.put_env(:barkpark, :github_status_fun, fn filter ->
+      send(test, {:status_called, filter})
       snapshot
     end)
   end
@@ -46,8 +47,12 @@ defmodule BarkparkWeb.GithubStatusControllerTest do
       conn = status(%{})
 
       assert %{"ok" => true, "health" => ^snapshot} = json_response(conn, 200)
-      # No filter given → dataset forwarded as nil (whole-fleet view).
-      assert_received {:status_called, nil}
+      # No token, no param → dataset nil, and the membership fence is the EMPTY
+      # list (fail-closed), never nil: `nil` is Health's "no fence" sentinel and
+      # would hand a principal with no memberships the whole fleet.
+      assert_received {:status_called, filter}
+      assert Keyword.fetch!(filter, :dataset) == nil
+      assert Keyword.fetch!(filter, :workspace_ids) == []
     end
 
     test "forwards the ?dataset= filter to the health snapshot" do
@@ -56,7 +61,8 @@ defmodule BarkparkWeb.GithubStatusControllerTest do
       conn = status(%{"dataset" => "staging"})
 
       assert json_response(conn, 200)
-      assert_received {:status_called, "staging"}
+      assert_received {:status_called, filter}
+      assert Keyword.fetch!(filter, :dataset) == "staging"
     end
 
     test "coerces a blank ?dataset= to nil (whole-fleet view)" do
@@ -65,7 +71,8 @@ defmodule BarkparkWeb.GithubStatusControllerTest do
       conn = status(%{"dataset" => "   "})
 
       assert json_response(conn, 200)
-      assert_received {:status_called, nil}
+      assert_received {:status_called, filter}
+      assert Keyword.fetch!(filter, :dataset) == nil
     end
 
     test "answers 200 with an empty snapshot when the plugin is dark" do
@@ -163,6 +170,86 @@ defmodule BarkparkWeb.GithubStatusControllerTest do
       assert %{"health" => health} = json_response(conn, 200)
       assert health["conflicts"]["total"] == 1
       assert Enum.map(health["conflicts"]["open"], & &1["dataset"]) == ["production"]
+    end
+  end
+
+  # --- w9: the membership fence, end to end over a REAL bearer ----------------
+  #
+  # The D18 block above pins to the token's dataset STRING. That was never
+  # isolation: a dataset slug is unique per project, so two workspaces both own a
+  # `"production"`. These drive the real Health with a real `%ApiToken{}` whose
+  # membership row exists, and prove the row belonging to the OTHER workspace —
+  # same repo, same dataset string — does not come back.
+  describe "workspace membership fence (w9) — real Health, real token" do
+    alias Barkpark.Auth.ApiToken
+    alias Barkpark.Plugins.Github.Conflicts
+    alias Barkpark.Repo
+    alias Barkpark.Tenancy
+
+    setup do
+      key = Barkpark.Plugins.Github
+      prev = Application.get_env(:barkpark, key)
+      Application.put_env(:barkpark, key, repo: "acme/repo")
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, key, prev),
+          else: Application.delete_env(:barkpark, key)
+      end)
+
+      :ok
+    end
+
+    defp token!(label) do
+      Repo.insert!(%ApiToken{
+        token_hash: "hash-#{label}-#{System.unique_integer([:positive])}",
+        label: label,
+        dataset: "production",
+        permissions: ["read"],
+        kind: "api"
+      })
+    end
+
+    defp owned_workspace!(token) do
+      slug = "w9-#{System.unique_integer([:positive])}"
+      {:ok, ws} = Tenancy.create_workspace_with_owner(%{slug: slug, name: slug}, token)
+      ws
+    end
+
+    defp record_in!(workspace_id, dataset, issue) do
+      {:ok, c} =
+        Conflicts.record(%{
+          repo: "acme/repo",
+          issue: issue,
+          doc_id: "gh-#{issue}",
+          dataset: dataset,
+          workspace_id: workspace_id,
+          kind: "detached",
+          detail: %{}
+        })
+
+      c
+    end
+
+    test "a bearer in workspace A does not see workspace B's conflicts under the SAME dataset" do
+      token_a = token!("a")
+      token_b = token!("b")
+      ws_a = owned_workspace!(token_a)
+      ws_b = owned_workspace!(token_b)
+
+      mine = record_in!(ws_a.id, "production", 9001)
+      theirs = record_in!(ws_b.id, "production", 9002)
+
+      conn =
+        build_conn()
+        |> Plug.Conn.assign(:api_token, token_a)
+        |> GithubStatusController.status(%{})
+
+      assert %{"ok" => true, "health" => health} = json_response(conn, 200)
+
+      ids = Enum.map(health["conflicts"]["open"], & &1["id"])
+      assert mine.id in ids
+      refute theirs.id in ids
     end
   end
 end

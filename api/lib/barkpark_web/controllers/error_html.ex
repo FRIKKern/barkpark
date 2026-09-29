@@ -19,6 +19,11 @@ defmodule BarkparkWeb.ErrorHTML do
   # the HTML format encoder escapes plain binaries, which would ship the markup
   # as literal text. Safe here: both interpolated values derive from the
   # template name Phoenix passes in, never from user input.
+  # `Phoenix.HTML.raw/1` is applied to `page/2`'s output, built entirely from the
+  # status code and `Phoenix.Controller.status_message_from_template/1` — both
+  # derived from the template NAME Phoenix passes in, never from user input.
+  # Inline rather than a line-pinned `.sobelow-skips` row (fingerprints shift).
+  # sobelow_skip ["XSS.Raw"]
   def render(template, _assigns) do
     code = template |> String.split(".") |> hd()
     message = Phoenix.Controller.status_message_from_template(template)

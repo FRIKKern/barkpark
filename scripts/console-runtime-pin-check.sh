@@ -10,18 +10,21 @@
 #     it describes.
 #   · console-harness.yml's `console-unit` job must carry that SAME literal in
 #     `node-version:`.
-#   · The EXEMPTION SET is pinned by SET-EQUALITY, not by a floor: exactly
-#     `cssom-parity`, `tier-floor-render`, `overflow-guard` and `modal-oracle`
-#     may differ, and they must all be on 22 (they speak CDP over a bare global
-#     WebSocket, stable by default only from Node 22 — epic decision D17). A
-#     FIFTH setup-node job reds this guard and is NAMED, because a new job
-#     silently inheriting a different runtime is exactly the drift nobody would
-#     see. `modal-oracle` joined on 2026-09-05
-#     (cch-w22-s1-residue-modal-oracle-uninvoked): it is the fourth CDP
-#     instrument to get its own job, and it needs 22 for the same reason the
-#     other three do — this guard REDS a new browser job rather than letting it
-#     inherit a runtime on which its bring-up exits 2, which is the guard
-#     working, not the guard in the way.
+#   · The EXEMPTION SET is pinned by SET-EQUALITY, not by a floor: exactly the
+#     jobs named in EXEMPT_JOBS below — read that line, this prose does not
+#     re-list them and must never become a second roster that can disagree with
+#     it — may differ, and they must all be on 22 (they speak CDP over a bare
+#     global WebSocket, stable by default only from Node 22 — epic decision
+#     D17). ANY setup-node job outside that set reds this guard and is NAMED,
+#     because a new job silently inheriting a different runtime is exactly the
+#     drift nobody would see. `modal-oracle` joined on 2026-09-05
+#     (cch-w22-s1-residue-modal-oracle-uninvoked); `adjacency-guard` joined on
+#     2026-09-18 (cch-w67-bl-a-destructive-control-under-a-primary-action-is-
+#     untested) — it drives Chrome over CDP to read rendered rects, so it needs
+#     22 for exactly the reason its siblings do. Each joined by EDITING THIS
+#     GUARD, which is the point: the guard REDS a new browser job rather than
+#     letting it inherit a runtime on which its bring-up exits 2 — that is the
+#     guard working, not the guard in the way.
 #
 # WHY A REPO-ROOT .nvmrc WOULD BE WRONG
 # -------------------------------------
@@ -60,7 +63,7 @@ ROOT="${CONSOLE_RUNTIME_PIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd
 DECL_REL="cloud/priv/static/__node-version"
 WF_REL=".github/workflows/console-harness.yml"
 PINNED_JOB="console-unit"
-EXEMPT_JOBS="cssom-parity modal-oracle overflow-guard tier-floor-render"   # sorted
+EXEMPT_JOBS="adjacency-guard cssom-parity modal-oracle overflow-guard tier-floor-render"   # sorted
 EXEMPT_VERSION="22"
 
 fail() { echo "::error::console-runtime-pin-check: $*" >&2; }
@@ -169,7 +172,7 @@ measure() {
     [ -n "$vals" ] || continue   # absence already reported by set-equality
     for v in $vals; do
       if [ "$v" != "$EXEMPT_VERSION" ]; then
-        fail "EXEMPTION DRIFT — browser job '$j' is on node-version: $v, not $EXEMPT_VERSION. These three are exempt BECAUSE they need 22 for a stable global WebSocket (D17); on anything else the exemption has lost its reason."
+        fail "EXEMPTION DRIFT — browser job '$j' is on node-version: $v, not $EXEMPT_VERSION. Its exemption exists BECAUSE it needs 22 for a stable global WebSocket (D17); on anything else the exemption has lost its reason."
         rc=1
       fi
     done

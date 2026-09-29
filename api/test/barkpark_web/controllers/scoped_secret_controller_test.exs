@@ -21,7 +21,7 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
       halts), so the guard is exercised at the controller seam directly: a
       forged `current_workspace` with a non-UUID id folds into an opaque 404
       on EVERY verb. On a naive passthrough this raises
-      `Ecto.Query.CastError` (a 500) — see `secrets_castgap_contract_test.exs`
+      `Ecto.Query.CastError` (an opaque 400) — see `secrets_castgap_contract_test.exs`
       for the context-layer witness.
     * AUDIT — scoped reveal/set/delete stamp the acting workspace on the
       audit row (D195).
@@ -284,7 +284,7 @@ defmodule BarkparkWeb.ScopedSecretControllerTest do
     # always assigns a DB-resolved struct or halts), so the guard is
     # defense-in-depth exercised at the controller seam: forge the assigns and
     # call the controller directly. On a naive scope passthrough every verb
-    # here raises Ecto.Query.CastError (a 500 on the wire) instead of 404.
+    # here raises Ecto.Query.CastError (an opaque 400 on the wire) instead of 404.
     defp forged_call(action, params) do
       scoped_conn()
       |> Map.put(:path_params, %{"workspace_slug" => "forged", "project_slug" => "default"})

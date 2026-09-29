@@ -218,7 +218,7 @@ defmodule Barkpark.Plugins.Tickets.Keys do
     do: @prefix <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
 
   # Kind-fenced, WORKSPACE-scoped fetch by id, guarding the :binary_id UUID cast
-  # (a non-UUID id would raise Ecto.CastError → 500; a malformed id identifies no
+  # (a non-UUID id would raise Ecto.Query.CastError → 400; a malformed id identifies no
   # row → nil). The workspace predicate is the cross-tenant IDOR fence: a key in
   # another workspace is invisible here, so every by-id mutation is confined to
   # the caller's own tenant.

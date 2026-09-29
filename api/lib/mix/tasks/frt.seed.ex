@@ -43,9 +43,19 @@ defmodule Mix.Tasks.Frt.Seed do
 
   @impl Mix.Task
   def run(_args) do
-    # Boot the app so the Repo, the plugin registry, and the tenancy tables are
-    # all live — same precondition `mix run priv/repo/seeds.exs` relies on.
-    Mix.Task.run("app.start")
+    # Narrowed boot (task-e2c484370ef8fb51), not `app.start`: a full boot
+    # binds the LIVE slot's port when `PHX_SERVER` is set and puts up a second
+    # Oban on the live queues. MEASURED: every write below is a direct
+    # `Repo.insert!(on_conflict: :nothing)` on `schema_definitions` /
+    # `documents` — it deliberately bypasses the Content writer, so there is no
+    # broadcast and no Oban insert; `Frt.register_schemas/1` is a pure
+    # function over the bundled schema files, not a `Plugins.Registry` call;
+    # `Tenancy.create_workspace/1` / `create_project/2` are plain `Repo.insert`.
+    # On a FRESH database the narrowed boot seeds the same 25 schemas + 125
+    # documents and `mix frt.export` then reports the identical content_hash
+    # (see the PR body).
+    Mix.Task.run("app.config")
+    Barkpark.OneShot.boot!()
 
     # ── 1. Resolve the tenancy scope + materialise the "frt" dataset ──────────
     #

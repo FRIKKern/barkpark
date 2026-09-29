@@ -16,7 +16,7 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
   `:ok` (≈ pre-fix main) turns the refusal tests red in the other direction —
   the resurrection succeeds again.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Content, Tasks, TenancyFixtures}
 
@@ -53,6 +53,7 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
     content =
       %{
         "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
         "lifecycle_status" => "open",
         "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
       }
@@ -316,7 +317,11 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
       "type" => "task",
       "title" => "Gate fixture #{doc_id}",
       "content" =>
-        %{"kind" => "task", "lifecycle_status" => "open"}
+        %{
+          "kind" => "task",
+          "brief" => Barkpark.TaskBriefFixtures.brief(),
+          "lifecycle_status" => "open"
+        }
         |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
         |> Map.put("acceptance_criteria", [
           %{"criterion" => "it works", "met" => false, "evidence" => ""}
@@ -425,5 +430,236 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
 
     assert pub.content["lifecycle_status"] == "open"
     assert [%{"met" => true}] = pub.content["acceptance_criteria"]
+  end
+
+  # ── (h) source: :github takes the FULL gate, and the producer picks it ────
+  #
+  # task-b36741707eabe359. Until this section, the coverage claim at
+  # `lifecycle.ex`'s exemption site — "the GitHub automatic publishers thread
+  # `source: :github`, NOT `:sync`, so they fall through to this gate" — was
+  # carried by PROSE and pinned by nothing: `grep -c github` over this file and
+  # `lifecycle_test.exs` was 0, and the only test file carrying `source:
+  # :github` (`plugins/github/drain_worker_test.exs`) asserts the outbox
+  # exclusion, a different property. Threading `:sync` from a github producer
+  # instead of `:github` reddened NO test.
+  #
+  # Two independent pins, because the claim has two halves:
+  #
+  #   * the DOOR half — `:github` is not `:sync`, so it takes the else arm:
+  #     transition + claim + criteria, all of them. Asserted against the
+  #     matching `:sync` arm on the SAME shape, so collapsing the two arms
+  #     (`== :sync` → `in [:sync, :github]`) reds here.
+  #   * the PRODUCER half — the door only sees `:github` because
+  #     `Github.Link`/`Github.Adopt` put it there. A source-literal anchor pins
+  #     that choice, so swapping `Keyword.put_new(opts, :source, :github)` for
+  #     `Keyword.put(opts, :source, :sync)` reds here even though the producer
+  #     path itself no longer reaches `publish_document/4` (both modules became
+  #     published-first fenced writers in #16479 — the door half above is the
+  #     contract, this is its producer-side tripwire).
+
+  test "a github-sourced publish cannot blank a met:true flag or a non-empty evidence " <>
+         "string — the criteria fence is reached for :github",
+       %{scope: scope} do
+    publish_proof_bearing!("pdg-gh-erase", scope)
+
+    _draft =
+      stage_draft!(
+        "pdg-gh-erase",
+        %{
+          "acceptance_criteria" => [
+            %{"criterion" => "it works", "met" => false, "evidence" => ""}
+          ]
+        },
+        scope,
+        :sync
+      )
+
+    assert {:error, {:invalid_task_content, %{"acceptance_criteria" => [message]}}} =
+             Content.publish_document(
+               "pdg-gh-erase",
+               "task",
+               @dataset,
+               scope ++ [source: :github]
+             )
+
+    assert message =~ "clear the `met: true` flag"
+
+    pub = published!("pdg-gh-erase", scope)
+
+    assert [%{"met" => true, "evidence" => "run output pasted"}] =
+             pub.content["acceptance_criteria"]
+  end
+
+  test "THE ARM DISCRIMINATOR: an open→done forge is REFUSED from :github and PASSES " <>
+         "from :sync — the two arms cannot be collapsed silently",
+       %{scope: scope} do
+    # One shape, two sources. The criteria fence is source-blind, so it cannot
+    # tell the arms apart; the TRANSITION check can, and that is the whole
+    # content of "`:github` is not `:sync`".
+    mk_task!("pdg-gh-forge", scope, %{}, "Refit the harbour crane hydraulics before winter")
+    {:ok, _} = Content.publish_document("pdg-gh-forge", "task", @dataset, scope)
+    _draft = stage_draft!("pdg-gh-forge", %{"lifecycle_status" => "done"}, scope, :sync)
+
+    assert {:error, {:invalid_task_content, %{"lifecycle_status" => [message]}}} =
+             Content.publish_document(
+               "pdg-gh-forge",
+               "task",
+               @dataset,
+               scope ++ [source: :github]
+             )
+
+    assert message =~ "\"open\""
+    assert message =~ "\"done\""
+    assert message =~ "bp task close"
+    assert published!("pdg-gh-forge", scope).content["lifecycle_status"] == "open"
+
+    # POSITIVE CONTROL, same shape, source :sync: the mirror-verbatim arm
+    # exempts the transition, so the identical publish SUCCEEDS. Without this
+    # the refusal above proves nothing about WHICH arm ran.
+    mk_task!("pdg-gh-forge-sync", scope, %{}, "Translate the spring seed catalogue into Nynorsk")
+    {:ok, _} = Content.publish_document("pdg-gh-forge-sync", "task", @dataset, scope)
+    _ = stage_draft!("pdg-gh-forge-sync", %{"lifecycle_status" => "done"}, scope, :sync)
+
+    assert {:ok, synced} =
+             Content.publish_document(
+               "pdg-gh-forge-sync",
+               "task",
+               @dataset,
+               scope ++ [source: :sync]
+             )
+
+    assert synced.content["lifecycle_status"] == "done"
+  end
+
+  # The producer-side anchor. `Link.put/4` and `Adopt.adopt/3` each default
+  # `:source` to `:github` with `put_new` — `put_new`, so an explicit caller
+  # source wins, and `:github`, so the door above sees the full-gate arm. A
+  # producer that threads `:sync` instead would buy itself the transition +
+  # claim exemptions the arm discriminator just measured, silently. This is the
+  # falsifier for that swap.
+  @source_anchor "Keyword.put_new(opts, :source, :github)"
+
+  test "producer anchor: the github write paths default :source to :github, once each" do
+    for rel <- [
+          "lib/barkpark/plugins/github/link.ex",
+          "lib/barkpark/plugins/github/adopt.ex"
+        ] do
+      path = Path.expand(Path.join([__DIR__, "..", "..", "..", rel]))
+      source = File.read!(path)
+
+      hits = length(String.split(source, @source_anchor)) - 1
+
+      assert hits == 1,
+             "#{rel}: expected exactly 1 occurrence of #{@source_anchor}, found #{hits}. " <>
+               "If the default source moved off :github, the publish door's full-gate " <>
+               "arm (transition + claim + criteria) is no longer what a github write " <>
+               "takes — see section (h) above and task-b36741707eabe359."
+    end
+  end
+
+  # ── (i) the stale-draft refusal's REMEDY lands (task-922e616cb9b99243) ────
+  #
+  # The refusal above used to prescribe "patch, then publish". While the twin
+  # exists, a bare-id patch is refused by the published-first fork fence
+  # (`Mutations.draft_twin_error/1`) and the publish then refuses identically —
+  # the two refusals pointed at each other. This arm runs the remedy the
+  # refusal NOW prints, in the order it prints it, against the same row the
+  # refusal was raised on, and shows it landing with the claim byte-identical.
+  # The wall itself is the quiet arm: the refusal fires BEFORE the remedy and
+  # the published row does not move until the remedy runs.
+  describe "the stale-claim refusal prescribes a remedy that lands" do
+    test "discard-draft, then a bare-id patch: lands, claim byte-identical", %{scope: scope} do
+      id = "pdg-remedy"
+      mk_task!(id, scope)
+      {:ok, _} = Content.publish_document(id, "task", @dataset, scope)
+      assert {:ok, claimed} = Tasks.claim_by_id(id, "pdg-remedy-worker", scope)
+      claim_before = claimed.content["claim"]
+      assert claim_before["worker"] == "pdg-remedy-worker"
+
+      # The trap shape: a draft twin that predates the claim (carries none).
+      mk_task!(id, scope)
+      {:ok, twin} = Content.get_document("drafts.#{id}", "task", @dataset, scope)
+      refute twin.content["claim"]
+
+      # THE WALL (quiet arm): still refused, published row untouched.
+      assert {:error, {:invalid_task_content, %{"claim" => [message]}}} =
+               Content.publish_document(id, "task", @dataset, scope)
+
+      assert published!(id, scope).content["claim"] == claim_before
+
+      # THE SENTENCE. The part that CLEARS the refusal is placeholder-free and
+      # printed with the real id, so criterion 1 ("runnable as printed") is
+      # measured against those two commands and this test runs exactly them
+      # below. The re-apply command keeps `<field>=<value>` because the value
+      # is the operator's own edit and `doc.patch` declares `flags: [set]`
+      # only — see the note over `stale_claim_error/2` for why filling it in
+      # from `draft.content` would be a worse bug, not a better message.
+      assert message =~ "stale draft: the published row carries claim state"
+      assert message =~ "`bp doc get task #{id} --perspective drafts`"
+      assert message =~ "`bp doc discard-draft task #{id} --yes`"
+      assert message =~ "only <field>=<value> is yours to fill"
+      assert message =~ "`bp doc patch task #{id} --set <field>=<value> --yes`"
+
+      # The OLD sentence is gone, in both of its halves.
+      refute message =~ "patch, then publish"
+      refute message =~ "Re-derive the draft from the published row"
+
+      # THE SELF-RETIREMENT KEY, asserted on the SHAPE the CLI guard actually
+      # reads (`internal/cli/stale_draft_publish_remedy.go`): it fires only when
+      # ONE string under `error.details.claim` carries BOTH clauses. The marker
+      # survives, the broken-remedy phrase does not, so the advisory retires.
+      # The phrase still exists in `criteria_regression_error/1`, but that error
+      # is emitted under "acceptance_criteria" and the guard reads only ".claim",
+      # so it is structurally invisible to it — this pair is the whole contract.
+      refute String.contains?(message, "stale draft: the published row carries claim state") and
+               String.contains?(message, "Re-derive the draft from the published row")
+
+      # THE PRINTED "patch, then publish" IS STILL A LOOP — pinned so the
+      # fork fence cannot be loosened by this row: with the twin in place the
+      # bare-id patch is refused…
+      assert {:error, {:invalid_task_content, %{"_id" => [fork]}}} =
+               Content.apply_mutations(
+                 [
+                   %{"patch" => %{"id" => id, "type" => "task", "set" => %{"description" => "x"}}}
+                 ],
+                 @dataset,
+                 [source: :api] ++ scope
+               )
+
+      assert fork =~ "Resolve the fork first"
+
+      # …and THE REMEDY, in the printed order, run as printed. Step 1: capture
+      # the twin's bytes (the `--perspective drafts` read the message names).
+      assert {:ok, captured} = Content.get_document("drafts.#{id}", "task", @dataset, scope)
+      assert captured.content["description"]
+
+      # Step 2: discard the twin. Placeholder-free, and after it the refusal
+      # is cleared — nothing about this row is refused any more.
+      assert {:ok, _} = Content.discard_draft(id, "task", @dataset, scope)
+      assert {:error, :not_found} = Content.get_document("drafts.#{id}", "task", @dataset, scope)
+
+      # Step 3: the bare-id patch — published-first, so it LANDS.
+      assert {:ok, {_tx, [_]}} =
+               Content.apply_mutations(
+                 [
+                   %{
+                     "patch" => %{
+                       "id" => id,
+                       "type" => "task",
+                       "set" => %{"description" => "enriched through the printed remedy"}
+                     }
+                   }
+                 ],
+                 @dataset,
+                 [source: :api] ++ scope
+               )
+
+      pub = published!(id, scope)
+      assert pub.content["description"] == "enriched through the printed remedy"
+      assert pub.content["claim"] == claim_before
+      assert pub.content["lifecycle_status"] == "in_progress"
+      # No twin left behind: the remedy is a landing, not another fork.
+      assert {:error, :not_found} = Content.get_document("drafts.#{id}", "task", @dataset, scope)
+    end
   end
 end

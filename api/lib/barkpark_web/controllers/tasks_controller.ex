@@ -103,6 +103,7 @@ defmodule BarkparkWeb.TasksController do
   alias Barkpark.Content.Errors
   alias Barkpark.Tasks.Citations
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Tasks.Landed
   alias Barkpark.Tasks.QueueGate
   alias Barkpark.Tasks.TwinResolver
   alias Barkpark.Tasks.Validation
@@ -117,6 +118,19 @@ defmodule BarkparkWeb.TasksController do
   alias BarkparkWeb.TasksController.Params
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
+  # Session auto-log (task-bc34e83515bbd91f): arm the before_send callback that
+  # appends a `task-closed` event when `close/2`'s `:closed` arm `mark/3`ed the
+  # conn. Scoped to the WORKSPACE the close itself resolved, not its project: a
+  # session is a workspace-level agent record (the ingest door that writes it
+  # infers `{workspace, nil}` for a scope-less token), and the flat /v1/tasks
+  # route pins the Default project, so a project-strict read would miss every
+  # such session. `:shared_only` (no tenant resolved) stays fail-narrow. A plug,
+  # not a call from the receipt body: see `BarkparkWeb.SessionAutolog`.
+  plug(:arm_session_autolog when action in [:close])
+
+  defp arm_session_autolog(conn, _opts),
+    do: BarkparkWeb.SessionAutolog.arm(conn, &Keyword.take(scope_opts(&1), [:workspace_id]))
 
   # ─── GET /v1/tasks/ready ────────────────────────────────────────────────
 
@@ -158,7 +172,7 @@ defmodule BarkparkWeb.TasksController do
       # which is a bigger change than this row is allowed to make. What changes
       # is that the span is now STATED (`page.dataset*` below) instead of being
       # an unstated global.
-      dataset = ready_dataset_param(params)
+      dataset = dataset_param(params)
 
       opts =
         []
@@ -174,7 +188,7 @@ defmodule BarkparkWeb.TasksController do
       body =
         docs
         |> task_list_response(conn, params, limit: limit, offset: offset)
-        |> put_ready_dataset_scope(docs, dataset, Tasks.dataset_ambiguous(opts))
+        |> put_dataset_scope(docs, dataset, Tasks.dataset_ambiguous(opts))
 
       json(conn, body)
     else
@@ -209,12 +223,18 @@ defmodule BarkparkWeb.TasksController do
   # exactly-full last page; that errs toward "look again", the safe direction.
   # ADDITIVE ONLY — `ok`, `docs` and `help` keep their names and shapes, so the
   # SDK, the Studio and the taskboard read byte-identical fields.
-  # `?dataset=` on the ready route. Fails SOFT on a non-binary spelling
-  # (`?dataset[]=production`), like `request_dataset/1` — a malformed selector
-  # must not 500 a queue read — but carries NO default: see `ready/2`.
-  defp ready_dataset_param(params) do
+  # `?dataset=` on the two LIST routes (ready and index). Fails SOFT on a
+  # non-binary spelling (`?dataset[]=production`), like `request_dataset/1` — a
+  # malformed selector must not 500 a listing — but carries NO default: see
+  # `ready/2`. An empty string is "named nothing", not a dataset called "".
+  #
+  # ONE reader for both routes (task-8483029782444df4). The index grew its own
+  # dataset selector after ready had one, and two spellings of "read the same
+  # query param" is exactly how ready and index came to disagree about whether
+  # `?dataset=` meant anything at all.
+  defp dataset_param(params) do
     case params["dataset"] do
-      dataset when is_binary(dataset) -> dataset
+      dataset when is_binary(dataset) and dataset != "" -> dataset
       _ -> nil
     end
   end
@@ -240,9 +260,12 @@ defmodule BarkparkWeb.TasksController do
   # standing exception, not an opening. A dataset fact a caller ACTS on belongs
   # in the structured block it can read without string-matching anyway.
   #
-  # READY ONLY, deliberately: `task_list_response/4`'s other caller is the index,
-  # which is not twin-collapsed and whose envelope stays byte-identical.
-  defp put_ready_dataset_scope(body, docs, dataset, ambiguous) do
+  # BOTH LIST ROUTES (task-8483029782444df4). It was ready-only while the index
+  # did not read `?dataset=` at all — an envelope may not describe a scope its
+  # route does not honour. Now that the index narrows on the same param, it says
+  # the same four things in the same four keys, so a caller reads one contract
+  # off `page` no matter which listing answered.
+  defp put_dataset_scope(body, docs, dataset, ambiguous) do
     spans = docs |> Enum.map(& &1.dataset) |> Enum.uniq() |> Enum.sort()
 
     page =
@@ -324,6 +347,15 @@ defmodule BarkparkWeb.TasksController do
           &Params.render_brief(&1, child_counts, live_child_counts, live_parents)
         )
 
+      # task-1ca34359dc0805df: `?view=board` runs the SAME two queries and the
+      # SAME builder as `:full` — it differs only in the `content` key being
+      # deleted from each card, so no count, no ordering and no other field can
+      # drift between the default view and the board's.
+      :board ->
+        counts = Params.batch_edge_counts(docs)
+        child_counts = Params.batch_child_counts(docs, scope_opts(conn))
+        Enum.map(docs, &Params.render_board_with_counts(&1, counts, child_counts))
+
       :full ->
         counts = Params.batch_edge_counts(docs)
         # task-3e0eda896a247776: the SAME batched grouped query the brief card
@@ -394,11 +426,19 @@ defmodule BarkparkWeb.TasksController do
 
             {Enum.map(sealed_in_progress, render), Enum.map(sealed_ready, render)}
 
-          :full ->
+          # task-1ca34359dc0805df: prime honours `?view=board` on the same terms
+          # the index does — the full card minus the `content` echo. Prime's
+          # `?view=` stays LENIENT (an undeclared value is still `:full`); only
+          # the index fail-closes the value, see `Params.parse_index_view/1`.
+          full_or_board when full_or_board in [:full, :board] ->
             counts = Params.batch_edge_counts(sealed_in_progress ++ sealed_ready)
             child_counts = Params.batch_child_counts(sealed_in_progress ++ sealed_ready, scope)
 
-            render = &Params.render_doc_with_counts(&1, counts, child_counts)
+            render =
+              case full_or_board do
+                :board -> &Params.render_board_with_counts(&1, counts, child_counts)
+                :full -> &Params.render_doc_with_counts(&1, counts, child_counts)
+              end
 
             {Enum.map(sealed_in_progress, render), Enum.map(sealed_ready, render)}
         end
@@ -488,11 +528,24 @@ defmodule BarkparkWeb.TasksController do
       # does not ask gets the byte-identical page it always got.
       payload? = params["payload"] in ["1", "true", true]
 
+      # tlv-bl-events-actor-attribution: the per-row audit narrowing. `?doc_id=`
+      # (which `bp task events <id>` sends as its one positional) restricts the
+      # replay to ONE task's mutation history instead of making the caller page
+      # the global backlog and filter client-side. Blank/absent is nil, which
+      # `Tasks.Events.replay_since/3` reads as unscoped — so every existing
+      # poller's request is byte-identical.
+      doc_id =
+        case params["doc_id"] do
+          v when is_binary(v) -> if String.trim(v) == "", do: nil, else: v
+          _ -> nil
+        end
+
       rows =
         Tasks.Events.replay_since(dataset, since,
           limit: limit,
           workspace_id: workspace_id,
-          payload: payload?
+          payload: payload?,
+          doc_id: doc_id
         )
 
       cursor =
@@ -529,18 +582,61 @@ defmodule BarkparkWeb.TasksController do
     # fail-closed by #12780 while the top level stayed fail-OPEN, so
     # `?parent_id=X` and `?bogus=1` both returned a 200 carrying the UNFILTERED
     # page — a false confirmation, not a missing feature.
+    # task-1ca34359dc0805df: the `?view=` VALUE is fail-closed on this route,
+    # beside the flat-namespace and filter-container doors above. The flat key
+    # `view` was already accepted; its value was not checked, so `?view=boad`
+    # fell back to the default and served the whole `content` echo — ~11 MB per
+    # page on the live ledger — behind a 200 the caller cannot tell from the
+    # cheap answer it asked for. That silent-expensive-fallback IS the defect
+    # class `view=board` exists to close, so the refusal ships with it.
+    # `Params.parse_index_view/1` documents why ready/prime stay lenient.
     with :ok <- Params.reject_unknown_flat_params(params, :index),
-         {:ok, filters} <- Params.parse_index_filters(params) do
+         {:ok, filters} <- Params.parse_index_filters(params),
+         {:ok, _view} <- Params.parse_index_view(params) do
       # cchi-bl-task-get-needs-a-server-side-prefix-lookup: `id_prefix` is the
       # one narrowing that answers with a DIFFERENT, lean body (doc_id + title),
       # so it branches here rather than composing as another where-clause below.
       case params["id_prefix"] || filters["id_prefix"] do
-        p when is_binary(p) and p != "" -> id_prefix_lookup(conn, p)
-        _ -> do_index(conn, params, filters)
+        p when is_binary(p) and p != "" ->
+          id_prefix_lookup(conn, p)
+
+        _ ->
+          # THE DELTA READ (task-a60d5a14346c43bb). Parsed HERE, beside the two
+          # other fail-closed doors, so a malformed instant is refused before a
+          # single row is read — and so the refusal is a 400 naming the key
+          # rather than an unnarrowed 200 the caller cannot tell from a real
+          # answer.
+          case Params.parse_updated_since(params, filters) do
+            {:ok, updated_since} -> do_index(conn, params, filters, updated_since)
+            {:error, reason} -> bad_request(conn, reason)
+          end
       end
     else
+      {:error, {:unknown_view, value}} -> unknown_view(conn, value)
       {:error, reason} -> invalid_filter(conn, reason)
     end
+  end
+
+  # An undeclared `?view=` on the index (task-1ca34359dc0805df).
+  #
+  # Emitted through `BarkparkWeb.ErrorResponse` — the ONE emitter of the §9
+  # envelope `{"error":{"code","message","request_id"}}` — so the refusal is
+  # correlatable to a log line, not another hand-built body. The code is the
+  # ALREADY-DECLARED `invalid_filter` (`Barkpark.Content.Errors`), because this
+  # IS a refused query narrowing and inventing a code would add a variant the
+  # public `Error.code` enum, the OpenAPI document and every generated SDK have
+  # never been told about (`error_code_coverage_test.exs` guards exactly that).
+  # The machine-readable half rides `details`: the param, what was sent, and
+  # the accepted set — so a client branches without parsing prose.
+  defp unknown_view(conn, value) do
+    BarkparkWeb.ErrorResponse.emit_custom(
+      conn,
+      :bad_request,
+      "invalid_filter",
+      "view must be one of #{Enum.join(Params.views(), ", ")}; got #{inspect(value)}",
+      %{param: "view", value: value, accepted: Params.views()},
+      "Drop ?view= for the default full card, ?view=board for the full card without the content echo, or ?view=brief for the agent list card."
+    )
   end
 
   # ─── GET /v1/tasks?id_prefix=… ──────────────────────────────────────────
@@ -577,7 +673,16 @@ defmodule BarkparkWeb.TasksController do
     })
   end
 
-  defp do_index(conn, params, filters) do
+  defp do_index(conn, params, filters, updated_since) do
+    # THE WATERMARK. Read from the clock BEFORE the query runs, echoed back on a
+    # delta request, and meant to be fed straight into the next poll's
+    # `updated_since`. Taking it first (and comparing INCLUSIVELY in
+    # `Tasks.Query.maybe_filter_updated_since/2`) biases the window to OVERLAP:
+    # a row written while this page was being built comes back once more next
+    # poll instead of falling into a gap between two exclusive windows. A
+    # client's own clock is the wrong source for this — a few seconds of skew
+    # the wrong way is silent, permanent data loss on the delta path.
+    as_of = DateTime.utc_now()
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
@@ -629,25 +734,24 @@ defmodule BarkparkWeb.TasksController do
     parent =
       params["parent"] || params["parent_id"] || filters["parent"] || filters["parent_id"]
 
-    # dr-w34-s4: twin collapse (published-wins) — a `drafts.<id>` shadow whose
-    # published twin exists in the same scope is suppressed, so a twinned task
-    # is ONE row here exactly as it is one row in `child_tasks/2` and in the
-    # ready queue. An UNPAIRED `drafts.<id>` row (the whole mutate-created
-    # population) has no distinct twin and survives — see
-    # `Tasks.Query.collapse_twins/1` for why this is NOT a blanket `drafts.`
-    # exclusion. NOTE the pagination consequence: `limit`/`offset` live in this
-    # BASE, so removing shadow rows shifts which rows land on which page and
-    # moves `bp task ls --all` totals.
-    base =
-      from(d in Document,
-        where: d.type == "task",
-        limit: ^limit,
-        offset: ^offset
-      )
-      |> Tasks.Query.collapse_twins()
+    # `?dataset=` ON THE INDEX (task-8483029782444df4). `/v1/tasks/ready` and
+    # `/v1/tasks/:doc_id` both honour this param; this route IGNORED it — and
+    # not by 400ing, which would at least be honest: `dataset` rides the
+    # `@phoenix_injected` allowlist in `reject_unknown_flat_params/2`, so
+    # `GET /v1/tasks?dataset=nosuchds` answered 200 with a FULL, GLOBAL page.
+    # A listing that serves the whole corpus under a selector naming one dataset
+    # is the "false confirmation an operator can act on" this route's own
+    # fail-closed filter doors exist to prevent. Read through `dataset_param/1`
+    # — the SAME reader `ready/2` uses, no default, soft on a malformed spelling.
+    dataset = dataset_param(params)
 
-    query =
-      base
+    # The filter chain is a CLOSURE because two queries need it: the paged read
+    # below, and the ambiguity probe. Building the probe off a different set of
+    # predicates is how a page and its own explanation come to describe
+    # different populations (`child_dataset_ambiguous/2` shares its base for the
+    # same reason).
+    narrow = fn query ->
+      query
       |> Params.maybe_filter_workspace(workspace_id)
       |> Params.maybe_filter_project(project_id)
       |> Params.maybe_filter_type(params["type"])
@@ -671,7 +775,49 @@ defmodule BarkparkWeb.TasksController do
       |> Params.maybe_filter_parent_id(filters["parent"])
       |> Params.maybe_filter_parent_id(filters["parent_id"])
       |> Params.maybe_filter_label(filters["label"])
-      |> Params.apply_index_order(parent)
+      # THE DELTA READ (task-a60d5a14346c43bb). `updated_since` is bound and
+      # parsed in `index/2` (fail-closed: an unparseable instant is a 400, never
+      # a silent full page) and reaches the query as a `%DateTime{}` or nil.
+      # It composes as one more where-clause on the SAME base — `limit`/`offset`
+      # and the cursor still mean what they meant — so a poller that narrows to
+      # its own window pays for the rows that actually moved.
+      |> Params.maybe_filter_updated_since(updated_since)
+    end
+
+    # dr-w34-s4: twin collapse (published-wins) — a `drafts.<id>` shadow whose
+    # published twin exists in the same scope is suppressed, so a twinned task
+    # is ONE row here exactly as it is one row in `child_tasks/2` and in the
+    # ready queue. An UNPAIRED `drafts.<id>` row (the whole mutate-created
+    # population) has no distinct twin and survives — see
+    # `Tasks.Query.collapse_twins/1` for why this is NOT a blanket `drafts.`
+    # exclusion. NOTE the pagination consequence: `limit`/`offset` live in this
+    # BASE, so removing shadow rows shifts which rows land on which page and
+    # moves `bp task ls --all` totals.
+    base =
+      from(d in Document,
+        where: d.type == "task",
+        limit: ^limit,
+        offset: ^offset
+      )
+      |> Tasks.Query.collapse_twins()
+      # DATASET axis of the SAME rule (task-49eef068420df918,
+      # `Barkpark.Tasks.TwinResolver` rule 3 at a listing). `collapse_twins/1`
+      # above requires `twin.dataset = d.dataset` BY DESIGN, so a doc_id living
+      # in two datasets of one workspace+project contributed TWO rows to this
+      # page — ids `GET /v1/tasks/:doc_id` itself refuses with a 409
+      # `ambiguous_dataset`. Same pagination consequence `collapse_twins/1`
+      # documents — `limit`/`offset` live in this BASE, so suppressed rows shift
+      # which rows land on which page.
+      #
+      # GATED on `?dataset=`, exactly as `child_tasks/2` gates it: naming a
+      # dataset IS the disambiguation rule 3 asks for, so a dataset-scoped page
+      # is NARROWED to that dataset rather than having its twins withheld. The
+      # narrowing is the same `maybe_filter_dataset/2` a dataset-named ready page
+      # applies — not merely "un-collapse", which would hand a caller who asked
+      # for ONE dataset back BOTH copies.
+      |> maybe_scope_index_dataset(dataset)
+
+    query = base |> narrow.() |> Params.apply_index_order(parent)
 
     # bl-api-tasks-stable-cursor: the keyset seek. Parsed AFTER `parent` is
     # bound because the cursor's axis is the ORDERING's axis, and the ordering
@@ -687,19 +833,73 @@ defmodule BarkparkWeb.TasksController do
       {:ok, cursor} ->
         docs = query |> Params.apply_index_cursor(cursor) |> Repo.all()
 
-        json(
-          conn,
-          task_list_response(docs, conn, params,
+        body =
+          docs
+          |> task_list_response(conn, params,
             limit: limit,
             offset: offset,
             cursor_axis: Params.cursor_axis(parent),
             cursor_requested?: Params.cursor_requested?(params)
           )
-        )
+          |> put_dataset_scope(docs, dataset, index_dataset_ambiguous(dataset, narrow))
+
+        json(conn, maybe_put_delta(body, updated_since, as_of))
 
       {:error, reason} ->
         bad_request(conn, reason)
     end
+  end
+
+  # `?dataset=` on the index, as a SCOPE SELECTOR (task-8483029782444df4).
+  #
+  #   * NAMED  — narrow to that dataset. Cross-dataset twins are not "ambiguous"
+  #     any more: the caller answered the question rule 3 refuses to answer for
+  #     them. A dataset holding no rows yields an EMPTY page, which is the whole
+  #     point: `?dataset=nosuchds` used to return a full global page.
+  #   * ABSENT — the page spans every dataset in the caller's workspace/project
+  #     scope and the cross-dataset twins are WITHHELD and named in
+  #     `page.dataset_ambiguous`, exactly as before this row.
+  defp maybe_scope_index_dataset(query, nil), do: Tasks.Query.collapse_cross_dataset_twins(query)
+
+  defp maybe_scope_index_dataset(query, dataset),
+    do: Tasks.Query.maybe_filter_dataset(query, dataset)
+
+  # The doc_ids the index WITHHELD as cross-dataset ambiguous, each with the
+  # dataset set it spans — `page.dataset_ambiguous`, the same shape
+  # `/v1/tasks/ready` and the child rail render.
+  #
+  # `[]` whenever the caller named a dataset (nothing is ambiguous then), so a
+  # dataset-scoped read pays for no probe at all. Otherwise it runs over the
+  # SAME narrowing closure the page used, minus `limit`/`offset`: a withheld id
+  # that fell outside the page window is still a withheld id, and an explanation
+  # bounded by the page it explains would go silent exactly when the page is
+  # short. Cheaper than the page in the way `Tasks.Queue.dataset_ambiguous/1` is
+  # cheaper than `ready_query/1` — one indexed correlated probe, no child-count
+  # fan-out, no render.
+  defp index_dataset_ambiguous(dataset, _narrow) when is_binary(dataset), do: []
+
+  defp index_dataset_ambiguous(nil, narrow) do
+    from(d in Document, where: d.type == "task")
+    |> narrow.()
+    |> Tasks.Query.cross_dataset_ambiguous_ids()
+  end
+
+  # The delta envelope. ADDITIVE and OMITTED WHEN THE CALLER DID NOT ASK, so
+  # every request that predates `updated_since` reads a byte-identical body —
+  # the same rule `next_cursor` follows one function up.
+  #
+  # `as_of` is the continuation token: pass it as the next poll's
+  # `updated_since` and the page carries exactly the rows that moved in between.
+  # Without it a client would have to invent the value from its own clock, and
+  # the failure mode of a clock that runs fast is a window that skips rows
+  # silently.
+  defp maybe_put_delta(body, nil, _as_of), do: body
+
+  defp maybe_put_delta(body, %DateTime{} = updated_since, as_of) do
+    Map.put(body, :delta, %{
+      updated_since: DateTime.to_iso8601(updated_since),
+      as_of: DateTime.to_iso8601(as_of)
+    })
   end
 
   # ─── POST /v1/tasks/claim ───────────────────────────────────────────────
@@ -707,12 +907,18 @@ defmodule BarkparkWeb.TasksController do
   def claim(conn, params) do
     case params["worker_id"] do
       worker_id when is_binary(worker_id) and byte_size(worker_id) > 0 ->
-        with {:ok, order} <- Params.parse_ready_order(params["order"]) do
+        with {:ok, order} <- Params.parse_ready_order(params["order"]),
+             {:ok, priming_start} <- flight_recorder_param(params, "priming_start") do
           opts =
             []
             |> Params.put_opt(:phase_id, params["phase_id"])
             |> Params.put_opt(:order, order)
             |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+            |> Params.put_opt(:session, session_id(conn, params))
+            # THREE-STATE: `put_opt/3` DROPS a nil, so an absent manifest never
+            # reaches Tasks.Claim as an opt at all and the claim it writes is
+            # byte-identical to one issued before this key existed.
+            |> Params.put_opt(:priming_start, priming_start)
             |> Keyword.merge(Params.execution_policy_opts(params))
             |> Keyword.merge(scope_opts(conn))
 
@@ -753,6 +959,9 @@ defmodule BarkparkWeb.TasksController do
         else
           {:error, :invalid_ready_order} ->
             bad_request(conn, "order must be closure_nearest when set")
+
+          {:error, code} when is_atom(code) ->
+            flight_recorder_refusal(conn, code)
         end
 
       _ ->
@@ -790,14 +999,43 @@ defmodule BarkparkWeb.TasksController do
         # reports — one query, one number, and `doc.child_count` now means the
         # same thing on `bp task get` as it does on a `bp task ls` / `ready`
         # card. The top-level key is UNCHANGED for the readers already on it.
-        child_counts = %{Params.strip_draft_prefix(doc.doc_id) => length(children)}
+        # task-e4f1d8e178509fc9: seal ONCE, then derive EVERY number and every
+        # summary from that one sealed list. Before this, both `child_count`
+        # keys counted the UNSEALED `children` while the `children:` array was
+        # rendered off `seal_docs(children, conn)` — two parallel derivations
+        # that agree only because `seal_docs/2` happens to be a
+        # length-preserving `Enum.map`. That is an incidental property of an
+        # unrelated helper, not a stated invariant: the day a seal drops a doc,
+        # the count would describe rows the caller never received (the shape
+        # PDS-D502 refuted). No behaviour change today — one list, one length.
+        sealed_children = seal_docs(children, conn)
 
-        json(conn, %{
+        child_counts = %{
+          Params.strip_draft_prefix(doc.doc_id) => length(sealed_children)
+        }
+
+        body = %{
           ok: true,
           doc: Params.render_doc_with_counts(seal_doc(doc, conn), counts, child_counts),
-          children: Enum.map(seal_docs(children, conn), &Params.child_summary/1),
-          child_count: length(children)
-        })
+          children: Enum.map(sealed_children, &Params.child_summary/1),
+          child_count: length(sealed_children)
+        }
+
+        # THE NAMING HALF of rule 3 at this listing. A by-id door answers an
+        # ambiguous id with a 409 naming every dataset; a rail cannot refuse the
+        # whole response over one child, so the refusal is scoped to the ROW —
+        # the child contributes nothing to `children`/`child_count` and is named
+        # exactly ONCE here with the datasets `?dataset=` may choose between.
+        # ADDITIVE and OMITTED WHEN EMPTY, so every ordinary task's `bp task get`
+        # envelope is byte-identical: the key appears only for the pathological
+        # corpus it describes.
+        body =
+          case child_dataset_ambiguous(doc.doc_id, conn) do
+            [] -> body
+            ambiguous -> Map.put(body, :dataset_ambiguous, ambiguous)
+          end
+
+        json(conn, body)
 
       {:error, :not_found} ->
         not_found(conn, "task not found")
@@ -811,7 +1049,59 @@ defmodule BarkparkWeb.TasksController do
   # `drafts.` stripped) + the SAME workspace/project filters,
   # over `type == "task"`. No duplicated matching logic — the filter helpers
   # are shared with `index/2`.
+  # THE ONE RULE AT THE CHILD RAIL (task-49eef068420df918). `collapse_twins/1`
+  # below is the DRAFT axis; `child_base_query/2` + `collapse_cross_dataset_twins/1`
+  # is the DATASET axis of the SAME rule (`Barkpark.Tasks.TwinResolver` rule 3 —
+  # read that moduledoc; this function writes no second rule). Measured live on
+  # guerrilla 2026-09-06: an epic whose nine children exist in BOTH `production`
+  # and `aker-brygge` reported `child_count: 18` and listed every child TWICE —
+  # ids this controller's OWN by-id door (`fetch_task_exact/4` → `TwinResolver`)
+  # refuses with a 409 `ambiguous_dataset`. A listing that serves ids its own
+  # by-id reader will not resolve is the ready/claim disagreement one door over,
+  # and it is what made the epic look twice its size.
+  #
+  # Gated on `?dataset=`: naming a dataset IS the disambiguation, so a
+  # dataset-scoped read sees its own dataset's children unchanged. The withheld
+  # ids are NOT hidden — `show/2` names each once in `dataset_ambiguous` via
+  # `child_dataset_ambiguous/2`, the same shape `/v1/tasks/ready` renders in
+  # `page.dataset_ambiguous`.
   defp child_tasks(doc_id, conn) do
+    base = child_base_query(doc_id, conn)
+
+    case conn.params["dataset"] do
+      # NAMED: the rail is SCOPED to that dataset, not merely un-collapsed.
+      # Lifting the collapse without narrowing would be strictly worse than
+      # doing nothing — `?dataset=production` would hand back BOTH copies of a
+      # twinned child, the very double-listing this fixes, on the one call that
+      # said which dataset it meant. (Caught by the POSITIVE CONTROL below,
+      # which read `[solo, twin, twin]` from the first draft of this function.)
+      # `maybe_filter_dataset/2` is the same narrowing `Queue.ready/1` applies
+      # to a dataset-named ready page.
+      d when is_binary(d) and d != "" ->
+        base |> Tasks.Query.maybe_filter_dataset(d) |> Repo.all()
+
+      _ ->
+        base |> Tasks.Query.collapse_cross_dataset_twins() |> Repo.all()
+    end
+  end
+
+  # The doc_ids `child_tasks/2` WITHHELD as cross-dataset ambiguous, each with
+  # the dataset set it spans. Built off the SAME base, so the rail and its
+  # explanation cannot describe different populations. `[]` whenever the caller
+  # named a dataset (nothing is ambiguous then).
+  defp child_dataset_ambiguous(doc_id, conn) do
+    case conn.params["dataset"] do
+      d when is_binary(d) and d != "" ->
+        []
+
+      _ ->
+        doc_id
+        |> child_base_query(conn)
+        |> Tasks.Query.cross_dataset_ambiguous_ids()
+    end
+  end
+
+  defp child_base_query(doc_id, conn) do
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
@@ -831,7 +1121,6 @@ defmodule BarkparkWeb.TasksController do
     |> Params.maybe_filter_workspace(workspace_id)
     |> Params.maybe_filter_project(project_id)
     |> Params.maybe_filter_parent_id(doc_id)
-    |> Repo.all()
   end
 
   # ─── POST /v1/tasks/:doc_id/claim ───────────────────────────────────────
@@ -842,98 +1131,118 @@ defmodule BarkparkWeb.TasksController do
   def claim_by_id(conn, %{"doc_id" => doc_id} = params) do
     case params["worker_id"] do
       worker_id when is_binary(worker_id) and byte_size(worker_id) > 0 ->
-        # `resources` rides as a JSON list (curl) or a comma-separated string
-        # (the bp `--set resources=a.go,b.go` path) — Tasks normalizes both.
-        opts =
-          [resources: params["resources"] || []]
-          |> Params.put_opt(:caller_token_id, caller_token_id(conn))
-          |> Keyword.merge(Params.execution_policy_opts(params))
-          |> Keyword.merge(scope_opts(conn))
-          |> Params.put_opt(
-            :criteria_unstated_override,
-            params["criteria_unstated_override"] ||
-              get_in(params, ["set", "criteria_unstated_override"])
-          )
-
-        # Snapshot the rail BEFORE the claim so rail_changed compares
-        # observed_rail_rev against the rail the worker actually saw (not the
-        # rev its own claim produces). nil when the row is absent/parentless.
-        pre_task =
-          case find_task_by_doc_id(doc_id, conn) do
-            {:ok, %Document{} = pre} -> pre
-            _ -> nil
-          end
-
-        baseline_rev = if pre_task, do: pre_write_rail_rev(pre_task, conn), else: nil
-
-        case Tasks.claim_by_id(doc_id, worker_id, opts) do
-          {:ok, %Document{} = doc} ->
-            json(
-              conn,
-              with_rail_extras(
-                %{
-                  ok: true,
-                  doc: Params.render_doc(seal_doc(doc, conn)),
-                  help: Params.mutation_help(:claim_by_id, doc, worker_id),
-                  lease: Params.claim_lease(doc)
-                },
-                doc,
-                baseline_rev,
-                conn,
-                params
-              )
+        with {:ok, priming_start} <- flight_recorder_param(params, "priming_start") do
+          # `resources` rides as a JSON list (curl) or a comma-separated string
+          # (the bp `--set resources=a.go,b.go` path) — Tasks normalizes both.
+          opts =
+            [resources: params["resources"] || []]
+            # THE FLIGHT RECORDER'S OPENING FRAME (task-a42dccec2fe4a406). Absent
+            # is dropped by put_opt/3, so a claim with no manifest is byte-for-byte
+            # the claim this door wrote yesterday.
+            |> Params.put_opt(:priming_start, priming_start)
+            |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+            |> Params.put_opt(:session, session_id(conn, params))
+            |> Keyword.merge(Params.execution_policy_opts(params))
+            |> Keyword.merge(scope_opts(conn))
+            |> Params.put_opt(
+              :criteria_unstated_override,
+              params["criteria_unstated_override"] ||
+                get_in(params, ["set", "criteria_unstated_override"])
             )
+            # `?dataset=` — the disambiguator the ambiguous_dataset refusal
+            # ADVERTISES (bp-task-verbs-500-on-cross-dataset-duplicate-slugs).
+            # `find_task_by_doc_id/2` has honoured it on every read door since the
+            # rule landed; this write door dropped it, so the claim refused and
+            # then refused its own escape hatch. Measured live on guerrilla
+            # 2026-09-16: GET `?dataset=production` -> 200 while POST
+            # `/claim?dataset=production` -> 409 (request_id GNW9zm1YCdlVXHsAADNB),
+            # which is what kept the eleven cross-dataset rows unclaimable — and
+            # therefore unstampable and uncloseable, every one of those verbs
+            # being claim-fenced.
+            |> Params.put_opt(:dataset, params["dataset"])
 
-          {:error, :not_found} ->
-            not_found(conn, "task not found")
+          # Snapshot the rail BEFORE the claim so rail_changed compares
+          # observed_rail_rev against the rail the worker actually saw (not the
+          # rev its own claim produces). nil when the row is absent/parentless.
+          pre_task =
+            case find_task_by_doc_id(doc_id, conn) do
+              {:ok, %Document{} = pre} -> pre
+              _ -> nil
+            end
 
-          {:error, {:resource_conflict, conflicts}} ->
-            # 409 with the HOLDERS: each conflict names the in-progress task,
-            # its worker, and the overlapping resource strings — enough for
-            # the caller to wait, renegotiate, or pick other files.
-            conn
-            |> put_status(:conflict)
-            |> json(%{ok: false, reason: "resource_conflict", conflicts: conflicts})
+          baseline_rev = if pre_task, do: pre_write_rail_rev(pre_task, conn), else: nil
 
-          {:error, {:invalid_execution_policy, errors}} ->
-            bad_request(conn, "invalid execution_policy_override: #{inspect(errors)}")
+          case Tasks.claim_by_id(doc_id, worker_id, opts) do
+            {:ok, %Document{} = doc} ->
+              json(
+                conn,
+                with_rail_extras(
+                  %{
+                    ok: true,
+                    doc: Params.render_doc(seal_doc(doc, conn)),
+                    help: Params.mutation_help(:claim_by_id, doc, worker_id),
+                    lease: Params.claim_lease(doc)
+                  },
+                  doc,
+                  baseline_rev,
+                  conn,
+                  params
+                )
+              )
 
-          # THE THREE-ARM SPLIT (task-eb2b6170e19f1611). `Tasks.claim_by_id/3`
-          # collapses three different refusals into one `:not_ready` atom, and
-          # the CLI turns that into one sentence covering all three: "someone
-          # else holds it or it isn't ready". Three different remedies, one
-          # word — the caller cannot tell which applies, and the filing that
-          # produced this fix spent hours chasing a phantom readiness bug on a
-          # row that was simply `human_gated` by its own author.
-          #
-          # The refusal atom is UNCHANGED (so is the wire `reason` token, which
-          # internal/cli/errors.go and pr-task-gate.sh both string-match) — the
-          # arm is DERIVED here from the pre-claim snapshot the rail baseline
-          # already fetched, and rides as additive fields + a `message` the bp
-          # CLI prints in place of the bare token.
-          {:error, :not_ready} ->
-            conn
-            |> put_status(:conflict)
-            |> json(not_ready_arm(pre_task, worker_id))
+            {:error, :not_found} ->
+              not_found(conn, "task not found")
 
-          # task-9554c64bf51a0f81: the refusal must carry its own remedy. ~30
-          # agents drive this verb daily, and a refusal that does not say what
-          # to type costs every one of them a round trip — which is what turns a
-          # good gate into a resented one.
-          {:error, :criteria_unstated} ->
-            conn
-            |> put_status(:conflict)
-            |> json(%{
-              ok: false,
-              reason: "criteria_unstated",
-              task: doc_id,
-              message: Params.criteria_unstated_message(doc_id, worker_id)
-            })
+            {:error, {:resource_conflict, conflicts}} ->
+              # 409 with the HOLDERS: each conflict names the in-progress task,
+              # its worker, and the overlapping resource strings — enough for
+              # the caller to wait, renegotiate, or pick other files.
+              conn
+              |> put_status(:conflict)
+              |> json(%{ok: false, reason: "resource_conflict", conflicts: conflicts})
 
-          {:error, reason} ->
-            conn
-            |> put_status(:conflict)
-            |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+            {:error, {:invalid_execution_policy, errors}} ->
+              bad_request(conn, "invalid execution_policy_override: #{inspect(errors)}")
+
+            # THE THREE-ARM SPLIT (task-eb2b6170e19f1611). `Tasks.claim_by_id/3`
+            # collapses three different refusals into one `:not_ready` atom, and
+            # the CLI turns that into one sentence covering all three: "someone
+            # else holds it or it isn't ready". Three different remedies, one
+            # word — the caller cannot tell which applies, and the filing that
+            # produced this fix spent hours chasing a phantom readiness bug on a
+            # row that was simply `human_gated` by its own author.
+            #
+            # The refusal atom is UNCHANGED (so is the wire `reason` token, which
+            # internal/cli/errors.go and pr-task-gate.sh both string-match) — the
+            # arm is DERIVED here from the pre-claim snapshot the rail baseline
+            # already fetched, and rides as additive fields + a `message` the bp
+            # CLI prints in place of the bare token.
+            {:error, :not_ready} ->
+              conn
+              |> put_status(:conflict)
+              |> json(not_ready_arm(pre_task, worker_id))
+
+            # task-9554c64bf51a0f81: the refusal must carry its own remedy. ~30
+            # agents drive this verb daily, and a refusal that does not say what
+            # to type costs every one of them a round trip — which is what turns a
+            # good gate into a resented one.
+            {:error, :criteria_unstated} ->
+              conn
+              |> put_status(:conflict)
+              |> json(%{
+                ok: false,
+                reason: "criteria_unstated",
+                task: doc_id,
+                message: Params.criteria_unstated_message(doc_id, worker_id)
+              })
+
+            {:error, reason} ->
+              conn
+              |> put_status(:conflict)
+              |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+          end
+        else
+          {:error, code} when is_atom(code) -> flight_recorder_refusal(conn, code)
         end
 
       _ ->
@@ -1132,6 +1441,20 @@ defmodule BarkparkWeb.TasksController do
     with {:ok, worker_id} <- Params.fetch_string(params, "worker_id"),
          {:ok, observed_epoch} <- Params.fetch_int(params, "observed_epoch"),
          {:ok, criteria} <- Params.parse_criteria(params["criteria"]),
+         # THE LAND DIGEST IS PARSED, NOT PASSED THROUGH (task-4ab4a5b58bce97a6).
+         # This line used to be `Params.put_opt(:landed, params["landed"])` two
+         # statements below — the ONE opt on this pipeline with no `parse_*` —
+         # so any JSON shape reached `Tasks.Internal.merge_landed/2`, which
+         # normalised the keys it knew and dropped the rest under a 2xx. The
+         # checker is `Tasks.Landed.check_digest/1`, the SAME module (and, for
+         # `files`, the same `check_files/1`) the `/landed` route runs: one
+         # shared function, never a mirror this door could drift from.
+         {:ok, landed} <- Params.parse_landed_digest(params["landed"]),
+         # THE BOUND RUNS BEFORE THE WRITE (task-a42dccec2fe4a406). An oversized
+         # compact is refused HERE, ahead of `find_task_by_doc_id/2` and every
+         # honesty gate, so a refused close touches no row and the rev is
+         # unchanged by construction rather than by inspection.
+         {:ok, context_compact} <- flight_recorder_param(params, "context_compact"),
          {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
       opts =
         [observed_epoch: observed_epoch]
@@ -1139,8 +1462,8 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:lifecycle_status, params["lifecycle_status"])
         |> Params.put_opt(:reason, params["reason"])
         |> Params.put_opt(:criteria, if(criteria == [], do: nil, else: criteria))
-        |> Params.put_opt(:landed, params["landed"])
-        # The two LOUD overrides (PDS-D288/D289). Without these two lines the
+        |> Params.put_opt(:landed, landed)
+        # The two LOUD overrides (PDS-D288/PDS-D289). Without these two lines the
         # honesty gates are refuse-only over HTTP — a lead could not seal a
         # foreign task and nobody could close over an honest unmet criterion
         # through the API or the bp CLI at all. `bp task close … --set
@@ -1160,6 +1483,11 @@ defmodule BarkparkWeb.TasksController do
         # rare one. Wire form: `bp task close … --set close_reason_override="…"`.
         |> Params.put_opt(:close_reason_override, params["close_reason_override"])
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+        |> Params.put_opt(:session, session_id(conn, params))
+        # THE FLIGHT RECORDER'S CLOSING FRAME. nil is dropped by put_opt/3, so a
+        # close carrying no compact writes the byte-identical claim map it wrote
+        # before this key existed.
+        |> Params.put_opt(:context_compact, context_compact)
 
       # Snapshot the rail BEFORE the close (from the already-fetched pre-close
       # task) so rail_changed reflects only concurrent actors, not this close.
@@ -1183,6 +1511,15 @@ defmodule BarkparkWeb.TasksController do
           )
 
         {:ok, %Document{} = doc, :closed} ->
+          # Session auto-log (task-bc34e83515bbd91f): the close has COMMITTED.
+          # `mark/3` writes nothing — the `arm_session_autolog` plug's
+          # before_send callback appends, best-effort, on the 2xx below.
+          conn =
+            BarkparkWeb.SessionAutolog.mark(conn, "task-closed", %{
+              "ref" => doc.doc_id,
+              "note" => get_in(doc.content || %{}, ["lifecycle_status"])
+            })
+
           # Graduated enforcement (living-values §12): unmet criteria are
           # SURFACED as a soft warning on the (already successful) close —
           # never a gate (close_response below, shipped with lvw-t6).
@@ -1230,6 +1567,31 @@ defmodule BarkparkWeb.TasksController do
       {:error, :invalid_criteria, msg} ->
         bad_request(conn, msg)
 
+      # A malformed land digest is a TYPED refusal that NAMES THE FIELD, not a
+      # bare 400: the caller has to be able to tell "my `landed` map is the
+      # wrong shape" from "my `criteria` are" without reading prose, because
+      # the shape that used to be accepted here is the one that wrote nothing.
+      {:error, :invalid_landed_digest, msg} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          ok: false,
+          reason: "invalid_landed_digest",
+          field: "landed",
+          message: msg
+        })
+
+      # The recorder's bound (task-a42dccec2fe4a406). Its own code, ahead of
+      # every write — see flight_recorder_refusal/2.
+      {:error, code}
+      when code in [
+             :context_compact_too_large,
+             :context_compact_invalid,
+             :priming_start_too_large,
+             :priming_start_invalid
+           ] ->
+        flight_recorder_refusal(conn, code)
+
       {:error, :not_found} ->
         not_found(conn, "task not found")
     end
@@ -1241,7 +1603,11 @@ defmodule BarkparkWeb.TasksController do
     with {:ok, worker_id} <- Params.fetch_string(params, "worker_id"),
          {:ok, observed_epoch} <- Params.fetch_int(params, "observed_epoch"),
          {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
-      case Tasks.release(task.id, worker_id, observed_epoch: observed_epoch) do
+      case Tasks.release(task.id, worker_id,
+             observed_epoch: observed_epoch,
+             caller_token_id: caller_token_id(conn),
+             session: session_id(conn, params)
+           ) do
         {:ok, %Document{} = doc} ->
           json(conn, %{
             ok: true,
@@ -1339,7 +1705,32 @@ defmodule BarkparkWeb.TasksController do
         # disposition_reason is refused; the caller has to say they read what
         # is there. `stage_supersede/1` reads both wire spellings.
         |> Params.put_opt(:supersede, Params.stage_supersede(params))
+        # The rerun's OWN two doors (task-fcc590f205433209). Forwarded
+        # separately from `:supersede` for the reason the instruction override
+        # is: a caller saying "I read the reason I am replacing" has not said
+        # anything about the probe that reason hangs on, and one key to both
+        # locks is one slot wearing a costume. Absent → nil → `Tasks.Stage`
+        # defaults to refusing the orphan.
+        |> Params.put_opt(:clear_rerun, Params.stage_clear_rerun(params))
+        |> Params.put_opt(:keep_rerun, Params.stage_keep_rerun(params))
+        # THE SECOND DURABLE SLOT (task-bd7476eecdede252). Standing guidance
+        # and its OWN override, forwarded separately from the note's — one
+        # flag for both would license a verdict-replacer to destroy guidance
+        # they never read. Hyphenated and underscored spellings both accepted,
+        # same reason as `reopen-trigger`: the manifest flag is hyphenated and
+        # the CLI sends the flag name verbatim, while a hand-written JSON body
+        # naturally uses the content key.
+        |> Params.put_opt(
+          :instruction,
+          params["instruction"] || params["operating_instruction"] ||
+            params["operating-instruction"]
+        )
+        |> Params.put_opt(
+          :supersede_instruction,
+          Params.stage_supersede_instruction(params)
+        )
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.stage(task.id, state, opts) do
         {:ok, %Document{} = doc} ->
@@ -1465,8 +1856,86 @@ defmodule BarkparkWeb.TasksController do
                 "If replacing it IS what you meant, re-run the same stage with " <>
                 "--supersede; the displaced text then stays recoverable from " <>
                 "`bp task events --payload` as `payload.staged.superseded_note`. " <>
-                "If it is not, put your text somewhere that does not overwrite a " <>
-                "caution — the brief, or a comment on the row."
+                "If it is not — if what you are writing is STANDING GUIDANCE for the " <>
+                "next reader rather than a verdict — write it with --instruction, which " <>
+                "lands on content.operating_instruction, a separate durable slot this " <>
+                "refusal does not guard and --supersede cannot reach."
+          })
+
+        # AN INSTRUCTION THAT WOULD DESTROY AN INSTRUCTION
+        # (task-bd7476eecdede252). The note guard's twin, one field over and
+        # with its OWN override, because standing guidance and a dated verdict
+        # must not share a key to both locks. 409, and NOTHING was written.
+        {:error, {:instruction_would_supersede, existing}} ->
+          {excerpt, truncated?} = Params.note_excerpt(existing)
+
+          conn
+          |> put_status(:conflict)
+          |> json(%{
+            ok: false,
+            reason: "instruction_would_supersede",
+            existing_instruction: excerpt,
+            existing_instruction_length: String.length(existing),
+            existing_instruction_truncated: truncated?,
+            message:
+              "refusing to replace the operating_instruction already on this row — " <>
+                "--instruction REPLACES, it does not append, and nothing was written. " <>
+                "THE INSTRUCTION YOU WOULD HAVE DESTROYED (#{String.length(existing)} chars" <>
+                if(truncated?, do: ", shown truncated", else: "") <>
+                "): #{inspect(excerpt)} — read it before you decide. An operating " <>
+                "instruction is STANDING GUIDANCE, not a dated measurement: nothing is " <>
+                "newer than it. If replacing it IS what you meant, re-run the same stage " <>
+                "with --supersede-instruction; the displaced text then stays recoverable " <>
+                "from `bp task events --payload` as " <>
+                "`payload.staged.superseded_instruction`. If you are recording a VERDICT " <>
+                "rather than guidance, use --note instead — it lands on " <>
+                "content.disposition_reason, a different durable slot, and leaves this " <>
+                "instruction byte-identical."
+          })
+
+        # A NOTE THAT WOULD STRAND A PROBE (task-fcc590f205433209, PDS-D750).
+        # 409, the twin of the two supersession refusals, and NOTHING was
+        # written — the row is byte-identical on BOTH keys. The rerun is quoted
+        # IN FULL and deliberately NOT bounded the way a note is: a truncated
+        # command cannot be judged, and judging whether it still binds the new
+        # reason is the entire decision this refusal asks for. Reruns are
+        # single commands, not prose.
+        {:error, {:rerun_would_orphan, existing}} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{
+            ok: false,
+            reason: "rerun_would_orphan",
+            field: Tasks.Stage.disposition_rerun_key(),
+            existing_rerun: existing,
+            message:
+              "refusing to replace the disposition_reason on this row while it carries a " <>
+                "disposition_rerun this call says nothing about — replacing the reason under " <>
+                "the probe would leave a green, recent, symbol-specific check attached to a " <>
+                "claim the row no longer makes, and nothing was written. " <>
+                "THE RERUN THAT WOULD HAVE BEEN STRANDED, IN FULL: #{inspect(existing)}. " <>
+                "--supersede is you saying you read the REASON you are replacing; it is not " <>
+                "you saying you read the rerun. Pick one on purpose: --rerun '<command>' " <>
+                "re-binds the probe to the reason you are writing, --clear-rerun removes it " <>
+                "(for a reason that is a pure ruling nothing can check), --keep-rerun states " <>
+                "that the existing probe still binds the new reason — a SHARED rerun across " <>
+                "distinct rows is the honest shape (PDS-D391b(b), PDS-D336(a)) and is never " <>
+                "refused here."
+          })
+
+        # Two intentions about one key. 422, and nothing was written — the
+        # writer must not pick one of them on the caller's behalf.
+        {:error, :contradictory_rerun} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{
+            ok: false,
+            reason: "contradictory_rerun",
+            field: Tasks.Stage.disposition_rerun_key(),
+            message:
+              "--rerun and --clear-rerun in the same call say two incompatible things about " <>
+                "content.#{Tasks.Stage.disposition_rerun_key()} — one re-binds the probe, the " <>
+                "other removes it. Send exactly one. Nothing was written."
           })
 
         {:error, :not_found} ->
@@ -1502,6 +1971,19 @@ defmodule BarkparkWeb.TasksController do
   #                                          withdrawals[] record appended. On a
   #                                          row with no claim it also needs
   #                                          observed_rev=<the rev you read>.
+  #   amend=true    + amended_criterion=<non-empty> + note=<non-empty>
+  #                                        → CORRECT THE WORDING
+  #                                          (task-a1df012e89b1e289): the
+  #                                          criterion text is replaced, the
+  #                                          superseded sentence is preserved on
+  #                                          a signed amendments[] record, and
+  #                                          met/evidence are PINNED. The brief's
+  #                                          criteria-list mirror is re-derived in
+  #                                          the SAME rev-fenced write, so both
+  #                                          surfaces move or neither does. Same
+  #                                          fence as withdraw: holder+epoch on an
+  #                                          in_progress row, observed_rev on any
+  #                                          other.
   # doc_id resolves via find_task_by_doc_id (close's pattern) and the
   # primitive locks task:<uuid> — the close family, serialized with close over
   # the same criteria. Progress is advisory: the response is the fresh doc
@@ -1521,7 +2003,9 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:criterion_text, criterion_text)
         |> Params.put_opt(:merge_gated, merge_gated)
         |> Params.put_opt(:observed_rev, Params.stamp_observed_rev(params))
+        |> Params.put_opt(:ack_gate, Params.stamp_ack_gate(params))
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.stamp(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->
@@ -1577,8 +2061,16 @@ defmodule BarkparkWeb.TasksController do
   # write-tier (RequireWriteForMutation) — what it drops is the HOLDER gate, not
   # authentication. `Tasks.Landed` owns the blast radius: content.landed plus at
   # most ONE merge-shaped criterion.
+  #
+  # `files` (task-726717ba693eb424) is the CHANGED PATHS, and it is checked
+  # HERE — a list of strings or a 400 naming the field — because the union it
+  # feeds has accepted a `files` key all along while this verb never wrote one,
+  # so the one shape a caller must never get back is a 2xx that says the paths
+  # landed. With `criterion`, those same paths are what `Tasks.Landed` compares
+  # against the row before it permits the flip.
   def landed(conn, %{"doc_id" => doc_id} = params) do
     with {:ok, criterion} <- Params.parse_landed_criterion(params["criterion"]),
+         {:ok, files} <- landed_files(params["files"]),
          :ok <- Params.check_landed_payload(params, criterion),
          {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
       opts =
@@ -1586,12 +2078,26 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:commit, params["commit"])
         |> Params.put_opt(:pr, params["pr"])
         |> Params.put_opt(:note, params["note"])
+        |> Params.put_opt(:files, files)
         |> Params.put_opt(:criterion, criterion)
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.record_landing(task.id, opts) do
         {:ok, %Document{} = doc} ->
-          json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
+          json(
+            conn,
+            Map.merge(
+              %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))},
+              Landed.overlap_report(task, files, criterion)
+            )
+          )
+
+        # The overlap refusal carries its own sentence: it has to name the row,
+        # the PR and BOTH sides of the comparison, none of which a static hint
+        # keyed on the token could know.
+        {:error, {:landing_files_outside_row, message}} ->
+          conflict(conn, :landing_files_outside_row, :landed, %{message: message})
 
         {:error, reason} ->
           # Every remaining failure is a STATE conflict (the index does not
@@ -1605,6 +2111,17 @@ defmodule BarkparkWeb.TasksController do
 
       {:error, :not_found} ->
         not_found(conn, "task not found")
+    end
+  end
+
+  # ONE shape rule, owned by the module that stores the value — the 400 here and
+  # the `:invalid_files` a direct `Tasks.record_landing/2` gets are the same
+  # check, so the door and the store cannot drift into disagreeing about what a
+  # storable `files` is.
+  defp landed_files(raw) do
+    case Landed.check_files(raw) do
+      {:ok, files} -> {:ok, files}
+      {:error, message} -> {:error, :invalid_landed, message}
     end
   end
 
@@ -1764,6 +2281,7 @@ defmodule BarkparkWeb.TasksController do
         [text: text]
         |> Params.put_opt(:criterion, criterion)
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.pulse_by_id(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->
@@ -1821,6 +2339,7 @@ defmodule BarkparkWeb.TasksController do
         [pr: pr, state: state]
         |> Params.put_opt(:reason, params["reason"])
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+        |> Params.put_opt(:session, session_id(conn, params))
 
       case Tasks.renew_lease_by_id(task.id, opts) do
         {:ok, %Document{} = doc} ->
@@ -2043,7 +2562,13 @@ defmodule BarkparkWeb.TasksController do
       edges: result.edges,
       dependents: result.dependents,
       truncated: result.truncated,
-      truncation_reason: result.truncation_reason
+      truncation_reason: result.truncation_reason,
+      # THE PHANTOM-VS-UNREAD DISCRIMINATOR (task-09889a18f174fcb2). `truncated`
+      # says the graph is partial; this says WHICH bound made it partial and how
+      # much of the corpus was actually read, so a consumer can tell an edge to
+      # a target that does not exist (a real broken reference) from one to a
+      # target the read never reached. `nil` on every complete read.
+      corpus_truncation: result.corpus_truncation
     })
   end
 
@@ -2226,7 +2751,9 @@ defmodule BarkparkWeb.TasksController do
   # lengthen every derivation, which crosses the TTL more often. Fail-open in
   # the only regime where the cap matters. The deadline arm is now GONE; the
   # deadline itself stays on the row as diagnostic data.
-  @graph_corpus_slots :barkpark_graph_corpus_slots
+  # The table itself is CORE (`Barkpark.Content.Graph.CorpusSlots`), created at
+  # boot by `Barkpark.Application.start/2` so it exists with every plugin off.
+  @graph_corpus_slots Barkpark.Content.Graph.CorpusSlots.table()
   @graph_corpus_max_concurrency 4
   @graph_corpus_slot_ttl_ms 60_000
 
@@ -2591,7 +3118,8 @@ defmodule BarkparkWeb.TasksController do
 
   defp acquire_graph_corpus_slot do
     # NO lazy `:ets.new` here. The table is created once from
-    # `Barkpark.Application.start/2`; a request-path create would hand ownership
+    # `Barkpark.Application.start/2` via the core
+    # `Barkpark.Content.Graph.CorpusSlots.init/0`; a request-path create would hand ownership
     # of the bound to a transient request process, and the bound would die (and
     # silently RESET) with it. If the table is somehow absent the `rescue` below
     # sheds rather than 500s.
@@ -2715,33 +3243,6 @@ defmodule BarkparkWeb.TasksController do
     end
 
     :ok
-  end
-
-  @doc """
-  Create the `/v1/graph` admission-cap slot table, owned by the caller.
-
-  Called ONCE from `Barkpark.Application.start/2` so the table's owner is the
-  application process rather than whichever request happened to arrive first —
-  a bound whose bookkeeping dies with a request is not a bound. Idempotent: a
-  second call (a re-boot in the test VM) is a no-op, and the rows are slots, so
-  nothing is lost by NOT clearing them.
-  """
-  def init_graph_corpus_slots, do: ensure_graph_corpus_slots()
-
-  defp ensure_graph_corpus_slots do
-    case :ets.whereis(@graph_corpus_slots) do
-      :undefined ->
-        try do
-          :ets.new(@graph_corpus_slots, [:named_table, :public, :set, read_concurrency: true])
-        rescue
-          # Lost the create race to a concurrent boot (the test VM re-starts the
-          # supervision tree) — the table exists, which is all this needs.
-          ArgumentError -> :ok
-        end
-
-      _ref ->
-        :ok
-    end
   end
 
   defp graph_corpus_max_concurrency,
@@ -3337,6 +3838,29 @@ defmodule BarkparkWeb.TasksController do
   # worker_id). `nil` for an anonymous / tokenless request — the stamp is then
   # omitted, keeping events backward-compatible. Metadata only; it never
   # affects authorization.
+  # THE SESSION DISCRIMINATOR (task-f79e39f4992749a5). A worker id is
+  # LANE-scoped: every session of the cli lane writes as `lead-cli`, so a
+  # claim / pulse / close by a woken predecessor was byte-indistinguishable
+  # from the live lead's. The caller presents a SECRET key on the
+  # `x-barkpark-session` header (or a `session_key` param); the server never
+  # stores that key — `Tasks.SessionId.derive/2` HMACs it under the endpoint
+  # secret and the calling token, and THAT one-way id is what lands on
+  # `claim.session`. Copying a stored id off a row and presenting it derives a
+  # DIFFERENT id, so a peer's session cannot be replayed from the ledger.
+  # `nil` for a caller that presents nothing: the stamp is then omitted and
+  # the row stays byte-identical, which is how every pre-existing client and
+  # every live claim taken before this shipped keeps working. Metadata only;
+  # it never affects authorization and never fences a CAS.
+  defp session_id(conn, params) do
+    key =
+      case get_req_header(conn, "x-barkpark-session") do
+        [v | _] -> v
+        _ -> params["session_key"]
+      end
+
+    Barkpark.Tasks.SessionId.derive(key, caller_token_id(conn))
+  end
+
   defp caller_token_id(conn) do
     case conn.assigns[:api_token] do
       %{id: id} -> id
@@ -3387,6 +3911,13 @@ defmodule BarkparkWeb.TasksController do
           conn,
           "invalid_capacity",
           "capacity must be a free-form string or an object with size_class (light | standard | heavy | xl), non-negative slots_total/slots_free (slots_free <= slots_total), and an optional non-negative budget"
+        )
+
+      {:error, :invalid_feed} ->
+        unprocessable(
+          conn,
+          "invalid_feed",
+          "feed must be one of: " <> Enum.join(Fleet.feeds(), " | ")
         )
 
       {:error, :stale_beat} ->
@@ -3460,6 +3991,61 @@ defmodule BarkparkWeb.TasksController do
       reason: "invalid_filter",
       message: Params.filter_message(reason),
       details: Params.filter_details(reason)
+    })
+  end
+
+  # ─── THE FLIGHT RECORDER'S TWO DOORS (task-a42dccec2fe4a406) ─────────────
+  #
+  # ONE reader for both keys, on all three verbs, so the three-state law cannot
+  # be honoured at one door and quietly dropped at another. An ABSENT key is
+  # `{:ok, nil}` — `Params.put_opt/3` then drops the opt entirely and the write
+  # is byte-identical to a pre-feature one. A present key is validated by
+  # `Barkpark.Tasks.FlightRecorder`, which owns the bound and the vocabulary.
+  #
+  # `--set` is a real wire path here: `bp task claim … --set priming_start:=<json>`
+  # lands the manifest at the body head, but an older bp (and the MCP bridge)
+  # can nest it under `set`, exactly as `criteria_unstated_override` is read two
+  # ways a few hundred lines up. Both spellings resolve to the same field.
+  defp flight_recorder_param(params, key) do
+    value = params[key] || get_in(params, ["set", key])
+
+    case key do
+      "priming_start" -> Barkpark.Tasks.FlightRecorder.validate_priming_start(value)
+      "context_compact" -> Barkpark.Tasks.FlightRecorder.validate_context_compact(value)
+    end
+  end
+
+  # A NAMED CODE, NEVER A GENERIC `bad_request` (the criterion's own word). A
+  # caller that hit the size wall must be able to tell it from every other 4xx
+  # without parsing prose, and must be told the bound and what it sent — the
+  # measured failure this repo keeps re-learning is a refusal that names no
+  # field, no bound and no unit (see the task.stamp URI note in the CLI's
+  # run.go). 422 because the request is well-formed and the VALUE is not.
+  defp flight_recorder_refusal(conn, code) do
+    limit = Barkpark.Tasks.FlightRecorder.max_bytes()
+
+    message =
+      case code do
+        :context_compact_too_large ->
+          "context_compact exceeds the #{limit}-byte bound; NOTHING was written and the task's rev is unchanged. Compact it further and close again."
+
+        :priming_start_too_large ->
+          "priming_start exceeds the #{limit}-byte bound; NOTHING was written and the task's rev is unchanged."
+
+        :context_compact_invalid ->
+          "context_compact must be a string."
+
+        :priming_start_invalid ->
+          "priming_start must be a JSON object (the schema=1 manifest bp writes locally)."
+      end
+
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{
+      ok: false,
+      reason: Atom.to_string(code),
+      limit_bytes: limit,
+      message: message
     })
   end
 

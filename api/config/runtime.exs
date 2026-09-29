@@ -35,13 +35,68 @@ for {env_name, config_key} <- [
   end
 end
 
+require Logger
+
+# BARKPARK_RELEASE_CAPTURE_HMAC_SECRET authenticates server-owned reader
+# evidence — the CycleFleet release-gate captures and the public-smoke
+# attestation. It is DELIBERATELY OPTIONAL, on exactly the contract
+# CONNECTORS_CONNECT_SECRET states further down this file: absent ⇒ the one
+# feature that needs it refuses, and an instance that never runs a release gate
+# is a normal instance.
+#
+# WHY THIS NEVER RAISES. It did raise, from 12c903782 (2026-07-19) until this
+# block, and the 2026-09-19 fleet migration-lag census
+# (tooling/grip/ledger/fleet-migration-lag-census-2026-09-19.md) measured the
+# cost. runtime.exs is evaluated for EVERY prod Mix invocation — `mix
+# ecto.migrate` included (scripts/deploy-rebuild.sh, deploy/instance-deploy.sh)
+# — so a box without the secret could not migrate, could not even be TOLD its
+# schema was behind, while `git pull` kept fast-forwarding HEAD past it. Three
+# warm boxes were crashlooping (NRestarts 585206 / 208412 / 363216) on
+# `/opt/barkpark/api/config/runtime.exs:44: (file)`, schema pinned at
+# 20260705260000 and 28-52 days behind HEAD; a 2x5 control held in both
+# directions — every box carrying the key was current, every box without it was
+# stuck. The invariant this block now keeps: a missing FEATURE secret must
+# refuse to SERVE the feature, and must never refuse to MIGRATE or to boot the
+# release for a maintenance task.
+#
+# The refusal is NOT dropped, it MOVED to the feature boundary:
+# `Barkpark.CycleFleet`'s `put_release_capture_hmac_secret/0` returns
+# `{:error, :release_capture_signing_unavailable}` for a missing or short
+# secret, and both signing transactions (activate + public smoke) roll back on
+# it, so nothing is ever signed with an absent or weak key.
+#
+# `Logger.warning`, NOT `Logger.info`: runtime.exs is evaluated BEFORE the
+# Logger application starts, so the `:logger` primary level is still the Erlang
+# default `:notice` and a `Logger.info` line here produces NO OUTPUT AT ALL —
+# see the BARKPARK_KEK_PREVIOUS block below for the same reasoning and its
+# control run. The line prints the LENGTH, never the value.
 case System.get_env("BARKPARK_RELEASE_CAPTURE_HMAC_SECRET") do
   secret when is_binary(secret) and byte_size(secret) >= 32 ->
     config :barkpark, :cycle_release_capture_hmac_secret, secret
 
-  _ ->
+  other ->
     if config_env() == :prod do
-      raise "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET must contain at least 32 bytes"
+      got =
+        case other do
+          nil -> "it is not set"
+          "" -> "it is set but empty"
+          short -> "got #{byte_size(short)} bytes"
+        end
+
+      Logger.warning("""
+      BARKPARK_RELEASE_CAPTURE_HMAC_SECRET must be at least 32 bytes (#{got}) \
+      — the CycleFleet release-capture surface is DISABLED on this box.
+
+      Every other endpoint serves normally and `mix ecto.migrate` runs, by \
+      design: this file must never refuse to migrate for a feature the box may \
+      not use (fleet migration-lag census, 2026-09-19). Activating a release \
+      gate or passing a public smoke will refuse with \
+      :release_capture_signing_unavailable until the secret is set.
+
+      Generate one: openssl rand -base64 32 — and set \
+      BARKPARK_RELEASE_CAPTURE_HMAC_SECRET in .env (compose) or \
+      /opt/barkpark/.env, then restart. This line never echoes the value.
+      """)
     end
 end
 
@@ -127,6 +182,42 @@ if System.get_env("BARKPARK_CLAUDE_CHAT") in ["0", "false", "no", "off"] do
   config :barkpark, :claude_chat, enabled: false
 end
 
+# Capability switches for the non-plugin subsystems (task-2f59ba23bcad333e,
+# `Barkpark.Capability`): studio_chat, cycle_fleet, epic_fleet. All ON unless
+# listed here, e.g. BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet. An OFF
+# subsystem starts no processes and its routes answer 404. This is the whole
+# Studio Chat subsystem; BARKPARK_CLAUDE_CHAT above only turns off the Claude
+# provider inside it. An unknown name refuses the boot.
+case System.get_env("BARKPARK_CAPABILITIES_OFF") do
+  off when is_binary(off) and off != "" ->
+    config :barkpark, Barkpark.Capability, Barkpark.Capability.parse_off_list(off)
+
+  _ ->
+    :ok
+end
+
+# Write admission for a dedicated managed instance (Barkdown migration, C083).
+# Both variables are required to enable it; a half-configured pair refuses the
+# boot rather than starting a server that silently admits every write.
+# BARKPARK_WRITE_ADMISSION_INITIALIZE=1 provisions a new journal once and
+# refuses an existing file.
+case {System.get_env("BARKPARK_WRITE_ADMISSION_INSTANCE"),
+      System.get_env("BARKPARK_WRITE_ADMISSION_JOURNAL")} do
+  {nil, nil} ->
+    :ok
+
+  {instance, journal}
+  when is_binary(instance) and instance != "" and is_binary(journal) and journal != "" ->
+    config :barkpark, :write_admission,
+      enabled: true,
+      instance_id: instance,
+      journal: journal,
+      initialize: System.get_env("BARKPARK_WRITE_ADMISSION_INITIALIZE") == "1"
+
+  _ ->
+    raise "BARKPARK_WRITE_ADMISSION_INSTANCE and BARKPARK_WRITE_ADMISSION_JOURNAL must be set together"
+end
+
 # "Log in with Barkpark Cloud" (instance-login handoff): on a cloud-managed
 # instance, the control plane's public origin here puts the cloud sign-in
 # button on /login. The button deep-links to the cloud SPA, which mints a
@@ -140,8 +231,22 @@ case System.get_env("BARKPARK_CLOUD_URL") do
     :ok
 end
 
+# REQUEST-LINE CEILING (pds-bl-bandit-request-line-ceiling). Bandit caps the
+# HTTP/1 request line at max_request_line_length bytes; 10_000 is Bandit's own
+# default, written out here so the limit is visible instead of implicit. The
+# request line is METHOD + space + TARGET + " HTTP/1.1" + CRLF, so for a POST the
+# request TARGET (path plus query string) may be at most 10_000 - 5 - 9 - 2 =
+# 9_984 bytes. Measured 2026-07-21: total URL 10_016 bytes OK, 10_017 refused,
+# the same byte through Caddy and direct to :4000, so it is this limit and not
+# the proxy. Past it the client gets 414 and the server logs a Bandit.HTTPError
+# "Request URI is too long" (grep journalctl for that, it is not a network blip).
+# Deliberately NOT raised: bp stamp evidence rides the query string, and the fix
+# for oversized evidence is to send it in the request body, not a longer URL.
 config :barkpark, BarkparkWeb.Endpoint,
-  http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+  http: [
+    port: String.to_integer(System.get_env("PORT", "4000")),
+    http_1_options: [max_request_line_length: 10_000]
+  ]
 
 cloak_key =
   case System.get_env("BARKPARK_CLOAK_KEY") do
@@ -213,6 +318,83 @@ if connectors_env != [] do
   config :barkpark, Barkpark.Connectors, connectors_env
 end
 
+require Logger
+
+# MEDIUM-9: BARKPARK_KEK_PREVIOUS (comma-separated Base64 keys, oldest-last)
+# lets `DataKeys.rewrap_all/0` complete a KEK rotation — it unwraps blobs
+# sealed by a prior KEK and re-wraps them under the current one. Set it to the
+# OLD BARKPARK_KEK during the rotation window, then clear it once rewrap_all
+# has run. Absent -> no fallback (single-key behaviour, unchanged).
+#
+# Blank entries are NOT an error: they are stripped here, so a stray or
+# trailing comma still boots (the pre-existing tolerance, unchanged).
+kek_previous_entries =
+  System.get_env("BARKPARK_KEK_PREVIOUS", "")
+  |> String.split(",", trim: true)
+  |> Enum.map(&String.trim/1)
+  |> Enum.reject(&(&1 == ""))
+
+# A malformed entry is DISCARDED IN SILENCE by `Barkpark.Crypto.LocalKek.keys/0`
+# (`Enum.filter(&match?(<<_::binary-size(32)>>, &1))`), so every blob sealed
+# under that KEK becomes permanently undecryptable with no diagnostic at either
+# end. We therefore AUDIT every set entry here, under exactly the primary
+# BARKPARK_KEK's contract (base64 of exactly 32 raw bytes), and record the
+# verdict so `Barkpark.Status` can surface it on /status.json.
+#
+# WHY THIS ONLY WARNS AND DOES NOT REFUSE THE BOOT. Refusing is the stronger,
+# more correct behaviour and it WAS implemented on this branch — see commit
+# cb3bb6d58 in this branch's history for the raise block. It is deliberately
+# NOT shipped: api/** auto-deploys on merge, and a refusal would brick the
+# boot of a production box whose live BARKPARK_KEK_PREVIOUS value nobody could
+# read first. The refusal is deferred to task-ef0c59e4fd3fc985, which is
+# blocked on the owner reading that live value.
+#
+# SCOPE DECISION (previously unstated): the audit runs ONLY when a primary
+# BARKPARK_KEK is set. With no primary KEK this file never configures
+# `previous_keys` at all, so the entries are not merely discarded — they are
+# never consumed by anything, and a "discarded" verdict about them would be
+# false. That state is recorded as `checked: false`, which is DISTINCT from
+# "checked and clean" so a reader can never mistake one for the other.
+kek_previous_audit =
+  if System.get_env("BARKPARK_KEK") do
+    malformed_positions =
+      kek_previous_entries
+      |> Enum.with_index(1)
+      |> Enum.reject(fn {entry, _position} ->
+        match?({:ok, <<_::binary-size(32)>>}, Base.decode64(entry))
+      end)
+      |> Enum.map(fn {_entry, position} -> position end)
+
+    %{
+      checked: true,
+      discarded: length(malformed_positions),
+      positions: malformed_positions
+    }
+  else
+    %{checked: false, discarded: 0, positions: []}
+  end
+
+config :barkpark, Barkpark.Crypto.LocalKek, kek_previous_audit: kek_previous_audit
+
+# `Logger.warning`, NOT `Logger.info`: runtime.exs is evaluated BEFORE the
+# Logger application starts, so the `:logger` primary level is still the Erlang
+# default `:notice`. A `Logger.info` line here produces NO OUTPUT AT ALL —
+# proved by control run — which would be a fix that ships the exact silence the
+# defect was filed for. The positions are named; the ENTRIES NEVER ARE (key
+# material). /status.json carries the same verdict for anyone who does not read
+# boot logs — see `Barkpark.Status.kek_previous_component/0`.
+if kek_previous_audit.discarded > 0 do
+  Logger.warning("""
+  BARKPARK_KEK_PREVIOUS: #{kek_previous_audit.discarded} entr#{if kek_previous_audit.discarded == 1, do: "y is", else: "ies are"} NOT the base64 encoding of exactly 32 raw bytes, \
+  at 1-based position#{if kek_previous_audit.discarded == 1, do: "", else: "s"} #{Enum.join(kek_previous_audit.positions, ", ")}.
+
+  Barkpark.Crypto.LocalKek will DISCARD #{if kek_previous_audit.discarded == 1, do: "it", else: "them"} silently, so every blob sealed under \
+  that KEK stays permanently undecryptable and `DataKeys.rewrap_all/0` cannot complete the rotation. \
+  Fix or remove the named position(s) and restart; clear BARKPARK_KEK_PREVIOUS entirely once rewrap_all/0 has run. \
+  This line never echoes the entry itself. The same verdict is published on /status.json as the `kek_previous` component.
+  """)
+end
+
 # Master KEK for envelope encryption (core auth/secrets, Phase 0). The dev/test
 # default lives in config/config.exs; here we OVERRIDE from BARKPARK_KEK and
 # REQUIRE it in prod. Base64 of exactly 32 raw bytes — generate with
@@ -250,20 +432,9 @@ case System.get_env("BARKPARK_KEK") do
         """
     end
 
-    # MEDIUM-9: BARKPARK_KEK_PREVIOUS (comma-separated Base64 keys, oldest-last)
-    # lets `DataKeys.rewrap_all/0` complete a KEK rotation — it unwraps blobs
-    # sealed by a prior KEK and re-wraps them under the current one. Set it to the
-    # OLD BARKPARK_KEK during the rotation window, then clear it once rewrap_all
-    # has run. Absent → no fallback (single-key behaviour, unchanged).
-    previous_keys =
-      System.get_env("BARKPARK_KEK_PREVIOUS", "")
-      |> String.split(",", trim: true)
-      |> Enum.map(&String.trim/1)
-      |> Enum.reject(&(&1 == ""))
-
     config :barkpark, Barkpark.Crypto.LocalKek,
       key: kek,
-      previous_keys: previous_keys,
+      previous_keys: kek_previous_entries,
       version: String.to_integer(System.get_env("BARKPARK_KEK_VERSION", "1"))
 end
 
@@ -287,6 +458,30 @@ bokbasen_env =
 
 if bokbasen_env != [] do
   config :barkpark, Barkpark.Plugins.OnixEdit.Bokbasen, bokbasen_env
+end
+
+# Per-kind default token expiry (task-a0f8cfd7f4800236). Unset = the shipped nil
+# (config.exs): no default, no behaviour change. A value must be a positive
+# integer number of days; `Barkpark.Auth.TokenExpiry` refuses one above the
+# kind's max age (api 365, share 365) at mint.
+token_default_expiry_days =
+  for {kind, env_name} <- [
+        api: "BARKPARK_TOKEN_DEFAULT_EXPIRY_DAYS_API",
+        share: "BARKPARK_TOKEN_DEFAULT_EXPIRY_DAYS_SHARE"
+      ],
+      raw = System.get_env(env_name),
+      raw not in [nil, ""],
+      into: %{} do
+    case Integer.parse(raw) do
+      {days, ""} when days > 0 -> {kind, days}
+      _ -> raise "#{env_name} must be a positive integer number of days, got: #{inspect(raw)}"
+    end
+  end
+
+if token_default_expiry_days != %{} do
+  config :barkpark,
+         :token_default_expiry_days,
+         Map.merge(%{api: nil, share: nil}, token_default_expiry_days)
 end
 
 # Indx search-engine credentials (retriever seam). `Barkpark.Plugins.Indx.Settings`
@@ -361,9 +556,34 @@ end
 #
 # `EnvConfig.parse/1` returns `:unset` only for nil, so the common unset case
 # never touches the env and behaviour is identical to before.
+require Logger
+
 case Barkpark.Plugins.EnvConfig.parse(System.get_env("BARKPARK_PLUGINS")) do
-  :unset -> :ok
-  plugins when is_list(plugins) -> config :barkpark, :plugins, plugins
+  :unset ->
+    :ok
+
+  [] ->
+    # Charter D24: an empty BARKPARK_PLUGINS is a LEGITIMATE operator choice and
+    # must NEVER refuse boot. But a box that then serves /api/schemas with zero
+    # plugin schemas has to SAY so, by name, once — otherwise the empty surface
+    # reads as data loss and the kill switch is indistinguishable from a bug.
+    #
+    # WARNING, not info, deliberately: config/runtime.exs is evaluated BEFORE
+    # the Logger application starts, so the :logger primary level is still the
+    # Erlang default (:notice). Verified locally — at :notice a Logger.info/1
+    # call is dropped with no output while Logger.warning/1 is emitted. An
+    # info-level line here would be invisible at real release boot, i.e. the
+    # exact silence this branch exists to end. Do not lower the level.
+    Logger.warning(
+      "BARKPARK_PLUGINS is set but empty — the plugin KILL SWITCH is ACTIVE. " <>
+        "No plugins will be registered and /api/schemas will serve core schemas " <>
+        "only. UNSET BARKPARK_PLUGINS to restore discover-all-from-disk."
+    )
+
+    config :barkpark, :plugins, []
+
+  plugins when is_list(plugins) ->
+    config :barkpark, :plugins, plugins
 end
 
 # Task lease TTL override. The default (config.exs) is 2700 s (45 min), sized
@@ -607,6 +827,16 @@ end
 # the runtime override that flips it on.
 if System.get_env("BARKPARK_ALLOW_BUNDLE_IMPORT") in ~w(1 true yes on) do
   config :barkpark, :allow_bundle_import, true
+end
+
+# Filing-law HARD tier for an ABSENT `surface` under cloud-console-hardening-epic
+# (cch-w28-s4-followup). Fail-open by design: OFF unless the env var is truthy,
+# and `Barkpark.Tasks.BirthGuards.surface_declared/6` reads the key with a false
+# default at call time. Off = an undeclared surface is warned and allowed
+# (`filing law: undeclared surface`); on = refused 422. Flip it only once the
+# open epic rows carry a surface — see that guard's header.
+if System.get_env("BARKPARK_FILING_LAW_ABSENT_SURFACE_HARD") in ~w(1 true yes on) do
+  config :barkpark, :filing_law_absent_surface_hard, true
 end
 
 # INSTANCE-OPERATOR allowlist (task-c7e2b87f1bbca815), mirroring cloud's
@@ -877,6 +1107,36 @@ if proxies = System.get_env("BARKPARK_TRUSTED_PROXIES") do
          end)
 end
 
+# ── The Oban JOB pool (jpf-bl-oban-pool-partition) ────────────────────────────
+#
+# Every Oban job body runs on a second `Barkpark.Repo` instance of this many
+# connections, never on the POOL_SIZE pool HTTP uses — see the pool note above
+# `repo_opts` below for the measurements and the connection arithmetic, and
+# `Barkpark.Repo.job_pool_child_specs/0` for the mechanism. Outside the :prod
+# block on purpose: dev gets the same partition (so a local load run measures
+# the shape prod runs), and :test gets NONE — the SQL sandbox owns the
+# connection there, and a real second pool could not see a test's rows.
+#
+# OBAN_POOL_SIZE overrides it; "0" disables the partition (every job back on the
+# shared pool — the pre-partition shape, kept as the incident escape hatch). A
+# malformed value REFUSES BOOT, as BARKPARK_DB_STATEMENT_TIMEOUT does.
+if config_env() != :test do
+  oban_pool_size =
+    case Integer.parse(String.trim(System.get_env("OBAN_POOL_SIZE") || "4")) do
+      {n, ""} when n >= 0 ->
+        n
+
+      _ ->
+        raise """
+        OBAN_POOL_SIZE is #{inspect(System.get_env("OBAN_POOL_SIZE"))}, which is not a
+        non-negative integer. It is the connection count of the Oban job pool;
+        "0" disables the partition. Unset, the default is 4.
+        """
+    end
+
+  config :barkpark, :oban_pool_size, oban_pool_size
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
@@ -903,8 +1163,8 @@ if config_env() == :prod do
   # suite's own fan-out, where nothing is actually starved for long and no user is
   # waiting. Guerrilla prod's failures (root-caused live: tooling/grip/ledger/
   # dr-w5-500-class-distinct-requests-2026-08-06.md, birth-fence-500-root-cause-
-  # 2026-07-31.md) are a STRUCTURALLY oversubscribed pool: 29 declared Oban queue
-  # slots share this same POOL_SIZE (default 10) with all HTTP traffic on a 2-vCPU
+  # 2026-07-31.md) were a STRUCTURALLY oversubscribed pool: 29 declared Oban queue
+  # slots shared this same POOL_SIZE (default 10) with all HTTP traffic on a 2-vCPU
   # box already deep in swap, and individual jobs (EdgeProjector, SSR site builds)
   # have been observed holding a connection 12-38s — well past even a 5s target and
   # past the unconfigured-here Ecto :timeout default (15_000ms). Widening the queue
@@ -915,11 +1175,31 @@ if config_env() == :prod do
   # raising POOL_SIZE on a 2-core box already 1.1 GB into swap" (bp-deploy-
   # reliability-charter.md D75) and "raising POOL_SIZE just moves contention into
   # Postgres — sizing waits for guerrilla-db-probe evidence" (bp-jarl-platform-
-  # followups-charter.md D11). The actual fix is tracked and gated on measurement:
-  # `jpf-bl-guerrilla-db-probe-arm` (read POOL_SIZE/max_connections/pg_stat_activity
-  # live) unblocks `jpf-bl-oban-pool-partition` (partition or cap Oban's pool share,
-  # then size POOL_SIZE on the numbers — NOT on feel). Both are open and unclaimed
-  # as of 2026-08-19; see also `mob-lm-guerrilla-pool-storm`.
+  # followups-charter.md D11).
+  #
+  # ── POOL_SIZE decision (jpf-bl-oban-pool-partition, 2026-09-25) ────────────
+  #
+  # MEASURED on guerrilla (cp-ops guerrilla-db-probe, run 36119486090,
+  # 2026-09-25T09:41Z): POOL_SIZE set nowhere, so this default 10 is live; only
+  # the green slot active; max_connections = 100; pg_stat_activity active 1 +
+  # idle 13 client backends (+5 background) = 11 app (10 pool + Oban's LISTEN
+  # notifier) + 3 other.
+  #
+  # THE FIX IS A PARTITION, NOT A RAISE. Oban job bodies now run on their own
+  # pool (OBAN_POOL_SIZE, default 4, set above this block), so the 29 declared
+  # queue slots take ZERO of these 10. A cap could not do it: OSS Oban has no
+  # global limit and the queue set has 9 queues, so the smallest possible
+  # aggregate is 9 of 10. Measured locally (scripts/mutate-load, 200
+  # create+publish rounds x 25, 29 slots of pg_sleep(3 s) jobs holding): shared
+  # pool 1/200 and 18/200 rounds landed, the rest 503 pool drops, create p95
+  # 9.1-21.0 s; partitioned 200/200 twice, create p95 324-511 ms, 0 pool drops.
+  #
+  # POOL_SIZE STAYS 10. Headroom exists — a flip holds 2 x (10 + 4 + 1 notifier
+  # + 1 transient export pool) + 3 other = 35 of 97 usable (100 - 3 superuser
+  # reserved) — but the measured 2026-09-05 500s were HTTP ledger polling on a
+  # 2-vCPU box 1 GB into swap, which more web connections would feed, not fix.
+  # Pinned by test/config/oban_pool_budget_test.exs; see also
+  # `mob-lm-guerrilla-pool-storm`.
   # ── statement_timeout: the SERVER-SIDE bound on ONE statement ──────────────
   #
   # MEASURED on guerrilla 2026-09-01T21:43-21:46Z (task-e2f5ecca0be9a6d1):
@@ -1179,6 +1459,36 @@ if config_env() == :prod do
     )
 
   config :barkpark, :rate_limits, rate_limits
+
+  # Quiz room-spawn rails (Barkpark.Quiz.SpawnBudget) — per-hour, per-principal
+  # budget on the anonymous host door that starts a GenServer per visitor-
+  # supplied pin. Operator-tunable without a rebuild, same pattern as
+  # BARKPARK_TICKET_RATE_* below. MODE is the kill switch AND the shadow
+  # setting: "enforce" (default) refuses, "shadow" only counts the would-be
+  # refusal, "off" consults no bucket at all.
+  base_quiz_room_spawn = Application.get_env(:barkpark, :quiz_room_spawn, [])
+
+  quiz_room_spawn =
+    base_quiz_room_spawn
+    |> then(fn opts ->
+      case System.get_env("BARKPARK_QUIZ_ROOM_SPAWN_PER_HOUR") do
+        nil -> opts
+        raw -> Keyword.put(opts, :per_hour, String.to_integer(raw))
+      end
+    end)
+    |> then(fn opts ->
+      # Literal atoms, not String.to_existing_atom/1: runtime.exs is evaluated
+      # before the release's own modules are loaded, so the atom this needs may
+      # not exist yet.
+      case System.get_env("BARKPARK_QUIZ_ROOM_SPAWN_MODE") do
+        "enforce" -> Keyword.put(opts, :mode, :enforce)
+        "shadow" -> Keyword.put(opts, :mode, :shadow)
+        "off" -> Keyword.put(opts, :mode, :off)
+        _ -> opts
+      end
+    end)
+
+  config :barkpark, :quiz_room_spawn, quiz_room_spawn
 
   # Ticket-key abuse rails (BarkparkWeb.Plugs.TicketRateLimit) — per-hour
   # budgets per key + write class, operator-tunable without a rebuild, same

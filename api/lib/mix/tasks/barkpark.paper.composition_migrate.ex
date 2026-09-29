@@ -53,7 +53,14 @@ defmodule Mix.Tasks.Barkpark.Paper.CompositionMigrate do
 
   @impl Mix.Task
   def run(args) do
-    Mix.Task.run("app.start")
+    # NOT `app.start` (task-557cf9a71e949768). `app.start` boots the FULL tree
+    # with whatever runtime env the shell carries: on guerrilla, 2026-09-02,
+    # `PHX_SERVER` was set and this one-shot's endpoint tried to bind the LIVE
+    # slot's port ("port 4001 already in use"), killing the run before the sweep
+    # started. `Barkpark.OneShot.boot!/0` starts the same tree narrowed — no
+    # Endpoint, no Oban, no SchemaBootstrap seeders, no plugin boot workers.
+    Mix.Task.run("app.config")
+    Barkpark.OneShot.boot!()
 
     {opts, _argv, invalid} = OptionParser.parse(args, strict: @switches)
 

@@ -41,6 +41,11 @@ package cli
 // holder of the token id) — then RE-READ every surface (delete responses prove
 // nothing, D33) and exit non-zero naming every survivor. Idempotent: a double
 // remove reports already-gone; partial state converges.
+//
+// `refresh` (cloud_support_refresh.go, pdf-bl-fleet-run-refresh) re-runs ONLY
+// the runtime leg's file write (supportFleetFilesStep, the SAME builder add
+// uses) against an existing, identity-fenced box at a pinned origin/main sha,
+// restarts the listener, and reads the runner sha back off the main's roster.
 
 import (
 	"bytes"
@@ -57,6 +62,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+	"github.com/FRIKKern/barkpark/internal/fleetruntime"
 )
 
 // supportCtx is the context every support bring-up call runs under. A package
@@ -121,7 +127,13 @@ const supportProvisioningTTL = 1800
 // runtime + unit) — the freshened on-box checkout is the fallback. PDF-D62:
 // the runtime files are written from origin/main content, never from whatever
 // stale copy an operator machine carries.
-const supportRawBase = "https://raw.githubusercontent.com/FRIKKern/barkpark/main"
+const supportRawBase = supportRawRoot + "/main"
+
+// supportRawRoot is the repo's raw-content root WITHOUT a ref, so the fleet
+// runtime can be fetched at a PINNED commit sha (<root>/<sha>/<path>) — a sha
+// URL is immutable, which is what lets the runner report the exact version it
+// was written from (pdf-bl-fleet-run-refresh).
+const supportRawRoot = fleetruntime.RawRoot
 
 // ── validation fences ────────────────────────────────────────────────────────
 
@@ -171,6 +183,8 @@ func runCloudSupport(out *writer, g globals, args []string) int {
 		return runCloudSupportAdd(out, g, rest)
 	case "remove", "rm", "delete":
 		return runCloudSupportRemove(out, g, rest)
+	case "refresh":
+		return runCloudSupportRefresh(out, g, rest)
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown support command %q (run `bp cloud support -h` for usage)", verb), exitUsage)
 	}
@@ -207,6 +221,15 @@ type supportAddRun struct {
 	tokenID     string
 	cpRowID     string // the CP support row id the register leg returned
 	maxClass    string // measured on the box; "" when the measure degraded
+
+	// What the MAIN observed, captured at the instant stepOnline accepted the
+	// box as online-with-capacity. These are the strongest post-conditions the
+	// add verb has — they are the main's own reading of the listener, not what
+	// this verb asked for — and until now they died inside stepOnline. Both are
+	// zero when the poll never reached a good row, which success() states as
+	// degraded rather than printing as a measured fact.
+	rosterStatus   string         // the roster row's status the poll accepted on
+	rosterCapacity map[string]any // the capacity the main reported for that row
 }
 
 func runCloudSupportAdd(out *writer, g globals, args []string) int {
@@ -287,7 +310,7 @@ func runCloudSupportAdd(out *writer, g globals, args []string) int {
 		out.progressf("  4. configure     freshen → secrets → migrate → admin-token → LOCAL health probe")
 		out.progressf("  5. bind          mint POST /v1/fleet/support-tokens on the MAIN + register POST /v1/fleet/supports on the CONTROL PLANE (PDF-D69)")
 		out.progressf("  6. dataset       dev-profile export of %s/%s → tar over SSH → merge-import into the box", r.ws, r.dataset)
-		out.progressf("  7. runtime       fleet-run.sh + protocol (origin/main content), %s CLI fail-open, unit + env 0600", r.agent)
+		out.progressf("  7. runtime       fleet-run.sh + protocol + bp-read.sh at the resolved origin/main sha (version file beside the runner), %s CLI fail-open, unit + env 0600", r.agent)
 		out.progressf("  8. online        enable barkpark-fleet-listener, poll the roster to online-with-capacity (budget %s)", supportRosterPollBudget)
 		return exitOK
 	}
@@ -445,6 +468,34 @@ func supportCapacityNarration(maxClass string) string {
 		return "not measured (degraded) — the listener measures itself at each beat"
 	}
 	return maxClass + " (measured on the box by fleet-run.sh capacity)"
+}
+
+// supportRosterFactNarration renders the MAIN'S OWN READING of the listener for
+// the final receipt: the roster status the poll accepted on and the capacity the
+// main reported alongside it. It is PURE — it composes from the two measured
+// values and nothing else — so both surfaces print the same fact from one place.
+//
+// A poll that never reached a good row leaves both zero, and that is STATED as
+// unread. success() is only reached on the happy path today, so the degraded
+// branch is defensive rather than live; it exists because the day a caller
+// reaches success() without a poll (a --skip-online, a resumed add) the receipt
+// must not print "reads  with capacity null" and let an operator read it as a
+// measurement the main made.
+func supportRosterFactNarration(status string, capacity map[string]any) string {
+	if strings.TrimSpace(status) == "" && len(capacity) == 0 {
+		return "not read (degraded) — the poll never returned a roster row; `bp fleet roster` is the live reading"
+	}
+	return fmt.Sprintf("reads %s with capacity %s (the MAIN's reading, not this verb's)",
+		supportOr(status, "unknown"), supportCompactJSON(capacity))
+}
+
+// observeRoster records the roster row the online poll accepted, taking the
+// main's answer WHOLE and doing its own status/capacity extraction (PDS-D431) —
+// so a production edit that stops carrying either fact is visible here rather
+// than one frame up in a caller that quietly stops passing an argument.
+func (r *supportAddRun) observeRoster(row map[string]any) {
+	r.rosterStatus, _ = row["status"].(string)
+	r.rosterCapacity, _ = row["capacity"].(map[string]any)
 }
 
 func (r *supportAddRun) state(step, msg string) { r.out.progressf("→ %s: %s", step, msg) }
@@ -785,8 +836,20 @@ func (r *supportAddRun) stepDataset() (int, bool) {
 // (exact var names — bp's env context reads them; BARKPARK_TOKEN is a
 // documented shadow hazard). Agent provider keys are NEVER copied.
 func (r *supportAddRun) stepRuntime() (int, bool) {
-	r.state("runtime", "writing fleet-run.sh + fleet-protocol.md (origin/main content)")
-	if err := r.runner.Run(supportCtx(), supportFleetFilesStep()); err != nil {
+	// Pin the runtime to ONE origin/main commit so the box can report which
+	// runner it runs (fleet-run.version → capacity.runner_sha on every beat).
+	// Best-effort on add: an unresolvable sha falls back to the freshened
+	// on-box checkout, and the version file then records THAT checkout's HEAD.
+	sha, serr := supportResolveMainSHA()
+	if serr == nil && !supportSHARe.MatchString(sha) {
+		serr = fmt.Errorf("unexpected sha shape %q", sha)
+	}
+	if serr != nil {
+		r.out.errf("⚠ runtime: could not resolve origin/main's sha (%v) — writing the runtime from the box's freshened checkout; its HEAD becomes the reported runner version", serr)
+		sha = ""
+	}
+	r.state("runtime", "writing fleet-run.sh + fleet-protocol.md + bp-read.sh at origin/main "+supportOr(sha, "(checkout fallback)"))
+	if err := r.runner.Run(supportCtx(), supportFleetFilesStep(sha, true)); err != nil {
 		return r.fail("runtime", "fleet runtime files failed: "+err.Error(),
 			fmt.Sprintf("box %s bound + data loaded at %s; listener runtime absent", r.host.Name, r.host.IP),
 			fmt.Sprintf("inspect `ssh root@%s`, then re-run `bp cloud support add %s`", r.host.IP, r.name),
@@ -853,6 +916,7 @@ func (r *supportAddRun) stepOnline() (int, bool) {
 			lastStatus = st
 			capMap, hasCap := row["capacity"].(map[string]any)
 			if (st == "idle" || st == "working" || st == "blocked") && hasCap && len(capMap) > 0 {
+				r.observeRoster(row)
 				r.done("online", supportOnlineNarration(r.name, row))
 				return exitOK, false
 			}
@@ -883,6 +947,15 @@ func (r *supportAddRun) success() int {
 			"cp_row_id": r.cpRowID,
 			"max_class": r.maxClass,
 			"unit":      "barkpark-fleet-listener",
+			"roster": map[string]any{
+				// `read` is the machine surface's honest degraded state: a status of
+				// "" with a null capacity is indistinguishable from a main that
+				// answered with an empty row, so the receipt says whether the poll
+				// ever got a reading at all.
+				"read":     r.rosterStatus != "" || len(r.rosterCapacity) > 0,
+				"status":   r.rosterStatus,
+				"capacity": r.rosterCapacity,
+			},
 		},
 		"main":    map[string]any{"url": r.base, "workspace": r.ws, "dataset": r.dataset},
 		"key_var": spec.keyVar,
@@ -896,6 +969,7 @@ func (r *supportAddRun) success() int {
 	r.out.outf("  box:    %s at %s (hetzner, label %s=%s)", r.host.Name, r.host.IP, cloud.FleetSupportLabelKey, r.name)
 	r.out.outf("  agent:  %s (hand it %s via the ssh one-liner above)", r.agent, spec.keyVar)
 	r.out.outf("  size:   max class %s", supportCapacityNarration(r.maxClass))
+	r.out.outf("  roster: %s", supportRosterFactNarration(r.rosterStatus, r.rosterCapacity))
 	r.out.outf("  next:   `bp fleet roster` shows it; route an order by naming assignee=%s", r.name)
 	return exitOK
 }
@@ -1128,23 +1202,8 @@ func (r *supportRemoveRun) stepLocate() (int, bool) {
 	// Identity fence: refuse LOUDLY on any foreign identity in the result —
 	// deleting on a mismatched label is exactly the wrong-box deletion the
 	// DeprovisionByIP lineage exists to prevent.
-	for _, box := range boxes {
-		if got := box.Labels[cloud.FleetSupportLabelKey]; got != r.name {
-			return r.fail("locate",
-				fmt.Sprintf("box %s (ip %s) is labeled %s=%q, not %q — REFUSING to touch a foreign identity; investigate manually",
-					box.Name, box.IP, cloud.FleetSupportLabelKey, got, r.name),
-				"nothing torn down yet", exitGeneric)
-		}
-	}
-	if len(boxes) > 1 {
-		var names []string
-		for _, box := range boxes {
-			names = append(names, fmt.Sprintf("%s (ip %s)", box.Name, box.IP))
-		}
-		return r.fail("locate",
-			fmt.Sprintf("%d boxes carry %s=%s — an anomaly this command never picks-one from: %s; investigate manually",
-				len(boxes), cloud.FleetSupportLabelKey, r.name, strings.Join(names, ", ")),
-			"nothing torn down yet", exitGeneric)
+	if refusal := supportIdentityFence(boxes, r.name); refusal != "" {
+		return r.fail("locate", refusal, "nothing torn down yet", exitGeneric)
 	}
 	r.boxes = boxes
 	if len(boxes) == 0 {
@@ -1172,6 +1231,29 @@ func (r *supportRemoveRun) stepLocate() (int, bool) {
 	return exitOK, false
 }
 
+// supportIdentityFence is the DeprovisionByIP fence, shared by remove and
+// refresh: "" when the label-matched boxes are safe to act on, else the
+// refusal. A box whose barkpark-fleet-support label names a different identity
+// is refused loudly, and several matches are an anomaly neither verb ever
+// picks one from.
+func supportIdentityFence(boxes []cloud.Server, name string) string {
+	for _, box := range boxes {
+		if got := box.Labels[cloud.FleetSupportLabelKey]; got != name {
+			return fmt.Sprintf("box %s (ip %s) is labeled %s=%q, not %q — REFUSING to touch a foreign identity; investigate manually",
+				box.Name, box.IP, cloud.FleetSupportLabelKey, got, name)
+		}
+	}
+	if len(boxes) > 1 {
+		var names []string
+		for _, box := range boxes {
+			names = append(names, fmt.Sprintf("%s (ip %s)", box.Name, box.IP))
+		}
+		return fmt.Sprintf("%d boxes carry %s=%s — an anomaly this command never picks-one from: %s; investigate manually",
+			len(boxes), cloud.FleetSupportLabelKey, name, strings.Join(names, ", "))
+	}
+	return ""
+}
+
 // stepToken revokes each recorded token id on the MAIN — idempotent (404 =
 // already gone). A hard failure STOPS: the CP row still holds the token id, so
 // a re-run converges instead of stranding a live credential.
@@ -1195,6 +1277,14 @@ func (r *supportRemoveRun) stepToken() (int, bool) {
 		case status == http.StatusNotFound:
 			r.revoked[id] = "already gone (404)"
 			r.done("token", id+" already gone (404)")
+		// DELIBERATELY STATUS-ONLY (cch-w40-fu, re-derived). This request goes to
+		// the MAIN (r.base, r.token), not the control plane: `grep -rn no_team
+		// api/lib` is EMPTY — the instance API has no team concept at all, so no
+		// refusal it can emit carries a `reason` this arm could read. The 403 here
+		// is the admin gate on POST/DELETE /v1/fleet/support-tokens and nothing
+		// else, and exitAuth is the honest code for it. Routing it through
+		// supportCPNoTeam would add a permanently-false branch on a host that
+		// cannot speak the shape.
 		case status == http.StatusUnauthorized || status == http.StatusForbidden:
 			return r.fail("token", fmt.Sprintf("the main answered %d — the revoke route is admin-gated; use an admin token against the main", status),
 				fmt.Sprintf("token %s NOT revoked; the control-plane row still holds its id", id), exitAuth)
@@ -1359,6 +1449,19 @@ func (r *supportRemoveRun) stepCPRow() (int, bool) {
 			// A re-run cannot converge on a dead session — name the fix (the
 			// same credential contract add narrates, PDF-D69/D71).
 			r.out.errf("⚠ cp-row: the control plane answered 401: %s — the Cloud session is missing or dead; run `bp login`, then re-run. Continuing; the census below is the truth", supportTrim(resp))
+		// cch-w40-fu: the CAUSE decides, not the status — the same predicate the
+		// add/bind arm reads (supportCPNoTeam, which covers 422 {"error":"no_team"}
+		// and 403 {"error":"forbidden","reason":"no_team"} alike). A login with NO
+		// TEAM cannot be repaired by a role grant, so the role sentence below would
+		// point at re-authenticating a credential that is fine. TODAY'''s control
+		// plane never reaches this arm on THIS route: `delete "/v1/fleet/supports/:id"`
+		// answers a teamless caller `404 {"error":"not_found"}` (its `is_nil(current_team)`
+		// arm), not the gate'''s 403 — but this CLI talks to control planes it does not
+		// version, and the route'''s declared credential family (PDF-D69, shape parity
+		// with POST /v1/fleet/supports) is the one that DOES emit no_team. Keying on
+		// the cause is what makes the two narrations unable to drift.
+		case supportCPNoTeam(status, resp):
+			r.out.errf("⚠ cp-row: the control plane answered %d: %s — your Cloud login has no active team; run `bp team use <team>`, then re-run. Continuing; the census below is the truth", status, supportTrim(resp))
 		case status == http.StatusForbidden:
 			r.out.errf("⚠ cp-row: the control plane answered 403: %s — a session needs team-admin, a PAT needs the deploy ability; fix the credential, then re-run. Continuing; the census below is the truth", supportTrim(resp))
 		default:
@@ -1426,6 +1529,10 @@ func (r *supportRemoveRun) census() int {
 				before = fmt.Sprintf("%d before, ", r.probeBefore)
 			}
 			r.out.progressf("  · token: DEAD — the admin-gated mint endpoint read %s401 after revoke", before)
+		// DELIBERATELY STATUS-ONLY (cch-w40-fu): here the status IS the
+		// measurement, not a narration choice — 403 means the MAIN authenticated
+		// the support'''s own bearer (token ALIVE), 401 means it did not (DEAD).
+		// Reading a `reason` would answer a different question than the probe asks.
 		case st == http.StatusForbidden:
 			residue = append(residue, "support token STILL VALID — the admin-gated mint endpoint answered 403 (authenticated), not 401, to the support's own bearer")
 		default:
@@ -1507,6 +1614,15 @@ type supportCPRow struct {
 
 // supportCPBarkparks lists the caller's fleet from the control plane. Non-2xx
 // is returned as a status, not an error — callers own the honest narration.
+//
+// The non-2xx BODY is deliberately dropped, so every caller's refusal arm
+// (resolveParent, stepCPRead) is status-only BY CONSTRUCTION (cch-w40-fu,
+// re-derived). That is sound for this route and only this route: `get
+// "/v1/barkparks"` gates with require_user_or_pat + require_ability("read") —
+// neither emits no_team — and then answers a TEAMLESS caller `200 {"barkparks":
+// []}` (its `case current_team do nil -> [] end` arm). There is no no_team shape
+// for these callers to miss. Teaching them the cause would mean returning the
+// body from here; do that only when the control plane starts refusing this list.
 func supportCPBarkparks(cpBase, cpToken string) ([]supportCPRow, int, error) {
 	status, body, err := supportMainJSON(http.MethodGet, cpBase+"/v1/barkparks", cpToken, nil)
 	if err != nil {
@@ -1627,6 +1743,12 @@ func supportLastLine(s string) string {
 // supportEnableImportStep flips the box's fail-closed bundle-import switch and
 // restarts Barkpark, then waits for the loopback API to answer again. The .env
 // edit is idempotent (strip + append, the secretsInstallStep idiom).
+//
+// The wait polls /status.json, NOT the legacy /api/schemas: that route pipes
+// through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+// `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, and `curl -fsS` turns its eventual
+// 404 into a non-zero exit — so on 2027-01-01 this step would burn all 60
+// attempts and fail the import on a box that came back fine.
 func supportEnableImportStep() cloud.CaddyStep {
 	script := `set -e
 touch /opt/barkpark/.env
@@ -1634,7 +1756,7 @@ grep -v '^BARKPARK_ALLOW_BUNDLE_IMPORT=' /opt/barkpark/.env > /opt/barkpark/.env
 printf 'BARKPARK_ALLOW_BUNDLE_IMPORT=1\n' >> /opt/barkpark/.env.bpnew
 mv /opt/barkpark/.env.bpnew /opt/barkpark/.env
 systemctl restart barkpark
-for i in $(seq 1 60); do curl -fsS http://localhost:4000/api/schemas >/dev/null 2>&1 && exit 0; sleep 2; done
+for i in $(seq 1 60); do curl -fsS http://localhost:4000/status.json >/dev/null 2>&1 && exit 0; sleep 2; done
 echo 'barkpark did not come back after restart' >&2; exit 1`
 	return cloud.CaddyStep{
 		Title: "enable workspace bundle import (BARKPARK_ALLOW_BUNDLE_IMPORT=1) + restart",
@@ -1696,20 +1818,15 @@ func supportImportStep(ws, adminToken string) cloud.CaddyStep {
 	return cloud.SupportMergeImportStep(ws, adminToken)
 }
 
-// supportFleetFilesStep writes the fleet runtime from origin/main CONTENT:
-// raw.githubusercontent origin/main first, the freshened on-box checkout as
-// the fallback (PDF-D62/D64 — never an operator machine's stale copy).
-func supportFleetFilesStep() cloud.CaddyStep {
-	script := `set -e
-mkdir -p /opt/barkpark-fleet
-fetch(){ curl -fsSL "` + supportRawBase + `/$1" -o "$2" 2>/dev/null || cp "/opt/barkpark/$1" "$2"; }
-fetch tooling/fleet/fleet-run.sh /opt/barkpark-fleet/fleet-run.sh
-fetch tooling/fleet/fleet-protocol.md /opt/barkpark-fleet/fleet-protocol.md
-chmod 0755 /opt/barkpark-fleet/fleet-run.sh`
-	return cloud.CaddyStep{
-		Title: "write fleet-run.sh + fleet-protocol.md from origin/main content",
-		Argv:  []string{"bash", "-lc", script},
-	}
+// supportFleetFilesStep writes the fleet runtime from origin/main CONTENT
+// (PDF-D62/D64). It is the ONE builder both `support add` (stepRuntime,
+// checkoutFallback=true) and `support refresh` (checkoutFallback=false) run —
+// and the provisioner's server-side chain runs the same definition:
+// fleetruntime.FilesStep owns the file set, the pinned fetch, the version file
+// and the temp-file-then-rename (task-837f1013efdf100f). The sha is fenced by
+// supportSHARe by every caller before it reaches here.
+func supportFleetFilesStep(sha string, checkoutFallback bool) cloud.CaddyStep {
+	return fleetruntime.FilesStep(sha, checkoutFallback)
 }
 
 // supportAgentInstallStep installs node + the agent CLI. The CALLER treats a
@@ -1957,6 +2074,7 @@ USAGE
                                  [--dataset <slug>] [--parent <cp-row-id>]
                                  [--dry-run] [-o json|yaml]
   bp cloud support remove <name> [--dataset <slug>] [--dry-run] [-o json|yaml]
+  bp cloud support refresh <name> [--dataset <slug>] [--force] [--dry-run] [-o json|yaml]
 
 WHAT IT DOES (eight named states, in order)
   create      provision an x86 warm-image box on hetzner, labeled
@@ -1974,9 +2092,10 @@ WHAT IT DOES (eight named states, in order)
               by matching its URL host (never the raw-IP host column).
   dataset     dev-profile (SCRUBBED) export of the main's dataset, streamed
               over SSH, merge-imported into the box's own Barkpark.
-  runtime     fleet-run.sh + fleet-protocol.md (origin/main content), the agent
-              CLI (fail-open), and the systemd unit + 0600 env carrying
-              BARKPARK_API_URL / BARKPARK_API_TOKEN.
+  runtime     fleet-run.sh + fleet-protocol.md + bp-read.sh at the resolved
+              origin/main sha (recorded in fleet-run.version beside the
+              runner), the agent CLI (fail-open), and the systemd unit + 0600
+              env carrying BARKPARK_API_URL / BARKPARK_API_TOKEN.
   online      enable barkpark-fleet-listener and poll the main's roster until
               the row truthfully reads online WITH measured capacity, or report
               an honest timeout (the row then ages to offline — never faked).
@@ -2007,6 +2126,21 @@ REMOVE (the mirror verb — PDF-D68, five surfaces since PDF-D101)
   surface — delete responses prove nothing — and any survivor is named
   with a non-zero exit. Idempotent: run it again and it reports
   already-gone; partial state converges.
+
+REFRESH (bring an existing box to the current runner — no hand-curl over SSH)
+  Resolves origin/main's commit sha and PRINTS it, locates the box by its
+  barkpark-fleet-support label (same identity fence as remove), refuses a
+  box whose roster row reads working (a restart kills the in-flight order;
+  --force overrides), re-runs ONLY the runtime file write at that sha (no
+  checkout fallback — the sha printed is the sha written), restarts
+  barkpark-fleet-listener, then polls the MAIN's roster until the row's
+  capacity.runner_sha reads back. It prints pushed vs reported; a mismatch
+  or no read-back is a non-zero exit, never a warning.
+  Trust: the box never pulls its own runner and gains no new capability.
+  The refresh is commanded over the operator's own SSH + provider
+  credentials (the same ones add uses); the box fetches an immutable
+  commit URL that bp chose. The running version is visible without SSH as
+  capacity.runner_sha on the roster (bp fleet roster).
 
 RELATED
   bp fleet roster        the fleet's presence table (who is online, with what)`

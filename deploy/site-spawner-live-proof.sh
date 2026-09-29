@@ -73,6 +73,14 @@
 #   81 BROKEN_BUILD_REACHED_VISITORS— the worst red: a broken build changed what visitors see
 #   90 SELF_CHECK_FAILED            — a named red did NOT fire on input that must trigger it
 set -uo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/lib/bp-curl.sh"   # 429 backoff, shared (task-90059c5c680f6665)
+# 429 backoff, shared (task-90059c5c680f6665). Every probe below reads its status
+# out of a `.code` file. bp_curl_code prints NOTHING and returns curl's rc on a
+# transport failure (curl -w alone printed 000 AND failed), so each site's
+# trailing `|| true` becomes `|| echo 000 >"<the .code file>"` — without it the
+# file would be left EMPTY and every `[ "$hc" = "200" ]` below would compare
+# against the empty string instead of the 000 the old code wrote.
 
 # ---- Config -----------------------------------------------------------------
 
@@ -292,6 +300,41 @@ print(m.group(1).strip() if m else "")
 PY
 }
 
+# fetch_page <dest> <url> — READ A LIVE PAGE AND KEEP THE PRODUCER'S REFUSAL.
+#
+# task-f56d84cf77d93c24 / the #14371 shape. The spelling this replaces sent
+# curl's stdout AND stderr to the bit bucket and then swallowed its status with
+# a trailing always-true, deleting the producer's evidence TWICE: the redirect
+# throws away curl's own message and the always-true arm throws away its exit
+# status. The next line parses a file that was
+# never written, so the headline becomes meta_content's silence about a missing
+# marker and the verdict blames the SITE UNDER PROOF for the INSTRUMENT's
+# failure: a DNS miss, an expired cert, a box that will not answer all read as
+# "the build id did not flip".
+#
+# This is the emit_spec shape: run the producer with its combined output
+# CAPTURED, assert BOTH the exit status and that a non-empty artifact appeared,
+# print the refusal INLINE where it happened, and park a headline in FETCH_WHY
+# that the rung's own fail() prefers over the parser's text. Returns 0 only when
+# a non-empty page really landed in <dest>.
+FETCH_WHY=""
+fetch_page() {
+  local dest="$1" url="$2" out rc=0
+  FETCH_WHY=""
+  rm -f "$dest"
+  out="$(curl -sS -m 30 -o "$dest" -w 'HTTP %{http_code} in %{time_total}s' "$url" 2>&1)" || rc=$?
+  out="$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-400)"
+  if [ "$rc" -ne 0 ]; then
+    FETCH_WHY="curl could NOT read $url (exit $rc): ${out:-<curl said nothing>}"
+  elif [ ! -s "$dest" ]; then
+    FETCH_WHY="curl reached $url but wrote an EMPTY $dest ($out)"
+  else
+    return 0
+  fi
+  note "PAGE READ REFUSED — $FETCH_WHY"
+  return 1
+}
+
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/site-proof.XXXXXX")"
 CREATED_SITE=""
 CREATED_BROKEN=""
@@ -337,8 +380,11 @@ cleanup() {
       else
         note "cleanup: DELETE FAILED for '$s' (exit $dx): $(cli_err "${TMP:-/tmp}/del-$s.json" "${TMP:-/tmp}/del-$s.err")"
         note "         Remove by hand: \`$BP cloud site delete $s --yes\`, or on $LIVE_HOST →"
-        note "         rm -rf /opt/barkpark/sites/$s and drop the '# barkpark-site:$s' guarded"
-        note "         handle_path block from /etc/caddy/Caddyfile. The site's read token is STILL LIVE."
+        note "         rm -rf /opt/barkpark/sites/$s and drop the guarded handle_path block from"
+        note "         /etc/caddy/Caddyfile — the one whose guard comment reads 'BARKPARK_SITE_ROUTE:$s'."
+        note "         (That marker, NOT the old '# barkpark-site<colon>' string, is what this engine"
+        note "         writes; grepping the old string finds nothing and the route stays live.)"
+        note "         The site's read token is STILL LIVE."
       fi
     done
   else
@@ -824,8 +870,8 @@ preflight() {
     # cross-team create does not fail with a permission error: it 404s
     # `barkpark_not_found` (the control plane refuses to leak existence across a
     # team boundary), which reads like a typo and wastes an hour. Name it here.
-    curl -sS -m 30 -o "$TMP/bps.json" -w '%{http_code}' \
-      -H "Authorization: Bearer $CLOUD_TOKEN" "$CLOUD_URL/v1/barkparks" >"$TMP/bps.code" 2>"$TMP/bps.err" || true
+    bp_curl_code -sS -m 30 -o "$TMP/bps.json" \
+      -H "Authorization: Bearer $CLOUD_TOKEN" "$CLOUD_URL/v1/barkparks" >"$TMP/bps.code" 2>"$TMP/bps.err" || echo 000 >"$TMP/bps.code"
     hc="$(cat "$TMP/bps.code" 2>/dev/null || echo 000)"
     if [ "$hc" = "200" ]; then
       ok "cloud session present → $CLOUD_URL (team ${CLOUD_TEAM:-?})"
@@ -862,8 +908,8 @@ PY
   srv="$(cfgval server)"; srv="${srv:-https://$LIVE_HOST}"
   ws="${DATASET%%/*}"; ds="${DATASET##*/}"; proj="$(printf '%s' "$DATASET" | cut -d/ -f2)"
   local scoped="$srv/w/$ws/p/$proj/v1/data/query/$ds/$DOC_TYPE?limit=1"
-  curl -sS -m 30 -o "$TMP/content.json" -w '%{http_code}' \
-    -H "Authorization: Bearer $(cfgval token)" "$scoped" >"$TMP/content.code" 2>/dev/null || true
+  bp_curl_code -sS -m 30 -o "$TMP/content.json" \
+    -H "Authorization: Bearer $(cfgval token)" "$scoped" >"$TMP/content.code" 2>/dev/null || echo 000 >"$TMP/content.code"
   hc="$(cat "$TMP/content.code" 2>/dev/null || echo 000)"
 
   local count first
@@ -948,8 +994,8 @@ live_proof() {
   # true here IS the proof the read token was minted and stored — no DB peek
   # needed, and none is possible from here anyway. The CLI's own JSON map does
   # not carry it, so read the site row straight from the control plane.
-  curl -sS -m 30 -o "$TMP/site.json" -w '%{http_code}' \
-    -H "Authorization: Bearer $CLOUD_TOKEN" "$CLOUD_URL/v1/sites/$site_id" >"$TMP/site.code" 2>/dev/null || true
+  bp_curl_code -sS -m 30 -o "$TMP/site.json" \
+    -H "Authorization: Bearer $CLOUD_TOKEN" "$CLOUD_URL/v1/sites/$site_id" >"$TMP/site.code" 2>/dev/null || echo 000 >"$TMP/site.code"
   local hc; hc="$(cat "$TMP/site.code")"
   [ "$hc" = "200" ] ||
     fail "$E_CREATE_FAILED" "GET /v1/sites/$site_id answered HTTP $hc — the site we just created is not readable."
@@ -1050,8 +1096,8 @@ PY
       "--force must fold a nonce into build_id = hash(code_rev + content_rev + config + nonce); if build2 == build_id the force nonce is not being minted (see site-spawner-w4-deploy-inputs / site-spawner-deploy-force-rebuild)"
   ok "second build live — $build2"
 
-  local before after t0 t1 elapsed rbx=0
-  curl -sS -m 30 -o "$TMP/live2.html" "https://$LIVE_HOST/sites/$SLUG/" >/dev/null 2>&1 || true
+  local before after t0 t1 elapsed rbx=0 rb_why=""
+  fetch_page "$TMP/live2.html" "https://$LIVE_HOST/sites/$SLUG/"; rb_why="$FETCH_WHY"
   before="$(meta_content "$TMP/live2.html" bp-build-id)"
 
   t0="$(now_ms)"
@@ -1063,11 +1109,11 @@ PY
     fail "$E_ROLLBACK_FAILED" "\`bp cloud site rollback\` exited $rbx after ${elapsed}ms: $(cli_err "$TMP/rollback.json" "$TMP/rollback.err")" \
       "if this is a 404, POST /v1/sites/:id/rollback is not wired — the CLI calls it and the control plane does not answer it"
 
-  curl -sS -m 30 -o "$TMP/live3.html" "https://$LIVE_HOST/sites/$SLUG/" >/dev/null 2>&1 || true
+  fetch_page "$TMP/live3.html" "https://$LIVE_HOST/sites/$SLUG/" || rb_why="${rb_why:+$rb_why · }$FETCH_WHY"
   after="$(meta_content "$TMP/live3.html" bp-build-id)"
 
   judge_rollback "$elapsed" "$before" "$after" "$ROLLBACK_BUDGET_MS" ||
-    fail $? "rollback took ${elapsed}ms (budget ${ROLLBACK_BUDGET_MS}ms) and the live bp-build-id went '$before' → '$after'. There is NO client-side poll on this path, so a 200 that returns before the symlink actually moved is a lie: the route must BLOCK on the real flip." \
+    fail $? "${rb_why:+READING THE LIVE PAGE FAILED — $rb_why; the bp-build-id values below are ABSENT because the page was never read, not because the rollback did not flip. }rollback took ${elapsed}ms (budget ${ROLLBACK_BUDGET_MS}ms) and the live bp-build-id went '$before' → '$after'. There is NO client-side poll on this path, so a 200 that returns before the symlink actually moved is a lie: the route must BLOCK on the real flip." \
       "the engine's own flip measured 25ms — anything near a second is the route not blocking on it, or not doing it at all"
   ok "rollback in ${elapsed}ms (budget ${ROLLBACK_BUDGET_MS}ms)"
   ok "live bp-build-id flipped $before → $after"
@@ -1153,11 +1199,12 @@ PY
   breason="$(jget "$TMP/broken.json" deployment.failure_reason)"
 
   # Containment: the live page is UNCHANGED — a failed deploy never reaches a visitor.
-  curl -sS -m 30 -o "$TMP/live4.html" "https://$LIVE_HOST/sites/$SLUG/" >/dev/null 2>&1 || true
+  local brk_why=""
+  fetch_page "$TMP/live4.html" "https://$LIVE_HOST/sites/$SLUG/"; brk_why="$FETCH_WHY"
   local live_after; live_after="$(meta_content "$TMP/live4.html" bp-build-id)"
 
   judge_broken "$bstatus" "$(printf '%s' "${bstage:-}" | tr '[:lower:]' '[:upper:]')" "$breason" "$live_before" "$live_after" ||
-    fail $? "the broken build: status=$bstatus stage=${bstage:-none} reason='${breason:-none}'; the live bp-build-id went '$live_before' → '$live_after'. A broken build must fail at a NAMED stage with a REAL reason, and it must NEVER change what a visitor sees." \
+    fail $? "${brk_why:+READING THE LIVE PAGE FAILED — $brk_why; the live bp-build-id below is ABSENT because the page was never read, not because the poison reached a visitor. }the broken build: status=$bstatus stage=${bstage:-none} reason='${breason:-none}'; the live bp-build-id went '$live_before' → '$live_after'. A broken build must fail at a NAMED stage with a REAL reason, and it must NEVER change what a visitor sees." \
       "HEALTH asserts the baked bp-doc-id/bp-content-rev markers before SWITCH — bytes that carry an empty bp-doc-id must die there"
   ok "failed at $(printf '%s' "$bstage" | tr '[:lower:]' '[:upper:]') — $breason"
   ok "the live bp-build-id UNCHANGED at $live_after (the poison never reached a visitor)"
@@ -1165,7 +1212,7 @@ PY
   # And the served page still carries a REAL doc id — not the blank we shipped.
   local sdoc; sdoc="$(meta_content "$TMP/live4.html" bp-doc-id)"
   [ -n "$sdoc" ] ||
-    fail "$E_BROKEN_REACHED_VISITORS" "the live page's bp-doc-id is EMPTY — the poisoned bytes ARE what visitors are being served. HEALTH did not gate the switch." \
+    fail "$E_BROKEN_REACHED_VISITORS" "${brk_why:+READING THE LIVE PAGE FAILED — $brk_why; that, not a poisoned deploy, is why the marker below is empty. }the live page's bp-doc-id is EMPTY — the poisoned bytes ARE what visitors are being served. HEALTH did not gate the switch." \
       "a build that fails HEALTH must never get the \`current\` symlink"
   ok "the live page still serves real content (bp-doc-id=$sdoc)"
 

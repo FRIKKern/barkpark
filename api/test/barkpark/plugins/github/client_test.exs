@@ -446,6 +446,60 @@ defmodule Barkpark.Plugins.Github.ClientTest do
     end
   end
 
+  describe "remove_sub_issue/4" do
+    test "DELETEs the sub_issue_id against the SINGULAR /sub_issue path", %{
+      bypass: bypass,
+      base: base
+    } do
+      {:ok, body_ref} = Agent.start_link(fn -> nil end)
+      stub_token(bypass)
+
+      # The remove verb does NOT share the add verb's plural path. A DELETE to
+      # /sub_issues (plural) is not an endpoint, so the path is the assertion:
+      # Bypass answers ONLY this route and anything else 404s the test.
+      Bypass.expect(bypass, "DELETE", "/repos/#{@repo}/issues/7/sub_issue", fn conn ->
+        {json, conn} = read_json_body(conn)
+        Agent.update(body_ref, fn _ -> json end)
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, Jason.encode!(%{"number" => 7}))
+      end)
+
+      # parent = number 7, child = its DATABASE id (not its number) — the same
+      # keying as add_sub_issue/4.
+      assert {:ok, %{"number" => 7}} =
+               Client.remove_sub_issue(@repo, 7, 55_667_788, base_url: base, max_retries: 0)
+
+      assert Agent.get(body_ref, & &1) == %{"sub_issue_id" => 55_667_788}
+    end
+
+    test "a 404 (nothing to remove) surfaces as NotFound", %{bypass: bypass, base: base} do
+      stub_token(bypass)
+
+      Bypass.stub(bypass, "DELETE", "/repos/#{@repo}/issues/7/sub_issue", fn conn ->
+        Plug.Conn.resp(conn, 404, ~s({"message":"Not Found"}))
+      end)
+
+      # NOT special-cased here — the Relations caller reads it as "already gone".
+      assert {:error, %NotFound{}} =
+               Client.remove_sub_issue(@repo, 7, 55_667_788, base_url: base, max_retries: 0)
+    end
+
+    test "a 403 with rate headers → RateLimitError", %{bypass: bypass, base: base} do
+      stub_token(bypass)
+
+      Bypass.stub(bypass, "DELETE", "/repos/#{@repo}/issues/7/sub_issue", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("retry-after", "17")
+        |> Plug.Conn.resp(403, ~s({"message":"secondary rate limit"}))
+      end)
+
+      assert {:error, %RateLimitError{retry_after: 17}} =
+               Client.remove_sub_issue(@repo, 7, 55_667_788, base_url: base, max_retries: 0)
+    end
+  end
+
   # Same defect, same shape as the bokbasen twin — both clients now route the
   # decision through `Barkpark.Net.RetrySafety`. A timed-out create_issue POST
   # minted up to 3 GitHub issues for ONE task; `MirrorJob`'s Oban-level dedup
@@ -863,7 +917,7 @@ defmodule Barkpark.Plugins.Github.ClientTest do
   # no caller can influence the timing (base_url resolves from app env only) —
   # rank it below any auth finding. `now` is passed explicitly here, so these are
   # deterministic: no sleeps, no barriers.
-  describe "retry_after_seconds/2 clamp" do
+  describe "retry_after_seconds/2 clamp + floor" do
     test "x-ratelimit-reset inside the window returns the true remaining seconds" do
       reset = 1_800_000_000
       assert Client.retry_after_seconds([{"x-ratelimit-reset", "#{reset}"}], reset - 10) == 10
@@ -877,9 +931,41 @@ defmodule Barkpark.Plugins.Github.ClientTest do
                300
     end
 
-    test "a forward clock step past the reset floors to 0" do
+    # DETECTOR (clk-bl-github-backoff-forward-step-1s-loop): on the unfixed code
+    # this returned 0, MirrorJob turned it into {:snooze, max(0, 1)} = 1, and
+    # Oban's snooze does inc: [max_attempts: 1] — a 1 s hammer that never
+    # exhausts attempts. The floor is what stops the loop; the ceiling from the
+    # clamp slice cannot, because 0 is already under it.
+    test "a forward clock step past the reset takes the floor, never 0" do
       reset = 1_800_000_000
-      assert Client.retry_after_seconds([{"x-ratelimit-reset", "#{reset}"}], reset + 5_000) == 0
+      s = Client.retry_after_seconds([{"x-ratelimit-reset", "#{reset}"}], reset + 5_000)
+
+      assert s == 60
+      assert s > 1, "a non-positive interval must never produce a 1 s snooze loop"
+      assert s <= 300, "the #12690 ceiling must stay intact"
+    end
+
+    test "a reset exactly equal to now takes the floor (boundary, not 0)" do
+      reset = 1_800_000_000
+      assert Client.retry_after_seconds([{"x-ratelimit-reset", "#{reset}"}], reset) == 60
+    end
+
+    test "a reset one second ahead is still honoured verbatim (positive arm)" do
+      reset = 1_800_000_000
+      assert Client.retry_after_seconds([{"x-ratelimit-reset", "#{reset}"}], reset - 1) == 1
+    end
+
+    test "an unparseable retry-after takes the floor rather than 0" do
+      assert Client.retry_after_seconds([{"retry-after", "soon"}], 1_800_000_000) == 60
+    end
+
+    test "a MirrorJob-shaped RateLimitError from a past reset snoozes far above 1 s" do
+      # The end-to-end invariant the task states: whatever the client returns,
+      # `max(s || 0, 1)` at mirror_job.ex must not collapse to 1.
+      reset = 1_800_000_000
+      s = Client.retry_after_seconds([{"x-ratelimit-reset", "#{reset}"}], reset + 86_400)
+
+      assert max(s || 0, 1) == 60
     end
 
     test "a hostile bare retry-after is clamped on that arm too" do
@@ -890,9 +976,9 @@ defmodule Barkpark.Plugins.Github.ClientTest do
       assert Client.retry_after_seconds([{"retry-after", "42"}], 1_800_000_000) == 42
     end
 
-    test "no rate-limit headers → 0" do
+    test "no rate-limit headers → the floor (the caller is already rate-limited)" do
       assert Client.retry_after_seconds([{"content-type", "application/json"}], 1_800_000_000) ==
-               0
+               60
     end
   end
 end

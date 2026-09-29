@@ -61,6 +61,91 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     end
   end
 
+  test "email stat places a muted display denominator between value and unit" do
+    for {theme, muted} <- [{:evergreen, "#55635e"}, {%{muted: "#654321"}, "#654321"}],
+        {denom, display} <- [{" 118 ", "118"}, {118, "118"}, {118.5, "118.5"}, {0, "0"}] do
+      html =
+        DataViz.stat_email_html(%{"value" => "71", "denom" => denom, "unit" => "blocks"}, theme)
+
+      assert html =~
+               ~s|>71<span style="font-weight:400;color:#{muted}">/#{display}</span> <span style="font-size:12px;font-weight:400;color:#{muted}">blocks</span></div>|
+
+      refute html =~ "class="
+      refute html =~ "var("
+    end
+  end
+
+  test "email stats and stat-grid compose each denominator through the shared stat renderer" do
+    for type <- ["stats", "stat-grid"] do
+      block = %{
+        "type" => type,
+        "items" => [
+          %{"value" => "71", "denom" => "118", "unit" => "blocks"},
+          %{"value" => "3", "denom" => "5"}
+        ]
+      }
+
+      %{"kind" => "_raw", "html" => html} = Compose.compose_block(block, :email)
+      assert html =~ ~s|>71<span style="font-weight:400;color:#55635e">/118</span> |
+      assert html =~ ~s|>3<span style="font-weight:400;color:#55635e">/5</span></div>|
+    end
+  end
+
+  test "email stat and stats escape hostile denominator HTML as display text" do
+    item = %{"value" => "71", "denom" => ~s|<img src=x onerror="alert('x')">&|}
+
+    for html <- [DataViz.stat_email_html(item), DataViz.stats_email_html(%{"items" => [item]})] do
+      assert html =~ "/&lt;img src=x onerror=&quot;alert(&#39;x&#39;)&quot;&gt;&amp;</span>"
+      refute html =~ "<img"
+    end
+  end
+
+  test "email denominator rendering preserves authored blocks and source provenance" do
+    item = %{
+      "value" => "71",
+      "denom" => " 118 ",
+      "unit" => "blocks",
+      "body" => "Completed blocks.",
+      "source" => "paper:denom-fixture"
+    }
+
+    block = %{"type" => "stats", "items" => [item, item]}
+    before = :erlang.term_to_binary({item, block})
+    singular = DataViz.stat_email_html(item)
+    plural = DataViz.stats_email_html(block)
+
+    assert singular =~ "Kilde: paper:denom-fixture"
+    assert singular =~ "Completed blocks."
+    assert length(String.split(plural, "Kilde: paper:denom-fixture")) == 2
+    assert :erlang.term_to_binary({item, block}) == before
+  end
+
+  test "email stat absent or unsupported denominators retain exact legacy bytes" do
+    block = %{
+      "value" => "71",
+      "unit" => "blocks",
+      "label" => "Completed",
+      "body" => "Completed blocks.",
+      "source" => "paper:denom-fixture"
+    }
+
+    expected =
+      ~s|<div style="display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top">| <>
+        ~s|<div style="font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1">71 <span style="font-size:12px;font-weight:400;color:#55635e">blocks</span></div>| <>
+        ~s|<div style="font-size:12px;color:#55635e;margin-top:2px">Completed</div>| <>
+        ~s|<div style="font-size:12px;color:#15211d;margin-top:4px">Completed blocks.</div>| <>
+        ~s|<div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;margin-top:8px">Kilde: paper:denom-fixture</div></div>|
+
+    assert DataViz.stat_email_html(block) == expected
+    plural = DataViz.stats_email_html(%{"items" => [block]})
+
+    for denom <- [nil, "", " \t\n ", false, true, [], [118], %{"value" => 118}] do
+      with_denom = Map.put(block, "denom", denom)
+      assert DataViz.stat_email_html(with_denom) == expected
+      assert DataViz.stats_email_html(%{"items" => [with_denom]}) == plural
+    end
+  end
+
   # ── heatmap ──────────────────────────────────────────────────────────────────
 
   test "heatmap normalizes intensity against the explicit max and keeps grid shape on junk" do
@@ -933,6 +1018,39 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
 
     assert DataViz.lineage_html(%{"type" => "lineage", "nodes" => []}) =~ "lineage — no data"
     assert DataViz.lineage_html(%{"type" => "lineage", "nodes" => [%{}]}) =~ "bp-dataviz--empty"
+  end
+
+  # pe-bl-clock-strip-block — the clock strip's per-stop VERDICT. A stop can
+  # carry `tone` from the same four-word vocabulary the chart regions use; the
+  # stylesheet colours that stop's spine tick and its time from the tone token.
+  # The control legs are the point: a stop with no tone, and a stop with a tone
+  # outside the vocabulary, must both emit the BARE class — every lineage
+  # authored before the clock strip renders byte-identically.
+  test "lineage: a stop's tone becomes a per-stop verdict class; unknown and absent tones stay bare" do
+    html =
+      DataViz.lineage_html(%{
+        "type" => "lineage",
+        "nodes" => [
+          %{"overline" => "20:47:43", "title" => "Thanks for finding this", "tone" => "ok"},
+          %{"overline" => "20:50:24", "title" => "First of four rewrites", "tone" => "warn"},
+          %{"overline" => "20:54:36", "title" => "Test disclosure gone", "tone" => "danger"},
+          %{"overline" => "20:55:53", "title" => "Merged, zero comments", "tone" => "info"},
+          %{"overline" => "later", "title" => "No tone at all"},
+          %{"overline" => "later still", "title" => "Tone off-vocabulary", "tone" => "puce"}
+        ]
+      })
+
+    assert html =~ ~s|<li class="bp-lineage__node bp-lineage__node--ok">|
+    assert html =~ ~s|<li class="bp-lineage__node bp-lineage__node--warn">|
+    assert html =~ ~s|<li class="bp-lineage__node bp-lineage__node--danger">|
+    assert html =~ ~s|<li class="bp-lineage__node bp-lineage__node--info">|
+    # the two controls: bare class, no modifier, for absent and unknown tone
+    assert html =~ ~s|<li class="bp-lineage__node"><div class="bp-lineage__overline">later</div>|
+
+    assert html =~
+             ~s|<li class="bp-lineage__node"><div class="bp-lineage__overline">later still</div>|
+
+    refute html =~ "bp-lineage__node--puce"
   end
 
   test "lineage dispatches through compose for :article and email styles" do

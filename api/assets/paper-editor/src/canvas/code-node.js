@@ -67,7 +67,10 @@
 // never the NodeView) without a browser.
 
 import { Node, mergeAttributes } from "@tiptap/core";
+import { TextSelection } from "@tiptap/pm/state";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
+// THE tokenizer, shared with the reader (plan #27): the highlight layer under the textarea.
+import { highlightHtml } from "../code-highlight.js";
 
 // The TipTap node NAME is `bpCode`, NOT `code` — `code` is already the StarterKit
 // INLINE code MARK (extension-code: name:'code', parses <code>), which the canvas
@@ -236,6 +239,22 @@ export const Code = Node.create({
       const area = document.createElement("textarea");
       area.className = "bp-canvas-code-area";
       area.setAttribute("spellcheck", "false");
+      // The highlight layer: the same text painted with hljs-* tokens under the (transparent-text)
+      // textarea — one tokenizer with the reader, so the tokens match /papers/:slug (plan #27).
+      const hl = document.createElement("code");
+      hl.className = "bp-canvas-code-hl";
+      hl.setAttribute("aria-hidden", "true");
+      let hlKey = null;
+      const paintHighlight = () => {
+        const key = langInput.value + "\u0000" + area.value;
+        if (key === hlKey) return;
+        hlKey = key;
+        // A trailing newline needs a visible line so the layer's height follows the textarea's rows.
+        hl.innerHTML = highlightHtml(area.value, langInput.value) + (area.value.endsWith("\n") ? " " : "");
+        hl.scrollTop = area.scrollTop;
+        hl.scrollLeft = area.scrollLeft;
+      };
+      area.addEventListener("scroll", () => { hl.scrollTop = area.scrollTop; hl.scrollLeft = area.scrollLeft; });
       // S9 code-interior: the textarea's typography (font / size / line-height /
       // colour / whitespace / transparent-borderless frame / width / resize) now
       // lives in the `.bp-canvas-code-area` CSS rule (both sinks), token-bound to
@@ -246,6 +265,7 @@ export const Code = Node.create({
       // island contract (stopEvent/ignoreMutation), so editing is unaffected.
 
       dom.appendChild(langInput);
+      dom.appendChild(hl);
       dom.appendChild(area);
 
       // Paint the controls from the node's current attrs. Re-run on every update()
@@ -278,12 +298,16 @@ export const Code = Node.create({
         langInput.style.display = hide ? "none" : "";
       };
 
+      let writeTimer = null; // pending debounced attr write (declared before paint, which guards on it)
       const paint = (n) => {
         const value = (n.attrs && n.attrs.value) || "";
         const lang = (n.attrs && n.attrs.lang) || "";
-        if (area.value !== value) area.value = value;
+        // While a local edit is still inside its debounce, an incoming repaint (own-echo,
+        // sibling save, node re-render) must not clobber the textarea with the stale attr.
+        if (area.value !== value && !writeTimer) area.value = value;
         syncRows();
         if (langInput.value !== lang) langInput.value = lang;
+        paintHighlight();
         // Editability mirrors the editor's mode.
         const editable = editor.isEditable;
         area.readOnly = !editable;
@@ -328,7 +352,6 @@ export const Code = Node.create({
       // → run-convert emits a single patch-block carrying the changed field(s). The
       // debounce mirrors the editor's DEBOUNCE_MS so a burst of keystrokes coalesces
       // into one attr write (and thus one op batch).
-      let writeTimer = null;
       const commitNow = () => {
         if (typeof getPos !== "function") return;
         const pos = getPos();
@@ -365,6 +388,7 @@ export const Code = Node.create({
       };
       const onAreaInput = () => {
         syncRows();
+        paintHighlight();
         scheduleWrite();
       };
       const flushPending = () => {
@@ -374,6 +398,58 @@ export const Code = Node.create({
         commitNow();
       };
 
+      // Keyboard exits (Notion parity): ArrowDown on the last line / ArrowUp on the first line
+      // leave the island into the neighbouring block (creating a paragraph when there is none),
+      // Escape selects the block itself, and Backspace in an empty block turns it back into text.
+      const exitTo = (direction) => {
+        flushPending();
+        if (typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        const cur = editor.state.doc.nodeAt(pos);
+        if (!cur) return;
+        const { state, view } = editor;
+        let tr = state.tr;
+        if (direction === "down") {
+          const after = pos + cur.nodeSize;
+          if (after >= state.doc.content.size) tr = tr.insert(after, state.schema.nodes.paragraph.create());
+          tr = tr.setSelection(TextSelection.near(tr.doc.resolve(after + 1), 1));
+        } else if (pos === 0) {
+          tr = tr.insert(0, state.schema.nodes.paragraph.create());
+          tr = tr.setSelection(TextSelection.near(tr.doc.resolve(1), -1));
+        } else {
+          tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos - 1), -1));
+        }
+        view.dispatch(tr);
+        view.focus();
+      };
+      const onAreaKey = (e) => {
+        if (!editor.isEditable) return;
+        if (e.key === "Escape") {
+          e.preventDefault();
+          flushPending();
+          const pos = typeof getPos === "function" ? getPos() : null;
+          if (pos != null) editor.chain().setNodeSelection(pos).focus().run();
+          return;
+        }
+        const firstLine = area.value.lastIndexOf("\n", area.selectionStart - 1) === -1;
+        const lastLine = area.value.indexOf("\n", area.selectionEnd) === -1;
+        if (e.key === "ArrowDown" && lastLine && !e.shiftKey) { e.preventDefault(); exitTo("down"); }
+        else if (e.key === "ArrowUp" && firstLine && !e.shiftKey) { e.preventDefault(); exitTo("up"); }
+        else if (e.key === "Backspace" && area.value === "") {
+          e.preventDefault();
+          if (typeof getPos !== "function") return;
+          const pos = getPos();
+          const cur = pos != null ? editor.state.doc.nodeAt(pos) : null;
+          if (!cur) return;
+          const { state, view } = editor;
+          let tr = state.tr.replaceWith(pos, pos + cur.nodeSize, state.schema.nodes.paragraph.create());
+          tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 1)));
+          view.dispatch(tr);
+          view.focus();
+        }
+      };
+      area.addEventListener("keydown", onAreaKey);
       area.addEventListener("input", onAreaInput);
       langInput.addEventListener("input", scheduleWrite);
       dom.addEventListener("bp-flush-node", flushPending);
@@ -381,6 +457,7 @@ export const Code = Node.create({
       // must not snap back to hidden while they are focused, and clearing it while
       // idle must re-hide it once blur+mouseleave settle).
       langInput.addEventListener("input", syncChrome);
+      langInput.addEventListener("input", paintHighlight);
 
       return {
         dom,
@@ -408,6 +485,7 @@ export const Code = Node.create({
 
         destroy: () => {
           if (writeTimer) clearTimeout(writeTimer);
+          area.removeEventListener("keydown", onAreaKey);
           area.removeEventListener("input", onAreaInput);
           langInput.removeEventListener("input", scheduleWrite);
           dom.removeEventListener("bp-flush-node", flushPending);

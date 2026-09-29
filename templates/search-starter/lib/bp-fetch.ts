@@ -1,7 +1,11 @@
 import "server-only";
 import { Agent, fetch as keepAliveFetch } from "undici";
 import { PUBLIC_API_URL, READ_TOKEN } from "./bp-env";
-import { parseRetryAfterMs, retryDelayMs } from "./retry-after";
+import {
+  envelopeRetryAfterMs,
+  parseRetryAfterMs,
+  retryDelayMs,
+} from "./retry-after";
 
 /**
  * Persistent connection pool to the Barkpark API. Without it, every upstream
@@ -104,8 +108,21 @@ export const RETRY_BUDGET = {
   BACKOFF_MS,
   TOTAL_BUDGET_MS,
 } as const;
-/** Upstream statuses that mean "API is bouncing, try again", not "real error". */
-const TRANSIENT_STATUS = new Set([502, 503, 504]);
+/**
+ * Upstream statuses that mean "come back", not "you are wrong".
+ *
+ * 429 IS IN HERE AND IT IS THE POINT OF THIS SET. A rate-limit refusal is a
+ * timed throttle — the shared token bucket is one bucket for the whole fleet,
+ * so a 429 is an ORDINARY event under load, not an outage — and rendering it
+ * as a hard failure paints a blank page over a hold the server told us the
+ * length of. 502/503/504 are the API-restart family this set was written for.
+ */
+const TRANSIENT_STATUS = new Set([429, 502, 503, 504]);
+
+/** The envelope code the API's three rate limiters share. Checked ALONGSIDE
+ * the status because a proxy can rewrite a status and leave the body intact,
+ * and because this is the key `js/packages/core`'s transport already uses. */
+const RATE_LIMITED_CODE = "rate_limited";
 
 /** Bearer header from the server-only token, or `{}` when unset (anonymous). */
 export function authHeaders(): HeadersInit {
@@ -219,10 +236,21 @@ async function attempt(url: string, init: RequestInit): Promise<unknown> {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => "(unreadable body)");
-    // Read the server's own backoff instruction BEFORE classifying: a shed that
-    // says "come back in 12s" is the only party that knows how long its
-    // capacity is committed for (/v1/graph holds a slot for a whole derivation).
-    const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
+    // Read the server's own backoff instruction BEFORE classifying: a shed
+    // that says "come back in 12s" is the only party that knows how long its
+    // capacity is committed for (`/v1/graph` holds a slot for a whole
+    // derivation; a rate limiter holds one for its whole window). Read on BOTH
+    // arms — a definitive answer can carry one too (every 429 does), and
+    // dropping it there is how this class of bug spreads.
+    //
+    // TWO CARRIERS, BODY FIRST. The limiters send the hold as both
+    // `details.retry_after` (seconds, in the envelope) and a `retry-after`
+    // header; `js/packages/core`'s transport prefers the body, and so does
+    // this, so a proxy that strips the header cannot silently downgrade us to
+    // a guess.
+    const retryAfterMs =
+      envelopeRetryAfterMs(detail) ??
+      parseRetryAfterMs(res.headers.get("retry-after"));
     // A non-OK response carrying a parseable JSON {error:…} envelope is a
     // DELIBERATE upstream answer (reindex_failed, 401 unauthorized) — surface its
     // real message and mark it definitive so it is NOT retried. A bodyless/HTML
@@ -265,8 +293,21 @@ async function attempt(url: string, init: RequestInit): Promise<unknown> {
 /** True when an error is worth one more attempt (network/timeout or 5xx-ish).
  * A definitive error (the upstream answered with a real {error:…}) is never
  * retried — retrying a business failure just wastes the restart-window budget. */
+export function isRateLimited(err: unknown): boolean {
+  if (!(err instanceof BpUpstreamError)) return false;
+  return err.status === 429 || err.code === RATE_LIMITED_CODE;
+}
+
 export function isTransient(err: unknown): boolean {
   if (!(err instanceof BpUpstreamError)) return false;
+  // THE ORDER IS THE FIX. A Barkpark 429 ALWAYS arrives as a parseable
+  // `{error:{code:"rate_limited",details:{retry_after}}}` envelope, so
+  // `errorEnvelope` marks it `definitive` and the bail below would swallow it
+  // — putting 429 in TRANSIENT_STATUS alone would change nothing. "Definitive"
+  // means "the upstream answered on purpose", which a throttle also is; what
+  // makes an answer un-retryable is that WAITING CANNOT CHANGE IT, and waiting
+  // is precisely what clears a rate limit. So the throttle is decided first.
+  if (isRateLimited(err)) return true;
   if (err.definitive) return false;
   return err.status === 0 || TRANSIENT_STATUS.has(err.status);
 }

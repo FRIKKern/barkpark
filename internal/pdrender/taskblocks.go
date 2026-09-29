@@ -642,20 +642,48 @@ func detailLabels(t map[string]any, ctx RenderCtx, cw int) []string {
 // → placeholder; empty → "No tasks yet."
 type taskBoardRenderer struct{}
 
-// boardColumns is the board's column ROLES in white-ladder order: the manifest
-// ladder (statusLadder) MINUS `cancel`, which is not a lane — the same seven
-// roles, in the same order, that react's BOARD_ROLES (js/packages/react/src/
-// blocks/taskboard.ts) and Elixir's board_roles/0 (portable_doc/render/
-// components.ex) carry. The header label is DERIVED (the canonical roleLabel,
-// sentence-cased via boardLabel) — NOT a second hardcoded copy (the fold —
-// shares gridblocks.go's roleLabel).
+// cancelRole is the terminal, non-claimable ladder rung. Named once so the lane
+// derivation below reads as a RULE ("move the terminal rung last") rather than as
+// a second hand-typed list.
+const cancelRole = "cancel"
+
+// boardColumns is the board's column ROLES: DERIVED from statusLadder — the
+// design/status-manifest.json roles[] ladder — with `cancel` moved to the END.
+// It is NOT a retyped list: every manifest rung is a lane, in manifest order, so
+// a rung added to the manifest becomes a lane here automatically.
 //
-// The two thought states are load-bearing, not decoration: roleForStatus
-// resolves `considering`/`researching` to roles of their own, and Render
-// collects lanes by iterating boardColumns ALONE, so a role missing here means
-// its rows are silently DROPPED from the board (the row-loss bug tlv-s3 left
-// behind when its file list omitted this file).
-var boardColumns = []string{"open", "ready", "progress", "blocked", "done", "considering", "researching"}
+// Render collects lanes by iterating boardColumns ALONE, so a role missing here
+// means its rows are silently DROPPED from the board. That is exactly what
+// happened to cancelled rows until task-881952f8d8417f4b: boardColumns was a
+// hand-typed seven-role list with `cancel` subtracted, so an abandoned row left
+// the board with no symptom at all — a reader could not tell "no cancelled work"
+// from "this surface does not render cancelled work". The ruling is that `cancel`
+// is its own lane, last and de-emphasised (dim label, see laneBody), carrying the
+// manifest's ✕ — never dropped, and never homed in `open`, which is the CLAIMABLE
+// lane `bp task ready` serves.
+//
+// The header label is DERIVED (the canonical roleLabel, sentence-cased via
+// boardLabel) — NOT a second hardcoded copy (the fold — shares gridblocks.go's
+// roleLabel).
+var boardColumns = boardLaneOrder(statusLadder)
+
+// boardLaneOrder folds a ladder into lane order: every rung in ladder order, with
+// the terminal `cancel` rung moved last. Exported-by-test so a mutation that
+// retypes the lane list beside the manifest (rather than deriving it) reds.
+func boardLaneOrder(ladder []string) []string {
+	out := make([]string, 0, len(ladder))
+	for _, role := range ladder {
+		if role != cancelRole {
+			out = append(out, role)
+		}
+	}
+	for _, role := range ladder {
+		if role == cancelRole {
+			out = append(out, role)
+		}
+	}
+	return out
+}
 
 // boardLabel is a lane's sentence-cased column header, folded from the ONE
 // canonical lowercase label: "in progress" → "In progress".
@@ -728,7 +756,7 @@ func (taskBoardRenderer) Render(b Block, ctx RenderCtx) []string {
 		if len(out) > 0 {
 			out = append(out, "") // rhythm between lanes
 		}
-		out = append(out, ctx.Theme.FieldLabel.Render(ln.label)+"  "+ctx.Theme.Dim.Render(strconv.Itoa(len(ln.rows))))
+		out = append(out, laneLabelStyle(ctx.Theme, ln.role).Render(ln.label)+"  "+ctx.Theme.Dim.Render(strconv.Itoa(len(ln.rows))))
 		for _, r := range ln.rows {
 			out = append(out, boardCardLines(r, ln.role, ctx, w)...)
 		}
@@ -744,12 +772,23 @@ func (taskBoardRenderer) Render(b Block, ctx RenderCtx) []string {
 // FieldLabel, the count dim) then each card via boardCardLines at innerW.
 func laneBody(role, label string, rows []map[string]any, ctx RenderCtx, innerW int) []string {
 	glyph := statusGlyphStyle(ctx.Theme, role).Render(glyphForRole(role))
-	header := glyph + " " + ctx.Theme.FieldLabel.Render(label) + "  " + ctx.Theme.Dim.Render(strconv.Itoa(len(rows)))
+	header := glyph + " " + laneLabelStyle(ctx.Theme, role).Render(label) + "  " + ctx.Theme.Dim.Render(strconv.Itoa(len(rows)))
 	out := wrapLines(header, innerW)
 	for _, r := range rows {
 		out = append(out, boardCardLines(r, role, ctx, innerW)...)
 	}
 	return out
+}
+
+// laneLabelStyle picks a lane header's label style: the terminal `cancel` lane is
+// DE-EMPHASISED (Dim, the same register the count rides) so abandoned work reads
+// as quieter than the live lanes; every other lane keeps FieldLabel. Placement and
+// styling stay decoupled — the lane exists either way, it just does not shout.
+func laneLabelStyle(t Theme, role string) lipgloss.Style {
+	if role == cancelRole {
+		return t.Dim
+	}
+	return t.FieldLabel
 }
 
 // laneBorderColor tints a lane's rounded border by its role, reusing the shared
@@ -1184,6 +1223,36 @@ func distributeSegments(total, n int) []int {
 // unresolvedPlaceholder is the honest degrade line for a task block whose
 // resolver key is absent (only a `query` reached the renderer, or the block is
 // empty): a dim `[<label> — unresolved]`.
+// taskUnavailableTypes are the block types the server marks "unavailable": true
+// when no task resolver is loaded (the Tasks plugin is off) — the Elixir
+// TaskResolver.unavailable_types/0 set: the snapshot types, task-detail, and the
+// aggregate data-viz types (task-6b5fa5205732bd0f, reads the key from #20164).
+var taskUnavailableTypes = map[string]bool{
+	"tasks": true, "task-list": true, "task-board": true, "roadmap": true,
+	"task-detail": true, "chart": true, "heatmap": true, "stat": true,
+}
+
+// taskUnavailableNoteText is the server's wording (Components.task_unavailable_note).
+const taskUnavailableNoteText = "tasks unavailable — the Tasks plugin is not loaded"
+
+// taskBlockUnavailable reports whether b is a task block the server marked
+// unavailable. Only the exact JSON `true` switches it, and only for the marked
+// types — any other block (or the key absent/false) renders exactly as before.
+func taskBlockUnavailable(b Block) bool {
+	if !taskUnavailableTypes[b.Type] || b.Attrs == nil {
+		return false
+	}
+	v, ok := b.Attrs["unavailable"].(bool)
+	return ok && v
+}
+
+// taskUnavailableNote paints "<type> — tasks unavailable — the Tasks plugin is
+// not loaded" as one dim line, so a plugins-off paper never reads as an empty
+// board or an unresolved query.
+func taskUnavailableNote(ctx RenderCtx, blockType string) string {
+	return ctx.Theme.Dim.Render(sanitizeText(blockType) + " — " + taskUnavailableNoteText)
+}
+
 func unresolvedPlaceholder(ctx RenderCtx, label string) string {
 	return ctx.Theme.Dim.Render("[" + label + " — unresolved]")
 }

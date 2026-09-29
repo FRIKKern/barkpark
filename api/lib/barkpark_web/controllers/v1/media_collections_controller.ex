@@ -13,6 +13,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
   alias Barkpark.Media.Delivery.AssetResponse
   alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
   alias BarkparkWeb.Plugs.RequireWritePermission
+  alias BarkparkWeb.ErrorResponse
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -132,6 +133,16 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
     end
   end
 
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def revoke_share(conn, %{"dataset" => dataset, "id" => id}) do
     with :ok <- require_write(conn),
          {:ok, doc} <- Share.revoke(id, dataset, scope_opts(conn)) do
@@ -203,12 +214,9 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
     else
       {:error, :expired} ->
         conn
-        |> put_status(:gone)
-        |> json(%{
-          error: %{
-            code: "share_expired",
-            message: "share link has expired or been revoked"
-          }
+        |> ErrorResponse.emit_fields(:gone, %{
+          code: "share_expired",
+          message: "share link has expired or been revoked"
         })
 
       {:error, :not_found} ->

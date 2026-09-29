@@ -1,0 +1,291 @@
+{
+  "capture_id": "pds-tagregistry-twin-capture-2026-09-10",
+  "captured_at_utc": "2026-09-10T11:11:47.985800Z",
+  "captured_by": "cli-r4-w10",
+  "for_task": "pds-bl-armed-draft-twin-tagregistry",
+  "subject_doc_id": "pds-bl-tagregistry-guard-no-rung",
+  "source": "https://guerrilla.barkpark.cloud",
+  "verdict": "REFUTED AS A LIVE HAZARD. The draft twin drafts.pds-bl-tagregistry-guard-no-rung no longer exists; it was discarded on 2026-09-04T11:08:58.748770Z (revision 42ac8ac0-46e7-4af7-b1e7-7f0059f25322, action discardDraft, rev 491e53bbdb1ac59f0591ccc61f6d9cef -- the exact rev the filing named). The published half is intact and still holds its stamped evidence.",
+  "commands": {
+    "published_half": "curl -s $B/v1/data/doc/production/task/pds-bl-tagregistry-guard-no-rung -H \"Authorization: Bearer $TOK\"",
+    "twin_absence": "curl -s $B/v1/data/doc/production/task/drafts.pds-bl-tagregistry-guard-no-rung -H \"Authorization: Bearer $TOK\"   -> 404 not_found",
+    "absence_control": "curl -s $B/v1/data/doc/production/task/drafts.pds-bl-go-tests-not-required -H \"Authorization: Bearer $TOK\"   -> 200, _draft true (the drafts. address space IS readable; the 404 above is an absence, not an unreadable lens)",
+    "discarded_draft_content": "env -u BARKPARK_TOKEN bp doc revision 42ac8ac0-46e7-4af7-b1e7-7f0059f25322 -o json",
+    "history": "env -u BARKPARK_TOKEN bp doc history task pds-bl-tagregistry-guard-no-rung -o json"
+  },
+  "published_half": {
+    "_id": "pds-bl-tagregistry-guard-no-rung",
+    "_rev": "f45f96e9c0ac474a838a865985b06ebb",
+    "_draft": false,
+    "_createdAt": "2026-07-20T09:59:05.163164Z",
+    "_updatedAt": "2026-09-04T11:11:16.367475Z",
+    "lifecycle_status": "done",
+    "parent_id": "task-2ac1f95237c4a8e5",
+    "assignee": "epic-builder-the-34-rows-that-say-nothing-start-sayin",
+    "claim": {
+      "closed_at": "2026-07-30T19:36:24.506634Z",
+      "closed_by": "epic-builder-the-34-rows-that-say-nothing-start-sayin",
+      "epoch": 2,
+      "ts_iso": "2026-07-30T19:30:34.863234Z",
+      "work_digest": "5b0372060b012429",
+      "work_field_digests": {
+        "acceptance_criteria": "d84c4b86634f163b",
+        "brief": "e02f3e21c4134f8e",
+        "description": "7534b87915e6be79",
+        "title": "395db59718d9cf21"
+      },
+      "worker": "epic-builder-the-34-rows-that-say-nothing-start-sayin"
+    },
+    "criteria_met": 3,
+    "criteria_total": 4,
+    "evidence_bytes_utf8": 1119,
+    "evidence_chars": 1113,
+    "acceptance_criteria": [
+      {
+        "criterion": "A written decision records whether the TagRegistry guard gets its own rung, with the ROSTER DRIFT coupling argument addressed either way. Evidence: the charter decision text.",
+        "evidence": "Verified by content on origin/main @99f713846660eb2701859cc684987c37cd981327: PDS-D187 is written at .claude/workflows/bp-pds-charter.md:1499 \u2014 'THE TAGREGISTRY GUARD GETS NO RUNG; SUITE-ONLY COVERAGE IS THE STANDING POSITION, AND metric IS NOT A COMPARABLE GAP.' The roster-drift coupling is addressed on the record: metric has no writer anywhere in the repository (a live-only orphan declared by no local plugin, D127), so its zero rung coverage reflects an absent writer rather than an audit gap. The decision also corrects this row's own '16 ExUnit tests' figure to 12, with 32 across the three-file gate.",
+        "met": true
+      },
+      {
+        "criterion": "If a rung is added, it exercises tag_registry.ex:126 against a real booted target with a control that has been SHOWN RED, and it does not disturb the 34-row sentinel arithmetic. Evidence: the fail-demo output plus a green run of the existing rungs alongside it.",
+        "evidence": "VACUOUS BY RULING, stated rather than implied: this criterion is conditional ('If a rung is added\u2026') and PDS-D187 rules that NO rung is added, so it does not bind. Nothing was built against it and nothing is being claimed for it \u2014 sentinel_scope_sql at pds-pull-proof.sh:2031 still excludes name IN ('tag','metric') on origin/main @99f713846660eb2701859cc684987c37cd981327.",
+        "met": true
+      },
+      {
+        "attempts": [
+          {
+            "note": "HALF MET, not flipped. The first half is done \u2014 suite-only coverage IS recorded as the standing position in PDS-D187 at charter:1499. The second half ('and every future climb transcript says so') is unverifiable today and undelivered: the harness is frozen, no transcript template on origin/main carries that wording, and a criterion about FUTURE transcripts cannot be proven by a present read. Filed forward in the close reason rather than graded green.",
+            "ts": "2026-07-30T19:36:14.934096Z",
+            "worker": "epic-builder-the-34-rows-that-say-nothing-start-sayin"
+          }
+        ],
+        "criterion": "If no rung is added, the suite-only coverage is recorded as the standing position and every future climb transcript says so. Evidence: the charter decision plus the transcript wording.",
+        "evidence": "",
+        "met": false
+      },
+      {
+        "criterion": "PR merged to main (LEAD closes this criterion on merge).",
+        "evidence": "Merged: git merge-base --is-ancestor bcb0638eb origin/main returns 0 against origin/main @99f713846660eb2701859cc684987c37cd981327.",
+        "met": true
+      }
+    ]
+  },
+  "draft_half_as_discarded": {
+    "revision_id": "42ac8ac0-46e7-4af7-b1e7-7f0059f25322",
+    "action": "discardDraft",
+    "status": "draft",
+    "rev": "491e53bbdb1ac59f0591ccc61f6d9cef",
+    "timestamp": "2026-09-04T11:08:58.748770Z",
+    "lifecycle_status": "open",
+    "parent_id": "task-2ac1f95237c4a8e5",
+    "claim": {
+      "epoch": 2,
+      "expired_at": "2026-07-30T20:14:00.973320Z",
+      "previous_worker": "epic-builder-the-34-rows-that-say-nothing-start-sayin",
+      "ts_iso": "2026-07-30T20:14:00.973320Z",
+      "work_digest": "5b0372060b012429",
+      "work_field_digests": {
+        "acceptance_criteria": "d84c4b86634f163b",
+        "brief": "e02f3e21c4134f8e",
+        "description": "7534b87915e6be79",
+        "title": "395db59718d9cf21"
+      },
+      "worker": null
+    },
+    "criteria_met": 0,
+    "criteria_total": 4,
+    "evidence_bytes_utf8": 0,
+    "acceptance_criteria": [
+      {
+        "criterion": "A written decision records whether the TagRegistry guard gets its own rung, with the ROSTER DRIFT coupling argument addressed either way. Evidence: the charter decision text.",
+        "evidence": "",
+        "met": false
+      },
+      {
+        "criterion": "If a rung is added, it exercises tag_registry.ex:126 against a real booted target with a control that has been SHOWN RED, and it does not disturb the 34-row sentinel arithmetic. Evidence: the fail-demo output plus a green run of the existing rungs alongside it.",
+        "evidence": "",
+        "met": false
+      },
+      {
+        "criterion": "If no rung is added, the suite-only coverage is recorded as the standing position and every future climb transcript says so. Evidence: the charter decision plus the transcript wording.",
+        "evidence": "",
+        "met": false
+      },
+      {
+        "criterion": "PR merged to main (LEAD closes this criterion on merge).",
+        "evidence": "",
+        "met": false
+      }
+    ]
+  },
+  "history": [
+    {
+      "timestamp": "2026-09-04T11:11:16.399823Z",
+      "action": "publish",
+      "status": "published",
+      "rev": "f45f96e9c0ac474a838a865985b06ebb",
+      "id": "8daf9514-e1f6-4e5c-9775-19ded977f7ea"
+    },
+    {
+      "timestamp": "2026-09-04T11:11:13.054997Z",
+      "action": "create",
+      "status": "draft",
+      "rev": "2237b42d4426afeec8b995ec803fbd5f",
+      "id": "18979705-b26d-4b5f-91c8-dfdc783bdcaa"
+    },
+    {
+      "timestamp": "2026-09-04T11:08:58.748770Z",
+      "action": "discardDraft",
+      "status": "draft",
+      "rev": "491e53bbdb1ac59f0591ccc61f6d9cef",
+      "id": "42ac8ac0-46e7-4af7-b1e7-7f0059f25322"
+    },
+    {
+      "timestamp": "2026-07-30T20:14:40.858891Z",
+      "action": "update",
+      "status": "draft",
+      "rev": null,
+      "id": "c3be4b78-8a5a-44bb-afe4-a833a503b4d6"
+    },
+    {
+      "timestamp": "2026-07-30T19:36:45.334290Z",
+      "action": "update",
+      "status": "draft",
+      "rev": null,
+      "id": "c880eb84-5a7f-43c6-89f7-d35f431aa0cc"
+    },
+    {
+      "timestamp": "2026-07-30T19:31:16.136476Z",
+      "action": "update",
+      "status": "draft",
+      "rev": null,
+      "id": "46f3bf9e-7dbb-4cf3-ba3f-17f5f207cea9"
+    },
+    {
+      "timestamp": "2026-07-30T19:30:34.759417Z",
+      "action": "update",
+      "status": "draft",
+      "rev": null,
+      "id": "610fc62e-45a7-4b3b-b54e-ae5234490625"
+    },
+    {
+      "timestamp": "2026-07-30T19:29:55.593636Z",
+      "action": "create",
+      "status": "draft",
+      "rev": null,
+      "id": "e983ce6e-d890-4354-8fa5-55889142dff1"
+    },
+    {
+      "timestamp": "2026-07-30T19:13:42.300169Z",
+      "action": "publish",
+      "status": "published",
+      "rev": null,
+      "id": "cfbe6ec3-891c-4110-9675-69b90c2ce4d6"
+    },
+    {
+      "timestamp": "2026-07-30T19:13:36.053674Z",
+      "action": "create",
+      "status": "draft",
+      "rev": null,
+      "id": "fcbc5df0-f08d-402a-b6eb-2e055e45d112"
+    },
+    {
+      "timestamp": "2026-07-23T06:26:03.923896Z",
+      "action": "publish",
+      "status": "published",
+      "rev": null,
+      "id": "01e04ac9-e12b-4dd3-88d3-caf1997d2a08"
+    },
+    {
+      "timestamp": "2026-07-23T06:26:03.230724Z",
+      "action": "create",
+      "status": "draft",
+      "rev": null,
+      "id": "c2334772-4dff-46ff-9944-c91f1d6afaec"
+    },
+    {
+      "timestamp": "2026-07-23T06:10:24.923766Z",
+      "action": "publish",
+      "status": "published",
+      "rev": null,
+      "id": "472c80df-c85b-4b08-9dc8-fc7a3a48d94b"
+    },
+    {
+      "timestamp": "2026-07-23T06:10:18.813411Z",
+      "action": "create",
+      "status": "draft",
+      "rev": null,
+      "id": "75a786e0-c36b-4447-a49e-5f7f73627393"
+    },
+    {
+      "timestamp": "2026-07-22T16:48:00.885025Z",
+      "action": "publish",
+      "status": "published",
+      "rev": null,
+      "id": "c94d37cd-f937-4f62-9fee-90cec752e943"
+    },
+    {
+      "timestamp": "2026-07-22T16:48:00.642655Z",
+      "action": "create",
+      "status": "draft",
+      "rev": null,
+      "id": "8e88f004-c847-48cf-8431-a008a5c393b2"
+    },
+    {
+      "timestamp": "2026-07-22T16:47:16.536482Z",
+      "action": "publish",
+      "status": "published",
+      "rev": null,
+      "id": "a3ed10ea-c58a-4210-a51f-41a94805ad75"
+    },
+    {
+      "timestamp": "2026-07-22T16:47:16.328359Z",
+      "action": "create",
+      "status": "draft",
+      "rev": null,
+      "id": "74d04aca-0f6a-43a4-95e5-6c9c36d54d4c"
+    },
+    {
+      "timestamp": "2026-07-20T09:59:46.652011Z",
+      "action": "publish",
+      "status": "published",
+      "rev": null,
+      "id": "c9bb954c-759b-4145-ac42-d8854b8bcd4a"
+    },
+    {
+      "timestamp": "2026-07-20T09:59:46.013797Z",
+      "action": "create",
+      "status": "draft",
+      "rev": null,
+      "id": "a58b4536-57ca-4dd2-ba00-db4a00e15a74"
+    },
+    {
+      "timestamp": "2026-07-20T09:59:45.548887Z",
+      "action": "publish",
+      "status": "published",
+      "rev": null,
+      "id": "48c6f5fb-8ba9-44df-80df-7406a9ae7dd7"
+    },
+    {
+      "timestamp": "2026-07-20T09:59:44.961158Z",
+      "action": "create",
+      "status": "draft",
+      "rev": null,
+      "id": "42bfa0f3-d3e4-4f3c-a631-19a8eab96135"
+    },
+    {
+      "timestamp": "2026-07-20T09:59:05.173243Z",
+      "action": "publish",
+      "status": "published",
+      "rev": null,
+      "id": "39fcc014-e764-4ca6-a5b6-f96b930fc236"
+    },
+    {
+      "timestamp": "2026-07-20T09:59:04.833761Z",
+      "action": "create",
+      "status": "draft",
+      "rev": null,
+      "id": "f4d5ce2a-e18f-4f3c-92a4-49e36915e7f4"
+    }
+  ]
+}

@@ -111,19 +111,43 @@
 //  A green run means nothing unless the red is demonstrated.
 //
 //    cp cloud/priv/static/app.css /tmp/app.css.bak
-//    perl -i -pe 's{/\\* REVIEW ADDENDUM}{REVIEW ADDENDUM} if $. == 1029' \
+//    perl -i -pe 's{/\* REVIEW ADDENDUM}{REVIEW ADDENDUM}' \
 //      cloud/priv/static/app.css        # the #4592 defect, byte-for-byte
 //    node cloud/priv/static/__preview__/cssom-parity.mjs   # exit 1, names .modal-root
 //    cp /tmp/app.css.bak cloud/priv/static/app.css         # exit 0 again
 //
+//  THE RECIPE IS CONTENT-KEYED NOW, AND THAT IS THE WHOLE POINT. It read
+//  `s{/\\* REVIEW ADDENDUM}{REVIEW ADDENDUM} if $. == 1029` until cch-w16-s7,
+//  and it was inert TWICE OVER: (1) the `$. == 1029` address had rotted — the
+//  `/* REVIEW ADDENDUM` opener is nowhere near 1029 today; (2) the pattern was
+//  over-escaped (`/\\*` matches a literal backslash plus any char, never `/*`),
+//  so deleting the line address alone STILL edits nothing. Measured on this
+//  tree, md5 of app.css: unedited 2b04636598c3e8331c50a7fb64de0713; after the
+//  verbatim old recipe 2b04636598c3e8331c50a7fb64de0713 (UNCHANGED); after the
+//  old recipe minus `if $.` 2b04636598c3e8331c50a7fb64de0713 (STILL unchanged);
+//  after the form above 748e24aa8207769fb15e3ce88109de05. A mutation proof that
+//  edits zero bytes reports the unmutated file's green as a successful RED.
+//  NO CITATION REGEX COULD EVER HAVE CAUGHT IT: `$. == 1029` is a bare number,
+//  not an `app.css:<n>`-shaped citation, so E11 in __css_check.mjs does not and
+//  cannot see it. This is a HAND repair; the class it belongs to — a line
+//  address inside an executable recipe — has no mechanical detector today.
+//  Re-prove it the way it was caught, never by reading it:
+//    cp cloud/priv/static/app.css /tmp/p.css && md5 -q /tmp/p.css
+//    perl -i -pe 's{/\* REVIEW ADDENDUM}{REVIEW ADDENDUM}' /tmp/p.css
+//    md5 -q /tmp/p.css     # MUST differ; identical means the recipe is inert
+//
 //  Measured: MISSES 0 → 2 (one rule head, two comma fragments of one garbage
-//  run) reporting `app.css:1034  .modal-root   ← SWALLOWED`, then 0 restored.
-//  The same edit at `app.css:3076` (`/* Shown-once`) names `.wh-secret` at
-//  `app.css:3077` — 2047 lines away, and THAT is the whole argument for this
-//  instrument over more photographs: the check is FILE-WIDE, not modal-local.
-//  (GR100 cites 986/3005; #4733's relocation shifted the file. The openers are
-//  unchanged, and GR95 already records this one at :1029. Re-grep before
-//  trusting any line number here — `grep -n 'REVIEW ADDENDUM' app.css`.)
+//  run) reporting `.modal-root   ← SWALLOWED`, then 0 restored.
+//  The same edit at the `/* Shown-once` opener names `.wh-secret` on the line
+//  directly below it — thousands of lines away from the `.modal-root` one, and
+//  THAT is the whole argument for this instrument over more photographs: the
+//  check is FILE-WIDE, not modal-local. Re-derive all three, never quote them:
+//    grep -n 'REVIEW ADDENDUM' app.css
+//    grep -n 'Shown-once' app.css
+//    grep -n '^\.wh-secret [{]' app.css
+//  (GR100 cites 986/3005 and GR95 records 1029; #4733's relocation shifted the
+//  file and every one of those figures is dead. The OPENERS are unchanged — the
+//  anchors above are what survives a relocation, which a line number does not.)
 //
 //  A miss whose text contains `*/` is reported as an ORPHAN-COMMENT SWALLOW
 //  cross-referencing E10 — without that, the miss reads as a nonsense selector
@@ -531,15 +555,38 @@ const atName = (head) => (head.match(/^@([a-zA-Z-]+)/) || [, ""])[1].toLowerCase
 // A "head" is the raw prelude text before a `{` — it may be a comma group, and
 // it may span many lines (40 of them do).
 // `depth` is 0 for a head authored at the top level of the sheet and N for one
-// nested inside N grouping at-rules. It is carried so the TOP-LEVEL duplicate census
+// nested inside N enclosing blocks — a grouping at-rule OR, since CSS nesting is
+// modelled, an enclosing style rule. It is carried so the TOP-LEVEL duplicate census
 // (the population the "6 twice-authored selectors" figure was counted over) can be
 // recomputed rather than remembered — see the census note above topLevelDuplicateHeads().
+//
+// ── WHY THIS DESCENDS INTO STYLE-RULE BODIES (CSS NESTING) ───────────────────
+// It used to `skipBlock` past every style rule's body, so a rule nested inside
+// another rule was authored but never counted. The CSSOM walk has always descended
+// (it recurses on `r.cssRules` for ANY rule that has them), so the two sides
+// disagreed by exactly the number of nested rules — the COUNT SKEW the gate could
+// only ever print. That asymmetry is the reason skew could not be made fatal: the
+// first commit to adopt nesting would have reddened the gate over a parser gap
+// rather than a CSS defect. Modelling it here is what earns the fatal arm below.
+//
+// THE CONTEXT STACK, and why a plain counter will not do. `;` means two different
+// things depending on where it is: at DECLARATION position (inside a style rule) it
+// terminates a declaration and the buffer must be dropped; at PRELUDE position it
+// does NOT end a qualified rule's prelude — CSS error recovery runs on to the next
+// `{`, which is exactly how #4592 swallowed `.modal-root`, and reproducing that
+// faithfully is what keeps the orphan-comment mutation proof honest. So the parser
+// tracks WHAT each open block is, not merely how many are open: `;` clears the
+// buffer only when the innermost open block is a style rule.
 export function authoredHeads(css) {
   const heads = [];
   let i = 0;
   let buf = "";
   let bufStart = 0;
-  let groupDepth = 0;
+  // Innermost-last stack of open blocks: "style" for a style-rule body (declaration
+  // position), "group" for a grouping at-rule (prelude position). Its LENGTH is the
+  // reported depth; its TOP decides what `;` means.
+  const stack = [];
+  const inStyleBody = () => stack[stack.length - 1] === "style";
   // Leading whitespace is never part of a head, and swallowing it here is what
   // makes the reported line the line the DEFECT is on rather than the line the
   // previous rule closed on.
@@ -563,23 +610,38 @@ export function authoredHeads(css) {
       const start = bufStart;
       buf = "";
       if (head.startsWith("@")) {
-        if (GROUPING_AT.has(atName(head))) { groupDepth++; i++; continue; } // descend
-        i = skipBlock(css, i);                                              // opaque — skip
+        if (GROUPING_AT.has(atName(head))) { stack.push("group"); i++; continue; } // descend
+        i = skipBlock(css, i);                                                     // opaque — skip
         continue;
       }
-      if (head !== "") heads.push({ head, index: start, braceIndex: i, depth: groupDepth });
+      if (head !== "") {
+        // `nested` asks whether ANY enclosing block is a style rule, not whether the
+        // INNERMOST one is: a grouping at-rule between a rule and its nested child
+        // (`.kappa { @media … { .lambda {} } }`) does not break the nesting context,
+        // and Chrome serialises `.lambda` there with the same implied `&` it uses one
+        // level up. Keying on the innermost frame instead would have made exactly that
+        // shape read as a miss. See the implied-`&` note in authoredIndex().
+        heads.push({ head, index: start, braceIndex: i, depth: stack.length, nested: stack.includes("style") });
+        // DESCEND rather than skipBlock: the body may itself author style rules
+        // (CSS nesting), and the CSSOM walk counts those. A bare `{` with no
+        // prelude authors no rule and is still skipped wholesale.
+        stack.push("style");
+        i++;
+        continue;
+      }
       i = skipBlock(css, i);
       continue;
     }
-    // Leaving a grouping block. `groupDepth` is floored at 0 rather than allowed to
+    // Leaving a block. The stack is only popped when non-empty rather than allowed to
     // go negative: a malformed sheet with a stray `}` must not make every head after
     // it read as "more top-level than top-level" and silently drop out of the census.
-    if (c === "}") { buf = ""; if (groupDepth > 0) groupDepth--; i++; continue; }
-    // A `;` ends a STATEMENT at-rule (@import, @charset, @layer a, b;). It does
-    // NOT end a qualified rule's prelude — CSS error recovery runs to the next
-    // `{`, which is precisely how #4592 swallowed the rule that followed it, and
-    // reproducing that faithfully is what makes the mutation proof honest.
-    if (c === ";" && buf.trim().startsWith("@")) { buf = ""; i++; continue; }
+    if (c === "}") { buf = ""; if (stack.length) stack.pop(); i++; continue; }
+    // A `;` ends a STATEMENT at-rule (@import, @charset, @layer a, b;) anywhere, and
+    // ends a DECLARATION when the innermost open block is a style rule. It does NOT
+    // end a qualified rule's prelude at prelude position — CSS error recovery runs to
+    // the next `{`, which is precisely how #4592 swallowed the rule that followed it,
+    // and reproducing that faithfully is what makes the mutation proof honest.
+    if (c === ";" && (inStyleBody() || buf.trim().startsWith("@"))) { buf = ""; i++; continue; }
     push(c, i);
     i++;
   }
@@ -713,7 +775,17 @@ export function authoredIndex(css, heads = authoredHeads(css)) {
   for (const h of heads) {
     const where = { head: h.head, line: lineOf(css, h.index), braceLine: lineOf(css, h.braceIndex) };
     for (const sel of splitGroup(h.head)) {
-      const key = normalise(sel);
+      // THE IMPLIED `&`. A relative selector nested inside a style rule may omit the
+      // `&` — `.epsilon { .zeta { … } }` — but Chrome's `selectorText` always
+      // serialises it back with the `&` made explicit, as `& .zeta`. Left alone, the
+      // authored text and the browser's text are different strings for the same rule
+      // and the gate reports a MISS against a selector that is alive: a FALSE
+      // ACCUSATION, which is worse than a blind spot because it gets the gate
+      // disabled. Restoring the `&` here (never in normalise(), which is deliberately
+      // blind to which side it is looking at and would collapse a TOP-LEVEL `.zeta`
+      // into a nested one) puts both sides in the same form for the same reason.
+      const relative = h.nested && !sel.trimStart().startsWith("&") ? `& ${sel.trim()}` : sel;
+      const key = normalise(relative);
       if (!key) continue;
       const rec = authored.get(key);
       // FIRST-WINS IS KEPT FOR THE REPORTED LOCATION and only for that: the head,
@@ -1172,6 +1244,12 @@ async function main() {
         `>> build      ${version.Browser} · node ${process.version}\n` +
         `>> roster     ${sheets.length} sheet(s)\n`,
     );
+    // THE SCOPE OF THIS RUN, PRINTED WITH ITS RESULT (D906). Everything below
+    // is measured in ONE engine. D168 asserted a cross-browser property off a
+    // green like this one and stood for four waves until a hand-driven Firefox
+    // refuted it (D904). browser-axis-census.mjs derives the engine from this
+    // file's own discovery candidates and reds if this line disagrees with them.
+    process.stdout.write(">> browser axis  Blink — 1 of 3 engine families (Blink · Gecko · WebKit). A green here is NOT a cross-browser green.\n");
     for (const s of sheets) {
       process.stdout.write(
         `>> stylesheet ${s.rel} · ${s.bytes} B · sha256 ${s.sha.slice(0, 12)}…` +
@@ -1286,18 +1364,32 @@ async function main() {
         `   MULTISET DEFICITS     ${deficits.length}\n`,
     );
 
-    // Count skew means the parser no longer models the file (CSS nesting, a new
-    // at-rule) — the miss list may then be INCOMPLETE, which is the failure mode
-    // this whole instrument exists to refuse. Advisory, not fatal: it is a fact
-    // about the parser, not about the CSS, and a gate that reds on the wrong
-    // thing gets disabled. Under a real swallow it moves too, and the MISS below
-    // is the signal that decides the exit code.
-    if (s.heads.length !== s.cssom.rules.length) {
-      process.stdout.write(
+    // THE COUNT SKEW — FATAL since the parser learned CSS nesting.
+    //
+    // Skew means the parser no longer models the file, so the miss list below may be
+    // INCOMPLETE — a 0 that has not been earned, which is the exact failure mode this
+    // instrument exists to refuse. It was ADVISORY while the parser could not descend
+    // into style-rule bodies: the first commit to adopt nesting would have reddened the
+    // gate over a parser gap rather than a CSS defect, and a gate that reds on the wrong
+    // thing is disabled within a wave. authoredHeads() now models nesting (see its
+    // header) and every at-rule the roster's sheets actually use — @media descends via
+    // GROUPING_AT, @keyframes/@font-face/@property are opaque on BOTH sides — so the two
+    // counts agree on a clean tree and a skew is once again evidence, not noise.
+    //
+    // It is checked INDEPENDENTLY of `misses`, and that independence is the whole point:
+    // the case worth failing is skew WITH ZERO MISSES and a MATCHING BASELINE, where
+    // every other signal in this file is silent and the run would otherwise print
+    // `PARITY PASS` over a sheet nobody measured. Once `Console gate` is a required
+    // context that is an unproven 0 wearing a required check's name.
+    const countSkew = s.heads.length !== s.cssom.rules.length;
+    if (countSkew) {
+      process.stderr.write(
         `\n!! COUNT SKEW in ${s.id}: ${s.heads.length} authored heads vs ${s.cssom.rules.length} CSSOM rules. Either a rule\n` +
           `   was discarded by the browser (see MISSES), or this parser no longer models\n` +
-          `   ${s.id} (CSS nesting? a new at-rule? add it to GROUPING_AT). If MISSES is 0 while\n` +
-          `   this is non-zero, treat the 0 as UNPROVEN and fix the parser first.\n`,
+          `   ${s.id} (a new at-rule? add it to GROUPING_AT; a nesting form authoredHeads does\n` +
+          `   not descend into?). If MISSES is 0 while this is non-zero, the 0 is UNPROVEN —\n` +
+          `   the parser is reading a different population than the browser, so the diff above\n` +
+          `   is over the wrong set. Fix the parser, do not bump the baseline.\n`,
       );
     }
 
@@ -1360,8 +1452,8 @@ async function main() {
       process.stderr.write("\n");
     }
 
-    if (misses.length === 0 && deficits.length === 0 && !baselineMismatch) {
-      process.stdout.write(`   PASS — every authored selector reached the CSSOM as often as it is authored, count matches baseline\n\n`);
+    if (misses.length === 0 && deficits.length === 0 && !baselineMismatch && !countSkew) {
+      process.stdout.write(`   PASS — every authored selector reached the CSSOM as often as it is authored, count matches baseline and the parser's population matches the browser's\n\n`);
       continue;
     }
     failed++;
@@ -1369,6 +1461,7 @@ async function main() {
     if (misses.length === 0) {
       process.stderr.write(
         `\n   FAIL ${s.id} — ${[
+          countSkew ? `count skew (${s.heads.length} authored vs ${s.cssom.rules.length} CSSOM)` : null,
           baselineMismatch ? "baseline mismatch" : null,
           deficits.length ? `${deficits.length} multiset deficit(s)` : null,
         ]

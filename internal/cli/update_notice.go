@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/mattn/go-isatty"
@@ -37,6 +38,23 @@ const updateCheckInterval = 24 * time.Hour
 // runtime; this is only the final grace.
 const updateFetchWait = 250 * time.Millisecond
 
+// updateRenotifyInterval re-arms a notice for a release we ALREADY announced,
+// when the operator is STILL running an older bp that many days later.
+//
+// Why this exists (pds-bl-bp-search-false-negative): Notified alone pins a
+// release forever, so the announcement is once-EVER per release. If no newer
+// release lands afterwards, an operator who scrolled past that one line — or
+// whose notice was eaten by a --output json run, a non-TTY wrapper, or a
+// pane that had already scrolled — is silently behind FOREVER. That is the
+// exact state six surveyors were in when their bp's refusal copy told them
+// `bp search` did not exist and they fell back to grep. Staleness that
+// PERSISTS gets restated; staleness that is fixed never prints again, because
+// the version comparison below stops matching.
+//
+// It re-arms off the CACHE only: no extra network, no extra latency — the
+// 24h updateCheckInterval still governs every lookup.
+const updateRenotifyInterval = 7 * 24 * time.Hour
+
 // versionShape is the only thing we will ever compare or print as a version.
 // The cache file is user-writable and Latest ultimately derives from a remote
 // redirect — without this gate a hostile/hand-edited value could inject ANSI
@@ -52,17 +70,43 @@ var isStderrTTY = func() bool {
 // updateCheckCache is the on-disk anti-spam state, persisted as
 // update-check.json next to config.json. Notified remembers the last release
 // we announced so each release prints at most once, ever.
+//
+// It holds NO copy of the latest release version: that value lives once, in
+// cli-release-cache.json (see releaseCacheFile), which every network-bearing
+// surface writes and which whoami already reads. What stays here is only what
+// is local to the notice — the ATTEMPT throttle and the announcement pins.
+// Keeping a second copy here let the two drift: `bp upgrade` and
+// `bp doctor --onboarding` refresh the release cache and never touched this
+// file, so the notice and the refusal-time stale-client note went on comparing
+// against a version resolved days earlier (or none at all).
 type updateCheckCache struct {
-	CheckedAt string `json:"checked_at,omitempty"` // RFC3339 of the last network check
-	Latest    string `json:"latest,omitempty"`     // newest cli-v* version seen
-	Notified  string `json:"notified,omitempty"`   // last version announced to the user
+	CheckedAt string `json:"checked_at,omitempty"` // RFC3339 of the last ATTEMPTED lookup (throttle)
+	// Latest is LEGACY: caches written before the version moved to
+	// cli-release-cache.json carry it. It is read once, as a fallback seed, and
+	// never written again — saveUpdateCache drops it, so the first save after
+	// an upgrade retires the redundant copy.
+	Latest     string `json:"latest,omitempty"`
+	Notified   string `json:"notified,omitempty"`    // last version announced to the user
+	NotifiedAt string `json:"notified_at,omitempty"` // RFC3339 of that announcement
+}
+
+// noticeLatest resolves the version the notice compares against: the single
+// source of truth first, the legacy in-file copy only when the release cache
+// has nothing yet (a cache written by an older bp). No TTL — see
+// releaseCacheLatest.
+func noticeLatest(c updateCheckCache) string {
+	if latest := releaseCacheLatest(); latest != "" {
+		return latest
+	}
+	return strings.TrimSpace(c.Latest)
 }
 
 // pendingUpdateCheck carries the in-flight state from startUpdateCheck to
 // finishUpdateNotice. nil means "every gate said no — do nothing at exit".
 type pendingUpdateCheck struct {
-	cache updateCheckCache
-	fetch <-chan string // nil when the cache was fresh (no lookup started)
+	cache  updateCheckCache
+	latest string        // release-cache reading taken at start; "" when unknown
+	fetch  <-chan string // nil when the cache was fresh (no lookup started)
 }
 
 // updateCachePath returns the cache file's absolute path (same dir as
@@ -99,6 +143,8 @@ func loadUpdateCache() updateCheckCache {
 // (read-only home, missing dir) is swallowed — the worst case is a repeat
 // check or a repeat notice, never an error surfaced to the user.
 func saveUpdateCache(c updateCheckCache) {
+	// Never write the legacy version copy back: cli-release-cache.json owns it.
+	c.Latest = ""
 	path, err := updateCachePath()
 	if err != nil {
 		return
@@ -154,7 +200,7 @@ func startUpdateCheck(subcommand string) *pendingUpdateCheck {
 		fresh = since >= 0 && since < updateCheckInterval
 	}
 	if fresh {
-		return &pendingUpdateCheck{cache: cache}
+		return &pendingUpdateCheck{cache: cache, latest: noticeLatest(cache)}
 	}
 
 	// Stamp checked_at NOW and persist immediately — even if the fetch never
@@ -173,17 +219,14 @@ func startUpdateCheck(subcommand string) *pendingUpdateCheck {
 			ch <- ""
 			return
 		}
-		c := loadUpdateCache()
-		c.Latest = latest
-		saveUpdateCache(c)
-		// This background resolve is network-bearing too, so route its result
-		// into the release cache whoami reads its freshness verdict from — any
-		// network-touching invocation refreshes the whoami leg, not just the
-		// doctor. Best-effort: a write failure never blocks the notice.
+		// This background resolve is network-bearing, so it writes the one
+		// store that holds the resolved version — the same file whoami reads
+		// its freshness verdict from, and the same file this notice compares
+		// against. Best-effort: a write failure never blocks the notice.
 		_ = writeReleaseCache(latest)
 		ch <- latest
 	}()
-	return &pendingUpdateCheck{cache: cache, fetch: ch}
+	return &pendingUpdateCheck{cache: cache, latest: noticeLatest(cache), fetch: ch}
 }
 
 // finishUpdateNotice completes the check startUpdateCheck began: collect a
@@ -195,11 +238,17 @@ func finishUpdateNotice(stderr io.Writer, pending *pendingUpdateCheck) {
 		return
 	}
 	cache := pending.cache
+	latest := pending.latest
+	if latest == "" {
+		// A pending built without a reading (or one taken when the release
+		// cache was still cold) still resolves the version the same way.
+		latest = noticeLatest(cache)
+	}
 	if pending.fetch != nil {
 		select {
-		case latest := <-pending.fetch:
-			if latest != "" {
-				cache.Latest = latest
+		case fetched := <-pending.fetch:
+			if fetched != "" {
+				latest = fetched
 			}
 		case <-time.After(updateFetchWait):
 			// Still running — the goroutine will persist for next time.
@@ -210,19 +259,71 @@ func finishUpdateNotice(stderr io.Writer, pending *pendingUpdateCheck) {
 	// announced yet prints one line, then Notified pins it forever. The shape
 	// gate keeps a hand-edited/hostile Latest (ANSI escapes, garbage) out of
 	// both the comparison and the terminal.
-	if cache.Latest == "" || !versionShape.MatchString(cache.Latest) {
+	if latest == "" || !versionShape.MatchString(latest) {
 		return
 	}
-	if cache.Notified == cache.Latest {
+	if cache.Notified == latest && !renotifyDue(cache.NotifiedAt, time.Now()) {
 		return
 	}
-	if compareVersions(cache.Latest, cliVersion) <= 0 {
+	if compareVersions(latest, cliVersion) <= 0 {
 		return
 	}
-	fmt.Fprintf(stderr, "bp %s is available (you run %s) — upgrade: bp upgrade\n", cache.Latest, cliVersion)
-	// Re-load before pinning Notified so we never clobber a fresher Latest
-	// persisted by the goroutine after our snapshot.
+	fmt.Fprintf(stderr, "bp %s is available (you run %s) — upgrade: bp upgrade\n", latest, cliVersion)
+	// Re-load before pinning Notified so we never clobber a Notified persisted
+	// by a concurrent invocation after our snapshot.
 	c := loadUpdateCache()
-	c.Notified = cache.Latest
+	c.Notified = latest
+	c.NotifiedAt = time.Now().UTC().Format(time.RFC3339)
 	saveUpdateCache(c)
+}
+
+// renotifyDue reports whether an already-announced release may be announced
+// again: true once updateRenotifyInterval has elapsed since notifiedAt.
+//
+// An unparseable or EMPTY stamp is due — a cache written before notified_at
+// existed carries a pinned Notified and no timestamp, and treating that as
+// "not due" would keep exactly the operators this row is about permanently
+// silent. A FUTURE stamp (clock skew, hand-edit) is NOT due: the interval has
+// genuinely not elapsed, and re-arming on skew would print every run.
+func renotifyDue(notifiedAt string, now time.Time) bool {
+	t, err := time.Parse(time.RFC3339, notifiedAt)
+	if err != nil {
+		return true
+	}
+	return now.Sub(t) >= updateRenotifyInterval
+}
+
+// staleClientNote returns the ONE line telling a human operator that the bp
+// they are running is behind the newest cli-v* release — or "" when we cannot
+// PROVE it, which is every ambiguous case.
+//
+// This is the refusal-time arm of the same signal finishUpdateNotice prints at
+// exit. The moment a reader is most likely to draw a FALSE conclusion from an
+// old client is the moment that client refuses: `unknown command "search"` is
+// how six independent agents in one wave concluded the verb did not exist and
+// fell back to grep, when in fact dispatch is manifest-driven and the server
+// had declared it all along. A refusal from a client that KNOWS it is behind
+// has to say so.
+//
+// Cost is a single read of the already-persisted cli-release-cache.json: no
+// network, no blocking, correct offline — and, because it reads the same store
+// `bp upgrade` and `bp doctor --onboarding` write, a version those surfaces
+// resolved is visible here immediately. A dev build returns "" (there is no
+// release to compare against — the same verdict `bp whoami` reports as
+// UNREPORTED), as does the BARKPARK_NO_UPDATE_NOTICE kill switch.
+func staleClientNote() string {
+	if cliVersion == "dev" {
+		return ""
+	}
+	if os.Getenv("BARKPARK_NO_UPDATE_NOTICE") != "" {
+		return ""
+	}
+	latest := noticeLatest(loadUpdateCache())
+	if latest == "" || !versionShape.MatchString(latest) {
+		return ""
+	}
+	if compareVersions(latest, cliVersion) <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("note: you are running bp %s; %s is released. an out-of-date bp can refuse a command the server DOES have — re-check with `bp upgrade` before concluding it does not exist.", cliVersion, latest)
 }

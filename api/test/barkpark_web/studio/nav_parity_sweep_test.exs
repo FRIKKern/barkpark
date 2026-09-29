@@ -169,6 +169,15 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       url: {:scoped, "/d/production/studio/_plugins/onixedit/settings"},
       active: "Structure"
     },
+    # The user's own "Your data" page (era-bl-gdpr-selfserve-ui). Same
+    # underscore-reserved segment and same prefix match as `_plugins`, so it
+    # sits in Structure's territory; it has no top-menu tab of its own.
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_account",
+      disposition: :mount,
+      url: {:scoped, "/d/production/studio/_account"},
+      active: "Structure"
+    },
 
     # ── env-gated (mount hard-gates on the enabled? predicate; off in test) ──
     %{route: "/studio/tmux", disposition: :skip_env_gated, gated: :tmux},
@@ -248,11 +257,17 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
 
   setup do
     {:ok, _} =
-      Auth.create_token(@admin_token, "nav parity sweep admin", "production", [
-        "read",
-        "write",
-        "admin"
-      ])
+      Auth.create_token(
+        @admin_token,
+        "nav parity sweep admin",
+        "production",
+        [
+          "read",
+          "write",
+          "admin"
+        ],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     :ok
   end

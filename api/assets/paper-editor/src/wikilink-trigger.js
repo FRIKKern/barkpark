@@ -32,17 +32,56 @@ export function parseOpenWikilink(text, caretOffset) {
   // lastIndexOf gives the NEAREST `[[` before the caret — so a closed `[[x]]`
   // earlier in the line never shadows a later open one.
   const open = before.lastIndexOf("[[");
-  if (open === -1) return null;
+  if (open === -1) return parseOpenMention(before, off);
 
   // Text between the nearest `[[` and the caret. A `]]` (closed), a second `[[`
   // (the query resets to the newer one), or a newline (the `[[` is not a
-  // same-line, unfinished trigger) all mean: do not open.
+  // same-line, unfinished trigger) all mean: no `[[` trigger — an `@` may still be.
   const between = before.slice(open + 2);
   if (between.includes("]]") || between.includes("[[") || between.includes("\n")) {
-    return null;
+    return parseOpenMention(before, off);
   }
 
-  return { query: between, from: open, to: off };
+  return { query: between, from: open, to: off, trigger: "[[" };
+}
+
+// `:` + at least two shortcode chars at a word start opens the emoji picker (GitHub's
+// shorthand). A time (12:30), a URL (http://) or a word containing a colon never
+// opens: the char before the `:` must be the block start or whitespace, and the
+// query is shortcode chars only (letters, digits, _ + -) with no space up to the caret.
+export function parseOpenEmoji(text, caretOffset) {
+  if (typeof text !== "string" || typeof caretOffset !== "number") return null;
+  const off = Math.max(0, Math.min(caretOffset, text.length));
+  const before = text.slice(0, off);
+  const colon = before.lastIndexOf(":");
+  if (colon === -1) return null;
+  if (colon > 0 && !/\s/.test(before[colon - 1])) return null;
+  const query = before.slice(colon + 1);
+  if (query.length < 2 || !/^[A-Za-z0-9_+-]+$/.test(query)) return null;
+  return { query, from: colon, to: off, trigger: ":" };
+}
+
+// The typed span is ":" + query ending at the caret.
+export function emojiReplaceRange(caretPos, query) {
+  const to = typeof caretPos === "number" ? caretPos : 0;
+  const len = typeof query === "string" ? query.length : 0;
+  return { from: Math.max(0, to - len - 1), to };
+}
+
+// `@` is an alias for `[[`: what Notion and Tiptap users reach for to link a page or a
+// person. It opens only where a mention can start — at the block start or after
+// whitespace / an opening bracket — so an address like me@example.com never opens,
+// and the query runs from the `@` to the caret on the same line (a second `@` or a
+// newline closes it). The pick replaces the `@query` span (wikilinkReplaceRange with
+// trigger "@" backs up one char, not two).
+export function parseOpenMention(before, off) {
+  const at = before.lastIndexOf("@");
+  if (at === -1) return null;
+  const prev = at === 0 ? "" : before[at - 1];
+  if (prev !== "" && !/[\s(\[]/.test(prev)) return null;
+  const query = before.slice(at + 1);
+  if (query.includes("\n") || query.includes("@") || query.includes("]]")) return null;
+  return { query, from: at, to: off, trigger: "@" };
 }
 
 /**
@@ -60,10 +99,11 @@ export function parseOpenWikilink(text, caretOffset) {
  * @param {string} query
  * @returns {{from: number, to: number}}
  */
-export function wikilinkReplaceRange(caretPos, query) {
+export function wikilinkReplaceRange(caretPos, query, trigger = "[[") {
   const to = typeof caretPos === "number" ? caretPos : 0;
   const len = typeof query === "string" ? query.length : 0;
-  const from = Math.max(0, to - len - 2);
+  // The typed span is the trigger + the query: two chars for `[[`, one for `@`.
+  const from = Math.max(0, to - len - (trigger === "@" ? 1 : 2));
   return { from, to };
 }
 

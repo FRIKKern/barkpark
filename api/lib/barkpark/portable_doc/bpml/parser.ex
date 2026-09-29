@@ -14,22 +14,28 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "callout" => ~w(id tone title),
     "diagram" => ~w(id caption),
     "route" => ~w(id sport distance elevation duration caption),
-    "code" => ~w(id),
+    # `lang` (code) and `ordered` (ul) are READ by the render side
+    # (components.ex `code_html/2` reads "lang"; compose.ex reads
+    # `Map.get(b, "ordered") == true`) but had no attribute row, so a pull/push
+    # silently dropped a syntax-highlighting language and turned every ORDERED
+    # list into bullets — a visible rewrite of a paper nobody edited
+    # (task-2957c0caa1ffd1b0: both fire on eight-minute-erasure).
+    "code" => ~w(id lang),
     "eyebrow" => ~w(id),
-    "p" => ~w(id),
+    "p" => ~w(id align),
     "pullquote" => ~w(id),
     "ingress" => ~w(id),
     "byline" => ~w(id),
-    "ul" => ~w(id),
+    "ul" => ~w(id ordered),
     "stats" => ~w(id),
     "steps" => ~w(id),
-    "table" => ~w(id),
-    "h1" => ~w(id),
-    "h2" => ~w(id),
-    "h3" => ~w(id),
+    "table" => ~w(id headcol),
+    "h1" => ~w(id align),
+    "h2" => ~w(id align),
+    "h3" => ~w(id align),
     "notes" => ~w(id),
     "note" => ~w(id label lead),
-    "stat" => ~w(label value denom),
+    "stat" => ~w(label value denom verdict),
     # The grid/widget tier (task-3b08cbd8a16ad48e criterion 1) — the corpus's
     # biggest unspellable types and their child elements. `stat` above is
     # SHARED by <stats> and <stat-grid>: the renderer composes both through one
@@ -55,21 +61,30 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "bar-chart" => ~w(id title values),
     "bar" => ~w(label value),
     "lineage" => ~w(id),
-    "lineage-node" => ~w(title overline source),
+    "lineage-node" => ~w(title overline source tone),
     "chart" => ~w(id kind caption min max xlabels),
     "series" => ~w(label),
     "step" => ~w(id title),
     "tag" => ~w(tag strength),
     "item" => [],
-    "li" => [],
+    "li" => ~w(checked),
     "tr" => [],
-    "th" => [],
-    "td" => [],
+    "th" => ~w(align),
+    "td" => ~w(colspan rowspan align),
+    "col" => ~w(type width),
     "meta" => [],
     "description" => [],
     "a" => ~w(href),
     "hr" => ~w(id),
-    "expandable" => ~w(id summary)
+    "expandable" => ~w(id summary),
+    # The flagship taste tier (task-2957c0caa1ffd1b0) — the three types the
+    # SEAL papers use that the kernel could not spell. `<column>` is the
+    # positional child of `<columns>` (the `<slot>` precedent, minus the name),
+    # so it carries no attributes of its own.
+    "figure" => ~w(id caption),
+    "asciicast" => ~w(id src caption poster rows),
+    "columns" => ~w(id),
+    "column" => []
   }
 
   @unknown_tag_hints %{
@@ -88,7 +103,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "strong" => "<strong>/<b> are inline — valid only inside a text-bearing element like <p>"
   }
 
-  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram route stats notes note steps callout hr expandable paper-links cards card slot quote terminal action pipeline stat-grid blockquote toc bar-chart lineage chart)
+  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram route stats notes note steps callout hr expandable paper-links cards card slot quote terminal action pipeline stat-grid blockquote toc bar-chart lineage chart figure asciicast columns column)
 
   @inline_marks %{
     "b" => "strong",
@@ -97,6 +112,9 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "em" => "em",
     "code" => "code",
     "u" => "underline",
+    "mark" => "highlight",
+    "sub" => "sub",
+    "sup" => "sup",
     "s" => "strike"
   }
 
@@ -227,13 +245,16 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     do: text_block("eyebrow", %{"type" => "eyebrow"}, attrs, sc, cur)
 
   defp build_block(<<"h", l>>, attrs, sc, cur) when l in ?1..?3 do
-    base = %{"type" => "heading", "level" => l - ?0}
+    base = %{"type" => "heading", "level" => l - ?0} |> put_attr("align", attrs)
     text_block(<<"h", l>>, base, attrs, sc, cur, "text")
   end
 
   defp build_block("code", attrs, sc, cur) do
     with {:ok, text, cur} <- tag_text("code", sc, cur) do
-      {:ok, %{"type" => "code", "value" => text} |> put_attr("id", attrs), cur}
+      {:ok,
+       %{"type" => "code", "value" => text}
+       |> put_attr("id", attrs)
+       |> put_attr("lang", attrs), cur}
     end
   end
 
@@ -270,7 +291,10 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     type = if tag == "p", do: "paragraph", else: tag
 
     with {:ok, nodes, cur} <- tag_inline(tag, sc, cur) do
-      {:ok, %{"type" => type, "content" => nodes} |> put_attr("id", attrs), cur}
+      block = %{"type" => type, "content" => nodes} |> put_attr("id", attrs)
+      # `align` (center | right) is a paragraph-only attribute; the printer spells it only on <p>.
+      block = if tag == "p", do: put_attr(block, "align", attrs), else: block
+      {:ok, block, cur}
     end
   end
 
@@ -297,8 +321,23 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   defp build_block("ul", attrs, sc, cur) do
     with {:ok, items, cur} <-
-           child_seq("ul", "li", sc, cur, fn _attrs, sc, cur -> tag_inline("li", sc, cur) end) do
-      {:ok, %{"type" => "list", "items" => items} |> put_attr("id", attrs), cur}
+           child_seq("ul", "li", sc, cur, fn li_attrs, sc, cur ->
+             case tag_inline("li", sc, cur) do
+               {:ok, nodes, cur} ->
+                 case List.keyfind(li_attrs, "checked", 0) do
+                   {"checked", v} -> {:ok, %{"content" => nodes, "checked" => v == "true"}, cur}
+                   nil -> {:ok, nodes, cur}
+                 end
+
+               other ->
+                 other
+             end
+           end) do
+      {:ok,
+       %{"type" => "list", "items" => items}
+       |> put_attr("id", attrs)
+       |> put_bool_attr("ordered", attrs)
+       |> put_bool_attr("task", attrs), cur}
     end
   end
 
@@ -586,6 +625,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
           |> put_attr("title", node_attrs)
           |> put_attr("overline", node_attrs)
           |> put_attr("source", node_attrs)
+          |> put_attr("tone", node_attrs)
           |> then(&if body == "", do: &1, else: Map.put(&1, "body", body))
 
         {:ok, node, cur}
@@ -679,13 +719,107 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
+  # `figure` — caption chrome around exactly ONE child block. The body is a
+  # real block list (`block_seq`, as `section`'s is), then the arity is checked:
+  # the stored shape is a SINGULAR `child` map, so zero or two children have no
+  # home and become a teaching error rather than a silently-dropped block. The
+  # printer never emits either, so this only fires on hand-authored BPML.
+  defp build_block("figure", attrs, sc, cur) do
+    l = line(cur)
+
+    if sc do
+      {:skip, [figure_arity_err(0, l)], cur}
+    else
+      {blocks, errors, cur} = block_seq(cur, "figure")
+      {errors, cur} = expect_close("figure", cur, errors)
+
+      case {errors, blocks} do
+        {[], [child]} ->
+          {:ok,
+           %{"type" => "figure", "child" => child}
+           |> put_attr("id", attrs)
+           |> put_attr("caption", attrs), cur}
+
+        {[], others} ->
+          {:skip, [figure_arity_err(length(others), l)], cur}
+
+        {errors, _} ->
+          {:skip, errors, cur}
+      end
+    end
+  end
+
+  # `asciicast` — a terminal recording; the `action` leaf shape (attributes
+  # only, no body). `rows` is an integer player option in the renderer
+  # (compose.ex `asciicast_rows/1` accepts 6..40), so it re-types through
+  # `put_num_attr` and a pull/push does not turn it into a string.
+  defp build_block("asciicast", attrs, _sc, cur) do
+    block =
+      %{"type" => "asciicast"}
+      |> put_attr("id", attrs)
+      |> put_attr("src", attrs)
+      |> put_attr("caption", attrs)
+      |> put_attr("poster", attrs)
+      |> put_num_attr("rows", attrs)
+
+    {:ok, block, cur}
+  end
+
+  # `columns` — each `<column>` is a block list, read back into the stored list
+  # of lists. `<column>` is also a block tag so a column's children recurse
+  # through the same `block_seq` a `section`'s do (the `<slot>` precedent).
+  defp build_block("columns", attrs, sc, cur) do
+    builder = fn _col_attrs, sc, cur ->
+      if sc do
+        {:ok, [], cur}
+      else
+        {blocks, errors, cur} = block_seq(cur, "column")
+
+        case expect_close("column", cur, errors) do
+          {[], cur} -> {:ok, blocks, cur}
+          {errors, cur} -> {:error, errors, cur}
+        end
+      end
+    end
+
+    with {:ok, cols, cur} <- child_seq("columns", "column", sc, cur, builder) do
+      {:ok, %{"type" => "columns", "columns" => cols} |> put_attr("id", attrs), cur}
+    end
+  end
+
+  # A bare `<column>` outside a `<columns>` is a shape error, not a block — the
+  # `<slot>` rule verbatim: it is in `@known_block_tags` only so a column's own
+  # children parse through `block_seq`.
+  defp build_block("column", _attrs, sc, cur) do
+    {:skip,
+     [
+       err(
+         "orphan-column",
+         "<column> is valid only inside <columns>",
+         line(cur),
+         "wrap it: <columns><column>…</column></columns>"
+       )
+     ], consume_element("column", sc, cur)}
+  end
+
   defp build_block("table", attrs, sc, cur) do
-    with {:ok, {head, rows}, cur} <- table_rows(sc, cur) do
+    with {:ok, {head, rows, cols}, cur} <- table_rows(sc, cur) do
+      # Merged cells (Barkdown plan #24): a <td colspan/rowspan> is the origin of a span; the
+      # cells it covers are printed as empty <td>s, so the grid stays rectangular.
+      {rows, spans} = table_split_spans(rows)
+
       block =
         %{"type" => "table"}
         |> put_attr("id", attrs)
         |> then(&if head == [], do: &1, else: Map.put(&1, "head", head))
         |> Map.put("rows", rows)
+        |> then(&if spans == [], do: &1, else: Map.put(&1, "spans", spans))
+        |> then(&if cols == [], do: &1, else: Map.put(&1, "cols", cols))
+        |> then(
+          &if List.keyfind(attrs, "headcol", 0) == {"headcol", "true"},
+            do: Map.put(&1, "headCol", true),
+            else: &1
+        )
 
       {:ok, block, cur}
     end
@@ -714,6 +848,15 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
+  defp figure_arity_err(n, l),
+    do:
+      err(
+        "figure-arity",
+        "<figure> holds exactly one child block, found #{n}",
+        l,
+        "wrap one block: <figure caption=\"…\"><diagram>…</diagram></figure>"
+      )
+
   # ── shared block shapes ─────────────────────────────────────────────────────
 
   defp text_block(tag, base, attrs, sc, cur, key \\ "text") do
@@ -731,6 +874,12 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   # one element spells both. The grid's `caption`/`note` are NOT in this row:
   # widening it changes the published /v1/capabilities grammar digest, so the
   # printer refuses an item carrying them rather than dropping them silently.
+  #
+  # `verdict` IS in the row (task-8bdef19b5acef8a8): the render leg
+  # (render/data_viz.ex `stat_html/1` → `.bp-stat__v--loss` / `--peace`) and the
+  # JS mirror both read it, so a stat that lost it on a BPML round-trip came back
+  # with its digits repainted `--paper-ink` and no error. Adding it MOVES the
+  # /v1/capabilities grammar digest on purpose — that is this row's decision.
   defp stat_item_builder(stat_attrs, sc, cur) do
     with {:ok, body, cur} <- tag_text("stat", sc, cur) do
       item =
@@ -738,6 +887,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         |> put_attr("value", stat_attrs)
         |> put_attr("label", stat_attrs)
         |> put_attr("denom", stat_attrs)
+        |> put_attr("verdict", stat_attrs)
         |> then(&if body == "", do: &1, else: Map.put(&1, "body", body))
 
       {:ok, item, cur}
@@ -992,11 +1142,11 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
-  defp table_rows(true, cur), do: {:ok, {[], []}, cur}
+  defp table_rows(true, cur), do: {:ok, {[], [], []}, cur}
 
-  defp table_rows(false, cur), do: table_rows_loop(cur, [], [], [])
+  defp table_rows(false, cur), do: table_rows_loop(cur, [], [], [], [])
 
-  defp table_rows_loop(cur, head, rows, errors) do
+  defp table_rows_loop(cur, head, rows, errors, cols) do
     cur = skip_ws(cur)
 
     case peek(cur) do
@@ -1004,15 +1154,38 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         {errors, cur} = expect_close("table", cur, errors)
 
         if errors == [] do
-          {:ok, {Enum.reverse(head), Enum.reverse(rows)}, cur}
+          {:ok, {Enum.reverse(head), Enum.reverse(rows), Enum.reverse(cols)}, cur}
         else
           {:skip, errors, cur}
         end
 
       :tag ->
         case open_tag(cur) do
-          {:error, e} -> table_rows_loop(skip_to_next_tag(cur), head, rows, [e | errors])
-          {:ok, tag, _attrs, sc, cur2} -> table_row(cur, cur2, tag, sc, head, rows, errors)
+          {:error, e} ->
+            table_rows_loop(skip_to_next_tag(cur), head, rows, [e | errors], cols)
+
+          {:ok, "col", attrs, true, cur2} ->
+            # A column line: type (num | delta | spark) and/or a width in px (plan #25).
+            col =
+              %{}
+              |> put_attr("type", attrs)
+              |> then(fn m ->
+                case List.keyfind(attrs, "width", 0) do
+                  {"width", v} ->
+                    case Integer.parse(v) do
+                      {n, ""} when n > 0 -> Map.put(m, "width", n)
+                      _ -> m
+                    end
+
+                  nil ->
+                    m
+                end
+              end)
+
+            table_rows_loop(cur2, head, rows, errors, [col | cols])
+
+          {:ok, tag, _attrs, sc, cur2} ->
+            table_row(cur, cur2, tag, sc, head, rows, errors, cols)
         end
 
       _ ->
@@ -1022,17 +1195,17 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
-  defp table_row(cur, cur2, tag, sc, head, rows, errors) do
+  defp table_row(cur, cur2, tag, sc, head, rows, errors, cols) do
     if tag == "tr" and not sc do
       case row_cells(cur2, cur) do
         {:ok, {:head, cells}, cur3} ->
-          table_rows_loop(cur3, Enum.reverse(cells) ++ head, rows, errors)
+          table_rows_loop(cur3, Enum.reverse(cells) ++ head, rows, errors, cols)
 
         {:ok, {:body, cells}, cur3} ->
-          table_rows_loop(cur3, head, [cells | rows], errors)
+          table_rows_loop(cur3, head, [cells | rows], errors, cols)
 
         {:skip, es, cur3} ->
-          table_rows_loop(cur3, head, rows, es ++ errors)
+          table_rows_loop(cur3, head, rows, es ++ errors, cols)
       end
     else
       e =
@@ -1043,7 +1216,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
           "wrap cells in <tr>…</tr>"
         )
 
-      table_rows_loop(consume_element(tag, sc, cur2), head, rows, [e | errors])
+      table_rows_loop(consume_element(tag, sc, cur2), head, rows, [e | errors], cols)
     end
   end
 
@@ -1073,7 +1246,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
       :tag ->
         case open_tag(cur) do
           {:error, e} -> {:skip, [e], consume_until_close("tr", skip_to_next_tag(cur))}
-          {:ok, tag, _attrs, sc, cur2} -> row_cell(cur, cur2, tag, sc, at, kind, cells)
+          {:ok, tag, attrs, sc, cur2} -> row_cell(cur, cur2, tag, attrs, sc, at, kind, cells)
         end
 
       _ ->
@@ -1081,7 +1254,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
-  defp row_cell(cur, cur2, tag, sc, at, kind, cells) do
+  defp row_cell(cur, cur2, tag, attrs, sc, at, kind, cells) do
     case {tag, kind} do
       # Head cells parse as INLINE content and emit inline-node lists — the
       # write chokepoint's canonical head-cell shape, so blocks fetched from
@@ -1089,14 +1262,20 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
       # printer-input shape only).
       {"th", k} when k in [nil, :head] ->
         case tag_inline("th", sc, cur2) do
-          {:ok, nodes, cur3} -> row_cells_loop(cur3, at, :head, [nodes | cells])
-          {:skip, es, cur3} -> {:skip, es, consume_until_close("tr", cur3)}
+          {:ok, nodes, cur3} ->
+            row_cells_loop(cur3, at, :head, [aligned_cell(nodes, attrs) | cells])
+
+          {:skip, es, cur3} ->
+            {:skip, es, consume_until_close("tr", cur3)}
         end
 
       {"td", k} when k in [nil, :body] ->
         case tag_inline("td", sc, cur2) do
-          {:ok, nodes, cur3} -> row_cells_loop(cur3, at, :body, [nodes | cells])
-          {:skip, es, cur3} -> {:skip, es, consume_until_close("tr", cur3)}
+          {:ok, nodes, cur3} ->
+            row_cells_loop(cur3, at, :body, [td_cell(aligned_cell(nodes, attrs), attrs) | cells])
+
+          {:skip, es, cur3} ->
+            {:skip, es, consume_until_close("tr", cur3)}
         end
 
       {t, _} when t in ["th", "td"] ->
@@ -1227,6 +1406,35 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   defp attrs_hint([]), do: "(no attributes)"
   defp attrs_hint(allowed), do: Enum.join(allowed, ", ")
+
+  # A <td colspan="2" rowspan="3"> is the origin of a merged cell (plan #24); a plain <td> is its
+  # inline nodes. An attribute that is not an integer above 1 is read as absent.
+  defp td_cell(nodes, attrs) do
+    cs = td_span_attr(attrs, "colspan")
+    rs = td_span_attr(attrs, "rowspan")
+    if cs > 1 or rs > 1, do: {:span, nodes, cs, rs}, else: nodes
+  end
+
+  # `align="center|right"` makes the cell a content-map (plan #26); anything else leaves the list.
+  defp aligned_cell(nodes, attrs) do
+    case List.keyfind(attrs, "align", 0) do
+      {"align", a} when a in ["center", "right"] -> %{"content" => nodes, "align" => a}
+      _ -> nodes
+    end
+  end
+
+  defp td_span_attr(attrs, key) do
+    case List.keyfind(attrs, key, 0) do
+      {^key, v} ->
+        case Integer.parse(v) do
+          {n, ""} when n > 1 -> n
+          _ -> 1
+        end
+
+      nil ->
+        1
+    end
+  end
 
   defp put_attr(map, key, attrs) do
     case List.keyfind(attrs, key, 0) do
@@ -1497,5 +1705,28 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   defp advance_one({<<_::utf8, rest::binary>>, ln}), do: {rest, ln}
   defp advance_one(cur), do: cur
 
+  # Body rows arrive as lists of cells, a spanning cell as {:span, nodes, colspan, rowspan}.
   defp err(code, message, line, hint), do: %{code: code, message: message, line: line, hint: hint}
+
+  defp table_split_spans(rows) do
+    {rows, spans} =
+      rows
+      |> Enum.with_index()
+      |> Enum.map_reduce([], fn {cells, r}, acc ->
+        {plain, acc} =
+          cells
+          |> Enum.with_index()
+          |> Enum.map_reduce(acc, fn
+            {{:span, nodes, cs, rs}, c}, acc ->
+              {nodes, [%{"row" => r, "col" => c, "colspan" => cs, "rowspan" => rs} | acc]}
+
+            {nodes, _c}, acc ->
+              {nodes, acc}
+          end)
+
+        {plain, acc}
+      end)
+
+    {rows, Enum.reverse(spans)}
+  end
 end

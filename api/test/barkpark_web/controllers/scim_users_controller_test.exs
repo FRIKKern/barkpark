@@ -249,8 +249,9 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
 
   # A raw path `:id` reaches `member_of_org?`, binding to Membership.principal_id
   # (and User.id) — both `:binary_id`. Before the guard a non-UUID id raised
-  # Ecto.CastError → HTTP 500; now it folds into the not_found branch → SCIM 404.
-  describe "malformed id → 404, not 500 (Ecto.CastError #672 class)" do
+  # Ecto.Query.CastError → an opaque HTTP 400; now it folds into the not_found
+  # branch → SCIM 404.
+  describe "malformed id → 404, not an opaque 400 (Ecto.Query.CastError #672 class)" do
     test "GET /scim/v2/Users/:id with a non-UUID id → 404 (never a 500)" do
       %{token: token} = org_with_ws("usr-cast")
       assert scim(token) |> get("/scim/v2/Users/not-a-uuid") |> json_response(404)

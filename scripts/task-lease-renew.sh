@@ -114,6 +114,19 @@ note() { echo "task-lease-renew: $*"; }
 notice() { echo "::notice title=Task lease renew::task-lease-renew: $*"; }
 warn()   { echo "::warning title=Task lease UNCHECKED::task-lease-renew: $*" >&2; }
 die2()   { echo "task-lease-renew: CANNOT MEASURE — $*" >&2; exit 2; }
+
+# ── 429 backoff — ONE helper, shared (task-ca8fffa7ca885413) ─────────────────
+# A ledger 429 is BACKPRESSURE, not a fault: scripts/lib/bp-curl.sh sleeps the
+# retry_after the RESPONSE names (bounded), then hands back the final code.
+# Loaded lazily on the first live call so a scratch copy of this script run from
+# a temp dir (the harness's mutants) never reaches it through the fixture door.
+BP_CURL_LIB="${BP_CURL_LIB:-$ROOT/scripts/lib/bp-curl.sh}"
+bp_curl_load() {
+  [ -n "${BP_CURL_LOADED:-}" ] && return 0
+  [ -f "$BP_CURL_LIB" ] || die2 "CANNOT READ ${BP_CURL_LIB} — the shared 429 backoff every ledger call rides is missing"
+  # shellcheck disable=SC1090
+  . "$BP_CURL_LIB"; BP_CURL_LOADED=1
+}
 # The ONE loud arm. `::error` so it lifts into the check-run UI rather than
 # dying in a log nobody opens, and it names the secret because a re-run cannot
 # clear a refused credential.
@@ -262,23 +275,29 @@ fi
 # The token is passed as a header value and is never echoed, never in a URL.
 post_renew() { # -> echoes an HTTP-ish code, body lands in $BODYF
   : > "$BODYF"
-  curl -sS --max-time 20 -o "$BODYF" -w '%{http_code}' \
+  bp_curl_load
+  bp_curl_code -sS --max-time 20 -o "$BODYF" \
     -X POST "${LEDGER_BASE%/}/v1/tasks/${TASK_ID}/renew" \
     -H "Authorization: Bearer ${LEDGER_TOKEN}" \
     -H "Content-Type: application/json" \
-    --data-binary "@${REQF}" 2>/dev/null || echo 000
+    --data-binary "@${REQF}" || echo 000
+  # stderr is NOT discarded any more: bp-curl's "waiting Ns (the server asked
+  # for it)" and BP-CURL-RATE-LIMITED lines are the audit trail of a 429.
 }
 
 # Bounded retry with backoff. 5xx and 000 (timeout / connection failure) are
 # transient; every decided answer — including 401/403 — is terminal, because
-# retrying a refused credential only multiplies the log.
+# retrying a refused credential only multiplies the log. 429 is terminal HERE
+# because bp_curl_code already slept the server's own retry_after (bounded);
+# a 429 that survives that is a quota, and this ladder's fixed delays would
+# be exactly the hardcoded sleep the helper exists to replace.
 CODE=""
 attempt=1
 delay="$RETRY_DELAY"
 while :; do
   CODE="$(post_renew)"
   case "$CODE" in
-    2??|400|401|403|404|409|412|422) break ;;
+    2??|400|401|403|404|409|412|422|429) break ;;
   esac
   if [ "$attempt" -ge "$RETRIES" ]; then break; fi
   note "ledger answered ${CODE} — retry ${attempt}/${RETRIES} in ${delay}s"
@@ -321,6 +340,9 @@ case "$CODE" in
     exit 0 ;;
   401|403)
     die_auth "$CODE" "$TASK_ID" ;;
+  429)
+    warn "the ledger is rate limiting this run (HTTP 429) and the bounded backoff in scripts/lib/bp-curl.sh was spent, so the claim on ${TASK_ID} was not extended and lapses on the normal lease. Backpressure, not a finding about this PR."
+    exit 0 ;;
   400|412|422)
     warn "the ledger refused the renew body for ${TASK_ID} with HTTP ${CODE}$( [ -n "$(read_field reason)" ] && printf ' (%s)' "$(read_field reason)" ). The lease was NOT extended. This is a contract mismatch between this script and /v1/tasks/:doc_id/renew, not a finding about the PR."
     exit 0 ;;

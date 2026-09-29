@@ -110,3 +110,40 @@ OK — every (query, engine) hit set matches parity-baseline.json. Parity holds.
 Build against guerrilla (or your own box) first — `cp .env.example .env`,
 `npm install`, `npm run build` — so the deploy under test is real; then run the
 two commands above. Same query → same hits, both engines: signed off.
+
+## …and that the island actually RENDERS (`render-smoke`)
+
+`parity-check` compares query **results**. It never opens a page. That blind
+spot is not hypothetical: the blank-on-keystroke bug shipped green because the
+route answered perfectly while the island threw the moment a visitor typed.
+
+`scripts/render-smoke.mjs` is the other half. It starts a stub Barkpark on
+loopback, **builds the site against that origin** (so every call the island
+makes is same-origin — the interceptor's API origin is baked at build), serves
+`dist/` from the same server, and drives headless chromium through four beats:
+
+| beat | asserts |
+|---|---|
+| `LAND` | the island hydrates: ≥1 `[data-nav-result]`, no `[data-search-error]` |
+| `ONE` | a **one-character** query still renders rows — the first keystroke is where the historic defect fired |
+| `MULTI` | a **multi-character** query still renders rows |
+| `CLEAN` | zero uncaught pageerrors and zero `console.error` |
+
+```
+node scripts/render-smoke.mjs            # build + serve + smoke
+node scripts/render-smoke.mjs --no-build  # reuse an existing dist/
+```
+
+Exit `0` every beat passed · `1` a beat FAILED (the finder is broken) · `2`
+CANNOT MEASURE (no chromium, build failed, port taken) — never reported as a
+pass. Playwright is resolved from `BP_PLAYWRIGHT`, the repo's `js/node_modules`,
+a bare specifier, or the global root; it is deliberately **not** a dependency of
+this template, so scaffolding a site from it does not pull a browser.
+
+The API half is a **stub** (`scripts/smoke-stub-api.mjs`), not a proxy to a live
+instance — this gate must say one thing, about the diff, every time. The cost is
+stated where it lives: this harness can never catch an API contract drift. That
+claim stays `parity-check`'s.
+
+CI: `.github/workflows/astro-finder-render-smoke.yml`, **advisory** (it reds the
+PR page; it is not in `.github/required-checks.json`).

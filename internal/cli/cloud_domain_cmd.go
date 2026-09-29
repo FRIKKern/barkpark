@@ -21,7 +21,9 @@ package cli
 //     contract), and the exit code follows the verdict (0 only when every host
 //     is serving), so `bp cloud domain status prod && …` is a real gate;
 //   - an auth-expired / gateway failure routes through cloudFail so auth
-//     handling is identical to every other cloud verb.
+//     handling is identical to every other cloud verb, and every other refusal
+//     exits by the shared #11784 status-family ladder (siteRefusalFail) so a
+//     script can tell a missing instance from a plane that fell over.
 
 import (
 	"encoding/json"
@@ -112,7 +114,15 @@ func runCloudDomainStatus(out *writer, g globals, args []string) int {
 
 	res, derr := cfg.CloudClient().DomainStatus(cloudCtx(), id)
 	if derr != nil {
-		return cloudFail(out, "domain status", derr)
+		// The SUCCESS path has been a real gate since this verb shipped
+		// (domainStatusExit: 0 only when every rung of every host is ok). The
+		// refusal arm was the half that flattened — every non-401 exited 1 — so
+		// `bp cloud domain status prod && deploy` could not tell a deleted
+		// instance from a plane that fell over. It rides the ONE #11784 ladder
+		// (siteRefusalFail, cloud_site_cmd.go) rather than minting a second
+		// dialect; 401 still falls through to cloudFail, so the "session expired?
+		// run `bp login` again" sentence is unchanged.
+		return siteRefusalFail(out, siteRefusedDomainStatus, ref, derr)
 	}
 
 	if out.output == "json" || out.output == "yaml" {

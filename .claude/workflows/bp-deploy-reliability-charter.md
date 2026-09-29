@@ -133,8 +133,14 @@ deployments, 17,171 failed, **65.0% lifetime / 87.3% over 7d**. Four sites — `
 
 - **D17 — Any change to `public_read.ex` or the graph admission path is HUMAN-GATED with a NAMED
   independent reviewer, and co-merges its leak-still-closed mutation proof.** *Why:* site-spawner
-  **D106** rules exactly this by name for these two files, and states that the clamp shipped without
-  its companion fix was "a FALSE CLAIM". This epic inherits that precedent rather than re-litigating it.
+  charter **D106** (`.claude/workflows/bp-cloud-site-spawner-charter.md`, "WIDENS THE FENCE BY NAME for
+  the D83 clamp") rules exactly this by name for these two files, and states that the clamp shipped
+  without its companion fix was "a FALSE CLAIM". This epic inherits that precedent rather than
+  re-litigating it. *(Rider 2026-09-17, `dr-w35-bl-charter-d106-phantom`: the qualifier "site-spawner"
+  wraps to the END of the previous line, so a line-local `grep -n D106` over THIS file loses it and reads
+  this as an intra-charter citation. It never was one. The cited text is verified present and verbatim at
+  `bp-cloud-site-spawner-charter.md` D106 — both filenames IN by name, and "Shipped alone, the clamp is a
+  FALSE CLAIM". This charter has no D106 of its own and never had one; see the riders on D169 and D594.)*
 
 - **D18 — Respect cloud-console-hardening's live fences.** *Why:* cch wave 31 decided 2026-08-05 and
   is unmerged: its s1/s8 own `cloud/.../web/router.ex` and its s7 owns `registry.ex`. Regions are
@@ -768,7 +774,14 @@ otherwise re-derive the same wrong premise from the same wish.
   (build processes held ~9 MB of swap while the box held 2,160 MB). **`MemoryHigh` on `barkpark.service`
   is the real fix and this wave DOES NOT SET IT** — `:erlang.memory()` could not be read (epmd empty,
   `bin/barkpark` has no `rpc` verb), so WHICH subsystem grows is UNPROVEN, and a guessed threshold trades
-  periodic OOM kills for permanent reclaim stalls (PSI memory `full avg10` is already 4.46). This wave
+  periodic OOM kills for permanent reclaim stalls (PSI memory `full avg10` is already 4.46 —
+  **CORRECTED 2026-09-16, `dr-bl-w6-memoryswapmax-not-memoryhigh`: the figure is 0.60, not 4.46.**
+  Re-measured on guerrilla: `/proc/pressure/memory` `full avg10=0.60 avg60=0.58 avg300=0.63`
+  (`some avg10=3.42`). Memory pressure on that box is BURSTY, not sustained; the sustained
+  pressure is CPU (`/proc/pressure/cpu some avg300=74.01`). Do not re-quote 4.46. The sentence's
+  CONCLUSION — that a guessed threshold trades kills for stalls — survives the correction; only
+  its magnitude was wrong, and it was wrong in the direction that made the argument look
+  stronger than the box supports). This wave
   ships the MEASUREMENT (`beam_pss_bytes`, `beam_swap_bytes` from `/proc`); the bound is filed.
 
 - **D40 — `attentionStatus()` IS BLIND TO PRESSURE, RE-PROVED BY RUN, AND THAT IS THE OWNER'S ACTUAL
@@ -1720,11 +1733,31 @@ rather than a remembered sentence: `vm_memory_total` 560.7 MB against a same-min
 `beam_swap` 630.3 MB = 1,508.9 MB, a **948 MB / 2.69× gap**, with PSS corroborated against
 `/proc/<pid>/smaps_rollup` inside 2% — so a bound read off `:erlang.memory()` would sit ~2.6× below the
 2.98–3.30 GB anon-rss the kernel has actually been reaping (32 of 32 OOM victims are `beam.smp`, two of
-them today, on a unit with `MemoryHigh=infinity`). The correct input is PSS+swap or, better, the per-slot
+them today, on a unit with `MemoryHigh=infinity`). **CORRECTED 2026-09-16,
+`dr-bl-w6-memoryswapmax-not-memoryhigh`: the census is 32-of-33, not 32-of-32.** The 30-day window
+holds 33 kills, and the 33rd is `bp-oom-probe-B.service` — our OWN memcg probe, deliberately killed
+inside its own cgroup. Quoting 32-of-32 launders a probe we fired into a perfect record we
+observed; the beam share is 97.0%, not 100%. **CORROBORATION STAMPED 2026-09-20,
+`dr-bl-w6-memoryswapmax-not-memoryhigh` c3:** the 32-of-32 claim was refutable by this repo's OWN committed
+evidence six weeks before anyone corrected it — `tooling/grip/ledger/beam-bound-inputs-2026-08-06.md:56`
+records *"32 beam.smp + 1 python3"*, i.e. 33 kills with a non-beam 33rd, dated 2026-08-06. The census was
+never 32-of-32 in any window we measured; the denominator was dropped in the retelling, not in the reading. Every `beam.smp` kill remains `global_oom` /
+`CONSTRAINT_NONE` with `task_memcg` = a `barkpark-slot` unit, so the reading the sentence rests on
+is unchanged. The correct input is PSS+swap or, better, the per-slot
 cgroup `MemoryPeak`/`MemorySwapPeak` systemd already keeps — **and a prerequisite nobody had named is now
 filed: the agent's `findBeamPID` returns the LEXICALLY FIRST `/proc` entry named `beam.smp`, so across a
 blue/green cutover (8m30s of overlap today) the `beam_*` series silently changes process, in violation of
-the standing `pds-w11-paired-control-measure` ruling to sample ALL slots and report the MAX.** The pool
+the standing `pds-w11-paired-control-measure` ruling to sample ALL slots and report the MAX.**
+**CORRECTED 2026-09-16, `dr-bl-w6-memoryswapmax-not-memoryhigh`: the beam-PID pin was never a
+prerequisite for the BOUND, and later waves read this paragraph as if it were.** The two clauses above
+are about different inputs and only one of them needs the pin. The cgroup counters are PER SLOT by
+construction and PID-agnostic — a bound derived from them is unaffected by which `beam.smp` the agent
+happens to find. The pin is a prerequisite for the `beam_*` TIME SERIES being trustworthy across a
+cutover (worth doing, taken in `dr-w6-s4-space-reaches-eyes`); it is not one for `MemoryHigh`. Whatever
+keeps `MemoryHigh` parked, it is not this — waiting on the pin waits for nothing. The peaks themselves
+have a REAL prerequisite, and it is a different one: they reset per unit invocation and read 0 on a
+stopped unit, so they must be sampled and PERSISTED or a census silently loses every restarted slot
+(`deploy/slot-memory-peaks.sh`). The pool
 partition stays with `jpf-bl-oban-pool-partition` (D28, D65, D75). Disk RECLAMATION stays with
 `jpf-runtime-image-pruning` — this wave makes jarl's 25 GB VISIBLE and NAMED (D69, D71) and deletes
 nothing. `db_unavailable` on the wire is filed, not built: `errors.ex:205-209` shows a new code drags the
@@ -2085,8 +2118,13 @@ cgroup counters, which are PID-agnostic, so it never depended on the beam-PID pi
 **`MemorySwapMax`** (live: the green slot holds 1,307 MB of the box's 1,956 MB of used swap and swapped out
 114 MB in two minutes; `MemorySwapPeak` 1,332.6 MB), and the real unbuilt prerequisites are persisting
 per-slot swap peaks across restarts (systemd resets them) and choosing unit-vs-slice placement. Filed, not
-taken. Also filed: PSI `memory-full avg10` measured **0.60**, not the 4.46 this charter has been quoting —
-do not re-quote it.
+taken. Also filed: PSI `memory-full avg10` measured **0.60** on guerrilla 2026-09-16, read from
+`/proc/pressure/memory` (`full avg10=0.60 avg60=0.58 avg300=0.63`, `some avg10=3.42`) — not the 4.46 this
+charter has been quoting; do not re-quote it. **DERIVATION STAMPED 2026-09-20,
+`dr-bl-w6-memoryswapmax-not-memoryhigh` c3:** this sentence carried the corrected figure with no date and
+no box, which is the exact shape that let 4.46 spread in the first place. A PSI `avg10` is a ten-second
+rolling average; quoted bare it is indistinguishable from a fresh reading, so every re-use of 0.60 must
+carry this date and this box or be re-measured.
 
 ---
 
@@ -3447,10 +3485,41 @@ Charter published as a docs-only PR, not pushed to main (D39, honest-gates).
   unread residue is **TWO** keys (`req_per_s`, `p95_ms`), not fourteen.
 
 - **D166 — `tmp_dep_site_live` IS PRODUCTION SCHEMA IN NO MIGRATION, AND IT IS WORTH 236x–498x.**
+  [**AMENDED 2026-09-16, dw30 — THE HEADLINE IS TRUE OF 2026-08-07 AND FALSE OF TODAY'S TREE. `tmp_dep_site_live`
+  IS DECLARED SCHEMA.** The RULED line below was carried out: the migration
+  `cloud/priv/repo/migrations/20260807140000_index_deployments_site_became_live.exs` landed 2026-08-07 as #10193,
+  commit `b79d4441e` — `git merge-base --is-ancestor b79d4441e origin/main` returns 0, so it is an ancestor of
+  `origin/main`, not an open PR. Its `up` runs
+  `cloud/priv/repo/migrations/20260807140000_index_deployments_site_became_live.exs`@`execute "DROP INDEX IF EXISTS tmp_dep_site_live"`
+  once and then creates `deployments_site_became_live_index` over the identical columns and predicate; its `down`
+  deliberately does not recreate the hand-made object. **THIS AMENDMENT CLAIMS ONLY THAT THE INDEX IS DECLARED IN A
+  MIGRATION ON `origin/main`. IT DOES NOT CLAIM THE OBJECT IS GONE FROM THE PRODUCTION DATABASE** — that is a live
+  `pg_indexes` read, owner-only, recorded in `$ORCH/BLOCKED-ON-USER.md`, and nothing below was re-run against
+  cloud-db-1. The two claims fail apart: `DROP INDEX IF EXISTS` is a logged no-op on any database that never
+  carried the drift, and the migration having run says nothing about which database it ran on. **Read the live
+  question with `deploy/db-undeclared-index-census.sh`**, which diffs live `pg_indexes` against the migration
+  tree's declared set across all 300 declared names and exits 2 CANNOT READ rather than reporting a comfortable
+  zero — residue, not intent. **DO NOT act on the pre-amendment headline by re-CREATEing the object by hand or by
+  "fixing the drift": that re-introduces exactly what #10193 ended.**]
   `CREATE INDEX tmp_dep_site_live ON deployments (site_id, became_live_at) WHERE became_live_at IS NOT NULL`
   is live on cloud-db-1 (53 pages / 424 kB, `pg_class.oid` 35410 — the HIGHEST of any object on the table, so
   created last, by hand). `git grep tmp_dep_site_live origin/main` returns nothing, and neither does a grep
-  over all 327 worktrees. Measured by actual `DROP INDEX` inside a rolled-back transaction (the assignment's
+  over all 327 worktrees
+  [**AMENDED 2026-09-16, dw30 — CORRECTED BY RUN, NOT BY ASSERTION.** That grep was re-run, not re-quoted, at
+  `origin/main` **`003c5caee`** (this PR's base) on **2026-09-16T22:38Z**. It does NOT return nothing. Verbatim:
+  `git grep -c tmp_dep_site_live origin/main` prints four rows, whose trailing figures are per-file LINE COUNTS,
+  not line numbers: the charter itself 8, the migration
+  `cloud/priv/repo/migrations/20260807140000_index_deployments_site_became_live.exs` 6,
+  `deploy/db-undeclared-index-census.sh` 11, and
+  `tooling/grip/ledger/tmp-dep-site-live-index-worth-2026-08-07.md` 15 — i.e. **40 matching LINES across 4 files**;
+  `git grep --only-matching -h tmp_dep_site_live origin/main | wc -l` prints 40 too, so here lines and occurrences
+  coincide. Carry the unit: `grep -c` counts LINES, and quoting a line count as an occurrence count is how a
+  correct number acquires a wrong story. THE CONTROL, because an empty grep and a broken grep look identical:
+  `git grep -c deployments_site_became_live_index origin/main` returns non-zero hits over the same revision, so a
+  zero above would have meant a broken read, not an absent string. **The zero in the original sentence was a true
+  reading of 2026-08-07, before #10193; it is not a property of the tree, and this count will move again.**
+  Re-derive with `git grep -c tmp_dep_site_live origin/main` and record the revision beside the number or do not
+  record it (D614's rule).] Measured by actual `DROP INDEX` inside a rolled-back transaction (the assignment's
   suggested `enable_indexscan=off` is INVALID — Postgres falls back to a Bitmap Index Scan on the SAME index
   and under-states the cost 14.5x): 7 d census **48.4 ms with / 24,089 ms without** (498x, 815x buffers);
   24 h **35.4 ms / 8,349 ms** (236x); site-scoped **21.7 ms / 4,615 ms** (213x). Wave 10's own
@@ -3511,7 +3580,11 @@ Charter published as a docs-only PR, not pushed to main (D39, honest-gates).
 
 - **D169 — ERRATA WAVE 11 OWES ITSELF.** (a) The lead's provenance hazard — "origin/main's charter stops at
   D105, D106–D146 exist only on #9976/#10069" — is STALE: `b4ef025cf` carries **D105 through D160**, landed
-  by #10101, so those two PRs are redundant and should be CLOSED, not rebased. (b) D142's sub-claim of
+  by #10101, so those two PRs are redundant and should be CLOSED, not rebased. *(Rider 2026-09-17,
+  `dr-w35-bl-charter-d106-phantom`: "D105 through D160" is a RANGE, not a roll-call — D106 is not in it and
+  never was. `git log -S'**D106 —' -- .claude/workflows/bp-deploy-reliability-charter.md` returns ZERO
+  commits, so no D106 definition was ever written to this charter and none was lost in any rebase; D105
+  and D107 are adjacent entries from the same wave. The number was skipped at mint time, nothing more.)* (b) D142's sub-claim of
   "78 rows in 24 h carry a NULL rev" does not reproduce: **66**, split failed 49 / **deferred 14** / live 3 —
   and D142 has no `deferred` bucket at all, because that status postdates it. The daily series runs 1–122 and
   never equals 78; 78 was a true point reading quoted as a fleet constant. (c) The direction's "the fleet
@@ -4119,7 +4192,7 @@ UP box unavailable.
   customer demand from platform churn — D3's vacuous green in its purest form. The survey's mechanism argument
   (Oban holds zero retryable/available/executing `site_deploy` work, so the re-queue is delivered by the next
   webhook and cutting the amplifier could make time-to-web WORSE) is real but is downgraded by D192 to a
-  hypothesis. **Both stay filed. The label must exist BEFORE the cut, not after.**
+  hypothesis. **Both stay filed. The label must exist BEFORE the cut, not after.** *[AMENDED IN PLACE 2026-09-10 by D606: the "no label" clause is now HISTORICAL — #17489 shipped an operator-assigned `deployments.demand_class` stamped at create; the precondition is the prod `Registry.DemandCensus` BEFORE number in task-b20d6fdf723bf8af c1, not a derived axis. D223's refutation of the DERIVED axis stands. See D606.]*
 - **D207 — TWO CHARTER FACTS ARE NOW FALSE AND ARE CLOSED BY RULING, NOT RE-SURVEYED.** D11's "an EXISTING
   COLUMN nobody sets" is dead: all five `site-autodeploy-*` webhooks carry `types={paper}`. And D169f/D181's
   "the 03:46:11Z delivery-leak stop has no commit and no deploy to explain it — cause NOT established" is
@@ -5075,14 +5148,21 @@ whose output is quoted. Where verification contradicted the wave's own direction
 - **D258 — FOUR NAMED COHORTS PLUS A RESIDUAL THAT MUST BE ZERO.** `classify(%{status: _other}), do: nil`
   (`:221`) is a catch-all over a CHECK-less varchar — `pg_constraint … contype='c'` on `deployments` returns
   **0 rows** on prod, confirmed independently twice. Today the hole is empty: `select distinct status` returns
-  exactly `deferred | failed | live`, zero non-terminal, zero `cancelled`, all-time over 31,070 rows. So "four
+  exactly `deferred | failed | live`, zero non-terminal, zero `cancelled`, all-time over 31,070 rows
+  [**AMENDED 2026-09-16, D614:** that zero and that 31,070 are a WAVE-15 READING, not a standing property, and
+  the denominator had already drifted to 31,137 by D290 one wave later. Neither is re-derivable from this
+  lane; D614(a) carries the re-derivation SQL and D614(d) states what a zero population does and does not
+  license — in short, it licenses no alarm, because the paths are alive and have only never qualified]. So "four
   numbers that SUM" is honest *today* — and latent forever. In-flight is bounded and self-healing (sweep-line
   peak **19** over 7 days of real `[inserted_at, updated_at)` intervals, Little's Law **0.678** over the
   trailing 24h, 22 live samples never above 1, ceilinged by
   `@default_deployment_stale_after_seconds 15 * 60` and by the partial unique index
   `deployments_active_site_env_index`, hit live as a real `Ecto.ConstraintError`). **`cancelled` is the real
   danger**: it is TERMINAL, it has two live producers (`auto_deploy_worker.refuse/1` at `:171`, tested at
-  `auto_deploy_worker_test.exs:248`, and `Registry.cancel_preview/2` at `registry.ex:5750`), and a subtractive
+  `auto_deploy_worker_test.exs:248`, and `Registry.cancel_preview/2` at `registry.ex:5750`)
+  [**AMENDED 2026-09-16, D614(c):** THREE, not two — a build box filing `status: "cancelled"` on
+  `POST /v1/{builder,agent}/deployments/:id/transition` is the third, and it rides the request body so a
+  literal grep misses it. All three line numbers here have rotted; D614(c) re-anchors them by content], and a subtractive
   `live` would score a deliberate refusal to deploy as a SUCCESS, permanently. **RULING: emit `live`,
   `in_flight` and `cancelled` as named cohorts and a `residual` a test asserts is zero — proven by MUTATION
   (insert a row in each of `queued`/`building`/`pushing`/`cancelled` and assert `live` does NOT move), never by
@@ -5245,7 +5325,13 @@ whose output is quoted. Where verification contradicted the wave's own direction
   declare it in the census envelope. `dr-w15-bl-deferral-cause-null-audit` is **SETTLED: residue, not a
   producer bug.** In the trailing 24h 1,259 of 1,510 deferrals (83.4%) are still unstamped, so any cause
   breakdown printed today must name the uncaused remainder as its own cohort and must never renormalise over
-  the caused subset.
+  the caused subset. *[AMENDED IN PLACE 2026-09-11 by D607: the 83.4%-unstamped picture is HISTORICAL — it
+  counted a trailing window that still straddled the 2026-08-07 10:02:23Z recorder boundary. Measured
+  2026-08-09, all **1,019 of 1,019** post-cutoff deferrals carry `BOX_AT_CAPACITY_DEFERRED` and ZERO are NULL.
+  The NULL residue is a fixed pre-boundary tail, not a live producer gap — which is what "SETTLED: residue, not
+  a producer bug" above already ruled, now with the post-cutoff arm measured. Re-derivation: `SELECT
+  deferral_cause, count(*) FROM deployments WHERE status='deferred' AND inserted_at > '2026-08-07 10:02:23'
+  GROUP BY 1;`. `dr-w15-bl-deferral-cause-null-audit` carries the same note on its own row. See D607.]*
 
 - **D268 — #10014 DIED TO MERGE MECHANICS, NOT TO A RULING, AND ITS CENSUS HUNKS ARE LEG 1's MATERIAL.** The
   branch still resolves on origin at `92f96f7ba`; content vs merge-base is 3 files / +402 −17;
@@ -5621,9 +5707,14 @@ AND deployed (D274).
   built nine waves later, never inherited it.
 
 - **D290 — `cancelled` HAS NEVER EXISTED, CONFIRMED AT THE DATABASE THREE WAYS, SO WAVE 16's COHORT IS A BUCKET
-  OVER AN EMPTY POPULATION.** 0 of 31,137 rows all-time, both spellings, since 2026-07-14. The lifetime status
+  OVER AN EMPTY POPULATION.** 0 of 31,137 rows all-time, both spellings, since 2026-07-14
+  [**AMENDED 2026-09-16, D614:** a reading taken during wave 16, not a standing property — D258 one wave
+  earlier read the same zero over 31,070. Not re-derivable from this lane; the SQL, the control that
+  distinguishes a real zero from a broken read, and the licence question are in D614]. The lifetime status
   vocabulary is exactly three values: failed 18,622 / live 10,391 / deferred 2,124. Two producers exist
-  (`registry.ex:5750`, `auto_deploy_worker.ex:188`) and neither has ever fired. Consequences: `deploy_ledger_test.exs:1251`'s
+  (`registry.ex:5750`, `auto_deploy_worker.ex:188`) and neither has ever fired
+  [**AMENDED 2026-09-16, D614(c):** three producers, and all three anchors here have rotted — re-anchored by
+  content in D614(c). "Neither has ever fired" is the same dated reading, not a property]. Consequences: `deploy_ledger_test.exs:1251`'s
   `assert census.cancelled == 0` is vacuous BY CONSTRUCTION (its fixture inserts no cancelled row);
   `dr-w16-s5`'s criterion *"`cancelled` renders when non-nil — paste both renders"* is **an arm that can never
   fire on prod data**, and is RE-SCOPED to "render when non-nil, proved on a synthetic envelope, with the
@@ -6074,7 +6165,10 @@ the per-site partition guard and the still-unrepaired prebuilt dead end are the 
   start returning a number.** Correcting the wave-17 debrief: the counter does NOT "reconcile to the Oban gap"
   in general — post-migration the gap is **negative (562 jobs vs 566 rows)** because rows also arrive from
   non-AutoDeployWorker triggers; the estimator is robust only at DAILY granularity on busy days, and
-  `oban_jobs` prunes at 7 days (floor 2026-07-31), so the cross-check has a hard expiry.
+  `oban_jobs` prunes at 7 days (floor 2026-07-31), so the cross-check has a hard expiry. **SETTLED BY D608
+  (2026-09-16): "DORMANT" IS THE WRONG WORD — the near-zero is a REGIME FACT with a named mechanism, and the
+  `0`-against-`1,371`-deferrals comparison this entry's neighbours draw is invalid.** Read D608 before quoting
+  any number from this entry.
 
 - **D314 — THE 50-SITE TRUNCATION IS LATENT BY ~4×, NOT LIVE, AND IS DEMOTED TO A ONE-LINE MARKER.** Distinct
   `site_id` is 7 (24h) / 9 (7d) / **12 all-time over 31,254 rows**; `sites` holds 13; creation is ~1/week after
@@ -6441,7 +6535,10 @@ land the file is resolved by UNION, never by choosing a side.
   (iii) **Of the candidate terms, `failure_rate` is vacuous by rename** (2026-07-30: failed 2446 / deferred
   0 / 88.43%; 2026-08-07: failed 18 / deferred 1371 / 0.94%, with failed+deferred roughly conserved) and
   **`coalesced_attempts` ships, meters, and reads a confident permanent ZERO** (1 non-zero row of 658 since
-  the counter began, total 6, against 1,371 deferrals the same day). **`live_rate` is the only quantity that
+  the counter began, total 6, against 1,371 deferrals the same day). **AMENDED IN PLACE BY D608 (2026-09-16): the
+  "against 1,371 deferrals" clause is STRUCK — those deferrals are the OTHER BRANCH of the same decision, not
+  a denominator, and the zero is correct for the regime that produced it. The ruling below (`live_rate` is the
+  honest headline) is UNAFFECTED: it never rested on this clause.** **`live_rate` is the only quantity that
   survives the rename** — 27.4% today (3.65 attempts per live) against 91.7–95.6% on 2026-07-14..21 (1.05–
   1.40) — so it IS the epic's harm and the honest headline. **It is a BAD FENCE**: any floor calibrated on
   healthy July makes today permanently red, which is precisely the objection levelled at raw absorption —
@@ -7403,7 +7500,12 @@ successful deploy**; UNCOVERED = 0 on two independent oracles over 790 cp + 1,17
 pushes, 1,373 path-matching, 1,373 with a run, 0 missing. The failure numerator is **FROZEN at 18,622 since
 2026-08-07T10:02:55Z** — the last failed deployment row in the entire table — and the four sites that carried
 89% of all failures all went live on 2026-08-08. **This wave sells on COST, DEGRADATION and BLINDNESS. Never
-on lost deploys.**
+on lost deploys.** *[AMENDED IN PLACE 2026-09-11 by D607: "FROZEN at 18,622 since 2026-08-07T10:02:55Z" is
+FALSE and was false when written — re-measured on `cloud-db-1` at `now() = 2026-08-09 08:05:53Z`, the numerator
+is **18,640** and the last failed row is **2026-08-08 14:55:28.776961**, eighteen rows later, inside a five-site
+outage. Re-derive, never quote: `SELECT count(*) AS failed_total, max(inserted_at) AS last_failed FROM
+deployments WHERE status='failed';`. The "COST, DEGRADATION, BLINDNESS" framing STANDS on its own legs; the
+freeze is struck. See D455, D471, D607.]*
 
 ### Decisions
 
@@ -7412,7 +7514,16 @@ since 2026-08-07T10:02:55Z; 2026-08-08 carries 259 rows and **0 failed**. A rate
 only fall by dilution: it reads "improving" every day regardless of what the platform does, and needs 42,789
 more clean rows (~165 days at today's rate) merely to reach 25%. It is a monument, not an instrument, and it
 fails this epic's own standing test. **Replacement: live-per-row over a PINNED window with volume beside it,
-and the deferral share printed as a co-equal.**
+and the deferral share printed as a co-equal.** *[AMENDED IN PLACE 2026-09-11 by D607: **THE VERDICT STANDS,
+THE REASON IS STRUCK.** Retire the lifetime rate because it is structurally DILUTION-DOMINATED — a lifetime
+denominator that only grows makes any fixed numerator read "improving" every day — NOT because "its numerator
+has not moved" and NOT because "a rate whose numerator is dead". The numerator was never dead: measured
+2026-08-09 08:05:53Z it is 18,640, moved 18 rows on 2026-08-08 (10:00:14Z → 14:55:28Z). "2026-08-08 carries 259
+rows and **0 failed**" is false: it carries **758 rows — 238 live / 502 deferred / 18 failed**; 2026-08-07 also
+carried 18 failed. Re-derivation, per-day so the SHAPE is visible: `SELECT date(inserted_at) AS day, count(*)
+AS rows, count(*) FILTER (WHERE status='failed') AS failed FROM deployments GROUP BY 1 ORDER BY 1 DESC LIMIT
+7;`. Do NOT over-correct by reinstating the lifetime rate — the replacement above is unchanged. See D455,
+D471, D607.]*
 
 **D376 — THE 98.6% HEADLINE IS ILLEGAL UNDER D3 AND MAY NOT BE PRINTED BARE.** Post-door (since
 2026-08-06T22:29:27Z) the population is **2,510 rows — 698 live (27.8%), 1,792 deferred (71.4%), 20 failed
@@ -7805,7 +7916,10 @@ Wave Paper: `deploy-reliability-wave-23-2026-08-08`. Epic task: `task-fb4fb86949
 
 **The wish's word "fail" has expired, and this wave says so in its own first paragraph.** The failure
 numerator moved twice in the last 33 hours and is otherwise flat; 2026-08-08 carried 1 failed row in 327.
-What is left is not lost deploys — it is COST, DEGRADATION and BLINDNESS: 71.1% of every deploy row is now
+*[AMENDED IN PLACE 2026-09-11 by D607: this reading is STALE in the same direction as D375's, and the two
+disagreed with each other in the same file for four waves — a contradiction nothing re-derived. Re-measured
+2026-08-09 08:05:53Z, 2026-08-08 carried **758 rows / 18 failed**, not "1 failed row in 327", and the numerator
+is not flat. Command as in D607.]* What is left is not lost deploys — it is COST, DEGRADATION and BLINDNESS: 71.1% of every deploy row is now
 refused at our own build door, and no surface a human reads says so. Wave 23 sells on that and never on
 failures.
 
@@ -8397,6 +8511,14 @@ Window: the 300 most recent `deploy.yml` runs, 2026-07-31T20:49:47Z → 2026-08-
   per-day it is 23.8–30.4% on quiet days against 48.9% (08-07) and 52.0% (08-08) — **the epic's own wave days**.
   "Measure on a quiet host" at the platform level. Print 36.7% with its window; never print 51.2% without
   saying it is a burst-day slice measured during our own waves.
+  *[AMENDED IN PLACE 2026-09-11 by D607: SUPERSEDED. The burst-free re-derivation measured 2026-08-09 is
+  **50.0% (45 cancelled / 45 success)**, and that is the figure to print. Population: 98 `Deploy (production)`
+  runs since the cutoff — 47 success, 51 cancelled, 0 failed; the EXCLUSION, which must be stated every time
+  the number is, is the lead's own 23:40–23:48Z merge burst, removed entirely. Both 36.7% and 51.2% are
+  retired: each was one denominator of a pair neither of which excluded our own wave load. Re-derivation:
+  `gh run list --repo FRIKKern/barkpark --workflow "Deploy (production)" -L 200 --json
+  conclusion,createdAt,headSha` then drop the 23:40–23:48Z window and take cancelled/success. Half of all
+  merged shas are carried by a LATER run in steady state; that is not a burst artifact. See D455, D607.]*
 - **PICKUP p50 = 4.0s is definition-invariant** across four variants. **p90 = 10.2–11.0s** — the inherited 10s
   reproduces, the survey's 14s does not. p95 diverges wildly (12.8s vs 153.8s); do not print p95.
 
@@ -8580,6 +8702,14 @@ sub-parent is the ONLY act that both discharges a seal criterion and buys back t
 about to lose. It cancels nothing (S-4a's forbidden act) and keeps every row findable in the tree.
 
 ### D435 — THE DOOR READER GAP IS ALREADY BUILT. SHEPHERD #10811; DO NOT RE-CUT dr-w22-s5.
+
+> **AMENDED 2026-09-17, D617 — #10811 NEVER MERGED, AND THE WORK LANDED ANYWAY.** `#10811` is `CLOSED` with
+> `mergedAt: null`, so "the task closes on #10811's merge" below is a condition that can never fire. It did not
+> need to: `dr-w22-s5` is `done` 8/8, because the same work relanded as **#12738** (the capacity cross-reference,
+> same title, fresh branch) and **#17281** (the door population line). Read "#10811" below as "the change #10811
+> carried", which is on `main`. **The residue this block files as one follow-on is now two-thirds discharged** —
+> D617 rules on it and re-cuts what is left (the BOX_BUSY cross-reference only). Do not size that follow-on from
+> the paragraph below.
 
 CONFIRMED: the census reader prints the DEFERRAL total (`1434 deferred`) and never the DOOR population
 (1434 + 6 terminal). REFUTED, and this matters because it was the brief's evidence: *"the cause split is not
@@ -10500,7 +10630,7 @@ over-reports by 2, so D474's all-of-present rule earns its keep live. The open d
   orphan site-less rows = **0**. The scoped census for the team that owns the fleet is **byte-identical**.
   Fleet-wide buys that team nothing and buys everyone else an unearned number.
 - **The 06:00Z send wrote 4 rows across 3 teams; two of those teams own ZERO sites** — including
-  `frikk.jarl@gyldendal.no`, the tenant this epic already has an open cross-tenant escalation about. Under
+  `<redacted-email>`, the tenant this epic already has an open cross-tenant escalation about. Under
   #11174 as written they receive "841 attempted, 555 deferred, 2.15% failed post-door" about a fleet they own
   no part of.
 - **The module contradicts itself in its own file.** `deliver_fleet_digest/1`'s doc states the ruling verbatim
@@ -10663,9 +10793,30 @@ window, not for the name. State it as the structural finding it is or it is refu
 ("`usage_samples` shows no new row for b1259514") is unsatisfiable because the sweep is **host-keyed**
 (`checkable_scope/1`, `registry.ex:3813-3815` — url is never consulted) and `record_sample/1`
 (`usage.ex:424-432`) inserts unconditionally; b1259514's host survives the fix, so rows keep landing every 15
-minutes. But the draft's correction — "ZERO new rows carry `unavailable_reason`" — **also fails on a working
-fix**: `:not_live` is not a member of `@unavailable_reasons` (`usage.ex:161-162`), so the post-fix envelope
-falls through to `"unknown"` at `:257`. **RULING: the criterion is "no new row carries a DELIVERY-PROVING
+minutes. The draft's correction — "ZERO new rows carry `unavailable_reason`" — was ruled here to fail on a
+working fix, on a mechanism that does not exist.
+[**AMENDED IN PLACE 2026-09-25 (task-2d6ad0f6950ff1ea), as D505 instructs ("must be amended, not merely
+superseded"). The struck chain is quoted and refuted in D505; it is not repeated here.** What `origin/main`
+(`d474ac911`) does, read from the source: `:not_live` never reaches `unavailable_reason/1`.
+`instance_base_url/1` returns `{:error, :not_live}` and `instance_admin_token/1` returns
+`{:error, :no_admin_token | :decrypt_failed}`; they are the two HEADS of the `with` in `instance_datasets/2`,
+`instance_documents/3` and `instance_webhooks/3`, whose `else {:error, _} -> :unmetered` (`usage.ex:831`,
+`:858`, `:870`) turns a failed head into the bare atom `:unmetered`. `instance_meter/2` (`usage.ex:321-327`,
+five clauses since `59bc5d202`, 2026-08-04, #9461) maps `:unmetered` and `nil` to `meter(@unmetered, source,
+nil)` — a meter with NO `:unavailable_reason` key — and only `{:error, reason}` and a bad shape go through
+`unavailable_meter/2` to `unavailable_reason/1`, where an atom outside `@unavailable_reasons` becomes
+`"unknown"`. So a post-fix (token NULLed) tick for b1259514 carries no reason at all, never `"unknown"`: pinned
+by `usage_test.exs` "a meter that MEASURED, or one deliberately unmetered, carries no reason at all". That shape
+is RULED, not incidental: `cloud/lib/barkpark_cloud/unavailable_vocabulary.ex` (`ef1ce66db`, #15879,
+2026-09-03) classes `not_live` / `no_admin_token` / `decrypt_failed` as `:one_sided` with `usage: nil` — "a
+different axis, not a missing word" — pinned by `unavailable_vocabulary_census_test.exs`. Consequence: the
+draft's "ZERO new rows carry `unavailable_reason`" would NOT have failed on a working fix; the RULING below
+stands anyway, on the broader base D505 gives it. D505's own mechanism sentence is partly stale in turn: the
+`with/else` collapses only a failed HEAD (not live, no or undecryptable token), not "EVERY error" — a transport,
+deadline or delivered-status failure inside the `with` body returns `{:error, reason}` and DOES carry a reason.
+Read D505 ("D492's MECHANISM IS WRONG and must be amended") and `unavailable_vocabulary.ex` beside this
+decision, never instead of it.]
+**RULING: the criterion is "no new row carries a DELIVERY-PROVING
 reason (`unreachable|unauthorized|refused|instance_error`)."** D475's unblock stands unchanged: the w25
 incumbent is still `published` (rev `80239efd7c09c965d3837f2c7e1f5eef`), so the E4 dedup wall is still armed —
 **retitle it, do not unpublish it** (unpublishing loses a row the seal roster counts, and D476 already
@@ -12968,6 +13119,123 @@ tail runs 12–30h past it (D569); (6) the crown's scheduled trigger has never o
 (7) prebuilt deploys and lost fenced CASes are invisible to the abandonment gauge, and it is production-only by
 construction (D559).
 
+**THE SEVEN RESIDUALS, CLASSED AND RE-RUNNABLE — 2026-09-16, `dr-w34-bl-residual-seven-unverified`.** The list
+above is a SEVEN-item block that mixes THREE evidence classes without saying so, and a reader cannot tell which
+sentences a future owner can re-check with the binary in hand. They are classed here, each with its own re-run
+command, and the ones that were never re-derived stay **UNVERIFIED** rather than being quietly promoted. **This
+lane could not ssh, walk prod, or touch the live control plane**, so every `live-DB` item below is re-run text
+and nothing else — printing any of them as a plain statement is the level-skip D592 forbids. The `code` and
+`Actions` items WERE re-derived this turn against `origin/main` `4282f116c`, and their output is quoted.
+
+| # | class | status | re-run |
+|---|---|---|---|
+| 1 | **live-DB** + code control | **UNVERIFIED** (count); self-citation **CONFIRMED** | SQL below, query (d); self-citation control quoted below |
+| 2 | **code** (label) + **live-DB** (count) | label **RE-DERIVED and rephrased**; `0 rows all-time` **UNVERIFIED** | `git show "origin/main:api/lib/barkpark/sites/deploy_runner.ex" \| sed -n '2924,2932p'`; SQL query (b) |
+| 3 | **code** | **RE-DERIVED** | `git show "origin/main:cloud/lib/barkpark_cloud/deploy_ledger.ex" \| sed -n '605p'` |
+| 4 | **code** (mechanism) + **live-DB** (population) | mechanism **RE-DERIVED**; `exactly 2 preview rows, zero preview-live ever` **UNVERIFIED** | `git show "origin/main:cloud/lib/barkpark_cloud/deploy_ledger.ex" \| sed -n '2092,2100p'`; SQL query (c) |
+| 5 | **live-DB** (`rpc`, not SQL) | **UNVERIFIED** | `DeployLedger.delivery/3` via `/app/bin/barkpark_cloud rpc` at b+0h/6h/12h/36h from `2026-08-05T21:13:50Z` — `eval` cannot do it (Repo not started, D572) |
+| 6 | **Actions** | **RE-DERIVED — and REFUTED** | `gh run list --workflow=crown-reconcile.yml --limit 400 --json event,createdAt,conclusion` |
+| 7 | **code** | **RE-DERIVED** | `git show "origin/main:cloud/lib/barkpark_cloud/deploy_ledger.ex" \| sed -n '482,499p;2815,2821p'` |
+
+**THE ONE SQL, WITH ITS ANTI-VACUITY CONTROL (unrun here).** Control plane `178.105.92.191`, container
+`cloud-db-1`; the live slot is **GREEN, not blue** — a recipe hardcoding `cloud-control_plane_blue-1` fails with
+an error that reads like a code fault (D572). `psql` needs the container's own `$POSTGRES_USER`/`$POSTGRES_DB`.
+
+```sh
+cat > /tmp/w34resid.sql <<'SQL'
+SELECT count(*) AS total FROM deployments;                                            -- (a) ANTI-VACUITY CONTROL
+SELECT count(*) AS exit15 FROM deployments WHERE failure_reason ILIKE '%exit 15%';    -- (b) residual 2
+SELECT environment,status,count(*) FROM deployments GROUP BY 1,2 ORDER BY 1,2;        -- (c) residual 4
+SELECT site_id,content_rev,status,inserted_at FROM deployments
+  WHERE failure_reason LIKE '%rebuilds in a row for this site%' ORDER BY inserted_at; -- (d) residual 1
+SQL
+ssh -i ~/.ssh/barkpark_indx root@178.105.92.191 \
+  'docker exec -i cloud-db-1 sh -c "psql -U \$POSTGRES_USER -d \$POSTGRES_DB -f -"' \
+  < /tmp/w34resid.sql; echo rc=$?
+```
+
+**(a) IS THE ANTI-VACUITY CONTROL AND IT GOVERNS EVERY COUNT ABOVE.** A zero `exit15` beside a zero `total` is a
+broken query, not a finding; the same for a preview cohort that is absent because the GROUP BY returned nothing
+at all. Query (c) answers residual 4's BOTH halves only if a `preview|live` row WOULD have appeared — the runner
+states that explicitly or the reading is void. Query (d) does not by itself prove "saved": that needs the LATER
+`live` row on the same `{site_id, environment}`. `deferral_depth = deferral_bound` is **UNSATISFIABLE by
+construction** for the deferred population (D544), so the abandonment set is reachable only by the prose scan in
+(d). And the standing warning that made all four unverifiable in the first place: **a full disk makes a mutation
+run report 4 failures that reproduce as 2 — any count taken on a full disk is suspect IN BOTH DIRECTIONS.**
+
+**RESIDUAL 1 — THE SELF-CITATION IS CONFIRMED, WITH A LIVE CONTROL.** `947c0dbd0de8` and `91284be29666` are
+`content_rev` values on the live `deployments` table, **not repo commits, so no grep can settle them**; they are
+recorded here as a SELF-CITATION WITH NO INDEPENDENT DERIVATION. The absence was proven, not inspected — the
+grep was shown live on the same file first, and `git cat-file` was shown live on a sha that IS an object:
+
+```
+$ git show "origin/main:.claude/workflows/bp-deploy-reliability-charter.md" | grep -c "D592"   →  1   (CONTROL: grep is live)
+$ … | grep -n "947c0dbd0de8"   →  13021 (the audited sentence), 13346 (D592 restating the audit)  — no third site
+$ … | grep -n "91284be29666"   →  13022 (the audited sentence), 13347 (D592 restating the audit)  — no third site
+$ git cat-file -t 4282f116c    →  commit                          (CONTROL: the command can answer)
+$ git cat-file -t 947c0dbd0de8 →  fatal: Not a valid object name
+$ git cat-file -t 91284be29666 →  fatal: Not a valid object name
+```
+
+That rules out the reading that they are commits and rules IN nothing. Settling them needs query (d) plus the
+later `live` row on the same key.
+
+**RESIDUAL 2 IS REPHRASED: THE `exit 15` LABEL IS TWO-PRODUCER AMBIGUOUS, NOT WRONG — AND THERE ARE SIX
+PRODUCERS ACROSS THREE LOCK FAMILIES, NOT FOUR ACROSS TWO.** `deploy_runner.ex:2929-2932` already names BOTH engine
+locks — `"the box's fleet build slot (900s) or this site's own deploy lock (1200s) (exit 15)"` — so "D38 names
+the wrong lock" is FALSE AS PHRASED and the honest residual is that one exit code carries two causes and the
+label cannot pick between them. The producers, every line re-derived against `origin/main` this turn:
+
+| lock family | budget | producers on `origin/main` |
+|---|---|---|
+| site deploy lock | `-w 1200` | `deploy/site-deploy.sh:3533`, `deploy/site-deploy-node.sh:3510` |
+| fleet build gate (`build_gate_acquire`, `deploy/lib/site-deploy-common.sh:349,394`) | `-w 900` | `deploy/site-deploy.sh:3833`, `deploy/site-deploy-node.sh:3802` |
+| control-plane / instance deploy lock | `-w 1800` | `deploy/cp-deploy.sh:189`, `deploy/instance-deploy.sh:448` |
+
+**The earlier count of "four producers across two lock families" omitted the fleet-build-gate arm** — which is
+the arm `deploy_runner.ex:2924-2928` calls "the far likelier cause". The 1800s family is a different surface
+(control-plane and instance deploys are not run by `DeployRunner`), so the label is not wrong about it; it
+simply never speaks for it. **Every published anchor for this residual had rotted**: `deploy_runner.ex:2061` →
+`:2929-2932`, `site-deploy.sh:1995` → `:3533`, `site-deploy-node.sh:1585` → `:3510`, `cp-deploy.sh:32` → `:189`,
+`instance-deploy.sh:144` → `:448` — 5 of 5, consistent with this epic's own measurement that 67% of task-body
+`path:NNN` anchors are stale. The `0 rows all-time` half stays **UNVERIFIED**; only query (b) settles it.
+
+**RESIDUAL 3 — RE-DERIVED.** `@coverage_basis` (`deploy_ledger.ex:605`) states in the code itself that coverage
+answers "is this site stuck NOW", never "was it stuck back then", and is a claim about THE SITE rebuilding
+rather than about the row's own payload — i.e. a stuck-site detector, not a delivery rate, and unable to
+separate abandonment from stuckness. No live read is needed; the sentence is a code fact.
+
+**RESIDUAL 4 — MECHANISM RE-DERIVED, POPULATION UNVERIFIED.** `live_marks/1` (`deploy_ledger.ex:2092-2100`)
+keys the covering marks on `{site_id, environment}`, with the reason in the source: *"a PREVIEW build going live
+is not the production site rebuilding, and claiming it were would be a vacuous green in the flagship
+instrument"*, and *"the key can only move a row COVERED → PENDING, never the reverse"*. So a preview arm with no
+later preview-live row is uncoverable BY CONSTRUCTION. That is the whole mechanism half. **"Exactly 2 preview
+rows, both failed, zero preview-live rows ever" is a population count and stays UNVERIFIED** — query (c), read
+against control (a).
+
+**RESIDUAL 5 — UNVERIFIED, AND NOT ANSWERABLE BY A ROW COUNT AT ALL.** The 12–30h healing tail (p95 refuses at
+b+0h and b+6h, first prints 7,820s at b+12h, settles to 336s by b+36h) needs `DeployLedger.delivery/3` run at
+four offsets from `2026-08-05T21:13:50Z` via `rpc`. Its anti-vacuity control is the b+36h call returning a
+NUMBER: four consecutive refusals are a broken invocation, not a healing tail.
+
+**RESIDUAL 6 — RE-DERIVED AND REFUTED AS OF 2026-09-16.** `crown-reconcile.yml:99-104` carries
+`schedule: - cron: "5 */6 * * *"`, and the schedule trigger HAS fired: over the most recent 400 runs
+(**anti-vacuity control: 400 runs returned, split `push` 335 / `pull_request` 52 / `schedule` 13**) there are
+**13 `schedule` runs between 2026-09-13T15:42:59Z and 2026-09-16T16:16:23Z, 12 `success` and 1 `failure`**
+(`34766428978`). "The crown's scheduled trigger has never once run the reconcile" was true when written and is
+**FALSE NOW**; it is retained above as the historical record and corrected here. The 400-run window does not
+reach back to 2026-08-09, so it dates the recovery no earlier than 2026-09-13 — one schedule run is enough to
+refute the claim, and no depth of history could restore it.
+
+**RESIDUAL 7 — RE-DERIVED.** Two code facts, both in `deploy_ledger.ex` on `origin/main`. (i) The abandonment
+marker is PROSE in `failure_reason` (`@abandonment_marker :444`, applied at `:1902`), so — in the module's own
+words at `:482-499` — "a failed row that recorded NO reason at all cannot be tested for it: the predicate does
+not answer 'no', it does not run"; those rows are published beside the number as `abandoned_unreadable`, and the
+count is a LOWER BOUND whenever that is non-zero. A prebuilt deploy and a lost fenced CAS both terminate without
+writing the refusal-chain prose, so neither is visible to the gauge. (ii) Production-only is a `WHERE`, not a
+convention: `where: d.environment == "production"` at `:2821` (and `:2931`, `:3011`), safe because the column is
+`NOT NULL DEFAULT 'production'`. Unkeyable rows are counted in `unmetered` rather than dropped.
+
 ### Wave 2026-08-09 (wave 33) — REVIEWED · Paper `deploy-reliability-wave-33-2026-08-09` · grade **A**
 
 **Five of six slices built, reviewed, gate-green on the reviewed state, pushed and PR'd. Nothing merged — the
@@ -13356,7 +13624,12 @@ verify recipes ride this PR under `tooling/grip/ledger/dr-w35-*` and
   ONLY the rest: w16 (D256–D273 + log), w18 (D302–D321 + log), w19 (D322–D336 + log), plus **#10173's
   61-line wave-11 REVIEWED log entry** — the seventh strand the wish omitted (its D161–D171 block is
   byte-identical to main :3137–3391 and is DROPPED) — plus the 22 additive ledger sidecars. Assembly is
-  proven: 13,351 lines, 591 unique D-defs (the only hole left is the pre-existing D106 phantom), zero
+  proven: 13,351 lines, 591 unique D-defs (the only hole left is the pre-existing D106 gap — *rider
+  2026-09-17, `dr-w35-bl-charter-d106-phantom`: ADJUDICATED, and "phantom" is withdrawn as the wrong word.
+  There is no phantom citation and no missing ruling: this charter's ONE D106 mention outside these riders
+  is the D17 cross-charter citation of the SITE-SPAWNER charter's D106, which resolves and says what it is
+  quoted as saying. D106 is simply a number this charter never minted, so the sequence gap is expected and
+  permanent — do not "restore" a definition, and do not renumber. Venue for this ruling: this charter*), zero
   duplicate definitions, all seven gained log entries exactly once, order-insensitive to whether the trio
   merged first (`final_S` ≡ `final_A` byte-identical). **Five prose sites become false at merge** (assembled
   coords :5436 :5438 :6307 :6559 :6940 — the "unmerged/stranded" sentences) and each gets the wave-35 union
@@ -13715,3 +13988,1230 @@ cannot be measured is not met. The deploy path runs the same function ADVISORY w
 content deploy never dies for a site prerequisite. `instance-deploy_test.sh` Case 19 drives every arm: each
 removal demands ITS code, and the OTHER three must still report `ok`, so a check that stops discriminating reds
 instead of greening a box that cannot build.
+
+### Round-3 lead rulings (lead-deploy-r7, 2026-09-10)
+
+- **D605 — `/v1/tls/ask` STAYS NAME-BOUND; BOX-BINDING IS RULED OUT UNTIL A SOURCE-RANGE PERIMETER EXISTS.**
+  Closes `dr-w24-bl-tls-ask-allowlist-is-not-box-bound` by ruling, as its one criterion allows. Re-derived on
+  `origin/main` 2026-09-10: `get "/v1/tls/ask"` (router.ex ~:9654) reads only `?domain=` and answers
+  `Registry.domain_registered?/1` (registry.ex ~:8169: site domains, live preview hosts, custom_host) — the gate
+  is name-only, exactly as filed. It CANNOT be box-bound honestly today, for a structural reason, not a sizing
+  one: Caddy's `on_demand_tls.ask` puts NO caller identity on the wire, so "the asking box" can only ever mean
+  the request's source address, and the control plane rewrites `conn.remote_ip` from `X-Forwarded-For` only
+  for `trusted_peer?/1` peers (router.ex ~:538-546). A box-bound ask is therefore a SOURCE-RANGE assertion —
+  the same mechanism as `INTERNAL_ALLOWED_CIDRS` in #17134 (`dr-w24-bl-internal-write-route-is-publicly-
+  reachable`), which is owner-gated because nobody but the owner can enumerate the ranges. Building the
+  stricter gate before that perimeter exists would refuse legitimate on-demand issuance for any box whose
+  egress address is not the one a row happens to record (a site mid-migration, a preview slot, a NAT change) —
+  a fleet-wide certificate outage, which is a worse failure than the one contested name the wave-24 join found
+  (exactly 1 row fleet-wide). The contested-name defect itself is handled at CLAIM time by the `url`-host leg
+  of `custom_host_taken?/2` (the wave-24 slice), which is where an ownership dispute belongs; the issuance gate's
+  job is only to be a cert-issuance DoS guard, and "SOME row owns this name" is the correct contract for that.
+  **RULING: not built this wave. Successor, filed only AFTER #17134 merges with a real CIDR list: "tls ask
+  binds the answer to the asking box's declared source range", with the allowlist measured, not assumed.**
+
+- **D606 — THE DEMAND-CUT PRECONDITION, RECONCILED: ONE ROW SURVIVES, AND THE CUT WAITS FOR A BEFORE NUMBER.**
+  D206 filed the fan-out cut behind "a label"; D223 then ruled the DERIVED customer/platform axis unbuildable
+  (no team axis: one team owns all 13 sites; AMPLIFIED/UNIQUE does not separate populations). #17489
+  (`a0552783c`) shipped something D223 did not refute: an OPERATOR-ASSIGNED per-site `demand_class`, stamped
+  onto `deployments.demand_class` at create by `Registry.classify_site_demand/2`, read by
+  `Registry.DemandCensus.census/1`, built so it CAN be wrong. Whether that answers D223 or renames the problem
+  is decided by ONE measurement, not by argument: the prod census over a 24h window with the five demo sites
+  classified `platform`. If `by_class` separates populations (unclassified is NOT the largest bucket;
+  platform_share and top5 reproduce the fixture's 98.4%), the precondition D206 wanted exists. If it cannot, the
+  cut has no instrument and stays closed. **RULING: `dr-w14-bl-demand-cut-needs-a-fresh-argument` is CLOSED
+  by this entry — its "replacement precondition" IS that census, and the regression instrument after any cut is
+  `by_class[customer]` flat within noise while `by_class[platform]` falls (task-b20d6fdf723bf8af c3).
+  `task-b20d6fdf723bf8af` is the single surviving row; D206 is annotated in place. The cut is NOT built until
+  c1's BEFORE number is quoted from prod. D180 stands: `@build_slot_capacity` is not raised. Round 3 does not
+  touch a webhook.**
+
+- **D607 — THREE CHARTER SITES QUOTED A NUMBER NOBODY RE-DERIVED, AND THE CORRECTION IS A COMMAND, NOT A
+  NUMBER.** D455 and D471 already ruled D375's supporting figures struck, but they ruled it in NEW entries
+  4,000 lines below the FALSE sentences, which stayed un-annotated: a reader arriving at wave 22 read "FROZEN
+  at 18,622 since 2026-08-07T10:02:55Z" and had no signal that four waves of the same file disagreed. **A
+  ruling that does not touch the sentence it overturns has not landed.** Amended in place this round, each
+  with its re-derivation command beside it: wave 22's preamble, D375's body, wave 23's preamble ("1 failed row
+  in 327"), the D411 carried-sha rendering rule (36.7%/51.2%), and D252's deferral-cause NULL site. The
+  filings' `:6054/:6061/:6818` line numbers had ROTTED to `:7403/:7411/:7807`; find these by CONTENT.
+
+  **(a) THE SHAPE IS A STEP FUNCTION, NOT A FREEZE AT AN INSTANT.** Per-day, measured on `cloud-db-1` at
+  `now() = 2026-08-09 08:05:53Z`: **08-06 = 2,205 rows / 866 failed · 08-07 = 2,008 / 18 · 08-08 = 758 / 18 ·
+  08-09 = 335 / 0**. The collapse happened ACROSS 08-06→08-07 and the platform then ran at a low but NON-ZERO
+  failure rate. Reading that as "the numerator is dead at an instant" is what let a 4h55m five-site outage on
+  08-08 produce zero operator reaction. `SELECT date(inserted_at) AS day, count(*) AS rows, count(*) FILTER
+  (WHERE status='failed') AS failed FROM deployments GROUP BY 1 ORDER BY 1 DESC LIMIT 7;` — and the freeze that
+  IS real is in the WRITER, not the reporter: `deployment_failed` deliveries max at **2026-08-08
+  14:55:43.954614**, 15.2s after the last failed row, 2,313 sent / 4 failed lifetime.
+
+  **(b) THE DILUTION ARGUMENT REPLACES "FROZEN" EVERYWHERE.** The lifetime failure rate is retired because its
+  denominator only grows, so the rate falls by arithmetic whatever the platform does — a property of the
+  formula, true on any day, needing no measurement. "The numerator stopped moving" is a property of a
+  33-hour quiet patch and was already false the day after it was written (18,622 → 18,640). **Do not
+  over-correct: D375's RETIREMENT stands and the lifetime rate is not reinstated.** Where a carried-sha rate is
+  printed, it is **50.0% burst-free (45/45)**, with the 23:40–23:48Z merge-burst exclusion named in the same
+  sentence.
+
+  **(c) IS A BARE CHARTER NUMBER A FINDING? CONVENTION, NOT ENFORCED — stated honestly because the opposite
+  claim is the exact defect this entry exists to end.** `scripts/charter-citation-check.sh` checks that every
+  cited `charter D<n>` RESOLVES to a heading; it reads D-tokens and nothing else, and has no concept of a
+  numeric claim or a re-derivation command. `scripts/check-doc-budgets.sh` measures BYTES and explicitly
+  excludes `.claude/workflows/*-charter.md` from its scope ("carry headers, are not agent-loaded spine"). So
+  today NOTHING mechanically reds on a bare number. **What would enforce it**, in ascending cost: (i) a
+  `charter-number-provenance-check.sh` arm that flags a bolded `**<digits with , or %>**` in a charter whose
+  enclosing D-entry contains no fenced/backticked `SELECT`, `gh ` or `bp ` command, run advisory alongside the
+  citation check — cheap, high false-positive, and its OWN failure mode is going dark, so it needs a FLOOR on
+  the number of sites inspected (D8); (ii) requiring a measurement DATE adjacent to every such number, which
+  is checkable by regex and is the half that actually decays; (iii) nothing at all, and this convention keeps
+  costing a wave every few rounds. This entry buys (ii) by example and leaves (i) unbuilt and unfiled as
+  speculative — **a rule stated in prose is a convention, and calling it a gate would be the D469 defect
+  wearing the uniform of its own remedy.**
+
+  Closes `dr-w27-bl-d375-freeze-date-is-false-on-main` and `dr-w26-bl-d375-frozen-numerator-corrected`.
+  Every figure in this entry is a 2026-08-09 reading; none of it is re-measurable from a developer Mac, which
+  is itself the reason the COMMAND and the DATE travel with the number rather than the number travelling alone.
+### D608 — ROUTE GETS A NAMED SIBLING CHANNEL, NOT A SEAT IN `@stage_names`. THE WHITELIST IS A VERDICT LIST, AND ARMING IS A MEASUREMENT.
+
+**THE PREMISE, RE-DERIVED ON `origin/main` (`72ce16759`), NOT READ OFF THE FILING.** Both engines emit
+`BPSTAGE name=ROUTE status=<ok|failed> build_id=<id> detail="armed: …"` after their Caddy arming attempt
+(`deploy/site-deploy.sh:3982` `emit ROUTE ok` / `:3996` `emit ROUTE failed`, `deploy/site-deploy-node.sh:3572`
+`emit ROUTE ok`, with both engines' own self-tests pinning the wire at `site-deploy.sh:2377`-`:2525`). `emit()` (`deploy/lib/site-deploy-common.sh:55`-`:67`)
+writes that line to stdout and, when the transient unit named one, appends it to `$BARKPARK_SITE_STATUS_FILE` —
+**never** to `$BARKPARK_SITE_LOG_FILE`, which only `log()` writes. So `read_log_tail/1` structurally cannot carry
+it, and the file that DOES carry it is folded by `fold_status_file/2`, which passes every line through
+`parse_stage_line/2`'s `name in @stage_names` guard (`~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE)`). ROUTE is not in
+that list, so the fold drops it. Wave 21's count — 0 of 19,327 console-carrying `deployments` rows mentioning
+ROUTE — is the downstream shadow of exactly that guard. **Premise confirmed; nothing in the tree had already
+routed it.**
+
+**THE RULING: A SIBLING CHANNEL.** ROUTE is NOT admitted to `@stage_names`. It gets `@route_re`,
+`parse_route_line/1`, `fold_route_file/1` and two keys — `route_status` / `route_detail` — on every status shape
+the runner forwards: `reconstruct/2`'s render, the durable terminal record, the record read-back, and `:idle`.
+This is the SERVED shape (`@served_re` + `fold_served_file/1` + `served_port`/`served_slot`) reused for the SERVED
+reason.
+
+**WHY, READ OFF THE CODE AND NOT OFF THE FILING.** `@stage_names` is not a display list; it is the gate into
+`stages`, and `stages` is what decides the run. `deploy_outcome/2`'s FIRST clause is
+`stages |> Enum.reverse() |> Enum.find(&(&1.status == "failed"))` → `{stage_exit_code(failed.name), terminal_reason(…)}`.
+`stage_exit_code/1` has clauses for PLAN/BUILD/STAGE/HEALTH/SWITCH and a catch-all `-1`. So admitting ROUTE would
+mean: a `ROUTE status=failed` line — which both engines DO emit, on a Caddy `validate` rejection, a lock refusal,
+or an unwritable Caddyfile, all of them NON-FATAL by the engines' own `return 1` discipline — sets the run's
+`exit_code` to `-1` ("abnormal end") and writes a `failure_reason`, on a deploy that had already emitted
+`SWITCH ok`. A doctrine change that silently converts a non-fatal arming miss into a failed deployment is not the
+invariant this row asked for: the criterion is *the decision REACHES the plane*, and whether an arming miss is
+FATAL is the open question `dr-w19-bl-arm-route-incidence-then-fatal` has not answered. A channel that forces the
+answer before the ruling is written is the same dishonesty this epic exists to stop.
+
+Three supporting reasons, each checkable:
+
+1. **The precedent is already in the tree and it points the other way.** SERVED is the node engine's slot
+   measurement; `deploy_runner.ex`'s own comment says *"SERVED is not in `@stage_names` above … it is a
+   measurement, never a verdict"*, and `api/test/barkpark_web/controllers/site_deploy_served_slot_test.exs:266`
+   PINS that — with the rationale written as *"the ROUTE precedent, charter D327"*. Admitting ROUTE would make a
+   live pin's stated reasoning false.
+2. **The whitelist buys nothing else.** `@stage_statuses` already contains `ok` and `failed`, and `@stage_re`
+   already matches ROUTE's shape. The ONLY thing a seat in `@stage_names` adds is verdict participation — the one
+   effect ruled out above.
+3. **It would be a doctrine change on a lane that cannot gate it.** `deploy_runner_stage_names_test.exs` is the
+   pin for that attribute and its required lane's path filter is `deploy/**` only; an `api/**`-only PR moving the
+   whitelist does not run it. The sibling channel leaves that pin and its shell half untouched and green — no pin
+   is moved, because none needs to be.
+
+**WHAT THIS ENTRY DOES NOT CLOSE.** The runner now forwards the arm decision; `render_status/1` in
+`api/lib/barkpark_web/controllers/site_deploy_controller.ex` does not yet serialize the two keys onto the
+`/v1/instance/site-deploy` door, and the prod API box is 10 days behind `main`, so no `deployments` row can carry
+a ROUTE outcome yet. `dr-w21-bl-route-decision-reaches-no-plane` c1 (a non-zero ROUTE count on the cloud
+`deployments` table over a stated window) and c3 (the incidence re-taken over a denominator in the hundreds,
+≥24h after the wave-20 marker repair) stay OPEN and are the successor's, in that order: serialize, deploy, then
+count. **D346 stands, un-amended: the arm decision had no durable channel. This entry builds one.**
+
+### D609 — 2026-09-11 — THE CENSUS 403 IS GONE. THE OPERATOR ROUTE ANSWERS 200 TODAY, BOTH ROUTES RETURN THE SAME NUMBERS, AND THE TEAM-SCOPED ROUTE STAYS CANONICAL ANYWAY.
+
+`dr-w30-bl-operator-census-403-blocks-the-fleet-ranking` asked for a ruling on a 403. **The 403 does not
+reproduce.** Re-read live at decision time, with the cloud PAT this Mac holds, against
+`https://api.barkpark.cloud`:
+
+| route | status | read at (`date -u`) | headline |
+|---|---|---|---|
+| `GET /v1/operator/deploy-ledger/census?from=2026-08-05T21:13:50Z&to=2026-09-11T00:00:00Z` | **200** | 2026-09-11T13:52:20Z | `volume 12689 · failed 1199 · live 4103 · deferred_total 7387 · total_sites 10 · failure_rate 9.45% · terminal_failure_rate 22.61%` |
+| `GET /v1/deploy-ledger/census?from=2026-08-05T21:13:50Z&to=2026-09-11T00:00:00Z` | **200** | 2026-09-11T13:52:20Z | the SAME `volume 12689 · failed 1199 · live 4103 · deferred_total 7387 · total_sites 10`, plus a `scope` key: `team "guerrilla" · registered_sites 14` |
+| `GET /v1/me` | **200** | 2026-09-11T13:52:52Z | `"platform_operator": true` for `frikk@guerrilla.no` |
+
+**D30 IS SUPERSEDED ON ITS FACTS, NOT ON ITS RULING.** D30 called the census "403-dark in production … a
+PERMANENT HUMAN GATE" because `require_platform_operator/2` gates on `email in platform_admin_emails()` and
+`PLATFORM_ADMIN_EMAILS` was unset on prod. Somebody set it: `/v1/me` now answers `platform_operator: true`, so
+`gr-ops-platform-admin-emails` — the human gate D30 filed a dependency on — has been discharged for this
+principal. Every charter line that asserts the census answers 403 to a real token (D30, D165's re-derivation at
+`:5129`, `:5472`, `:5916`, `:7146`, `:7626`) is **historical record, correct on its date, false today.** They are
+not struck: they dated a condition that has since changed, which is exactly what a dated entry is for.
+
+**THE RULING: THE TEAM-SCOPED ROUTE IS CANONICAL. The epic's readers do NOT get a platform_operator
+credential as a design dependency.** Three reasons, each read off the two responses above and not off the
+filing:
+
+1. **The operator route buys nothing.** Over the identical window the two routes return the identical
+   population — `volume 12689`, `total_sites 10`, class-for-class identical counts. The team owns every site
+   that has deployed. The "FLEET is far larger" premise the row was filed on is **false as measured**: there is
+   no fleet outside this team to see.
+2. **The credential is allowlist-shaped and can be emptied without a deploy.** `platform_operator` resolves
+   from `PLATFORM_ADMIN_EMAILS` at request time. An instrument pinned to the operator route goes dark the next
+   time that env var is edited, with no code change and no gate red — the same failure that darkened the crown.
+   The team route's authority is team membership, which the epic's readers hold by construction.
+3. **Only the team route names its own scope.** Its envelope carries `scope.team`, `scope.site_ids` and
+   `scope.registered_sites`; the operator envelope carries no scope key at all. A number that cannot say what
+   population it covers is the thing this epic exists to refuse.
+
+**THE LABELLING CONVENTION, BINDING ON EVERY FLEET-WIDE NUMBER THIS EPIC PUBLISHES** (this is the verbatim
+text; quote it, do not paraphrase it):
+
+> Every published fleet-wide number names its READER and its READING. A number is an INSTRUMENT READING only
+> when it was returned by a shipped HTTP route that answered 200 in the same session that publishes it, and it
+> is then published with the route path, the HTTP status, the pinned window, and the `date -u` instant of the
+> call. A number obtained any other way — SSH plus psql, a hand-rolled aggregate, a spreadsheet, a re-quote of
+> an earlier reading — is labelled **SQL-derived, not an instrument reading**, and may never be compared
+> side-by-side with an instrument reading without that label on it. The census's own `scope` block, when the
+> team route produced the number, is reproduced beside it; when the number came from the operator route, which
+> emits no scope block, the publication states "operator route, unscoped" in its place. A reading whose route
+> answered anything other than 200 is not a number at all: publish the status code and stop.
+
+This convention is what `dr-w30-bl-…` c1 asked for, with one inversion the live reading forced: c1 was drafted
+assuming the fleet number could ONLY be SQL-derived. It can be an instrument reading today. The convention
+therefore governs the LABEL, not the method, and it is the label that is mandatory.
+
+**WHAT THIS ENTRY DOES NOT CLOSE.** Nothing here says the operator route will still answer 200 tomorrow — the
+allowlist is prod configuration this epic does not own, and no test pins it. Any instrument that calls the
+operator route must still treat a 403 as a first-class outcome and surface it, never bury it. `D516`'s ranking
+stands on its own window and is untouched; the window read above is a DIFFERENT, later window and its
+`failure_rate 9.45%` may not be laid beside D516's `17.79%` without both windows printed.
+
+### D610 — 2026-09-11 — D469'S OFFLINE RULE CANNOT REACH A TASK TITLE. THE PROSE-ROT CLASS HAS NO AUTOMATED GUARD ON THE LEDGER, AND `dr-w27-bl-…` IS RETITLED BY HAND.
+
+**The retitle, done.** `dr-w27-bl-deferral-cause-is-null-on-59-percent` was titled
+*"59.7% of deferrals cannot name a cause, and the vocabulary changed twice inside one week"* — a decaying
+percentage over a CLOSED population, stated in the present tense. Patched and published at 2026-09-11T13:53:32Z
+(`bp doc patch task … --set title=… --yes`, then `bp doc publish task … --yes`). The row now reads:
+
+> The NULL-cause deferral population closed at 2026-08-07T10:01:54Z; the vocabulary changed twice in the week before it
+
+**The row was NOT closed and its criteria were NOT touched.** Read back at 2026-09-11T13:53:42Z:
+`lifecycle_status: open`, `acceptance_criteria` length 3 before and 3 after, and the three criterion strings
+compare byte-identical (`met` false → false on all three). The two live criteria survive verbatim:
+(2) *"Any rate this epic publishes states which vocabulary window it covers, and refuses to span
+2026-08-05T21:27:11 or the 2026-08-07 cause switch silently"* and (3) *"The interaction with dr-w27-s5 ARM D is
+recorded: the deferred population is a floor because a lost defer CAS produces no deferred row"*. The slug still
+embeds `59-percent`; that fossil is accepted, as the filing said.
+
+**THE GAP, RULED.** D469's prose-rot rule is **syntactic and offline by construction** — "no network in the
+unit gate" — and it scans instrument FILES in this repo. A Barkpark task title is a server-side row in the
+`production` dataset, reachable only over HTTP. **So the rule structurally cannot see the surface this defect
+lived on, and this class has NO automated guard.** Nothing in CI reds when a ledger title freezes a decaying
+number or narrates a closed population in the present tense; nothing did for the 33 days this title stood. The
+only mechanism is review, and review is what caught this one. **Naming that is the guard we have.** A network
+tier that could reach titles would have to run against prod on every PR, which D469 already refused for a
+reason that has not changed; the honest state is *known gap, deliberately unguarded, documented here so the next
+reader does not assume a gate exists.*
+
+- **D608 — THE `coalesced_attempts` ZERO IS A REGIME FACT, NOT A DEAD COUNTER, AND THE `0`-vs-`1,371`
+  COMPARISON IS INVALID.** A counter reading zero has two indistinguishable causes — the phenomenon does not
+  happen, or the increment never fires — and D313 chose "accurate and dormant" by reading the code. This entry
+  settles it by RUNNING both causes through the same column.
+
+  **(a) THE TWO NUMBERS ARE THE EXCLUSIVE BRANCHES OF ONE DECISION.** In `AutoDeployWorker.drive/2` a second
+  publish either finds the site's previous row STILL ACTIVE — `deployments_active_site_env_index` refuses the
+  INSERT, `Sites.Deploy.enqueue/6` recovers `{:duplicate, building}`, `defer_behind_running_build/2` mints NO
+  row and bumps `coalesced_attempts` — or finds it SETTLED, in which case the INSERT succeeds, a REAL ROW
+  carries the attempt, and the counter is never reached. `deferred` is TERMINAL (`Deployment.@transitions`
+  maps it to `[]`), so on a busy box every round settles its own row before the next attempt runs and only the
+  MINT branch is reachable. **The 1,371 `deferred` rows of 2026-08-07 are 1,371 proofs that the mint branch was
+  taken, not 1,371 uncounted coalesces.** The coalesce branch's window is the span a row spends active: minutes
+  on a healthy build, ONE HTTP ROUND TRIP on a busy box (claim → `building` → 409 → `deferred`), against a 60s
+  debounce. That, and not a broken increment, is the whole explanation for 6 attempts on 1 row.
+
+  **(b) PROVED BY A TEST THAT CAN TELL THE TWO CAUSES APART, NOT BY READING THE CODE.**
+  `cloud/test/barkpark_cloud/sites/auto_deploy_worker_test.exs` — *"THE ZERO IS THE REGIME, NOT A DEAD
+  COUNTER: the same counter reads 3 in flight and 0 behind a busy box"* — runs ARM A (a row claimed to
+  `building`, three publishes coalesce, counter reads **3**) and ARM B (`Deploy.SyncStarter` + a 409
+  `already_running` box, five rounds, five `deferred` rows, `SUM(coalesced_attempts)` = **0**), asserting in
+  ARM B's every round that `Deploy.active_production_deployment/1` is `nil` so the coalesce branch is
+  UNREACHABLE rather than merely unvisited. **A dead counter reads 0 in BOTH arms.** MUTATION-PROVED IN BOTH
+  DIRECTIONS, run output recorded on the PR: deleting the `record_coalesced_attempt(in_flight)` call reds ARM
+  A only (`left: 0, right: 3`, line 501) and leaves ARM B green; adding `"deferred"` to
+  `active_production_deployment/1`'s status list reds ARM B only (*"round 2: a settled deferral must leave the
+  active set"*) and leaves ARM A green.
+
+  **(c) RULING: THE TERM IS RENDERABLE ABOVE ITS FLOOR, AND ITS `basis` NOW CARRIES THE EXCLUSIVITY.** The
+  wave-19 refusal to render it (`dr-w19-s7`) was the right call while the cause was unknown; the cause is now
+  known and it is not a defect, so the gauge keeps the `@coalesced_counter_since` coverage floor it already has
+  and needs no second suppression. What changes is the SENTENCE that travels with the number: `@coalesced_basis`
+  now states that coalescing and minting a row are exclusive branches and that `deferred` rows can never be a
+  denominator for it — because the reading that made this suspect was made by a reader who had the number and
+  not that fact. **A low reading means "few publishes landed during a healthy in-flight build in this window",
+  never "the counter is broken"; if it must ever be re-doubted, the discriminator in (b) is the instrument.**
+
+  **(d) NOT SIZED WITH `oban_jobs` MINUS `deployments`, AND THE COPY OF THAT ESTIMATOR IN THE CODE IS
+  WITHDRAWN.** `auto_deploy_worker.ex`'s own comment carried *"1,204 attempts that minted no row … 4.35:1"*
+  from that subtraction; the two populations are not nested (rows also arrive from non-`AutoDeployWorker`
+  triggers), so post-migration it goes NEGATIVE — **651 jobs against 658 rows, i.e. -7** — and `oban_jobs`
+  prunes at 7 days. The paragraph is deleted from the file rather than merely overruled here, per D607. **NOT
+  RE-MEASURED THIS ROUND:** every prod figure quoted above (658 rows, total 6, 1,371 deferrals, 651 jobs) is
+  INHERITED from D313 and the wave-19 filing and is a month old — this entry settles the MECHANISM, which is a
+  property of the code, and deliberately does not restate the counts as fresh. Re-derive with
+  `SELECT count(*), sum(coalesced_attempts), count(*) FILTER (WHERE coalesced_attempts > 0) FROM deployments
+  WHERE inserted_at >= '2026-08-07 10:02:23Z';` beside
+  `SELECT count(*) FROM deployments WHERE status='deferred' AND inserted_at::date = '<day>';`
+
+### D611 — 2026-09-16 — THE CONSTRUCTIVE HALF OF D118: THE LEVER'S HOME IS THE PER-BUILD TRANSIENT UNIT, THE BOUND THAT BELONGS THERE IS `MemorySwapMax=0`, AND THE PLACEMENT RULE NOW HAS A GUARD THAT CAN RED.
+
+Closes the constructive side of `dr-bl-w8-memory-lever-belongs-on-the-build-slice`. D118 states the
+PROHIBITION (never the serving slot) and names the permitted home in one clause; it never says what is
+already there, what the bound should be, or how anyone would notice a violation. This supplies all three.
+
+**(a) THE ROW'S FOUNDING PREMISE IS WRONG, AND IT IS WRONG IN THE DIRECTION THAT WOULD HAVE CAUSED A
+DUPLICATE RULING.** The row reads *"The charter carries no memory, swap, OOM or cgroup decision, so this needs
+a new one."* It carries at least three: **D39** (the OOM census, `MemoryHigh` parked, two levers refuted by
+measurement), **D118** (the prohibition itself), and **D143** (`/v1/graph` measured from outside the BEAM:
++684/+568/+646 MB in 2–4 s off a 403–446 MB idle floor). A fourth, **D119**, is the one the row DOES quote —
+build windows anti-correlated at relative risk 0.42. A builder taking the row at its word would have re-derived
+D39's census and re-argued D118. **Read the charter before writing "the charter has no ruling."**
+
+**(b) THE BOUND IS ALREADY ON THE BUILD UNIT — MEASURED IN THE TREE, NOT ON A BOX.** Read on `origin/main`
+2026-09-16 from this repo (no host was touched; every line number below is from that read):
+
+| what | where | value |
+|---|---|---|
+| per-build transient unit name | `api/lib/barkpark/sites/deploy_runner.ex:1910` | `bp-site-build-<slug>-<tag>-<ms>.service` |
+| its RSS bound | `deploy_runner.ex:211`, applied at `:1933` | `MemoryMax=1500M` |
+| its CPU bound | `deploy_runner.ex:212`, applied at `:1934` | `CPUQuota=150%` |
+| its SWAP bound | — | **absent. No unit file and no code path in the tree SETS `MemorySwapMax`; `git grep MemorySwapMax` returns prose (this charter, `deploy/README.md`, the script header), one 2026-08-06 ledger transcript of an `ssh` probe, and — after this commit — `deploy/slot-memory-peaks.sh`, which only READS the property and mints it in its own `--self-test` fixtures. Zero live directives anywhere.** |
+| the serving slot unit file | `deploy/systemd/barkpark-slot@.service` | **zero `Memory*=` directives** |
+| build concurrency forced by those caps | `deploy/lib/site-deploy-common.sh:342` | `BUILD_GATE_SLOTS=1` |
+| a legitimately bounded NON-slot unit | `deploy/systemd/barkpark-site@.service:53` | `MemoryMax=512M` |
+
+So D118's placement is already honoured for the RSS half and the box is already compliant. **The open half is
+swap.** Under cgroup v2 `memory.swap.max` defaults to `max`, so a build held to 1,500 MB of RSS may still push
+an unbounded number of pages into the box's swapfile — and the pages it displaces are the serving BEAM's. That
+is the exact mechanism D118 is about, and `MemoryMax` alone does not close it.
+
+**(c) THE VALUE IS `MemorySwapMax=0`, AND ITS JUSTIFICATION IS BLAST RADIUS, NOT RECLAIM. Whoever ships it may
+not sell it as recovering memory.** The input is NOT mine and is labelled as such: the 2026-08-06 guerrilla
+budget (`tooling/grip/ledger/guerrilla-steady-state-memory-budget-2026-08-06.md:70-73`) ranks it lever #2 and
+measured **build processes holding ~9 MB of swap in total** while the box held 2,160 MB — so refusing the build
+scope swap outright **recovers 0 MB** and costs the build approximately nothing, while removing the build from
+the set of processes that can be the one that tips the API into the global OOM killer. That is the whole case,
+and the "0 MB" is half of it: a reader who quotes this as a memory-reclaim lever has inverted it. **This
+charter prescribes no OTHER number.** A non-zero swap ceiling would have to be derived from the build unit's
+own `MemorySwapPeak`, and see (d).
+
+**(d) THE VERIFICATION OF ANY BUILD-UNIT BOUND RIDES THE JOURNAL, NEVER `systemctl show` — `--collect` DESTROYS
+THE EVIDENCE AT EXIT.** `deploy_runner.ex:1935` passes `--collect`, which is correct (it is what keeps a re-run
+of the same slug from tripping "unit already exists") and which garbage-collects the transient unit the moment
+it exits. A finished build's `MemoryPeak` / `MemorySwapPeak` / `Result` are therefore **unreadable after the
+fact**: `systemctl show bp-site-build-….service -p Result` races the reaper and normally loses. The journal
+does survive — the 2026-08-06 `bp-oom-probe-B` probe
+(`tooling/grip/ledger/journald-vs-d31-ruling-2026-08-06.md:17`, again not my reading) established that an
+OOM-killed unit flushes its output, 200/200 pre-kill lines plus the partial. **So: prove a build-unit bound
+from `journalctl -u bp-site-build-*`, and treat a post-hoc `systemctl show` of a finished build unit as an
+instrument that reads empty for a structural reason, not as a clean box.** `deploy/slot-memory-peaks.sh`'s
+monotonic fold cannot help here either: it folds units that are LONG-LIVED, and a transient unit that is reaped
+at exit has no next sample to fold into.
+
+**(e) THE PLACEMENT RULE STOPS BEING PROSE.** `bash deploy/slot-memory-peaks.sh --placement-check [FILE|-]`
+reads `systemctl show`'s own block shape (live on a box, or a capture offline/in CI) and exits **40** the
+moment a finite `MemoryMax` / `MemoryHigh` / `MemorySwapMax` appears on `barkpark-slot@*.service` or on the
+slot slice; a bound on a `bp-site-build-*.service` exits 0 and is reported as the sanctioned home; a bound on
+any other unit is printed and **not judged** (`barkpark-site@.service` ships `MemoryMax=512M` by design, and a
+guard that reddened a box for that would be uninstalled inside a day). An empty capture exits **41** and a
+host with no `systemctl` and no capture exits **42** — a broken instrument never renders as a clean box. A
+STATIC arm reads the shipped `deploy/systemd/barkpark-slot@.service` and reds the same 40 if a `Memory*=`
+directive is ever added to it, so the violation is caught at the commit and not only on the host.
+The `--self-test` proof is 35 checks; the placement arms carry **both** required mutations: the forbidden-slot
+red is shown non-vacuous by misclassifying the serving slot (the red disappears), and the QUIET arm runs the
+**identical** `MemorySwapMax=1468006400` against a build unit and asserts exit 0 — same number, different
+cgroup, opposite verdict, which is the entire ruling expressed as a test.
+
+**(f) CRITERION 2 OF THE ROW IS ALREADY DISCHARGED BY THIS CHARTER, BY A DIFFERENT WAVE.** The row demands the
+driver of the graph failure rate be established before any bound is prescribed. **D116** established it, and its own
+citation is quoted here rather than re-derived: `resolve_target_existence` in `api/lib/barkpark/content/edges.ex`
+runs per reference-value per document, un-batched and un-memoized,
+measured at **+1,484 / +1,318 / +2,332 `xact_commit`** against an +86…+140 baseline, n=30 giving p95 23.4 s and
+4/30 HTTP 500 clustered at the `DBConnection` 15,000 ms ceiling. **D143** then split the two stories apart and
+forbade conflating them: #10016 "reclaims the pool-timeout story and NOT the OOM story, and it must not be sold
+as both." **D119** refuted build windows at RR 0.42. None of those are my measurements and none of them are
+re-derived here. **The driver is round trips, not memory — which is precisely why the memory lever is a blast-
+radius lever and not a cure, and why (c) forbids selling it as one.**
+
+**(g) THREE PIECES OF PROSE DESCRIBED A CAP MECHANISM THAT NO LONGER EXISTS, AND THEY ARE THE FIRST THING A
+READER HUNTING THE LEVER WOULD FIND.** `deploy/README.md`, `deploy/site-deploy.sh`'s header and
+`deploy/site-deploy-node.sh`'s header all said the BUILD runs "under `systemd-run --scope -p MemoryMax=1500M -p
+CPUQuota=150%`". The inner scope was retired by slice `stw6-deployrunner-reattach`; the engines' own in-body
+comments already say so — cited by CONTENT, not by line, because this very commit edits that file's header and
+would shift any number written here: `grep -n 'No inner resource cap' deploy/site-deploy.sh` lands on the block
+reading *"the inner `systemd-run --scope` cap is gone, so it is a no-op today"*. `BARKPARK_SITE_NO_CAP` is
+therefore a documented no-op (still set by 27 self-test invocations in `site-deploy-node.sh`, which is why it
+was retained rather than deleted). The headers were pointing anyone asking
+"where does the memory bound live?" at a mechanism inside the engine instead of at the transient unit one layer
+up — the exact question this row exists to answer. Corrected in the same commit. **The assertion is where
+people stop looking: the three surfaces that named the cap were the three that were wrong about it.**
+
+**WHAT THIS DOES NOT CLOSE.** The setting itself. `MemorySwapMax=0` must be added at `deploy_runner.ex:1933-1934`
+beside the two properties already there, and that file is outside the deploy fence — filed, not built here.
+Nothing above was measured on guerrilla or any other host: this entry contains **no new host reading**, and every
+number in it is either read from this repo at `origin/main` (the table in (b), the 35-check count) or quoted
+with its source and its date from an earlier wave's ledger (the ~9 MB, the 0 MB, the 2,160 MB, the 200/200).
+
+- **D612 — D225's "GREEN ON THE MERGE COMMIT" IS UNSATISFIABLE FOR ONE CONTEXT, NOT FOR LACK OF A READER; AND
+  THE 25-ROW COHORT NO LONGER EXISTS, SO NOTHING WAS REWRITTEN.** `dr-w14-bl-merge-commit-criterion-wording`
+  ordered 25 criteria reworded before the D225 sweep stamped them. Both halves of its premise were re-measured
+  before any write, and both moved.
+
+  **(a) `gh pr view --json statusCheckRollup` DOES report the HEAD commit — CONFIRMED, 4/4 samples.** Measured
+  2026-09-16 on the four most recent merged PRs. The rollup's length equals the *headRefOid*'s `check-runs`
+  `total_count` EXACTLY, and never the merge commit's:
+
+  | PR | rollup | head check-runs | merge check-runs | `PR references an active task` on HEAD | on MERGE |
+  |---|---|---|---|---|---|
+  | #17070 | 55 | 55 | 121 | 1 | 0 |
+  | #17068 | 55 | 55 | 69 | 1 | 0 |
+  | #17066 | 57 | 57 | 69 | 2 | 0 |
+  | #17064 | 57 | 57 | 77 | 2 | 0 |
+
+  The last two columns are each other's control: the same `grep -cx 'PR references an active task'` returns
+  non-zero on every HEAD, so a `0` on a merge sha is a real absence and not a broken reader.
+
+  **(b) BUT "no tool this epic uses can report the merge commit's checks" is FALSE.** The merge commit carries
+  MORE check-runs than the head (121 vs 55 on #17070), and `gh api repos/<r>/commits/<mergeSha>/check-runs`
+  reads them. This repo already ships a reader that takes an arbitrary sha: `scripts/merge-check.sh --classify
+  <sha>` calls `mc_rollup`, which paginates `commits/$REAL/check-runs` with a `total_count` completeness
+  assertion. The live path passes `REAL=$(git rev-parse refs/remotes/origin/$BR)` — a BRANCH HEAD — so
+  merge-check.sh *asks about the head by choice of argument, not by limitation of its reader*. Hand it a merge
+  sha and it answers about the merge sha.
+
+  **(c) THE REAL DEFECT IS NARROWER AND SHARPER: ONE OF THE FOUR REQUIRED CONTEXTS NEVER RENDERS ON A MERGE
+  COMMIT.** On merge sha `f7610ed6a`, `Cloud gate`, `Console gate` and `Elixir gate` are each `completed/success`
+  — three of four are readable AND green. `PR references an active task` is ABSENT, because
+  `.github/workflows/pr-task-gate.yml` is `pull_request`-triggered and a squash merge is a `push`. So
+  "all FOUR required contexts green on the merge commit" is false forever — **a missing EVENT, not a missing
+  READER**. Corroborated independently: `dr-bl-w19-console-gate-red-on-a-merged-main-commit` c3 already records
+  "PR references an active task is ABSENT on 52/52 merge shas".
+
+  **(d) THE COHORT IS NOT 25 AND IS SPENT.** Denominator: ALL 9,413 rows via `bp task ls --all` (complete — no
+  truncation warning; `--limit 500` fills exactly and is NOT complete). 8,799 carry `acceptance_criteria`;
+  253 criteria across 248 rows mention "merge commit"; **52 criteria on 52 distinct rows** carry the specific
+  *green-on-the-merge-commit* shape. Of those 52: **46 are `done` with `met:true` — already stamped**, 5 are
+  `cancelled`, and **1 is `open`+unmet**. The event D225 wanted to prevent already happened, and the two sibling
+  orders that carried this same instruction (`dr-w14-bl-ledger-sweep-fifty-four` c2,
+  `dr-w10-bl-epic-ledger-stamp-repair` c3) were CANCELLED as premise-expired on 2026-08-23: *"the 54-row cohort
+  no longer exists."*
+
+  **(e) THE ONE LIVE ROW IS ALREADY CORRECT, SO ZERO ROWS WERE PATCHED.** The single `open`+unmet row,
+  `cch-bl-cloudflare-identity-echo-no-surface` c5 (claim.worker `null`), already reads *"the FOUR live required
+  contexts … green on the PR HEAD — **never on the merge commit**"*. The fix this row ordered is already in the
+  only row that could still receive it. Rewriting the other 51 would edit `done`/`cancelled` rows' work digest
+  for no gain and would 409 their holders' closes.
+
+  **RULING: the satisfiable wording is "the four required contexts are green on the PR HEAD at merge time
+  (newest run per name `completed/success`), and the merge sha is an ancestor of origin/main" — NOT "no
+  FAILURE/CANCELLED/TIMED_OUT anywhere in the rollup", which is stricter than the rule this repo merges on
+  (per-name latest-`completed_at` wins, so a superseded red is irrelevant) and would refuse merges the gate
+  permits. No rows rewritten; the identification and this note are the deliverable.**
+---
+
+## D613 — TASK-AUTHORING RUBRIC: CITE THE SYMBOL. A LINE NUMBER WITH NO SHA IS NOT FALSIFIABLE. (2026-09-16)
+
+Row: `dr-w11-bl-task-body-file-line-anchors-rot-silently`. Measured at `origin/main` **d288448d9** over the
+**complete** direct-children set of `dr-backlog-never-started` (342 rows via `bp task ls --parent … --all`,
+every row carrying `.content.description`; its 3 grandchildren are all `done`, so no open row sits outside it).
+
+**THE SCOPE.** Of the **78** non-terminal rows (72 `open`, 4 `in_progress`, 2 `blocked`), **30 carry at least one
+parseable `path:NNN` anchor**, **62 anchors** in all. Under SYMBOL-IN-WINDOW(+/-5) — resolve the path against
+`git ls-files`, harvest the citing sentence's identifiers minus a stoplist minus every token derivable from the
+path itself, and ask whether one of them appears within five lines of the cited number:
+
+| verdict | n | reading |
+|---|---|---|
+| GOOD | 13 | a claim token lands within +/-5 |
+| STALE | 26 | no claim token within +/-5, or the line is out of range |
+| UNTESTABLE | 5 | the sentence names no symbol beyond the path — never scored GOOD |
+| UNRESOLVED-AMBIGUOUS | 17 | a bare basename is not an address (`router.ex` matches BOTH routers) |
+| UNRESOLVED-MISSING | 1 | no file at HEAD ends with that path |
+
+**26 stale of the 39 that are both resolvable and testable — 67%.** The stale share is NOT small, so the
+convention is not the whole answer; but it is most of it, for the reason below.
+
+**THE SEED SIX, RE-VERIFIED INDIVIDUALLY AT d288448d9 — FIVE ARE STILL WRONG, AND THE CORRECTIONS THEMSELVES
+ROTTED.** The row's body carried six anchors plus their corrections. The corrections are now as dead as the
+originals:
+
+| # | the body says | at d288448d9 |
+|---|---|---|
+| 1 | `Deploy.start/1` at cloud router `:10805`/`:12347`, corrected to `:11240`/`:12782` | **STILL WRONG, twice over.** `Deploy.start/1` no longer exists — the sites are `Sites.Deploy.start_reported/1` at `:15393` and `:17482`, and the file grew past 12k to **17,568** lines. `:11240` is a BLANK line. |
+| 2 | `@build_slot_capacity` at `deploy_runner.ex:269`, corrected to `:285` | **STILL WRONG.** `api/lib/barkpark/sites/deploy_runner.ex:395`; `:285` is blank. Also implied a cloud path — the file is under `api/`. |
+| 3 | `box_at_capacity?/2` at `:721`, corrected to `:748` | **STILL WRONG, and unrepairable.** No `def`/`defp box_at_capacity?` exists anywhere in the tree (control: the identical `git grep` finds `build_slot_capacity` in 17 places). Only the error-code STRING survives. |
+| 4 | `errors.ex` `internal_error` catch-all at `:634`, corrected to `:644` | **STILL WRONG.** The catch-all is `api/lib/barkpark/content/errors.ex:1150`; the file is 1,296 lines. |
+| 5 | api router token route at `:2342`, corrected to `:2359` | **STILL WRONG.** `:2359` is a BLANK line; `post("/v1/tokens", TokenController, :create)` is at `:3184`. |
+| 6 | `AgentEvent` under `api/lib/barkpark/registry/`, corrected to `cloud/lib/barkpark_cloud/registry/` | **CORRECT.** `cloud/lib/barkpark_cloud/registry/agent_event.ex` exists. |
+
+**The one that survived is the one with no line number.** That is the whole ruling in one row.
+
+**THE CLASS IS BIGGER THAN THE CHECKER, AND THIS IS THE LOAD-BEARING FINDING.** Two populations are invisible
+to any `path:NNN` instrument, both measured on this corpus or collected on 2026-09-16:
+
+* **BARE `:NNN` REFERENTS — 11 of the 78 open rows, 37 occurrences.** `at :269`, `is at :748` — prose-bound to a
+  filename named in an earlier clause. This row's own body is the specimen: of its six anchors, a `path:NNN`
+  grammar parses **one**. A checker aimed at its filing row would have seen one sixth of it.
+* **CLAIM ROT — a prose assertion about the code that is false with every line number correct.** Four of six
+  fresh specimens: `callees/2`'s `uniq_by` was blamed for dropping sibling clauses (refuted by run — `callee_key/1`
+  and `bfs_walk/9`'s seen-set both carry the line); `studio_chrome`'s `when event in @per_view_events` was guessed
+  not to halt (it halts, `{:halt, chrome_fallback(...)}`); `dr-bl-w8-memory-lever-belongs-on-the-build-slice`
+  asserted this charter carries no memory/swap/OOM/cgroup decision (D39, D118, D143 and D119 all exist);
+  `pds-w29-bl-twin-policy-split` cited four anchors that had ALL rotted and additionally missed a fifth surface
+  and a ruling on main that cites the row by id. **No line checker catches any of these.**
+
+**RULING — the authoring convention, binding on every row this epic files from here:**
+
+1. **CITE THE SYMBOL.** `deploy_runner.ex @build_slot_capacity`, `router.ex Deploy.start_reported/1 (2 sites)`.
+   A symbol is re-findable by `git grep` after any insertion; a number is not.
+2. **A LINE NUMBER IS AN OPTIONAL HINT AND CARRIES THE SHA IT WAS TAKEN AT** — `deploy_runner.ex:395@d288448d9`.
+   A number with no sha is not falsifiable: nothing can tell a later reader whether it ever was right.
+3. **A BARE BASENAME IS NOT AN ADDRESS.** Write the repo-relative path. 17 of 62 anchors here resolve to two or
+   more files, and `router.ex` is the worst offender in the repo.
+4. **AN ASSERTION ABOUT THE CODE CARRIES THE RUN OR THE GREP THAT PRODUCED IT.** Rules 1-3 do nothing for claim
+   rot, which was two-thirds of the fresh specimens. The prose is the thing that has to be checkable.
+5. **NEVER AUTO-CORRECT AN ANCHOR.** A moved anchor has two causes with opposite remedies — the code moved
+   (re-anchor) or the finding is gone (close the row). A rewriter picks one silently and destroys the evidence
+   for the other. `scripts/pds-task-anchor-report.sh` REPORTS and exits; its selftest arm (d) asserts the fixture
+   tree is byte-identical after a full red run.
+
+**THE INSTRUMENT.** `scripts/pds-task-anchor-report.sh --parent <id>` prints the table above and a BLIND SPOT
+line naming the bare-ref count it cannot parse, so the number never flatters itself. `--selftest` is hermetic
+and green, 10 arms, paired RED/QUIET by construction: arm (a) cites a line the symbol has MOVED away from and
+must read STALE naming the row, arm (b) cites the line it is ON and must stay GOOD. Disposed ENVIRONMENT in
+`scripts/pds-door-census.sh` — the live arm walks the ledger and exits 2 CANNOT READ rather than reporting a
+comfortable zero.
+
+**WHAT THIS DOES NOT CLOSE.** The repo-wide rubric at `docs/setup/TASK-SYSTEM.md` — its
+*"How to organize tasks (follow these for ANY task)"* section is the natural home for rules 1-4 beyond this
+epic, and it is outside the deploy fence. Routed to the lead, not edited here. And the five rotted seed anchors
+above are REPORTED, not rewritten, per rule 5: each needs a human to decide whether the code moved or the
+finding died.
+
+### D614 — 2026-09-16 — THE CANCELLED POPULATION IS ZERO *AS AT A DATE*, NOT AS A PROPERTY. IT LICENSES NO ALARM, NO DASHBOARD AND NO GATE, BECAUSE THE PATHS ARE ALIVE AND HAVE ONLY NEVER QUALIFIED.
+
+Closes `dr-w16-bl-cancelled-rows-rationale-is-wrong` c2. D258 and D290 both state the zero; neither states a
+date beside it, a command that re-derives it, or what it permits. A bare zero in a charter reads five months
+later as a current fact — and this epic has already paid for that once (D607). This entry fixes the shape.
+
+**(a) THE OBSERVATION, WITH ITS DATE AND ITS DENOMINATOR — AND THE DENOMINATOR HAS ALREADY MOVED.**
+`status = 'cancelled'` on `deployments`: **0 rows, all-time.** Two readings are on this file's record and they
+do not share a denominator:
+
+| Reading | Recorded in | Denominator | Vocabulary at the time |
+|---|---|---|---|
+| 0 cancelled | D258 (wave 15) | 31,070 all-time rows | `deferred \| failed \| live` |
+| 0 cancelled, both spellings, since 2026-07-14 | D290 (wave 16) | 31,137 all-time rows | failed 18,622 / live 10,391 / deferred 2,124 |
+
+**The numerator held and the denominator drifted 67 rows between two waves of the same epic.** That is the
+whole argument in one row of a table: the zero is a reading of a growing table at an instant, and a number
+quoted without the instant it was read at cannot be checked by anyone later.
+
+**(b) NEITHER READING IS RE-DERIVABLE FROM THIS LANE, AND THAT IS STATED RATHER THAN PAPERED OVER.** Both came
+from a live read of `cloud-db-1`; reaching it needs ssh or a prod DB credential, both owner-only, and no agent
+on the deploy or console lane has one (`$ORCH/BLOCKED-ON-USER.md`, and the refusal is on this row's own c2
+attempt log, 2026-09-16T10:09:55Z). **Nothing below was re-run for this entry.** What this entry adds is the
+command, so the next reader is not stuck where three waves have been:
+
+```sql
+-- THE NUMBER. Numerator, denominator, and the instant, in one row.
+SELECT count(*) FILTER (WHERE status = 'cancelled') AS cancelled,
+       count(*)                                     AS all_time,
+       min(inserted_at)                             AS oldest_row,
+       max(inserted_at)                             AS newest_row,
+       now()                                        AS taken_at
+  FROM deployments;
+
+-- THE CONTROL, and it is not optional. A zero and a broken read are the same
+-- output. This must print the live vocabulary with non-zero counts; an empty
+-- result set means the read never reached the table, NOT that the table is empty.
+SELECT status, count(*) FROM deployments GROUP BY 1 ORDER BY 2 DESC;
+
+-- THE TWO QUALIFYING POPULATIONS (see (d)). Either going non-zero makes the
+-- cancelled population reachable with NO code change.
+SELECT count(*) FROM deployments WHERE environment = 'preview';          -- cancel_preview/2's world
+SELECT count(*) FROM deployments d
+  JOIN sites s ON s.current_deployment_id = d.id
+ WHERE d.source = 'prebuilt';                                            -- refuse/1's qualifying sites
+```
+
+Record the answer here the way (a) does — number, denominator, `taken_at` — or do not record it.
+
+**(c) THE PRODUCERS, RE-ANCHORED BY CONTENT. THERE ARE THREE, NOT TWO, AND NONE OF THEM IS A PERSON.**
+Verified against `origin/main` at `f42843f4e`. Every line number D258 and D290 carry has rotted; cite the
+symbol (D613 rule 1), and note that both Elixir producers are `defp` — neither is callable from outside:
+
+| Producer | Address today | How to re-find it |
+|---|---|---|
+| `refuse/1` — prebuilt-overwrite guard | `cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex` `defp refuse` | `git grep -n 'defp refuse' -- cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex` |
+| its test | `cloud/test/barkpark_cloud/sites/auto_deploy_worker_test.exs` | `git grep -n 'mints a USER-VISIBLE cancelled row'` |
+| `cancel_preview/2` — preview supersede + branch teardown | `cloud/lib/barkpark_cloud/registry.ex` `defp cancel_preview` | `git grep -n 'defp cancel_preview' -- cloud/lib/barkpark_cloud/registry.ex` |
+| a build box filing the terminal itself | `POST /v1/{builder,agent}/deployments/:id/transition` | `git grep -n 'deployments/:id/transition' -- cloud/lib/barkpark_cloud/web/router.ex` |
+
+The third rides the REQUEST BODY, which is why a literal grep for `cancelled` under `cloud/lib` misses it —
+and why `cloud/test/barkpark_cloud/cancelled_producer_census_test.exs` ARM A enumerates two files and says so.
+Three one-time migrations also `SET status='cancelled'`; those are history, not live producers.
+
+**THE ABSENCE CLAIM, WITH ITS CONTROL.** *There is no human cancel path anywhere in `cloud/lib`* — probed
+`phx-click="cancel…`, `handle_event("cancel…`, `cancel_deploy`, `cancel_deployment`, `def cancel(`: zero hits.
+That is worth nothing on its own (an absence is never caught by inspection), so: the `phx-click`/`handle_event`
+controls ALSO return zero — `cloud/` has no LiveView at all — which means those probes measured nothing and
+are **withdrawn**. The probe that carries a live control is the router: `cloud/lib/barkpark_cloud/web/router.ex`
+has **105** `post ` routes and does contain the string `cancelled`, so the file is being read; searching it for
+a cancel route returns exactly one, `POST /v1/billing/cancel` (owner-gated subscription cancel, at
+period-end), which does not touch the `deployments` table. **One human cancel affordance exists in the whole
+control plane and it cancels a SUBSCRIPTION.**
+
+**(d) WHAT A ZERO POPULATION DOES NOT LICENSE — the sentence a future reader needs.** A zero population does
+**not** mean the code is dead. It means the code has never QUALIFIED. All three producers are live and
+reachable; `refuse/1` has no qualifying site today (its guard is the LIVE RELEASE's provenance,
+`Deployment.prebuilt?/1` i.e. `source == "prebuilt"` — *not* the `prebuilt_enabled` opt-in, which a site can
+carry while still serving a box build), and `cancel_preview/2` fires only on `environment == "preview"`, an
+environment with 2 rows all-time. **Add one preview site, or let one prebuilt-release site take a content
+publish, and the population becomes non-zero with no code change at all.** Therefore:
+
+- **Do not scope an alarm, a dashboard tile, a threshold or a merge gate against this population.** It would
+  be vacuous the day it ships and would silently come alive later — *worse than either alone*, because it
+  accrues a green track record over an empty set and then starts firing with no change to blame.
+- **Do not delete the cancelled cohort from the census on the grounds that it is always zero.** D258 named the
+  cohort precisely because the danger is a subtractive `live` scoring a refusal as a success.
+- **Do not write a test that asserts the population is zero.** That is a ratchet with two failure directions
+  and the world getting better reds it. The guard that IS correct is the one that shipped:
+  `cancelled_producer_census_test.exs` reds on a NEW un-enumerated producer and on a revert of the corrected
+  framing — it governs the SOURCE, which this lane can read, not the POPULATION, which it cannot.
+
+**THE RULE, GENERALLY.** A number this repo cannot re-run is a dated observation. It travels with four things
+or it does not get written: **the number, the denominator, the instant it was read at, and the command that
+re-derives it.** D607 bought this convention by example; D614 buys it for the cancelled population and states
+the licence question — *what does this number permit?* — as the second half nobody had written down.
+---
+
+## D615 — THE READ-ONLY MANDATE HAD NO READER BUT THE ACTOR IT CONSTRAINED. IT NOW HAS A PROGRAM, A PERMIT FOR THE ONE MEASUREMENT THAT MUST BREAK IT, AND AN OWNER-ONLY CREDENTIAL ASK. (2026-09-16)
+
+Row: `dr-w11-bl-prod-sweep-litter-and-credential`. Decided at `origin/main` **f42843f4e** and RE-RUN, not re-quoted, at **53ccd4a24** after the rebase that renumbered this decision (a sibling took D614 in the same window); every figure below holds at both. From the tree and the
+row's own text only. **NO PRODUCTION SURFACE WAS TOUCHED TO REACH THIS RULING** — no ssh, no `psql`, no live
+database, no box's `.env`. Documenting a read-only breach by committing one would have been the worst available
+outcome, and the fence was held.
+
+### THE CAUSE IS NOT THE THREE SYMPTOMS
+
+The row files three breaches from wave 11's own survey/verify fleet. They are one fault:
+
+| # | the symptom | its status |
+|---|---|---|
+| 1 | `tmp_dep_site_live` CREATEd by hand on `cloud-db-1` during a **read-only** sweep, never dropped | the OBJECT is repaired — slice `dr-w11-s6` adopts it as `deployments_site_became_live_index` (D166). **The discipline breach is not**, and that is what this decision rules on. |
+| 2 | that index `DROP`ped **four times inside rolled-back transactions on the live database**, ACCESS EXCLUSIVE on `deployments` each time, longest ~24 s | permitted going forward, under a written permit — see below. Nothing was lost. |
+| 3 | a live `DATABASE_URL` with a plaintext password read into a verifier's transcript while probing guerrilla's `/opt/barkpark/.env` | redacted on disk, present in a run log. **Owner-only.** Routed, not decided here. |
+
+**WAVE 10 HAD ALREADY WRITTEN THE RULE DOWN AND HAD ALREADY VERIFIED COMPLIANCE.**
+`dr-w10-bl-inserted-at-index-watch-item` declared the cleanup discipline in exactly the words a later reader
+would want — *"created CONCURRENTLY and its presence or removal verified by reading `pg_indexes` afterwards …
+`deployments` is back to exactly 9 indexes, zero `tmp_*`"* — and confirmed it at **05:12Z**. Hours later the same
+epic's next wave created a `tmp_*` index by hand on the same table and left it, and the table went to ten.
+
+So the finding is **not** that the rule was unclear, unknown, or unwritten. It was clear, known, written, and
+confirmed. **It failed because its only reader was the actor it constrained.** Wave 10 authored the mandate and
+attested its own compliance; both halves of the control sat inside the thing being controlled. A self-attested
+control is a statement about an author's intentions, and intentions do not survive a shift change.
+
+**THE RULING ON THE CAUSE. A READ-ONLY MANDATE THAT NOTHING CAN MECHANICALLY CHECK IS NOT A MANDATE. IT IS A
+PREFERENCE.** From here, any sweep, survey or verify lane that declares itself read-only against a production
+datastore must name which of these two it actually has. Prose alone is neither:
+
+1. **PREVENTION — the connection cannot write.** The sweep connects as a role without DDL, or sets
+   `default_transaction_read_only = on` for the session. A hand `CREATE INDEX` then fails **at the wire**, in the
+   sweeper's own transcript, at the moment of the mistake. This is the only control in this decision that does
+   not depend on anybody remembering anything, and it is the one to reach for first. It is also the one this
+   lane cannot land: it is an ops/credential act on a live box, owner-routed with the rest.
+2. **DETECTION — a reader that is not the actor.** `deploy/db-undeclared-index-census.sh` asks a database which
+   indexes it carries and diffs that against the set the migration tree DECLARES, reddening on any object no
+   migration names. It would have caught `tmp_dep_site_live` from a laptop, days later, with no cooperation from
+   and no self-report by whoever created it. **That is the whole point: it reads the RESIDUE, not the intent.**
+
+**THE INSTRUMENT, AND WHAT BUILDING IT ALREADY PROVED.** `deploy/db-undeclared-index-census.sh` has three arms —
+`--manifest` (offline, prints the declared set), `--check` (live, one `SELECT` against `pg_indexes`), `--selftest`
+(hermetic: stub `psql`, fixture migrations, no network, no credential). By run 2026-09-16, identical at f42843f4e and at the rebased base 53ccd4a24:
+`--selftest` rc=0, **11 arms, 0 failed**; `--manifest` rc=0, **300 declared index names across the two migration
+roots, BLIND SPOT 7**. It never writes — read verbs only, and arm (g) greps its own operative region for a write
+verb while arm (h) proves that grep can still find one planted in a copy. A failed, absent or **zero-row** read
+exits **2 CANNOT READ** and prints no table (arms e, f, i), because a broken read answering *"0 undeclared
+indexes"* is the precise fraud it exists to refuse.
+
+Its green is not asserted; it was **earned twice, and both faults were the same family as the breach itself**:
+
+* **PROSE IS NOT A DECLARATION.** The first cut counted any line carrying the words `CREATE INDEX`, and so pulled
+  `tmp_dep_site_live` out of the **`@moduledoc` of the very migration that DROPs it** — measured, 1 line, present
+  in the manifest. The census would have read the hand-made index as declared and stayed silent on the single
+  object it was written to catch. `derive_manifest` now tracks `@moduledoc`/`@doc` blocks and ignores them; arm
+  (j) is that specimen and arm (a) is its control.
+* **A SINGLE-LINE READER MISSES THE STATEMENT THAT MATTERS.** The wave-11 repair writes
+  `name: :deployments_site_became_live_index` on the **third** line of its `create index(`. A line-at-a-time
+  parser derives the positional name instead, and the real production index reads **UNDECLARED** — a false alarm
+  aimed at the fix. `derive_manifest` now joins a statement until its parens balance; arm (k) requires the
+  explicit name present **and** the positional one absent, so neither an always-emit nor an always-drop parser
+  passes. The two repairs moved the declared count 265 → 300 and the blind-spot count 30 → 7.
+
+**AND THE HONEST LIMIT, STATED HERE RATHER THAN DISCOVERED LATER: NOTHING REQUIRED RUNS IT YET.** `deploy/` is
+this lane's whole fence. `scripts/pds-door-census.sh` keys on `scripts/pds-*`, so this program is outside its
+denominator, and the rider that would make it THROUGH — an ExUnit exec under `api/test` plus a step in
+`.github/workflows/shell-harnesses.yml` — lives in two trees this lane may not touch. **Routed to the gates lane.**
+Until that rider lands, D615 is a decision with a runnable reader and no scheduler, which is a strictly better
+position than D615's own subject (a rule with neither) but is *not* the finished state, and this paragraph exists
+so no later reader mistakes one for the other.
+
+### THE DROP-IN-A-ROLLED-BACK-TRANSACTION MEASUREMENT IS PERMITTED, NOT FORGIVEN
+
+**A BAN WOULD BE THE WRONG RULING, AND D166 IS THE PROOF.** An index's worth cannot be established without
+removing it, and the alternative the assignment suggested — `SET enable_indexscan = off` — **lies**: Postgres
+falls back to a Bitmap Index Scan on the *same* index and understates the cost **14.5x**. Ban the honest method
+and the next verifier either guesses or reaches for a method that returns a confident wrong number. The
+measurement bought the 236x–498x figures that D166 turns into a landed migration; it was worth taking.
+
+**BUT PERMITTING IT SILENTLY WOULD ALSO BE WRONG, AND THE REASON IS SHARPER THAN "LOCKS ARE BAD".** The ACCESS
+EXCLUSIVE lock is held for the duration of the `EXPLAIN`, and the `EXPLAIN` is slow **precisely in proportion to
+how valuable the index is**. D166's own numbers: 48.4 ms with the index, **24,089 ms without**. The ~24 s
+production stall *was* the 498x payoff, read off the clock. **The better the index, the longer the outage that
+measuring it causes — monotonically.** A verifier's intuition runs the other way ("it's only an EXPLAIN"), which
+is why this has to be written down rather than left to judgement.
+
+**THE PERMIT. A production `DROP`-and-`ROLLBACK` measurement is permissible when ALL of these hold; any one
+missing and it is not a measurement, it is an outage with a spreadsheet.**
+
+1. **WRITTEN AUTHORISATION BEFORE THE FIRST STATEMENT**, from the wave lead or the owner, naming the object, the
+   table, the expected worst-case lock, and **the number of repetitions**. Retrofitted authorisation is not
+   authorisation, and this clause is the one wave 11 failed: four windows were taken where nobody had authorised
+   one. **The count is the part nobody agreed to.**
+2. **`lock_timeout` SET IN THE SAME SESSION BEFORE `BEGIN`**, to a bound stated in the authorisation. Wave 11 did
+   this, and it is why the breach is a discipline finding rather than an incident: the transaction fails fast
+   instead of queuing behind live traffic and stalling every writer on the table.
+3. **`statement_timeout` SET TOO, AND THIS IS THE CLAUSE WAVE 11 DID NOT HAVE.** `lock_timeout` bounds how long
+   you wait to ACQUIRE the lock; it says nothing about how long you HOLD it. The ~24 s was hold time. Without a
+   statement bound, the hold is whatever the un-indexed plan costs, which is unknown by construction — it is the
+   number being measured.
+4. **ONE EXPLICIT TRANSACTION PER MEASUREMENT**, `BEGIN … DROP … EXPLAIN … ROLLBACK` issued as a single batch,
+   never autocommit. A connection that dies mid-batch rolls back; an autocommit `DROP` does not, and that is the
+   difference between a measurement and a permanent loss.
+5. **`pg_indexes` RE-READ AFTER EVERY `ROLLBACK`, AND THE READ PASTED INTO THE RECORD.** The restore is *proven*,
+   not assumed, once per repetition. Wave 11 did this too, and it is the reason this decision can say "nothing
+   was lost" as a fact rather than a hope.
+6. **RECORDED WITH THE MEASUREMENT: UTC timestamps, the observed hold time per repetition, and the traffic
+   window.** The two wave-11 windows sit at roughly 06:39Z and 06:47Z; that they are known at all is what made
+   this row filable.
+7. **A RESTORED SNAPSHOT OR REPLICA IS THE DEFAULT; PRODUCTION IS THE FALLBACK, AND IT MUST BE ARGUED.** Stated
+   without pretending it is free: the 236x–498x figures depend on production row counts and cache state, so a
+   snapshot answers a slightly different question. The permit exists because sometimes that argument genuinely
+   wins. It has to be *made*, in the authorisation, not assumed.
+
+### THE CREDENTIAL IS ROUTED TO THE OWNER AND NOWHERE ELSE
+
+A verifier read guerrilla's live `DATABASE_URL` — a Postgres role password in plaintext — into its transcript. It
+is **redacted in everything written to disk**: nothing in this repo, this charter, the ledger, or any lane's notes
+carries the value, and **nothing may**. What remains is a run log retained outside the repo and outside any lane's
+reach. **Rotation is an owner act** — a new role password plus a coordinated `.env` rewrite and restart on every
+consumer — and no agent performs it, proposes a value, or re-reads that `.env` to confirm anything.
+
+**The ask is recorded for the owner in `scratchpad/orchestrate/BLOCKED-ON-USER.md`** (checked absent first, with
+the search proven live in both directions: a known-present string matched, a known-absent one did not), naming the
+credential class, the host, that it reached a run log, that it is redacted on disk, and the two dispositions —
+**rotate**, on the view that a plaintext database password in a retained transcript is disclosed by definition; or
+**accept and record the acceptance**, so the next sweep does not re-raise it. Either is a defensible owner
+decision. **"Nobody decided" is not**, and it is the state that line exists to end.
+
+### THE LITTER
+
+Query files and CSV exports left in `/tmp` on guerrilla and barkpark-cp, plus `/tmp/deps.csv` inside the
+`cloud-db-1` container. Read-only artefacts, no secret content asserted, but litter on production and outside this
+lane's fence by construction — removing them means reaching for the boxes this decision forbids reaching for.
+**Ruled a named ops act for the owner or an ops-credentialed lane, not a slice**, and deliberately not performed
+here. It is the cheapest of the four items and the only one with no argument in it.
+
+## D616 — THIS CHARTER'S D-NUMBERS ARE NOW MINTED FROM A RESERVATION LEDGER, NOT FROM A READ OF THIS FILE. IT IS THE PDS ARBITER BEHIND A PREFIX ARGUMENT, AND DELIBERATELY NOT A SECOND ONE. (2026-09-17)
+
+Row: `task-a312c1496c51209c`, worker `dw34`. **This decision's own number was reserved before this paragraph was
+written** — `deploy/d-number-reservations.tsv` carries `D616` with the timestamp of its reservation. Minting it by
+reading the charter would have been the defect committing itself.
+
+### THE INCIDENT
+
+On 2026-09-16 two PRs in flight the same hour both read this file, both correctly found the highest number defined
+was **D613**, and both minted **D614**. Both had checked BOTH numbering styles this charter uses — `###` headings
+and the `- **D` bullet list — so the scan was not the defect. #18700 merged first and kept D614; #18701 rebased and
+renumbered to D615 (its own text above says so). The cost was one build cycle and a rebase. The next collision may
+land both.
+
+**NEITHER READER WAS CARELESS, AND THAT IS THE WHOLE POINT.** Two correct readers of one unchanged document a
+minute apart get the same answer. A document is a lagging record of what has LANDED; it cannot express what is IN
+FLIGHT. The window between "I have decided to use D614" and "D614 is in the charter" is exactly where the collision
+lives, and no reader of the charter can see into it. Something outside the charter has to hold the claim. A bigger
+grep cannot: every lens over this file shares the one property that causes this.
+
+### THE RULING
+
+Before writing a decision into this charter, **reserve its number**:
+
+    bash deploy/d-number-arbiter.sh --allocate-d 1 --for "task-… <who>"
+
+and commit the resulting `deploy/d-number-reservations.tsv` row **in the same PR as the charter edit**. The arbiter
+takes an atomic `mkdir` lock, reads the charter AND the ledger, and mints above both — so the second author, minutes
+later with this file still untouched, reads a corpus that already says the number is taken. The collision is not
+detected afterwards; it cannot be minted. `bash deploy/d-number-arbiter.sh --check-alloc` scores it and names an
+unreserved number as `UNRESERVED-MINT`.
+
+### IT IS THE PDS ARBITER, NOT A COPY — AND THAT CHOICE IS THE DECISION
+
+`scripts/pds-record-parity.sh` already owns the definition lens, the allocation lock, the SEED semantics and the
+refusal. Its allocation arms were PDS-specific only in one token, so that token is now the `--prefix` parameter and
+`deploy/d-number-arbiter.sh` is **three variable bindings with no logic of its own**. **Two arbiters that can drift
+is a worse outcome than one**, and the evidence is in that file's own history: its lens has already drifted once
+(`PDS-D679` — a heading-blind second copy manufactured six phantom citations). A lens change now happens once, for
+both charters. The default prefix stays `PDS-D`, so every existing PDS caller, fixture and CI arm is byte-identical.
+
+### THE SEED IS 615, AND A NAIVE SCAN WOULD HAVE SAID 716
+
+The seed is the high-water at adoption; numbers at or below it predate the arbiter and are not scored, because a
+retroactive reservation is a claim about history nobody measured. It was derived with the **strict union lens** —
+bold-lead bullet UNION own-line heading, `charter_defined_numbers()` — which reads **633 definitions over 615
+distinct numbers, contiguous `1..615`**. A naive `\bD[0-9]+\b` scan reads **716** and is wrong: this charter's prose
+cites **PDS-D716**, the PDS charter's fence adjudication, six times, and a loose lens reads that cross-charter
+citation as this charter's own high-water. The PDS ledger warns of the identical trap with its `PDS-D777`/`PDS-D999`
+fixtures. **A lens that counts citations as definitions jumps the pointer by a hundred on the strength of a
+footnote.**
+
+### WHAT IS NOT DONE HERE, NAMED RATHER THAN IMPLIED
+
+**THE SENTENCE THAT STOOD HERE WAS FALSE ON THE DAY IT WAS WRITTEN. IT IS CORRECTED IN PLACE, NOT DELETED (D620).**
+It read: *"The `--check-alloc` arm is not yet wired to run on a PR that touches only this charter. That wiring lives
+in `.github/workflows/shell-harnesses.yml` — the `pds-harnesses` job's `paths:` filter lists
+`.claude/workflows/bp-pds-charter.md` and the `scripts/pds-*` doors, and this charter appears in no workflow path
+filter anywhere."* The first two clauses were true of their moment. **THE LAST CLAUSE IS RETRACTED:**
+`doc-gates.yml` selected this charter on BOTH the `pull_request` and the `push` arm, and twice over on each
+(`**/*.md` AND `.claude/workflows/**`), on every day D616 stood — and thirty-odd further arms carry no `paths:`
+filter at all and so matched it too. A downstream row was filed off the retracted clause and inherited it as its own
+premise. The measured set, by workflow and by arm, is D620 below, and `deploy/charter-adoption-check.sh` re-derives
+it on every run so this sentence cannot come back.
+
+**WHAT WAS ACTUALLY NOT DONE, which is narrower and was entirely real:** nothing anywhere ran the `--check-alloc`
+ARM, and `shell-harnesses.yml` — the single workflow that owns the shared arbiter — did not trigger on this charter
+at all. `.github/workflows/**` is outside this lane's fence, so that wiring was **routed, not faked**; it landed in
+`7028ed2d8` (#18884) and was demonstrated red-then-green on a charter-only PR by D619. **A guard that does not watch
+the file it guards is not yet a guard** stands as written. Stated so the next reader does not mistake a ledger for
+enforcement — nor, in the other direction, a doc-gates trigger for an arbiter run.
+
+**HISTORICAL CONTEXT FOR WHY THIS IS URGENT.** The same strict lens counts **16 numbers in this charter defined
+more than once** (633 definitions, 615 distinct — 18 excess definitions): `D14 D30 D31 D66 D68 D142 D206 D214 D256
+D351 D384 D411 D492 D593 D605 D608`. The PDS charter's own count is *eighteen pairs*, every one a wave-REVIEW block
+colliding with the next wave's DECIDE block off a single unowned pointer. **This charter is on the same curve and
+was previously running the same unowned pointer.** D614 was simply the first one anybody noticed in the same hour.
+
+## D617 — RULING ON `dr-w24-bl-census-names-the-door-population`: IT WILL NOT BE DONE AS FILED, BECAUSE TWO OF ITS THREE CLAIMS ARE ALREADY DISCHARGED ON `main`. THE RESIDUE IS THE BOX_BUSY CROSS-REFERENCE, AND IT IS RE-CUT, NOT CARRIED. (2026-09-17)
+
+The row's single criterion offered a choice — *"A wave picks this up, or the lead rules it will not be done and
+says why in the charter."* **This is that ruling, and it is not a deferral.** The row as filed describes a
+codebase that no longer exists; two of the three defects it names were fixed by successor PRs while the row sat
+in `dr-backlog-never-started`. Carrying it forward unchanged would send a wave to build something that is
+already built. **What is left is real, and it is one-third of what the row says it is.**
+
+### WHAT WAS VERIFIED, AGAINST `origin/main` AND NOT AGAINST THE ROW'S PROSE
+
+**CLAIM 2 — "no line names the DOOR POPULATION as such" — IS DISCHARGED.**
+`internal/cli/cloud_deploy_census_cmd.go`@`func deployCensusDoorLine(d *cloudclient.DeployBoxDoor) string {`
+renders exactly the missing aggregate: the door's REFUSAL count over its own named predicate, the cause-keyed
+reader's count beside it, and the DELTA between them with the producer's own status split —
+`internal/cli/cloud_deploy_census_cmd.go`@`box door — REFUSALS %d over its own population (%s). The cause-keyed reader (%s) sees %d`.
+It is reached from `renderDeployCensus`, not merely defined. It landed as **#17281** (`e60630764`, *"the census
+stops undercounting the box door"*) under `dr-w32`. A nil term prints NOT MEASURED rather than a flattering zero.
+
+**THE PREMISE CORRECTION'S OWN INFERENCE IS REFUTED, and this is the lesson worth more than the row.** The
+2026-08-21 correction on the row reasoned: #10811 is `CLOSED` with `mergedAt: null`, **therefore** "the function
+was never opened." The PR state is true — verified again 2026-09-17, `state: CLOSED`, `mergedAt: null`, closed
+`2026-08-20T08:47:20Z`. **The conclusion drawn from it is false.**
+`internal/cli/cloud_deploy_census_cmd.go`@`func deployCensusCapacityLine(census cloudclient.DeployCensus) string {`
+is on `main` and has been since **#12738** (`87bfbcf41`) — a PR carrying #10811's *byte-identical title*, i.e. the
+same work relanded on a fresh branch. **A closed PR says its branch died; it says nothing about whether its
+content reached `main`.** The correction was right to distrust the row and wrong to stop at the PR state
+instead of grepping the file. Cost of the check that would have caught it: one `git grep` against `origin/main`.
+
+**CLAIM 1 — the BOX_BUSY pair — IS THE LIVE RESIDUE, and it is the whole remaining job.**
+`BOX_BUSY_409` sits in the failure classes and `cloud/lib/barkpark_cloud/deploy_ledger.ex`@`    "BOX_BUSY_DEFERRED",`
+in the deferral classes: the identical one-cause/two-cohort split that `deployCensusCapacityLine` was built to
+disclose for capacity. **No equivalent line exists for it.** `BOX_BUSY` appears in the reader source exactly
+once, inside a comment on `deployCensusCapacityLine` that names it only to say it is *not* the capacity class —
+against 7 occurrences of the capacity class names in the same file, and 18 in the reader's test file. Per D7 the
+codeless-409 mass makes BOX_BUSY the **larger** of the two door causes, so the undisclosed split is the bigger one.
+
+**AND THE DOOR LINE DOES NOT COVER IT, which is why discharging claim 2 does not discharge claim 1.** The door
+population is capacity-keyed at the source: `cloud/lib/barkpark_cloud/deploy_ledger.ex`@`  @box_door_marker "%409%box_at_capacity%"`.
+BOX_BUSY rows are outside that marker entirely. The census now names **one** door honestly and is silent that a
+second, larger one exists.
+
+### THE 1,434 / 1,439 FIGURES ARE A DATED OBSERVATION, NOT A CURRENT FACT
+
+Recorded here in the form D614 and the amended D166 require. **READING OF 2026-08-08, over a pinned 24h window,
+taken from a live control-plane DB read that no later reader can reproduce**: 1,434 rows on the deferral line
+against 1,439 in the door population — a gap of 6 terminal door rows that landed in the failure numerator and
+were absent from the deferral line. **Nothing standing follows from it.** It sized a defect on the day it was
+measured; the discrepancy it describes is now *rendered* by the door line rather than inferred, and today's gap
+is whatever `d.Unkeyed` reads over the window a caller actually asks for. Any wave that re-quotes 1,434/1,439 as
+a present-tense quantity is repeating the mistake this paragraph exists to prevent.
+
+### WHY IT IS NOT BEING BUILT IN THIS WAVE
+
+Not cost — **the build is small, and that is precisely why it should not ride this row.** The residue is one
+function beside `deployCensusCapacityLine` on the same shape, reading two counts already on the wire, plus its
+fixture test: renderer-only, no server term, no migration, no new client field. It is smaller than the row's own
+~15-line estimate implies once the discharged two-thirds are subtracted.
+
+**The blocker is that the row can no longer describe its own work.** Its title, its criterion and its body all
+sell the door-population aggregate, which is built. A builder claiming it would either build nothing and stamp
+it, or silently substitute a different job — and the row's acceptance criterion would be satisfied by neither.
+**A row whose title is discharged cannot gate the work that remains.** So: this row is ruled DONE-BY-SUPERSESSION
+against claims 2 and 3, and the residue is re-cut as its own row with its own criterion naming BOX_BUSY.
+
+### WHAT A LATER WAVE INHERITS, STATED SO NOTHING IS RE-DERIVED
+
+- **Build:** a `deployCensusBoxBusyLine` beside `deployCensusCapacityLine`, same two-cohort disclosure shape,
+  reading `BOX_BUSY_409` off `census.Classes` and `BOX_BUSY_DEFERRED` off `census.Deferred` via the existing
+  `deployCensusClassCount`. Return `""` when both are zero, as its sibling does.
+- **Do NOT re-derive:** whether the causes reach the screen. They do — `renderDeployCensus` echoes
+  `census.Classes` and `census.Deferred` verbatim. The row's *"grep BOX_ hits only the test file"* was a
+  level-skip when first filed and is still one. **What is missing is the CROSS-REFERENCE, not the causes.**
+- **Do NOT extend the door term** to cover BOX_BUSY as part of this. That changes `@box_door_marker` and is a
+  server-side population change with its own migration-shaped blast radius — a separate decision, not a rider.
+- **Fence:** `internal/cli/` only. The cloud-side door term is already correct for what it counts.
+
+### D435 IS AMENDED, NOT DELETED
+
+D435 instructed the lead to *"SHEPHERD #10811"* and to close `dr-w22-s5` **on #10811's merge**. That merge never
+happened, so the close condition could never fire on its own terms. **It did not need to**: `dr-w22-s5` is
+`done`, 8/8 criteria met, and it is legitimately done — its work reached `main` through #12738 and #17281, and
+`internal/cloudclient/client.go` still names the `BoxDoor` field *"the dr-w22-s5 addition"*. **The row was not
+closed by the condition D435 wrote; it was closed by the work landing another way.** D435's verdict was right
+and its mechanism was wrong, which is the failure mode worth naming: **a close condition pinned to a specific
+PR number outlives the PR and then blocks nothing, because the thing it was guarding happened anyway.** Pin
+close conditions to the SYMBOL on `main`, never to a PR number.
+
+
+### D618 — 2026-09-17 — NO AUTOMATON MAY RE-DISPATCH A ZOMBIED RUN. THE ONE ACTOR IS THE ON-DUTY DEPLOY LANE, BY HAND, ONE RUN AT A TIME; AND THE DEAD-HEAD RULING IS NOT "CANCEL RATHER THAN RETRY" BUT A THREE-WAY SPLIT ON THE JOB COUNT, WHOSE THIRD ARM HAS NO VERB AT ALL.
+
+`dr-w10-f1-zombied-run-remediation` was filed on the premise that `scripts/absent-context-census.sh` detects a
+ZOMBIED run and **nothing acts on the finding** — that the open questions were "who may re-dispatch", "is an
+automatic re-run safe", and "should a run whose branch is gone be cancelled rather than retried". Three of that
+premise's four load-bearing facts do not survive contact with the instrument or with the live queue. **The
+ruling below is therefore mostly a LIFT, not an invention**: the cancel-versus-re-dispatch question was already
+decided, in code, with measurements, inside the census's own stale-queue arm. What was genuinely missing is the
+only thing a detector cannot supply — a NAMED ACTOR — and one class the row asked about that the instrument
+cannot name.
+
+#### THE PREMISE, TESTED BEFORE IT WAS BUILT ON
+
+The row names two live specimens. **Neither is zombied any more, and neither was ever re-dispatched by a human.**
+
+| Specimen | Row's claim (2026-08-07) | Read 2026-09-17 | Class today |
+|---|---|---|---|
+| `console-harness` 31120806862 | queued, attempt 1, 12.7h, PR #9887 | `completed` / **`cancelled`**, attempt 1, `jobs.total_count` 0 | `NAME_NOT_IN_RUN` |
+| `pr-task-gate` 29988818645 | queued, attempt 9, 357.7h | `completed` / **`cancelled`**, attempt 9, `jobs.total_count` 0 | `RERUN_DELETED` |
+
+Both carry `updated_at` **2026-08-20T13:49:15Z** and **13:49:20Z** — five seconds apart, fourteen and
+twenty-eight days after they were filed as live. **That is a bulk reap, not a remediation.** The status quo
+already terminates a zombie; it does so by cancellation, applied from GitHub's side, silently, on nobody's
+schedule, leaving no record any reader of this repo can find. **The row's implicit claim that a zombie waits
+forever for a human is false: it waits for an unannounced reaper.** Rerun:
+
+```
+gh api repos/FRIKKern/barkpark/actions/runs/31120806862 --jq '{status,conclusion,run_attempt,updated_at}'
+gh api repos/FRIKKern/barkpark/actions/runs/29988818645 --jq '{status,conclusion,run_attempt,updated_at}'
+```
+
+**And the "branch that will never push again" is still there.** Both head branches —
+`loop-epic/the-triage-ladder-lands-eleven-rungs-bp--0` and `docs/connectors-w33-wave-log` — resolve on
+`repos/FRIKKern/barkpark/branches/…` today. #9887 merged 2026-08-07. **A merged PR is not a deleted branch**,
+and the row conflated them. This matters because the census has **no deleted-branch class at all**: `RERUN_DELETED`
+names a deleted *check run* (`scripts/absent-context-census.sh`@`# A re-run that finished and still rendered nothing is a DELETED`),
+not a deleted branch. The row's c0 asks for a ruling on a class the instrument cannot detect, and c2 asks a
+probe to decline a `RERUN_DELETED` run as though that were the deleted-branch case. **It is not.** The class the
+row means is the census's `ORPHANED` — *head not on any open PR or main*.
+
+#### THE INSTRUMENT ALREADY RULES. THE ROW READ ONLY HALF OF IT.
+
+The census has two sections. The row cites the first — the per-required-context classifier that emits
+`ZOMBIED`. **The second is a repo-wide sweep of every queued run, and it already prints a remedy per shape**,
+with the cancel-versus-re-dispatch question answered and its measurements recorded in place:
+
+| Shape | Census verdict | Remedy the census already names |
+|---|---|---|
+| head live on an open PR | `STALE … LIVE HEAD` — screams | **re-run the workflow on the head** |
+| head live, PR idle > `DORMANT_PR_DAYS` (14) | `DORMANT PR HEAD` — notice | re-run is **notional**; "a remedy nobody will apply is not a remedy" |
+| dead head, `jobs > 0`, some started | `STALE … DISPATCHED` — screams | **`gh run cancel <id>`** |
+| dead head, `jobs > 0`, **none ever started**, > 24h | `PHANTOM` — no verdict | **none** — GitHub answers *"Cannot cancel a workflow run that is completed"* on a run it still lists as queued |
+| dead head, `jobs == 0` | `ORPHANED` — notice | **none** — *"measured on all 8: run cancel says 'completed', REST says 'NOT BEEN QUEUED YET'"* |
+
+So: **"nothing acts on the finding" is true only in the narrowest sense.** The census prints an imperative and
+no one executes it. The *content* of the ruling the row asks for already exists for four of five shapes, and it
+was arrived at by measurement, not by argument. Re-deciding it here would be the failure D605 names — quoting a
+number nobody re-derived — in reverse.
+
+#### THE RULING
+
+**1. NO AUTOMATON MAY RE-DISPATCH. Ever, on any shape.** Not a workflow, not a cron, not a bot, not a step
+appended to the census. The census's job ends at printing the remedy line; it acquires no verb. Three
+independent reasons, any one of which is sufficient:
+
+- **ZOMBIEING IS CORRELATED, AND A PER-RUN ACTOR CANNOT SEE THAT.** Read 2026-09-17, thirty runs sit `queued`,
+  twenty-nine of them older than 24h, `jobs.total_count` 0 on six of seven sampled. **Twenty-six of the thirty
+  arrive in three bursts** — twelve share `created_at` `2026-09-13T08:50:42Z` to the second, seven share
+  `2026-08-07T09:08:43Z`, six share `2026-09-13T08:43:35Z`. A run does not zombie on its own account; a
+  *dispatch moment* zombies and takes its whole batch. An actor that decides per run therefore fires twelve
+  dispatches into a queue that has just demonstrated it does not drain. **That is the stampede, and it is not a
+  hypothetical: the population to stampede with is sitting in the queue today.** Rerun:
+  `gh api "repos/FRIKKern/barkpark/actions/runs?status=queued&per_page=100" --jq '.workflow_runs[].created_at' | sort | uniq -c | sort -rn`
+- **FOUR OF THE FIVE SHAPES HAVE NO REMEDY OR A NOTIONAL ONE.** An actor built here would spend almost all of
+  its life declining. An actor whose dominant behaviour is declining is a classifier with a dangerous button
+  bolted on, and the census is already the classifier.
+- **THE WORKING VERB CHANGES THE MERGE SURFACE.** `gh run rerun` is a no-op on a queued run (the row's own
+  note, and consistent with the `ORPHANED` measurement above). The verb that works is a fresh
+  `gh workflow run`, which mints a **new run id** and therefore a new check-run identity on the PR. Re-dispatch
+  is not a restoration; it is an edit to what the branch protection sees. Per D603's principle that every
+  instrument the exit cites gets a named owner, an act with merge-gate consequences gets a named actor, not a
+  scheduler.
+
+**2. THE ONE ACTOR IS THE ON-DUTY DEPLOY-RELIABILITY LANE — a person or the agent holding that lane — acting by
+hand, one run at a time, from the census's own printed remedy line.** Not "someone"; not "whoever notices the
+scheduled run went red", which is the vacuum this row was filed against. Three obligations attach, and they are
+what make the actor real rather than decorative:
+
+- **The burst check precedes the act.** Before re-dispatching anything, group the queued feed by `created_at`
+  (command above). If the target shares its second with siblings, **the finding is the batch, not the run**:
+  the lane re-dispatches *nothing* and escalates the dispatch moment. A single isolated zombie on a live head is
+  the only shape a bare re-dispatch may be applied to.
+- **Only the shape the census named.** The lane executes the remedy string the census printed for that run id
+  and no other. If the census printed no remedy — `PHANTOM`, `ORPHANED` — **there is nothing to do and doing
+  something is the error.**
+- **`gh run rerun` is forbidden in this lane.** It overwrites a conclusion, which destroys the evidence the next
+  reader needs to classify the run at all. Cancel writes a terminal conclusion onto a run that had none;
+  rerun *replaces* one that existed.
+
+**3. THE DEAD-HEAD RULING IS A THREE-WAY SPLIT ON THE JOB COUNT, AND "CANCEL RATHER THAN RETRY" IS ONLY ITS
+MIDDLE ARM.** The row asked for cancel-or-retry. **The honest answer does not fit in that binary.**
+
+- **Dead head, `jobs > 0`, some started → CANCEL, NEVER RETRY.** Retry is not merely worse here, it is
+  incoherent: a re-dispatch needs a ref, the ref resolves to no open PR head, so no green it produced could
+  gate any merge — while the run itself is holding a runner slot, which in the correlated case is precisely the
+  scarce resource. Cancel is non-destructive of evidence and releases the slot. **This, and only this, is the
+  arm where "cancel rather than retry" is the right sentence.**
+- **Dead head, `jobs > 0`, none ever started, > 24h → NEITHER VERB EXISTS.** Measured on `compose-smoke`
+  32219250070: GitHub answers *"Cannot cancel a workflow run that is completed"* on a run it still lists as
+  queued. Policy: record, count in phantom-queued, **do not scream and do not act**.
+- **Dead head, `jobs == 0` → NEITHER VERB EXISTS.** Measured on all eight specimens: cancel says `completed`,
+  REST says `NOT BEEN QUEUED YET`. Same policy. **This is the class the row meant by "branch is gone", and its
+  ruling is not "cancel" — it is that our side has no button.**
+
+Writing "cancel, not retry" as the whole dead-head rule would therefore be a **false remedy on two of three
+arms**, and a false remedy is worse than none: it sends the lane to run a command that will fail and report the
+failure as a fault of the run rather than of the instruction.
+
+#### WHAT IS NOT DECIDED HERE, AND WHY IT IS NOT A RIDER
+
+**The census cannot see most of the live zombie population.** Its first section iterates `gh pr list --state open --limit 100`
+(`scripts/absent-context-census.sh`@`    gh pr list --repo "$REPO" --state open --limit 100 \`), so the
+`ZOMBIED` class is scoped to open PR heads. Of the three branches carrying queued runs today —
+`gates/scratchpad-reaper`, `deploy/compose-buildinfo`, `api-r19-seed-prose` — **none has an open PR**, and
+twelve of the queued runs are on `main`, which is not a PR head at all. The second section does sweep repo-wide
+and does count them. **No change is proposed to either.** Widening the scope is a `scripts/` edit under the
+**gates** fence, it changes what a required gate screams about, and it is filed rather than smuggled in beside
+a policy decision — the rider trap D614's neighbour paragraph names.
+
+**The deleted-branch detector does not exist and is not built here.** The ruling in §3 keys on the job count
+and on head-liveness, both of which the census already reads; a literal *branch deleted* signal is a distinct
+read and would be a new class. Filed, not built, for the same fence reason.
+
+#### THE ROW'S OTHER TWO CRITERIA ARE HONEST MISSES
+
+- **c1 ("proven against a real zombied run, with before/after run status quoted") is NOT MET and was not
+  attempted.** The proof it demands is a live dispatch or cancel against production CI, which this lane may not
+  perform and which `gh run rerun` — forbidden above and a no-op besides — cannot supply. **What would unblock
+  it:** an isolated `STALE … LIVE HEAD` specimen (none exists today; all three queued branches are dead-headed)
+  plus explicit owner authorisation to execute one `gh workflow run` and quote the before/after. Note that the
+  two specimens the row nominated **cannot** serve, because GitHub already terminated them.
+- **c2 ("a fixture-driven probe shows it declining a DISPATCHED_PENDING and a RERUN_DELETED run") is NOT MET
+  and is unbuildable as written.** A probe tests an actor, and §1 rules that no automated actor may exist — the
+  declining is done by a human reading a printed class, which no fixture can exercise. Insofar as a probe is
+  still wanted, it belongs beside the classifier in `scripts/`, i.e. the **gates** fence, not here. **What would
+  unblock it:** a gates-fenced slice adding the two fixture arms to the census's own probe suite, asserting the
+  *classifier* never emits `ZOMBIED` for a run that is `DISPATCHED_PENDING` or `RERUN_DELETED`. That is a real
+  and useful test; it is a test of the detector, not of a remediator, and the row should be re-cut to say so.
+
+## D619 — THE ARBITER IS WIRED, AND "WIRED" MEANS *A CHARTER-ONLY PR WAS SHOWN TO RUN IT AND TO RED*. D616's "WHAT IS NOT DONE HERE" IS SUPERSEDED. (2026-09-18)
+
+`D616` closed with a named gap: the `--check-alloc` arm existed but was *"not yet wired to run on a PR that touches
+only this charter"*, and `.github/workflows/**` sat outside this lane's fence. **That gap is now closed and this
+block is the record of it.** The wiring landed in `7028ed2d8` (#18884): `.github/workflows/shell-harnesses.yml`
+carries `.claude/workflows/bp-deploy-reliability-charter.md`, `deploy/d-number-reservations.tsv` and
+`deploy/d-number-arbiter.sh` on **both** the `pull_request` and `push` `paths:` arms, the dispatcher maps all three
+to the `pds-harnesses` leg, and `.github/shell-harness-legs.json` gained the arm *"D allocation arbiter
+(deploy-reliability charter): --check-alloc over the merged tree"*. **Read D616's gap paragraph only as history.**
+
+### THE RULING: PRESENT-IN-THE-WORKFLOW IS NOT FIRES-WHEN-IT-SHOULD
+
+A `paths:` entry is a claim, not a measurement. The three ways a guard like this is green and inert are all
+invisible to reading the YAML: the job **dispatches but the arm never executes** (a matrix leg not selected, an
+`if:` short-circuit); the arm **executes but cannot red** (the arbiter's non-zero rc swallowed by a pipe, a `|| true`,
+or a `continue-on-error`); the filter **matches a neighbour, not the file** (a glob that catches the ledger but not
+the charter, or only the `push:` arm). **So the standing bar for this charter's guards is a DEMONSTRATION, not an
+inspection: one PR whose diff is THIS FILE AND NOTHING ELSE must be shown to dispatch the job, and the arm must be
+shown to RED BY NAME on a planted violation.** A green run that never reached the step proves the opposite of what
+it looks like.
+
+### HOW IT WAS DEMONSTRATED, IN BOTH DIRECTIONS, ON ONE BRANCH
+
+The negative control came first, deliberately: the commit that introduced *this very block* minted `D619` in the
+charter and **did not** reserve it, with a diff of exactly one file — this one. That is simultaneously the
+charter-only trigger test and the planted violation, so a single run answers both halves: if the job does not
+dispatch, the filter is wrong; if it dispatches green, the arm is inert. It dispatched, and `pds-harnesses` failed
+naming `UNRESERVED-MINT D619`. The following commit reserved `D619` in `deploy/d-number-reservations.tsv` and the
+same arm returned `PARITY`. **The red and the green are the same arm on the same branch minutes apart, which is the
+only shape that rules out a flake being read as a control.**
+
+**WHAT THIS DOES NOT CLAIM.** It does not claim the charter is watched by everything it should be — it is matched
+by `doc-gates.yml` on `**/*.md` and by the unfiltered task gates, and those were always firing. The measured defect
+was narrower and is the one fixed: **no workflow ran the ARBITER**, and the single workflow that owns the shared
+implementation did not trigger on this charter at all.
+
+### A SIDE-FINDING THE DEMONSTRATION TURNED UP: THE RED'S PRINTED REMEDY DOES NOT WORK
+
+The `UNRESERVED-MINT` failure tells the reader to run `bash deploy/d-number-arbiter.sh --allocate-d 1 --for …`.
+**Running exactly that does not clear the red.** `--allocate-d` mints `max(charter_high_water, ledger_high_water) + 1`,
+and the offending number is *already* the charter high-water — so reserving `D619` allocated `D620`, and the arbiter
+stayed `DIVERGENT` with one more unusable row in the ledger. The remedy is only correct for the ordering the ledger
+exists to enforce (reserve, *then* write); for the violation it is actually printed on, the fix is a hand-edited row
+carrying the offending number, which is what was done here. **A guard that names a violation should not print a
+remedy it has never been run against.** Filed, not fixed here: the arbiter lives in `deploy/`, but the wording and
+an `--allocate-d <n>`-style explicit-number arm are a change to the shared implementation both charters use.
+
+## D620 — THE ADOPTION CLAIM IS NOW A MEASURED SET WITH A GUARD BEHIND IT. D616'S "NO WORKFLOW PATH FILTER ANYWHERE" WAS FALSE THE DAY IT WAS WRITTEN, AND IS CORRECTED IN PLACE. (2026-09-18)
+
+D616 asserted this charter "appears in no workflow path filter anywhere". **It never did.** `doc-gates.yml` has
+selected it on both arms, by two different globs, since long before D616 was written. `task-8f908f721d054032` was
+filed off that clause and carried it forward as its own premise; D619 corrected the *conclusion* in passing
+("it is matched by `doc-gates.yml` on `**/*.md` and by the unfiltered task gates, and those were always firing")
+but left the false sentence standing at its own site, where the next reader meets it first. **A correction that
+lives in a later block does not repair the earlier one — a grep lands on the falsehood, and the reader who greps is
+exactly the reader the sentence misleads.** D616's paragraph is now corrected in place, with the retracted clause
+quoted verbatim so this ruling is reachable from the words it retracts.
+
+### THE MEASUREMENT, BY WORKFLOW AND BY ARM, RE-DERIVED AND NOT INHERITED
+
+Every `on.pull_request` and `on.push` arm of all 78 files in `.github/workflows/` was evaluated against the path
+`.claude/workflows/bp-deploy-reliability-charter.md` under GitHub's own filter semantics — `**` crosses `/`, `*`
+does not, the last matching pattern wins, and a list with no matching pattern selects only when it holds no
+positive pattern at all. **Four path-filtered arms select this charter, across two workflows:**
+
+<!-- CHARTER-ADOPTION-SET BEGIN — the declared set. `deploy/charter-adoption-check.sh` reds if it stops matching the real `paths:` lists. -->
+```
+doc-gates.yml pull_request
+doc-gates.yml push
+shell-harnesses.yml pull_request
+shell-harnesses.yml push
+```
+<!-- CHARTER-ADOPTION-SET END -->
+
+`doc-gates.yml` matches it twice on each arm (`**/*.md` and `.claude/workflows/**`) and always did.
+`shell-harnesses.yml` matches it by its explicit literal path on both arms, and only since `7028ed2d8` (#18884) —
+that is the one line of this table D616 could have written truthfully, in the negative. **A further 35 arms carry no
+`paths:` filter at all** and therefore match every change to this file, `pr-task-gate.yml` and `task-lease-renew.yml`
+among them. Those 35 are deliberately NOT in the declared set: they change for reasons that have nothing to do with
+this charter, and pinning their roster would buy a red on every unrelated workflow addition. The guard counts them
+and asserts the count is non-zero, which is the only claim about them worth enforcing.
+
+### THE GUARD, AND WHY THE DECLARED SET LIVES IN THIS FILE
+
+`deploy/charter-adoption-check.sh` derives the OBSERVED set from `.github/workflows/` and the DECLARED set from the
+marker block above, and reds on either direction of disagreement: `UNDECLARED` when a filter selects the charter and
+the charter does not say so, `STALE` when the charter claims a watcher that no longer watches. It REFUSES — exit 2,
+never a pass — on a missing charter, a missing marker block, an unparseable workflow, or an absent PyYAML.
+
+**Both drift directions are live, and only one of them touches this file.** The sentence D616 got wrong did not rot;
+it was wrong on arrival. The *next* one will rot, because a `paths:` list somewhere else moves. So the guard is
+wired into `doc-gates.yml`, not into `shell-harnesses.yml`: doc-gates is the only job that triggers on BOTH
+`**/*.md` (this charter) AND `.github/workflows/**` (the filters), so it is the only place the check runs on the
+edit that breaks it. Wiring it to the charter alone would have produced a guard blind to its own commonest failure.
+
+`--selftest` proves it in both directions over `mktemp` fixtures, 7 cases, no network and no token: the true tree is
+GREEN (a guard that cannot be quiet is noise), a dropped row reds `UNDECLARED`, an invented row reds `STALE`, **a
+widened filter in an untouched-charter tree reds** — that is the drift case, and it is the reason the guard exists —
+a missing marker block REFUSES rather than passing, a genuinely unwatched charter reds `NO-WATCHER`, and a mixed
+positive-plus-negative `paths:` list does not select a path none of its positives match.
+
+### A SIDE-FINDING: THE REPO'S OTHER PATH MATCHER GETS THE MIXED-NEGATION CELL WRONG
+
+`scripts/lib/dispatch-filter-census.py`'s `matches()` falls back, when no pattern matched, to
+`any(p.startswith("!") for p in patterns)` — GitHub's rule for a negation-ONLY list, applied to any list. On
+`origin/main` that makes `deploy.yml`'s `push` arm select **every** path: its `paths:` carries eight positives and
+one `!api/test/**`, so a path matching none of them is returned as selected. The first cut of this census inherited
+the same fallback and reported `deploy.yml push` as a watcher of this charter; the corrected rule drops it, which is
+why the table above says four arms and not five. **The bug is in the gates fence and is filed, not fixed here** —
+but the lesson is this lane's: *a matcher copied for its shape carries the cell you did not test.* This guard's case
+G exists to hold that cell down for good.
+
+### D621 — 2026-09-25 — A `cancelled` DEPLOYMENT ROW IS ITS OWN COUNTED BUCKET IN THE TIME-TO-WEB CENSUS, NEVER A WAIT; AND THE WAITING ALERT CANNOT FIRE ON ONE, BECAUSE IT READS THAT CENSUS AND NO OTHER.
+
+Row: `dr-w11-bl-cancelled-rows-count-as-waiting`, c0. The behaviour shipped in **#16528** (`b9e5b6114`); this entry
+writes down the rule the code already carries, ratified by main on 2026-09-06 as option 1. The number was reserved
+through `deploy/d-number-arbiter.sh --allocate-d 1` (D616), not read off this file. Verified against `origin/main`
+at `e9f137469`; every citation below is a function or a test name (D613 rule 1).
+
+**THE NOUN.** `deployments.status == "cancelled"` — a publish the FLEET refused (the three machine producers in
+D614(c)). No person can cancel a deploy. This is **not** the `cancelled` of D338, which is a GitHub Actions
+workflow-run conclusion (queue eviction under `deploy-production` concurrency); the two share a word and nothing
+else, and neither ruling bears on the other.
+
+**(a) CENSUS LEVEL — what a cancelled row counts as for time-to-web.** In `DeployLedger.delivery/3`,
+`site_delivery/3` splits `status == "cancelled"` out of the metered rows with `Enum.split_with` BEFORE `observe/3`
+runs — the same shape as the `unmetered` split one clause above it. So a cancelled row is:
+
+- **not an observation**: it is in neither the `delivered` nor the `censored` bucket, adds nothing to `sample`,
+  and cannot set `still_waiting` or `oldest_waiting_seconds`; it feeds no percentile;
+- **counted, never dropped**: `cancelled: length(cancelled)` on every site node, summed fleet-wide into the
+  envelope's `cancelled` — present at `0` when there is none;
+- **still on the roster**: a site whose only in-window row is cancelled APPEARS in `sites[]`, carrying
+  `sample: 0`, `delivered: 0`, `censored: 0`, `still_waiting: false`, `cancelled: N`;
+- **not delivered by a later live mark** (the rider): that mark belongs to a different publish, which files its own
+  row and earns its own observation. Crediting the cancelled row would count one delivery twice and put a duration
+  on content that stopped trying to ship.
+
+Pinned in `cloud/test/barkpark_cloud/deploy_ledger_test.exs` by *"a site whose ONLY non-live row is CANCELLED
+appears, and is NOT still waiting"* (sites[] membership, `still_waiting` false, fleet `sample` 0,
+`censored.count` 0, `cancelled` 1) and *"a cancelled row is NOT delivered by a later live mark on the same site"*
+(`sample` 1 not 2, `delivered` 1, `cancelled` 1). The census reads rosier than the fleet only if the bucket
+vanishes, which is why it is a named key and never a `WHERE` clause.
+
+**(b) ALERT LEVEL — a waiting alert never fires with a cancelled row as its sole cause.** The alert
+(`Notifications.SitePublishWaitingAlert`, dr-w11-s5 — built since #16528, whose tests still say "not built") writes
+no query of its own: `read/2` calls `DeployLedger.delivery/3`, and `verdict/1` / `waiting_sites/1` count a site
+only when the private `over_threshold?/1` sees `still_waiting: true` AND a numeric `oldest_waiting_seconds` at or
+past `threshold_seconds/0`. Neither field can be moved by a cancelled row (part (a)), so the alert needs **no
+filter of its own and must not grow one** — a second filter would be two definitions of one cohort, the drift
+`SitePublishWaitingAlert`'s moduledoc refuses. A site with a genuine waiter AND cancelled rows still alerts, on the
+waiter's duration. Pinned by *"the still-waiting cohort delivery/3 PUBLISHES cannot contain a cancelled-caused
+row"*: one in-flight waiter plus a site of two older cancelled rows; the cohort is exactly `[waiting_site.id]`,
+`censored.count` 1 with the waiter's bound (85,400s), not the cancelled rows' larger one, and `cancelled` 2 stays on
+the envelope.
+
+**THE LIMIT OF (b), STATED.** That proof is over the cohort, not through the alert. No committed test drives a
+cancelled row into `SitePublishWaitingAlert` end to end — its test file stalls with `failed` on purpose, noting
+that a `cancelled` fixture "would assert nothing". The hole the #16528 test named (S5 computing its own cohort)
+did not open: `read/2` is a thin call to `delivery/3`. If that ever changes, (b) is no longer proved.
+
+**RELATION TO D290 AND D614 — consistent; D290 needs no further note.** D290 ("`cancelled` HAS NEVER EXISTED")
+already carries two dated amendments from D614: the zero is a reading at a date, not a property, and there are
+three producers. This rule does not contradict it: the only cancelled rows this entry has seen are test fixtures,
+and the prod population is unmeasured from this lane (D614(b)). D614(d) forbids scoping an alarm *against* the
+cancelled population; this rule does the complement — it keeps the population *out of* the alarm while counting
+it in the census, and it is correct at zero and at any non-zero value, so it does not rot when a preview site or
+a prebuilt-release site makes the population real.

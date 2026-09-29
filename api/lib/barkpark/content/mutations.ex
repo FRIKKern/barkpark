@@ -46,7 +46,7 @@ defmodule Barkpark.Content.Mutations do
   draft. Two consequences worth naming:
 
     * a task patch now passes the publish door's gates —
-      `Content.Lifecycle.ensure_task_publish_transition_legal/5` (legal
+      `Tasks.PublishGuards.door_gate/4`, a `:door` pre-publish fence (legal
       lifecycle transition, no claim substitution, no criteria regression) and
       `Content.AuthoringWall.enforce/5` (`task` is a walled type). Those turn
       writes that used to 200-onto-nothing into honest refusals. This is the
@@ -64,6 +64,7 @@ defmodule Barkpark.Content.Mutations do
 
   alias Barkpark.Repo
   alias Barkpark.Content
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   alias Barkpark.Content.{
     BoundFieldSync,
@@ -71,6 +72,7 @@ defmodule Barkpark.Content.Mutations do
     CallerContext,
     DraftId,
     Envelope,
+    MutateDoorFences,
     Warnings,
     Writer
   }
@@ -104,7 +106,7 @@ defmodule Barkpark.Content.Mutations do
       [:barkpark, :content, :mutate],
       %{count: length(mutations), dataset: dataset, workspace_id: workspace_id},
       fn ->
-        result = do_apply_mutations(mutations, dataset, opts)
+        result = Door.admit(fn -> do_apply_mutations(mutations, dataset, opts) end)
         {result, %{count: length(mutations), dataset: dataset, workspace_id: workspace_id}}
       end
     )
@@ -112,12 +114,17 @@ defmodule Barkpark.Content.Mutations do
 
   defp do_apply_mutations(mutations, dataset, opts) do
     # Initialise the deferred-broadcast queue for this process so
-    # tap_broadcast/5 knows to queue instead of broadcast immediately.
-    Process.put(:barkpark_deferred_broadcasts, [])
+    # tap_broadcast/5 knows to queue instead of broadcast immediately, and CLAIM
+    # it: the claim is what tells `maybe_dispatch_webhook/7` that this queue has
+    # a flusher. It also resets `:barkpark_deferred_webhooks`, which this line
+    # used to leave alone — a stale webhook entry stranded on this process by an
+    # unowned transaction would otherwise be dispatched by the next mutate.
+    Broadcast.claim_deferred_queue()
 
     try do
       result =
         Repo.transaction(fn ->
+          :ok = serialize_unscoped_batch(opts)
           tx_id = Writer.generate_rev()
 
           # SECURITY: echo each mutated document through the REAL caller + the
@@ -135,6 +142,7 @@ defmodule Barkpark.Content.Mutations do
             Enum.map_reduce(mutations, %{}, fn m, cache ->
               case apply_one(m, dataset, opts) do
                 {:ok, doc, op} ->
+                  :ok = between_mutations_barrier()
                   {schema, cache} = echo_schema(doc.type, dataset, opts, cache)
 
                   {%{
@@ -163,9 +171,181 @@ defmodule Barkpark.Content.Mutations do
     rescue
       e ->
         Broadcast.clear_deferred_broadcasts()
-        reraise(e, __STACKTRACE__)
+
+        case classify_search_vector_overflow(e, mutations) do
+          {:ok, reason} -> {:error, reason}
+          :no -> reraise(e, __STACKTRACE__)
+        end
     end
   end
+
+  # ── The tsvector cap is a CALLER fault, not an engine fault ────────────────
+  #
+  # `documents.search_vector` is a GENERATED ALWAYS ... STORED column (migration
+  # 20260614220000_search_vector_fields — NOT the 20260526181000 original, which
+  # has since been dropped and re-added twice). It folds `title` plus every
+  # string value in the `content` jsonb through `to_tsvector`/`jsonb_to_tsvector`.
+  # Postgres caps ONE tsvector at 1 048 575 bytes; past that the INSERT raises
+  # `Postgrex.Error` SQLSTATE 54000 (`:program_limit_exceeded`) from inside the
+  # transaction. Nothing rescued it, so it escaped `apply_mutations/3` and
+  # Phoenix's RenderErrors rendered a bare 500 `internal_error` — which tells the
+  # caller to RETRY a request that will fail identically forever, and books a
+  # client mistake against the server's error rate. Measured live on guerrilla
+  # 2026-09-10 (task-655f368ae5c72120): an 800 000-byte high-entropy body → 500.
+  #
+  # It is translated HERE, not in `MutateController`, for two reasons:
+  #
+  #   * the exception is raised by the WRITER, and every caller of
+  #     `apply_mutations/3` (the HTTP mutate door, the plugin write paths, the
+  #     Studio's LiveView saves) inherits the typed refusal instead of only the
+  #     one door a controller rescue would cover;
+  #   * this rescue already exists — it is the deferred-broadcast cleanup — and
+  #     the `{:error, reason}` shape it now returns is exactly what the door
+  #     already routes through `Content.Errors.to_envelope/2`. No new seam.
+  #
+  # NARROW BY CONSTRUCTION: only SQLSTATE 54000 whose message names `tsvector`
+  # is claimed. Every other `Postgrex.Error` — and every other exception — is
+  # reraised byte-identically, so no real engine fault is laundered into a 4xx.
+  #
+  # WHY 422 AND NOT 413: the cap is on the DERIVED tsvector, not on the request.
+  # A 2 000 000-byte LOW-entropy body succeeds while an 800 000-byte high-entropy
+  # one fails, so `payload_too_large` ("reduce the request body — it exceeds the
+  # maximum allowed size") would be an actively false instruction. 422 is this
+  # codebase's slot for "well-formed, but I cannot act on it as sent"
+  # (`workspace_scope_required`, `batch_too_large`, `create_wall`).
+  @tsvector_limit_bytes 1_048_575
+
+  # THE UNSCOPED-BATCH SERIALIZER (task-59136713cece112c, ruling option b).
+  #
+  # `Audit.emit/1` takes the audit-chain lock of each DOCUMENT's workspace and
+  # holds it to the end of this transaction. A batch whose opts name a workspace
+  # reads fail-closed to it and stamps it on creates, so it audits under ONE
+  # chain; the /mutate door always sends one (it refuses a key-absent write with
+  # `workspace_scope_required`). A batch with NO workspace in its opts (internal
+  # callers only) reads unscoped, so a `delete`/`publish` of rows in W1 and W2
+  # takes chain(W1) and chain(W2) in mutation order, and two such batches in
+  # opposite order deadlock (40P01) — pinned by
+  # test/barkpark/content/unscoped_batch_audit_lock_order_test.exs.
+  #
+  # The chains it will need are known only after `apply_one/3` reads each row,
+  # so a sorted up-front set is not computable. Instead every unscoped batch
+  # takes the GLOBAL chain lock (the nil key) FIRST: two unscoped batches then
+  # never interleave. A scoped transaction holds one chain and only ever takes
+  # locks ordered after it (the #20369 publish-scope lock, rows), so it cannot
+  # close a cycle with one either. `lock_chain!/1` is re-entrant, so a nil-
+  # workspace document's own emit later in the batch does not wait on itself.
+  # Scoped batches are untouched.
+  defp serialize_unscoped_batch(opts) do
+    if is_nil(Keyword.get(opts, :workspace_id)), do: Barkpark.Audit.lock_chain!(nil), else: :ok
+  end
+
+  # TEST-ONLY BARRIER SEAM (task-59136713cece112c). A lock-order race between
+  # two batches needs each one parked INSIDE its transaction after its first
+  # mutation, holding what that mutation locked, before its second one runs.
+  # Nothing in a serial test produces that interleaving. A harness puts a
+  # `fun/0` under this key in the BATCH process's dictionary; it runs once,
+  # after the first successful mutation, and is removed before it runs, so it
+  # fires at most once per `Process.put`. Process-scoped, so a concurrently
+  # running async test can never trip it; unset (every production path), it
+  # costs one `Process.get`. Nothing under api/lib may set the key:
+  # test/barkpark/content/mutations_between_barrier_census_test.exs enforces
+  # it. Same shape and rationale as `DedupWall.post_check_barrier/3`.
+  @between_mutations_barrier :barkpark_mutations_between_barrier
+
+  defp between_mutations_barrier do
+    case Process.get(@between_mutations_barrier) do
+      fun when is_function(fun, 0) ->
+        Process.delete(@between_mutations_barrier)
+        fun.()
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp classify_search_vector_overflow(
+         %Postgrex.Error{postgres: %{code: :program_limit_exceeded, message: message}},
+         mutations
+       )
+       when is_binary(message) do
+    if String.contains?(message, "tsvector") do
+      {:ok, {:searchable_text_too_large, @tsvector_limit_bytes, largest_text_field(mutations)}}
+    else
+      :no
+    end
+  end
+
+  defp classify_search_vector_overflow(_e, _mutations), do: :no
+
+  # WHICH field overflowed. Postgres reports only a total byte count, so the
+  # culprit is located from the payload the caller actually sent: the longest
+  # string value across the batch, named by its `<doc id>` and JSON-pointer path.
+  # That is a heuristic and the envelope's message says so — but it is the one
+  # datum that turns "something in your write was too big" into an edit the
+  # caller can make. Returns nil when the batch carries no string worth naming.
+  defp largest_text_field(mutations) when is_list(mutations) do
+    mutations
+    |> Enum.flat_map(&mutation_payloads/1)
+    |> Enum.flat_map(fn payload ->
+      doc_id = payload["_id"] || payload[:_id]
+      payload |> strings_with_paths("") |> Enum.map(fn {path, len} -> {doc_id, path, len} end)
+    end)
+    |> case do
+      [] -> nil
+      candidates -> candidates |> Enum.max_by(fn {_id, _path, len} -> len end) |> drop_length()
+    end
+  end
+
+  defp largest_text_field(_), do: nil
+
+  defp drop_length({doc_id, path, bytes}), do: %{document: doc_id, field: path, bytes: bytes}
+
+  # A mutation is `%{"createOrReplace" => payload}` etc.; a `patch` nests the
+  # document body one level deeper under `set`/`setIfMissing`/`append`/….
+  defp mutation_payloads(mutation) when is_map(mutation) do
+    Enum.flat_map(mutation, fn
+      {_op, %{} = payload} ->
+        nested =
+          payload
+          |> Map.take(["set", "setIfMissing", "append", "prepend", "unset", "inc", "dec"])
+          |> Map.values()
+          |> Enum.filter(&is_map/1)
+
+        [payload | nested]
+
+      _ ->
+        []
+    end)
+  end
+
+  defp mutation_payloads(_), do: []
+
+  # Every string leaf of a payload, keyed by JSON pointer. Keys that begin with
+  # `_` (`_id`, `_type`, `_rev`) are skipped: they are identity, never body, and
+  # `title`/`content.*` are what the generated column actually reads.
+  defp strings_with_paths(%{} = map, prefix) do
+    Enum.flat_map(map, fn {key, value} ->
+      key = to_string(key)
+
+      if String.starts_with?(key, "_") do
+        []
+      else
+        strings_with_paths(value, prefix <> "/" <> key)
+      end
+    end)
+  end
+
+  defp strings_with_paths(list, prefix) when is_list(list) do
+    list
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {value, idx} ->
+      strings_with_paths(value, prefix <> "/" <> to_string(idx))
+    end)
+  end
+
+  defp strings_with_paths(value, prefix) when is_binary(value), do: [{prefix, byte_size(value)}]
+  defp strings_with_paths(_value, _prefix), do: []
 
   # ── The `duplicate_of` compensation, OUTSIDE the batch transaction ─────────
   #
@@ -267,7 +447,9 @@ defmodule Barkpark.Content.Mutations do
         end
 
       _ ->
-        with {:ok, doc} <- Content.create_document(type, attrs, dataset, opts),
+        with :ok <-
+               run_mutate_door_fences(:before_rev, type, nil, attrs, dataset, opts),
+             {:ok, doc} <- Content.create_document(type, attrs, dataset, opts),
              do: {:ok, doc, "create"}
     end
   end
@@ -288,11 +470,11 @@ defmodule Barkpark.Content.Mutations do
     # case structurally (see their heads), so the importer shape
     # (migration 20260528100000 seeds already-`done` rows) keeps working while
     # a write ONTO a live claimed/open task is fenced exactly like a patch.
-    with :ok <- ensure_rev(existing, expected),
+    with :ok <- run_mutate_door_fences(:before_rev, type, existing, attrs, dataset, opts),
+         :ok <- ensure_rev(existing, expected),
          :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
-         :ok <- ensure_disposition_via_verb(type, existing, incoming_content(attrs), opts),
-         :ok <- ensure_adoption_adjudicated(type, existing, incoming_content(attrs), opts),
+         :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
          {:ok, doc} <- Content.create_document(type, attrs, dataset, with_if_rev(opts, expected)) do
       {:ok, doc, "createOrReplace"}
     end
@@ -310,7 +492,9 @@ defmodule Barkpark.Content.Mutations do
         end
 
       _ ->
-        with {:ok, doc} <- Content.create_document(type, attrs, dataset, opts),
+        with :ok <-
+               run_mutate_door_fences(:before_rev, type, nil, attrs, dataset, opts),
+             {:ok, doc} <- Content.create_document(type, attrs, dataset, opts),
              do: {:ok, doc, "create"}
     end
   end
@@ -353,6 +537,11 @@ defmodule Barkpark.Content.Mutations do
   defp apply_one(%{"discardDraft" => %{"id" => id, "type" => type}}, dataset, opts) do
     with {:ok, doc} <- Content.discard_draft(id, type, dataset, opts),
          do: {:ok, doc, "discardDraft"}
+  end
+
+  defp apply_one(%{"deleteExactDraft" => %{"id" => id, "type" => type} = op}, dataset, opts) do
+    with {:ok, doc} <- Content.delete_exact_draft(id, type, dataset, if_rev(op), opts),
+         do: {:ok, doc, "deleteExactDraft"}
   end
 
   defp apply_one(%{"delete" => %{"id" => id, "type" => type} = op}, dataset, opts) do
@@ -409,8 +598,7 @@ defmodule Barkpark.Content.Mutations do
          :ok <- ensure_rev(existing, if_rev(attrs)),
          :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
-         :ok <- ensure_disposition_via_verb(type, existing, incoming_content(attrs), opts),
-         :ok <- ensure_adoption_adjudicated(type, existing, incoming_content(attrs), opts),
+         :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
          {:ok, doc} <-
            Content.create_document(type, attrs, dataset, with_if_rev(opts, if_rev(attrs))) do
       {:ok, doc, "replace"}
@@ -438,7 +626,7 @@ defmodule Barkpark.Content.Mutations do
          :ok <- Writer.refuse_bare_id(Map.get(patch, "setIfMissing"), :patch),
          {:ok, existing} <- get_patch_base(id, type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(patch)) do
-      protected = ~w(title status _id _type _rev)
+      protected = patch_protected_keys(patch, type, dataset, opts)
       set_fields = Map.get(patch, "set", %{})
       unset_keys = list_or_empty(Map.get(patch, "unset"))
 
@@ -467,8 +655,8 @@ defmodule Barkpark.Content.Mutations do
 
       with :ok <- ensure_task_close_is_cas(type, existing, merged, patch, opts),
            :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
-           :ok <- ensure_disposition_via_verb(type, existing, merged, opts),
-           :ok <- ensure_adoption_adjudicated(type, existing, merged, opts),
+           :ok <-
+             run_mutate_door_fences(:after_claim, type, existing, merged, patch, dataset, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
@@ -491,7 +679,7 @@ defmodule Barkpark.Content.Mutations do
 
       merged =
         prior
-        |> Map.merge(Map.drop(fields, ~w(title status _id _type _rev)))
+        |> Map.merge(Map.drop(fields, patch_protected_keys(patch, type, dataset, opts)))
         # Bound-block write-through — see the ops clause above and
         # `Barkpark.Content.BoundFieldSync`.
         |> BoundFieldSync.sync(prior, fields["title"])
@@ -504,8 +692,8 @@ defmodule Barkpark.Content.Mutations do
 
       with :ok <- ensure_task_close_is_cas(type, existing, merged, patch, opts),
            :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
-           :ok <- ensure_disposition_via_verb(type, existing, merged, opts),
-           :ok <- ensure_adoption_adjudicated(type, existing, merged, opts),
+           :ok <-
+             run_mutate_door_fences(:after_claim, type, existing, merged, patch, dataset, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
@@ -534,7 +722,7 @@ defmodule Barkpark.Content.Mutations do
   # `patch` that carries id+type but no recognized op (it has both keys, so
   # nothing is "missing" — it fails for a different reason and must not be
   # mislabelled).
-  @id_type_verbs ~w(publish unpublish discardDraft delete patch)
+  @id_type_verbs ~w(publish unpublish discardDraft delete deleteExactDraft patch)
 
   defp apply_one(mutation, _dataset, _opts) when is_map(mutation) do
     case missing_id_type(mutation) do
@@ -644,7 +832,7 @@ defmodule Barkpark.Content.Mutations do
   # dependent task from not-ready to ready. The fix landed on the READ side: a
   # done row now satisfies a dependent only if it ALSO carries close provenance
   # — `claim.closed_by`, `claim.closed_at`, or a non-empty `close_reason`
-  # (queue.ex, the `ready_done_tasks` CTE; the same disjunction `QueueGate`
+  # (queue.ex, the `ready_done_tasks` CTE; the same disjunction the Tasks queue gate
   # applies in `closed?/1`). A forged birth carries none of the three.
   #
   # Pinned by `test "CLOSED: a forged FRESH create no longer unblocks a
@@ -838,260 +1026,6 @@ defmodule Barkpark.Content.Mutations do
     }
   end
 
-  # ── The adjudication's own fence (PDS wave 24, charter D298 amended) ──────
-  #
-  # THE CLASS THIS CLOSES: a `type:task` row that SAYS it was adjudicated and
-  # cannot say on what terms. `content.disposition` is the epic's adjudication
-  # vocabulary — `open` / `parked` / `closed` — and until this slice it had ZERO
-  # code writers repo-wide (re-derived 2026-07-30: `git grep '"disposition'`
-  # over `api/lib`, `internal`, `js` and `scripts` returned exactly two hits,
-  # neither a writer of the term). It existed because charter D298 instructed
-  # AGENTS to hand-patch it through this very door. A field with no writer has,
-  # by construction, no normaliser and no requirement, and the measured
-  # consequence was both: a vocabulary reading `OPEN` 57 / `open` 47 / `parked`
-  # 27 / ABSENT 37, and parked rows carrying nothing that says what would ever
-  # reopen them. `content.reopen_trigger` existed in zero files and on zero
-  # rows.
-  #
-  # WHY A GUARD HERE IS NOT ENOUGH ON ITS OWN, AND WHY THE VERB IS NOT EITHER.
-  # This is the two-door judgment, and it is settled by measurement, not taste:
-  #   * `Barkpark.Tasks.Stage` — the sole sanctioned writer of a durable
-  #     adjudication REASON — could not write the TERM at all. Measured pre-fix:
-  #     after a stage the persisted keys were exactly
-  #     ["description","disposition_reason","engagement","kind",
-  #      "lifecycle_status","tags"]. A stage-side requirement therefore cannot
-  #     even SEE a parked disposition, so it can never fire.
-  #   * Conversely a guard ONLY here leaves that sanctioned writer unfenced:
-  #     `api/lib/barkpark/tasks/` contains ZERO references to
-  #     `Content.apply_mutations` (the same fact the close guard above relies
-  #     on), and `Stage` persists with a bare `Repo.update_all` inside its own
-  #     advisory lock.
-  # Both doors are therefore load-bearing: this one refuses the raw write and
-  # NAMES the verb; `Tasks.Stage` makes the verb able to write the whole triple
-  # (term + reason + trigger) atomically, and refuses a park with no trigger.
-  #
-  # SCOPE: ANY CHANGE OF THE TERM, NOT JUST A HOLLOW PARK. Refusing only
-  # `parked`-without-a-trigger has a near-zero fire rate — under the charter's
-  # own recipe a park usually arrives WITH a reason, and the ungoverned
-  # two-case `OPEN`/`open` writes would sail past untouched. Refusing every raw
-  # change routes all of them to the one writer that normalises, which is what
-  # makes the vocabulary converge instead of merely making one shape harder.
-  # `now == was` is NOT a change: bookkeeping on already-adjudicated rows
-  # (digests, github sync fingerprints, compaction) passes untouched, exactly
-  # as it does for the two sibling guards.
-  #
-  # THE SECOND STEP IS FENCED TOO. Writing the term through the verb and then
-  # erasing `reopen_trigger` through this door would restore hollowness in two
-  # moves, so an api-door write that BLANKS or DROPS the trigger of a row whose
-  # resulting disposition is `parked` is refused as well. ADDING a trigger raw
-  # is deliberately still allowed — it can only make an existing hollow park
-  # honest, and the 27 already-parked rows need exactly that remediation.
-  #
-  # THERE IS NO REVISION ESCAPE, UNLIKE THE CLOSE GUARD. A rev precondition
-  # proves the caller READ the row; it says nothing about whether the value
-  # being written is a governed term with its trigger. The escape here is the
-  # verb, and the message says so.
-  #
-  # REPLICATION IS EXEMPT, checked FIRST, for the same concrete reason the
-  # claim fence states: `Sync.Applier.apply_upsert` mirrors an upstream row with
-  # `createOrReplace` + the FULL remote document, and because `apply_mutations`
-  # wraps the batch in one transaction, a refusal would roll back the ENTIRE
-  # sync batch and wedge the replica on that row with no operator recourse.
-  # `:source` is server-set (`MutateController` prepends `source: :api`), so a
-  # request body can never reach the `:sync` value.
-  #
-  # THE FRESH-CREATE EXEMPTION IS STILL INHERITED HERE, AND IS NOW CLOSED
-  # DOWNSTREAM (PDS wave 28). `ensure_*("task", nil, …), do: :ok` is still the
-  # head of every sibling guard on this seam and the plain `create` clause still
-  # calls none of them — that is unchanged and correct, because a birth has no
-  # prior revision and no prior term for a CHANGE guard to compare against.
-  # What changed is that the create-family doors all funnel into
-  # `Content.create_document/4`, and `Writer.ensure_task_born_adjudicated/5` now
-  # sits in that chain where `prev_doc == nil` IS expressible: a birth carrying
-  # an off-vocabulary term, or a park with no reopen trigger, is refused there.
-  # It is a fence and not a ban — a COMPLETE adjudication is born, so the
-  # dataset-importer shape the substrate anticipates (migration
-  # 20260528100000) still works. The pinning test inverted on purpose.
-  #
-  # WHAT REMAINS, STATED NOT IMPLIED AWAY: a birth carrying NO disposition at
-  # all is logged and allowed (see that function's comment for why a hard
-  # requirement is a protocol change, not a fence), so "every task row is
-  # adjudicated" is NOT true by construction yet.
-  @disposition_key "disposition"
-  @reopen_trigger_key "reopen_trigger"
-  @trigger_required_dispositions ~w(parked)
-
-  # PDS wave 28: the FOURTH durable key gets the SAME raw-door treatment as the
-  # term. `Tasks.Stage` screens a rerun that cannot fail (`git -C`, a `test`
-  # predicate, command substitution, `merge-base --is-ancestor`, a pipe-masked
-  # formatting tail) at the write seam — a screen a raw patch would walk
-  # straight past, leaving the sanctioned-writer property as decoration. Any
-  # CHANGE of the key through this door is refused and named to the verb;
-  # `now == was` is not a change, so bookkeeping passes untouched.
-  @disposition_rerun_key "disposition_rerun"
-
-  defp ensure_disposition_via_verb("task", nil, _merged, _opts), do: :ok
-
-  defp ensure_disposition_via_verb("task", existing, merged, opts) do
-    was = existing.content || %{}
-    was_term = was[@disposition_key]
-    now_term = merged[@disposition_key]
-
-    cond do
-      # Replication mirrors upstream rows verbatim — checked BEFORE any change
-      # predicate so a mirror always applies.
-      Keyword.get(opts, :source, :api) != :api ->
-        :ok
-
-      # The term CHANGED through the raw door. Route it to the verb.
-      now_term != was_term ->
-        {:error, {:invalid_task_content, disposition_bypass_error(was_term, now_term)}}
-
-      # The RERUN changed through the raw door — the same bypass one field
-      # over. Route it to the verb, which screens a rerun that cannot fail.
-      merged[@disposition_rerun_key] != was[@disposition_rerun_key] ->
-        {:error, {:invalid_task_content, rerun_bypass_error(merged[@disposition_rerun_key])}}
-
-      # The term is unchanged, but the trigger that makes a park honest is
-      # being erased underneath it.
-      now_term in @trigger_required_dispositions and
-          trigger_erased?(was[@reopen_trigger_key], merged[@reopen_trigger_key]) ->
-        {:error, {:invalid_task_content, trigger_erasure_error(now_term)}}
-
-      true ->
-        :ok
-    end
-  end
-
-  defp ensure_disposition_via_verb(_type, _existing, _merged, _opts), do: :ok
-
-  # ── ADOPTION-BY-REPARENT (PDS wave 28, the birth fence's second half) ──────
-  #
-  # A birth-scoped fence is STRUCTURALLY BLIND to adoption. A task filed outside
-  # an epic carries no `parent_id`; giving it one later is an UPDATE with
-  # `prev_doc` non-nil, so `Writer.ensure_task_born_adjudicated/5` — and every
-  # other birth-scoped gate — never sees it. Without this guard the closure has
-  # a side door: file bare, then reparent in, and the row is inside the epic's
-  # denominator having never been adjudicated by anything.
-  #
-  # So: a `type:task` write that CHANGES `content.parent_id` must leave the row
-  # carrying a disposition. It reads `merged` (the write's RESULT, not the
-  # patch) for the same reason its siblings do — a patch that sets only
-  # `parent_id` still has to be judged on what the row will BE.
-  #
-  # The vocabulary check is deliberate, not decorative: `disposition: "maybe"`
-  # would otherwise satisfy a mere-presence test while meaning nothing, and the
-  # raw door has no normaliser (`Tasks.Stage` is the one writer).
-  #
-  # THIS COMPOSES WITH `ensure_disposition_via_verb/4` INTO A DELIBERATE ORDER
-  # OF OPERATIONS, and callers must know it: that guard refuses any raw CHANGE
-  # of the term, so a bare row cannot be reparented and adjudicated in the same
-  # mutate — the disposition has to be written FIRST, through the verb, and the
-  # reparent comes after. That is the intended shape (adopt only rows that have
-  # been judged), and the message says so rather than leaving the caller to
-  # discover a two-guard interaction by trial.
-  #
-  # Replication is exempt first, same reason as every sibling: a mirror applies
-  # verbatim or wedges the batch.
-  @parent_key "parent_id"
-
-  defp ensure_adoption_adjudicated("task", nil, _merged, _opts), do: :ok
-
-  defp ensure_adoption_adjudicated("task", existing, merged, opts) do
-    was = existing.content || %{}
-    was_parent = was[@parent_key]
-    now_parent = merged[@parent_key]
-
-    cond do
-      Keyword.get(opts, :source, :api) != :api -> :ok
-      was_parent == now_parent -> :ok
-      merged[@disposition_key] in Barkpark.Tasks.Stage.dispositions() -> :ok
-      true -> {:error, {:invalid_task_content, adoption_error(was_parent, now_parent)}}
-    end
-  end
-
-  defp ensure_adoption_adjudicated(_type, _existing, _merged, _opts), do: :ok
-
-  defp adoption_error(was_parent, now_parent) do
-    %{
-      @parent_key => [
-        "cannot be changed from #{inspect(was_parent)} to #{inspect(now_parent)} on a task " <>
-          "carrying no adjudication. Reparenting is ADOPTION: it moves the row into (or out " <>
-          "of) a parent's closure, and a row that joins a closure unjudged is exactly the " <>
-          "bare row a birth-time fence cannot see, because giving a task a parent later is an " <>
-          "update, not a birth. Adjudicate it FIRST through the sanctioned verb (`bp task " <>
-          "stage <id> <state> --disposition <open|parked|closed> --note <why>`, " <>
-          "POST /v1/tasks/:id/stage) — the disposition cannot be written in this same " <>
-          "mutate, because the raw door refuses any change of it — then reparent."
-      ]
-    }
-  end
-
-  # A trigger is "erased" when the row carried a real one and the write's result
-  # carries none. A blank string is not a trigger — the verb normalises the same
-  # way (`Tasks.Stage.normalize_note/1`), so the two doors agree on what
-  # "present" means.
-  defp trigger_erased?(was, now), do: present_trigger?(was) and not present_trigger?(now)
-
-  defp present_trigger?(value) when is_binary(value), do: String.trim(value) != ""
-  defp present_trigger?(_), do: false
-
-  # Same `invalid_task_content` family as the close and claim siblings (422
-  # `validation_failed` with a per-field details map) — no new error code, no
-  # new controller branch. Keyed on the field the caller actually wrote, and the
-  # message is the retry instruction: it names the verb, the flags, and the fact
-  # that the verb writes the triple atomically.
-  defp disposition_bypass_error(was, now) do
-    %{
-      @disposition_key => [
-        "cannot be set to #{inspect(now)} through /v1/data/mutate" <>
-          if(is_binary(was), do: " (currently #{inspect(was)})", else: "") <>
-          ". A disposition is an adjudication: written raw it carries no normalised term, no " <>
-          "durable reason and — for a park — nothing that says what would ever reopen it, " <>
-          "which is a row that claims to be decided and has decided nothing. A revision " <>
-          "precondition does NOT unlock this. Write it through the sanctioned verb instead " <>
-          "(`bp task stage <id> <state> --disposition <open|parked|closed> " <>
-          "--note <why> --reopen-trigger <what would reconsider it>`, " <>
-          "POST /v1/tasks/:id/stage), which normalises the term and writes term, reason and " <>
-          "trigger in one atomic write — and refuses a park with no trigger."
-      ]
-    }
-  end
-
-  # Same `invalid_task_content` family, keyed on the field the caller wrote,
-  # and the message is the retry instruction. It states the property the raw
-  # door would destroy: the rerun is screened at the verb's write seam, so a
-  # rerun written raw is one nobody has checked can fail.
-  defp rerun_bypass_error(now) do
-    %{
-      @disposition_rerun_key => [
-        "cannot be set to #{inspect(now)} through /v1/data/mutate. The rerun is the one " <>
-          "thing that could prove a durable reason WRONG, and it is screened at the verb's " <>
-          "write seam — a rerun that cannot fail (`git -C`, a `test` predicate, `$( … )` " <>
-          "command substitution, `git merge-base --is-ancestor`, or a pipe-masked " <>
-          "formatting tail like `| head -1`) is refused there. Written raw it bypasses that " <>
-          "screen, which is a check nobody has checked. A revision precondition does NOT " <>
-          "unlock this. Write it through the sanctioned verb instead " <>
-          "(`bp task stage <id> <state> --rerun \"git cat-file -e origin/main:<path>\"`), " <>
-          "POST /v1/tasks/:id/stage — and omitting the rerun is always allowed: a reason " <>
-          "may honestly refuse to be checkable."
-      ]
-    }
-  end
-
-  defp trigger_erasure_error(term) do
-    %{
-      @reopen_trigger_key => [
-        "cannot be erased through /v1/data/mutate while this task is #{inspect(term)}. The " <>
-          "reopen trigger is the only thing that makes a park a deferral rather than a silent " <>
-          "drop: without it nothing states what would bring the row back. Re-adjudicate it " <>
-          "through the sanctioned verb (`bp task stage <id> <state> --disposition open` to " <>
-          "un-park, or `--reopen-trigger <new condition>` to replace the condition), " <>
-          "POST /v1/tasks/:id/stage."
-      ]
-    }
-  end
-
   # The content the write will ACTUALLY land, resolved through the same
   # `Writer.from_envelope/1` the create path uses — so a create-family op in the
   # FLAT Sanity shape (`%{"_id" => …, "_type" => "task", "lifecycle_status" =>
@@ -1159,6 +1093,66 @@ defmodule Barkpark.Content.Mutations do
   # the draft-first clause, whose `id &&` guard already handles it.
   defp published_first_patch?(id, type),
     do: is_binary(id) and type in @published_first_patch_types and not DraftId.draft?(id)
+
+  # ── The plugin mutate-door fences (task-b04cbe7823d084a6) ─────────────────
+  #
+  # The task guards this door used to name — the create family's
+  # published-fork fence and the adjudication guards (disposition by verb,
+  # rerun, operating instruction, reopen trigger, adoption, disposition owner)
+  # — are declared by the Tasks plugin through `mutate_door_fences/0` and run
+  # here, at the two positions they held (see `Content.MutateDoorFences` for
+  # why this is its own list and not the writer's pre-write fences). With
+  # plugins off the list is empty and both steps are `:ok`.
+  #
+  #   * `:before_rev` — first step of `create`, `createOrReplace` and
+  #     `createIfNotExists`, before `ensure_rev/2`.
+  #   * `:after_claim` — after `ensure_claim_not_dropped/4`, before the writer,
+  #     on `createOrReplace`, `replace` and both `patch` clauses.
+  #
+  # The create family passes its attrs as `op` and `incoming_content/1` as
+  # `merged` (what the guards read today); `patch` passes the patch map and the
+  # merged content it computed.
+  defp run_mutate_door_fences(phase, type, existing, attrs, dataset, opts),
+    do:
+      run_mutate_door_fences(
+        phase,
+        type,
+        existing,
+        incoming_content(attrs),
+        attrs,
+        dataset,
+        opts
+      )
+
+  defp run_mutate_door_fences(phase, type, existing, merged, op, dataset, opts) do
+    MutateDoorFences.run(MutateDoorFences.list(), phase, [
+      type,
+      existing,
+      merged,
+      op,
+      dataset,
+      opts
+    ])
+  end
+
+  @doc """
+  Run the create family's `:before_rev` mutate-door fences for a create
+  naming `id` — the published-fork fence the Tasks plugin declares (refuse a
+  create that would fork a published task somebody holds, otherwise advise).
+
+  Returns `:ok` or the first refusal verbatim. Public, and kept at this name,
+  because the legacy door (`POST /api/documents/:type` →
+  `Content.upsert_document/4`) forks the same twin without passing through
+  `apply_mutations/3`. With plugins off it is `:ok`, on both doors alike.
+  """
+  @spec ensure_create_not_forking_published_task(
+          String.t() | nil,
+          String.t() | nil,
+          String.t(),
+          keyword()
+        ) :: :ok | term()
+  def ensure_create_not_forking_published_task(type, id, dataset, opts),
+    do: run_mutate_door_fences(:before_rev, type, nil, %{"doc_id" => id}, dataset, opts)
 
   defp published_first_patch_base(id, type, dataset, opts) do
     case Content.get_document(id, type, dataset, opts) do
@@ -1307,6 +1301,68 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp warn_on_nested_content(_fields), do: :ok
+
+  # [declaring-type-status] task-949bee3f1fb1d304 — the PATCH counterpart of
+  # #17346's CREATE/UPSERT fix (`Writer.declared_status_field?/4`).
+  #
+  # THE DEFECT. `status` sits in the patch path's hard `protected` list, so
+  # every patch verb DROPS it: `set` merges a map it was removed from, `unset`
+  # cannot name it, `inc`/`dec`/`append`/`prepend`/`setIfMissing` skip it. On a
+  # type that does NOT declare a `status` field that is correct — `status` is
+  # the document's LIFECYCLE word there and a caller must move it with
+  # `publish`/`archive`, never by writing a content key. But on a type whose
+  # SchemaDefinition declares its own `status` field (Tickets ships one), the
+  # key is the caller's ordinary field, and dropping it returned HTTP 2xx while
+  # writing nothing at all: no field write, no lifecycle write, no error. A
+  # silent no-op is the one failure a write API cannot let the caller detect.
+  #
+  # THE SHAPE, AND THE ONE WE REFUSED. Removing `status` from `protected`
+  # outright would let any caller rewrite any document's lifecycle through
+  # `content`, on every type. #17346 already settled how this repo tells the
+  # two cases apart: ASK THE TYPE. `Writer.schema_declares_status?/3` is that
+  # question, and it is now called from both doors instead of one.
+  #
+  # COST. One `Content.resolve_schema/3` read, and only when the patch actually
+  # MENTIONS `status` in some verb — `patch_mentions_status?/1` gates it, the
+  # same way #17346 gated its read behind a present top-level `status` key. A
+  # patch that never says `status` costs exactly what it cost before.
+  #
+  # BACKWARD COMPATIBILITY. A type that does not declare `status` keeps the
+  # byte-identical old list, so its patches are unchanged down to the stored
+  # map. The only behaviour that moves belongs to declaring types, where the
+  # previous behaviour stored nothing — there is no working caller to migrate,
+  # because nobody was reading back a value that was never written. A missing
+  # schema or any resolver error reads as NOT DECLARED, so the predicate can
+  # only ever move a patch from the silent reading to the stored one.
+  #
+  # `title` is deliberately NOT part of this. It is protected here but it is
+  # not silently discarded: the clauses below lift `set["title"]` into the
+  # document's `title` COLUMN, which is what a read renders. Its story is a
+  # different one (a declaring type's `content["title"]` shadowing the column)
+  # with a different remedy, and it is not this row.
+  defp patch_protected_keys(patch, type, dataset, opts) do
+    base = ~w(title status _id _type _rev)
+
+    if patch_mentions_status?(patch) and is_binary(type) and
+         Writer.schema_declares_status?(type, dataset, opts) do
+      base -- ["status"]
+    else
+      base
+    end
+  end
+
+  @status_bearing_ops ~w(set setIfMissing inc dec append prepend)
+
+  defp patch_mentions_status?(patch) when is_map(patch) do
+    Enum.any?(@status_bearing_ops, fn op ->
+      case Map.get(patch, op) do
+        m when is_map(m) -> Map.has_key?(m, "status")
+        _ -> false
+      end
+    end) or "status" in list_or_empty(Map.get(patch, "unset"))
+  end
+
+  defp patch_mentions_status?(_), do: false
 
   defp list_or_empty(l) when is_list(l), do: l
   defp list_or_empty(_), do: []

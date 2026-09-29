@@ -5,7 +5,7 @@ defmodule Barkpark.Tasks.Close do
   # already-terminal guard, and the dependent-unblock walk all live together so
   # the close contract is one cohesive unit.
   #
-  # THE CLOSE HONESTY GATES (PDS-D288/D289/D290) — READ THIS BEFORE CHANGING THEM.
+  # THE CLOSE HONESTY GATES (PDS-D288/PDS-D289/PDS-D290) — READ THIS BEFORE CHANGING THEM.
   # Three checks ride the same in-lock `with` chain as the epoch fence:
   #
   #   * HOLDER — the closer must be (or have been) the lease holder. A foreign
@@ -81,7 +81,8 @@ defmodule Barkpark.Tasks.Close do
       fenced_content_write: 4,
       insert_mutation_event!: 3,
       insert_mutation_event!: 5,
-      caller_stamp: 1,
+      caller_stamp: 2,
+      actor_stamp: 2,
       merge_criteria: 2,
       merge_landed: 2,
       normalize_landed_list: 1,
@@ -93,6 +94,7 @@ defmodule Barkpark.Tasks.Close do
       check_worker_id: 1
     ]
 
+  alias Barkpark.Tasks.SessionId
   alias Barkpark.Tasks.LockKey
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Plugins.Github.Acknowledgement
@@ -100,6 +102,7 @@ defmodule Barkpark.Tasks.Close do
   alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.Criteria
   alias Barkpark.Tasks.Edges
+  alias Barkpark.Tasks.FlightRecorder
   alias Barkpark.Tasks.WorkDigest
 
   @closed_lifecycle_statuses ~w(done cancelled blocked)
@@ -107,6 +110,13 @@ defmodule Barkpark.Tasks.Close do
   # Merge-event reconcile emits a criterion-level event (same kind Stamp emits),
   # so the reconciliation shows up in the events feed without a lifecycle flip.
   @event_task_criterion "task.criterion"
+
+  # The third `@autostamp_key` sub-key, declared HERE rather than beside its
+  # prose (`THE DISCREPANCY`, far below) because a module attribute has to
+  # exist before the line that reads it — `write_reconcile/6` folds a
+  # discrepancy into the merge-event write hundreds of lines earlier than the
+  # section that builds one.
+  @discrepancy_key "discrepancy"
   @event_task_mutated "task.mutated"
   # Advisory cross-task notice (task-obsession layer 4): a task closed with a
   # land digest whose files overlap another in-progress task's claimed scope.
@@ -151,7 +161,13 @@ defmodule Barkpark.Tasks.Close do
     # Audit stamp: the api_token id that drove this close (nil for internal
     # callers), threaded into the task.closed mutation_event's document map.
     caller_token_id = Keyword.get(opts, :caller_token_id)
-    # The two LOUD overrides (PDS-D288/D289). Each is a non-empty reason string;
+    session = Keyword.get(opts, :session)
+    # THE FLIGHT RECORDER'S CLOSING FRAME (task-a42dccec2fe4a406). Agent-written
+    # prose, already BOUNDED and already refused by the controller if it is over
+    # the wall — by the time it reaches here it is either a validated binary or
+    # `nil`, and `nil` writes NO key (see FlightRecorder.put_context_compact/2).
+    context_compact = Keyword.get(opts, :context_compact)
+    # The two LOUD overrides (PDS-D288/PDS-D289). Each is a non-empty reason string;
     # absent (or blank) means "no override", and the corresponding gate refuses.
     overrides = %{
       holder: override_reason(Keyword.get(opts, :holder_override)),
@@ -194,7 +210,9 @@ defmodule Barkpark.Tasks.Close do
           criteria,
           landed,
           caller_token_id,
-          overrides
+          session,
+          overrides,
+          context_compact
         )
     end
   end
@@ -331,19 +349,32 @@ defmodule Barkpark.Tasks.Close do
 
     unflagged = unflagged_worded_gates(indexed)
 
+    # THE RECONCILIATION (task-4ab4a5b58bce97a6). The merge webhook is the only
+    # witness this ledger has, and it arrives AFTER the close. Compare what the
+    # close ASSERTED against what the server has now OBSERVED, and thread the
+    # verdict through EVERY arm below — including `:already_stamped`, which is
+    # the case that matters most: the close already flipped the gate on the
+    # asserted bytes, so if that assertion is the false one, this is the only
+    # moment anything can say so.
+    discrepancy = merge_discrepancy_record(doc.content, landed, ts_iso)
+
     cond do
       gates == [] and unflagged != [] ->
         # Nothing to stamp — and saying `:no_marker` here would be true but
         # useless, because the row DOES carry something that reads like a gate.
         # Name the criteria rather than count them: a count says there is a
         # problem, a list says where.
-        {:ok, :unflagged_merge_gates, Enum.map(unflagged, fn {_entry, i} -> i end)}
+        record_discrepancy_only(
+          doc,
+          discrepancy,
+          {:ok, :unflagged_merge_gates, Enum.map(unflagged, fn {_entry, i} -> i end)}
+        )
 
       gates == [] ->
-        {:ok, :no_marker}
+        record_discrepancy_only(doc, discrepancy, {:ok, :no_marker})
 
       Enum.all?(gates, fn {entry, _i} -> Map.get(entry, "met") == true end) ->
-        {:ok, :already_stamped}
+        record_discrepancy_only(doc, discrepancy, {:ok, :already_stamped})
 
       true ->
         evidence = compose_reconcile_evidence(worker_id, landed, ts_iso)
@@ -353,9 +384,9 @@ defmodule Barkpark.Tasks.Close do
           # Unmet merge-gate criteria exist but none carry guardable text — the
           # D56 fail-closed guard has nothing to CAS against, so a human must
           # stamp them. Never faked through the hole.
-          {:ok, :no_guardable_marker}
+          record_discrepancy_only(doc, discrepancy, {:ok, :no_guardable_marker})
         else
-          write_reconcile(doc, synthetic, worker_id, landed, ts_iso)
+          write_reconcile(doc, synthetic, worker_id, landed, ts_iso, discrepancy)
         end
     end
   end
@@ -372,7 +403,7 @@ defmodule Barkpark.Tasks.Close do
   # This is the VERIFIED half — a real merge event was observed — so it lands
   # under "merge_event" with `verified: true`, next to (never on top of) any
   # earlier unverified close-time assertion.
-  defp write_reconcile(%Document{} = doc, synthetic, worker_id, landed, ts_iso) do
+  defp write_reconcile(%Document{} = doc, synthetic, worker_id, landed, ts_iso, discrepancy) do
     observed_rev = doc.rev
     new_rev = generate_rev()
     indices = Enum.map(synthetic, &Map.get(&1, "index"))
@@ -388,6 +419,7 @@ defmodule Barkpark.Tasks.Close do
           "landed" => landed_summary(landed),
           "ts" => ts_iso
         })
+        |> merge_autostamp_record(@discrepancy_key, discrepancy)
 
       case fenced_content_write(doc, observed_rev, new_content, new_rev) do
         {:ok, updated} ->
@@ -444,7 +476,9 @@ defmodule Barkpark.Tasks.Close do
          criteria,
          landed,
          caller_token_id,
-         overrides
+         session,
+         overrides,
+         context_compact
        ) do
     result =
       Repo.transaction(fn ->
@@ -593,11 +627,13 @@ defmodule Barkpark.Tasks.Close do
                            artifact_record,
                            worker_id
                          ),
-                         caller_token_id
+                         caller_token_id,
+                         session,
+                         context_compact
                        ) do
                   # THE CLOSER IS NAMED ON EVERY CLOSE (pds-bl-close-audit-gaps).
                   #
-                  # `apply_close_update/9` stamps `closed_by` into the CLAIM, so
+                  # `apply_close_update/10` stamps `closed_by` into the CLAIM, so
                   # a row that was never claimed took its `_ ->` arm and the
                   # whole close — document and event alike — named nobody.
                   # Measured on the guerrilla ledger 2026-09-06: 139 of 6,617
@@ -637,7 +673,20 @@ defmodule Barkpark.Tasks.Close do
                       @event_task_closed,
                       observed_rev,
                       "api",
-                      Map.put(caller_stamp(caller_token_id), "closed_by", worker_id)
+                      # tlv-bl-events-actor-attribution: `closed_by` alone
+                      # names the actor but not the LEASE it acted on, so two
+                      # closes by the same worker across a re-claim are
+                      # indistinguishable on the feed. `actor` adds the epoch
+                      # the CAS actually fenced on, read from the row AS
+                      # WRITTEN (`updated`) rather than from the request, so
+                      # the event records what committed. A claimless close
+                      # (container / root rows) stamps no `actor` key at all.
+                      caller_stamp(caller_token_id, session)
+                      |> Map.put("closed_by", worker_id)
+                      |> Map.merge(
+                        actor_stamp(worker_id, get_in(updated.content, ["claim", "epoch"]))
+                      )
+                      |> Map.merge(SessionId.session_stamp(session))
                     )
 
                   unblocked = cascade_unblock_dependents!(updated)
@@ -672,7 +721,7 @@ defmodule Barkpark.Tasks.Close do
   end
 
   # A REPLAY, not a race: this exact worker already closed this row to this
-  # exact status. `closed_by` is stamped by `apply_close_update/9` on every
+  # exact status. `closed_by` is stamped by `apply_close_update/10` on every
   # close that carries a claim, so it is the authorship record, and comparing
   # it to the caller is what separates "your own write landed" from "somebody
   # else got here first".
@@ -941,7 +990,7 @@ defmodule Barkpark.Tasks.Close do
   # zero-criteria task; it fired on 9 of those 11 births and changed nothing,
   # because its only reader is the server journal. A second warning would have
   # been the same instrument aimed at the same blind spot. So this REFUSES — in the exact
-  # PDS-D288/D289 idiom, which means "refuse UNLESS you say why on the record",
+  # PDS-D288/PDS-D289 idiom, which means "refuse UNLESS you say why on the record",
   # not a wall: `--set ack_override="<reason>"` always lands.
   #
   # `blocked` is exempt BY NAME (the same honest-partial reasoning as the criteria
@@ -1056,7 +1105,7 @@ defmodule Barkpark.Tasks.Close do
   #
   # returned rc=0 and printed `✓ the store holds it — lifecycle_status=cancelled`.
   # Read back: lifecycle `cancelled`, `close_reason` ABSENT, and no record
-  # anywhere of why the work was abandoned. `apply_close_update/9` writes
+  # anywhere of why the work was abandoned. `apply_close_update/10` writes
   # `close_reason` only for a non-empty binary (blank never clobbers a stored
   # value — right for a replay, and the reason this landed silently), so a blank
   # reason on a first close writes NOTHING and says so to nobody. That is the
@@ -1261,7 +1310,11 @@ defmodule Barkpark.Tasks.Close do
   # doc's current work-defining fields (title/brief/description/acceptance_criteria —
   # for criteria, only each entry's `criterion` TEXT is work-defining; the
   # met/evidence/attempts progress subfields a mid-claim `stamp` writes are
-  # excluded by WorkDigest D5, so a worker's own stamps never fence its close)
+  # excluded by WorkDigest D5, so a worker's own stamps to an EXISTING
+  # criterion never fence its close. A stamp that SEEDS a criterion is the
+  # exception and fences correctly: it adds criterion TEXT, which IS the work
+  # definition, so the holder must re-read and pin observed_rev before sealing
+  # a row whose bar it just moved)
   # are re-digested inside this close txn and compared to the claim-time stamp.
   # Drift → {:error, {:doc_changed_since_claim, current_rev, changed_fields}} so
   # the worker re-reads the changed brief before closing against stale
@@ -1301,7 +1354,9 @@ defmodule Barkpark.Tasks.Close do
          criteria,
          landed,
          override_record,
-         caller_token_id
+         caller_token_id,
+         session,
+         context_compact
        ) do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -1316,6 +1371,22 @@ defmodule Barkpark.Tasks.Close do
             claim
             |> Map.put("closed_by", worker_id)
             |> Map.put("closed_at", ts_iso)
+            # WHICH SESSION sealed the row (task-f79e39f4992749a5). `closed_by`
+            # is the LANE worker id, so a close by a woken predecessor of the
+            # same lane was indistinguishable from the live session's.
+            # `closed_session` records the server-derived session beside it and
+            # leaves `session` / `session_origin` alone, so a reader can still
+            # see the claim-vs-close split. Attribution only; the close CAS
+            # still fences on `worker + epoch` exactly as before.
+            |> then(fn c ->
+              if is_binary(session), do: Map.put(c, "closed_session", session), else: c
+            end)
+            # Beside `closed_by` / `closed_at` because it IS close metadata: the
+            # compact of what this lease learned, stamped on the lease it
+            # learned it under. A close that carries none leaves the claim map
+            # byte-identical — there is no empty-compact arm, for the same
+            # reason there is no empty-override arm two functions down.
+            |> FlightRecorder.put_context_compact(context_compact)
 
           doc.content
           |> Map.put("lifecycle_status", new_status)
@@ -1796,14 +1867,131 @@ defmodule Barkpark.Tasks.Close do
   # #456.
   defp observed_prs(content) do
     case get_in(content, [@autostamp_key, "merge_event"]) do
-      %{} = record ->
-        case asserted_prs(record) do
-          [] -> summary_prs(Map.get(record, "landed"))
-          prs -> prs
-        end
+      %{} = record -> record_prs(record)
+      _ -> []
+    end
+  end
+
+  # The PR numbers an autostamp RECORD names. Records written before the `prs`
+  # key existed carry only the prose summary, so those are read back through the
+  # `#<number>` shape `landed_summary/1` emits. ONE definition, because the
+  # witness join (`observed_prs/1`) and the discrepancy reconciliation
+  # (`merge_discrepancy_record/3`) must never disagree about which PRs a stored
+  # record claims — that disagreement IS the false verdict.
+  defp record_prs(record) when is_map(record) do
+    case asserted_prs(record) do
+      [] -> summary_prs(Map.get(record, "landed"))
+      prs -> prs
+    end
+  end
+
+  defp record_prs(_record), do: []
+
+  # ─── THE DISCREPANCY (task-4ab4a5b58bce97a6) ──────────────────────────────
+  #
+  # `@autostamp_key`'s "close" sub-key records that a close-time merge-gate
+  # autostamp rested on the CALLER'S ASSERTION (`verified: false`). It was a
+  # receipt and nothing more: nothing in the system ever went back and asked
+  # whether the assertion turned out to be TRUE. This is that second look, and
+  # it is deliberately here rather than in the close:
+  #
+  #   * the close runs under `pg_advisory_xact_lock` and cannot make a network
+  #     call, so at close time there is nothing new to learn;
+  #   * the merge webhook is the server's OWN observation and arrives later.
+  #
+  # So verification stays ASYNC, on the merge-event path, exactly where the row
+  # asked for it. The record is NAMED — it says which PRs were asserted, which
+  # the server has actually observed on this task, and which of the asserted
+  # ones remain unwitnessed — because a boolean would only say "something is
+  # wrong" while a reader needs to know WHICH PR the close leaned on.
+  #
+  # WHAT IT DOES NOT DO: it does not un-stamp, un-close, or refuse anything.
+  # 76/2064 closes are foreign lead seals (D288/D289) and a hard refusal breaks
+  # the seal ritual — the wave declined that policy on purpose. This makes the
+  # false assertion LEGIBLE, which is the half that was missing.
+  defp merge_discrepancy_record(content, landed, ts_iso) when is_map(content) do
+    case get_in(content, [@autostamp_key, "close"]) do
+      %{} = close_record ->
+        build_discrepancy(content, close_record, landed, ts_iso)
 
       _ ->
-        []
+        nil
+    end
+  end
+
+  defp merge_discrepancy_record(_content, _landed, _ts_iso), do: nil
+
+  defp build_discrepancy(content, close_record, landed, ts_iso) do
+    asserted = record_prs(close_record)
+    # What the server has observed on THIS task: every prior merge event, plus
+    # the one being reconciled right now.
+    observed = Enum.uniq(observed_prs(content) ++ asserted_prs(landed))
+    observed_set = MapSet.new(observed)
+    unwitnessed = Enum.reject(asserted, &MapSet.member?(observed_set, &1))
+
+    cond do
+      unwitnessed == [] ->
+        nil
+
+      # Idempotent across replayed deliveries: a record that already says the
+      # same thing is not rewritten, so a redelivered webhook does not burn a
+      # rev restating a discrepancy the row already carries.
+      already_recorded?(content, unwitnessed, observed) ->
+        nil
+
+      true ->
+        %{
+          "verified" => true,
+          "source" => "merge_event_reconcile",
+          "kind" => "asserted_pr_not_merged_for_this_task",
+          "asserted_prs" => asserted,
+          "unwitnessed_prs" => unwitnessed,
+          "observed_prs" => observed,
+          "close_indices" => Map.get(close_record, "indices"),
+          "asserted_worker" => Map.get(close_record, "asserted_worker"),
+          "authenticated_token_id" => Map.get(close_record, "authenticated_token_id"),
+          "message" => discrepancy_message(unwitnessed, observed),
+          "ts" => ts_iso
+        }
+    end
+  end
+
+  defp already_recorded?(content, unwitnessed, observed) do
+    case get_in(content, [@autostamp_key, @discrepancy_key]) do
+      %{"unwitnessed_prs" => ^unwitnessed, "observed_prs" => ^observed} -> true
+      _ -> false
+    end
+  end
+
+  defp discrepancy_message(unwitnessed, observed) do
+    seen =
+      case observed do
+        [] -> "no PR at all"
+        prs -> "PR " <> Enum.map_join(prs, ", ", &"##{&1}")
+      end
+
+    "the close asserted " <>
+      "PR " <>
+      Enum.map_join(unwitnessed, ", ", &"##{&1}") <>
+      " as this task's landing and the merge-gate autostamp was written on those bytes; " <>
+      "the server has since observed #{seen} merge for this task and has never observed " <>
+      Enum.map_join(unwitnessed, ", ", &"##{&1}") <>
+      " here. The stamp stands and is NOT withdrawn — this record names what it rests on."
+  end
+
+  # A discrepancy found on an arm that stamps nothing still has to be STORED —
+  # `:already_stamped` is precisely the case where the close got there first.
+  # The verdict returned to the caller is unchanged either way: a lost rev-CAS
+  # race leaves the record for the next delivery rather than turning a
+  # successful reconcile into an error the webhook would retry forever.
+  defp record_discrepancy_only(_doc, nil, verdict), do: verdict
+
+  defp record_discrepancy_only(%Document{} = doc, record, verdict) do
+    new_content = merge_autostamp_record(doc.content || %{}, @discrepancy_key, record)
+
+    case fenced_content_write(doc, doc.rev, new_content, generate_rev()) do
+      {:ok, _updated} -> verdict
+      :stale -> verdict
     end
   end
 

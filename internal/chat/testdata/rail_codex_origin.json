@@ -1,0 +1,21 @@
+{
+ "01JQ8TH3CODEXTHREADAAAA": {
+  "status": "running",
+  "seq": 1,
+  "row": {
+   "task_type": "collab_agent_tool_call",
+   "description": "Port the OAuth refresh-token rotation to the new client and keep the audit trail"
+  },
+  "origin": "codex",
+  "model": "gpt-5-codex"
+ },
+ "01JQ8TH3CODEXTHREADBBBB": {
+  "status": "completed",
+  "seq": 2,
+  "row": {
+   "task_type": "codex_subagent",
+   "description": "agents/review/security.md"
+  },
+  "origin": "codex"
+ }
+}

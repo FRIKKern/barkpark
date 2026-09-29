@@ -182,6 +182,130 @@ defmodule BarkparkCloud.ConsoleReaderCensus do
   end
 
   @doc """
+  WHERE a slug is read: every app.js site that made Side B count it, as
+  `{line_number, kind, excerpt}` tuples with `kind` in `:errors_key | :quoted`.
+
+  This exists because the rot arm's verdict is NOT derivable from the slug
+  alone. Side B counts a slug quoted ANYWHERE in app.js as read (see SIDE B
+  above), so a match is EITHER a reader that landed OR a slug quoted for an
+  unrelated purpose — and this census cannot tell the two apart. It CAN hand the
+  reader the sites, and it CAN separate out the one site class that is
+  unambiguous: a bare key of the curated `var ERRORS = {` map is a console
+  reader by construction.
+
+  Line numbers are 1-based over the ORIGINAL file: the comment stripper is a 1:1
+  line map, so a stripped line keeps its number.
+  """
+  @spec read_sites([binary()], binary()) :: [{pos_integer(), :errors_key | :quoted, binary()}]
+  def read_sites(js_lines, slug) do
+    quoted_re = ~r/["']#{Regex.escape(slug)}["']/
+    key_re = ~r/^\s*#{Regex.escape(slug)}:\s/
+    range = errors_block_range(js_lines)
+
+    js_lines
+    |> Enum.with_index(1)
+    |> Enum.flat_map(fn {line, n} ->
+      cond do
+        in_range?(range, n) and Regex.match?(key_re, line) -> [{n, :errors_key, excerpt(line)}]
+        Regex.match?(quoted_re, line) -> [{n, :quoted, excerpt(line)}]
+        true -> []
+      end
+    end)
+  end
+
+  @doc """
+  THE ROT ARM'S FAILURE TEXT — built here, not inlined at the assertion, so that
+  a planted fixture can render the exact message a reader sees without redding
+  the real suite.
+
+  The message carries this module's own blind spot (a quoted slug counts as read
+  wherever it appears, so a match may be an unrelated purpose) and then forks per
+  slug on the only distinction the file can honestly make: an ERRORS bare key is
+  a CONFIRMED reader (delete the rows); a quoted-only match is UNCONFIRMED
+  (confirm a real reader first, or rename the colliding token and KEEP the rows).
+  """
+  @spec rot_arm_message([binary()], [binary()]) :: binary()
+  def rot_arm_message(rotted, js_lines) do
+    """
+    #{length(rotted)} classified code(s) are now READ by the console:
+
+    #{Enum.map_join(rotted, "\n", &"      #{&1}")}
+
+    BEFORE YOU DELETE ANY ROW — what this arm can and cannot see:
+
+          Side B counts a slug quoted ANYWHERE in app.js as read. A match is
+          therefore EITHER a reader that landed OR the slug quoted for an
+          UNRELATED purpose, and this file CANNOT distinguish the two. A real
+          console reader must be CONFIRMED to consume the code before ANY
+          @classified row for it is deleted. Deleting rows on a string
+          coincidence silently destroys the coverage this census exists to hold.
+
+          The sites below make that confirmation a glance: a fetch / route /
+          error-dispatch site on the code is a reader; a UI token, a state name,
+          a CSS class or any other literal that merely SPELLS the slug is not.
+
+    #{Enum.map_join(rotted, "\n\n", &slug_verdict(&1, js_lines))}
+    """
+  end
+
+  defp slug_verdict(slug, js_lines) do
+    sites = read_sites(js_lines, slug)
+    confirmed? = Enum.any?(sites, fn {_n, kind, _t} -> kind == :errors_key end)
+
+    where =
+      case sites do
+        [] ->
+          "          (no site located by the site scanner — find it by hand; do NOT\n" <>
+            "          delete a row on a match you could not locate)"
+
+        _ ->
+          Enum.map_join(sites, "\n", fn {n, kind, text} ->
+            "          app.js:#{n}  [#{site_label(kind)}]\n            #{text}"
+          end)
+      end
+
+    verdict =
+      if confirmed? do
+        "          VERDICT: READER CONFIRMED. A bare `#{slug}:` key of the curated\n" <>
+          "          `var ERRORS = {` map is a console reader by construction, so this\n" <>
+          "          is the GOOD direction. Delete EVERY @classified row for `#{slug}`\n" <>
+          "          in the SAME diff as the reader."
+      else
+        "          VERDICT: UNCONFIRMED — CONFIRM BEFORE DELETING. Every site above is\n" <>
+          "          a quoted literal, which Side B counts as read wherever it appears.\n" <>
+          "          Read them. If one really consumes this refusal code, delete every\n" <>
+          "          @classified row for `#{slug}` in the same diff. If they are\n" <>
+          "          unrelated tokens that merely spell `#{slug}`, KEEP the rows and\n" <>
+          "          rename the colliding token instead — that is the fix."
+      end
+
+    "      #{slug}\n#{where}\n\n#{verdict}"
+  end
+
+  defp site_label(:errors_key), do: "ERRORS map key — a curated console reader"
+  defp site_label(:quoted), do: "quoted literal — purpose unknown to this census"
+
+  defp errors_block_range(js_lines) do
+    case Enum.find_index(js_lines, &Regex.match?(@errors_open, &1)) do
+      nil ->
+        nil
+
+      start ->
+        rest = Enum.drop(js_lines, start)
+        len = Enum.find_index(rest, &Regex.match?(@errors_close, &1)) || length(rest)
+        {start + 1, start + len}
+    end
+  end
+
+  defp in_range?(nil, _n), do: false
+  defp in_range?({lo, hi}, n), do: n >= lo and n <= hi
+
+  defp excerpt(line) do
+    t = line |> String.trim() |> String.replace(~r/\s+/, " ")
+    if String.length(t) > 140, do: String.slice(t, 0, 139) <> "…", else: t
+  end
+
+  @doc """
   THE D881 SEAL — classified rows whose reason still literally reads "READER OWED"
   (SPACE-only, case-insensitive), returned as sorted unique codes.
 
@@ -320,6 +444,17 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "no console surface uploads artifacts. Flip: a console artifact upload ships."
     },
     %{
+      code: "artifact_quota_exceeded",
+      site: "router.ex start_prebuilt_deploy (POST /v1/sites/:id/deployments/:dep_id/artifact)",
+      reason:
+        "CLI-only: the PER-TEAM ceiling on stored artifact bytes, refused on the same " <>
+          "bp prebuilt upload path as its three siblings above; zero app.js callers of " <>
+          "the artifact route. A 429 here tells a machine to let its in-flight deploys " <>
+          "settle (the reaper frees the bytes) or to raise ARTIFACT_QUOTA_BYTES — both " <>
+          "operator/CI moves, not console ones. Flip: a console artifact upload ships, " <>
+          "or the console grows a storage-usage surface that must name this ceiling."
+    },
+    %{
       code: "artifact_too_large",
       site:
         "router.ex receive_deployment_artifact (POST /v1/sites/:id/deployments/:dep_id/artifact)",
@@ -442,20 +577,23 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       code: "installation_id_required",
       site: "router.ex POST /v1/github/installations",
       reason:
-        "Unreachable from every shipped surface: zero callers of the installations " <>
-          "route in app.js, internal/, or js/ (w73 zero-caller proof), because no " <>
-          "GitHub App setup_action callback consumer was ever built. Flip: the " <>
-          "callback consumer ships (cch-w73-bl-github-install-callback-loop-open)."
+        "RELABELED (wave 73, cch-w73-bl): the zero-caller premise is spent — app.js " <>
+          "now HAS a caller (handleGithubInstallReturn). The code is nonetheless " <>
+          "guard-shielded from that caller: the console POSTs only an installation_id " <>
+          "it already trimmed to non-empty (githubInstallReturnFromSearch), and a " <>
+          "redirect carrying no id takes the honest-absence arm and issues NO request " <>
+          "at all. Only a CLI/PAT or hand-built POST can send an empty or absent id. " <>
+          "Flip: a caller that can submit a blank installation_id ships."
     },
-    %{
-      code: "installation_not_found",
-      site: "router.ex POST /v1/github/installations",
-      reason:
-        "Unreachable from every shipped surface: same zero-caller proof as its " <>
-          "sibling — no App-install callback consumer exists, no setup_action route, " <>
-          "no installation_id reader anywhere. Conditioned on that absence. Flip: a " <>
-          "callback consumer ships and this becomes a reader-owed row."
-    },
+    # installation_not_found was PAID in Round 5 (wave 73,
+    # cch-w73-bl-github-install-callback-loop-open): its flip condition — "a
+    # callback consumer ships" — FIRED. app.js's handleGithubInstallReturn reads
+    # ?installation_id&setup_action off the boot URL and POSTs the id to this
+    # very route, so the 422 is now human-reachable (an installation removed
+    # between GitHub's redirect and the POST, or a bookmarked Setup-URL link
+    # replayed later — the URL is in browser history). It gained a curated
+    # ERRORS reader in the same diff and this row was deleted; the rot arm ran
+    # RED naming installation_not_found before the deletion.
     %{
       code: "repo_full_name_required",
       site: "router.ex connect_site_github",
@@ -1185,6 +1323,19 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "wave rules provider-specific copy owed."
     },
     %{
+      code: "credential_unreadable",
+      site: "router.ex providers_identity (GET /v1/providers/:kind/identity)",
+      reason:
+        "NOT console-reachable YET — no console surface calls this route at all: " <>
+          "PROVIDERS carries no cloudflare entry and the only /overview reader is " <>
+          "the rotation card. A 502 here means the stored credential would not " <>
+          "decrypt, an infrastructure fault kept DELIBERATELY distinct from an " <>
+          "identity whose value is nil (which is a 200) so the two are never " <>
+          "collapsed; the 5xx honesty law renders the server-fault sentence. " <>
+          "Flip: the console reader ships (task-cc5125ed3a4da0c2), at which point " <>
+          "this owes a read or its own copy."
+    },
+    %{
       code: "enqueue_failed",
       site: "router.ex do_resurrect",
       reason:
@@ -1382,6 +1533,65 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "coded 404 for a deleted webhook, discriminated server-side; the panel " <>
           "caller's fallback renders. Flip: a wave rules the deleted-webhook " <>
           "sentence owed."
+    },
+    # -------------------------------------------------------------- site-rebind arm
+    # site-spawner `site-rebind-content`: PATCH /v1/sites/:id gained a content-
+    # binding arm (workspace+project+dataset together, re-minting the scope-bound
+    # public-read token). It ships SERVER-SIDE ONLY — app.js has no rebind control
+    # on the site settings panel, which posts theme/doc_type/prebuilt_enabled and
+    # nothing else. Every row here flips the moment that control ships.
+    %{
+      code: "content_binding_not_applicable",
+      site: "router.ex rebind_site_content (PATCH /v1/sites/:id, rebind arm)",
+      reason:
+        "UNREACHABLE from the console today: no app.js caller sends workspace/" <>
+          "project/dataset on the settings PATCH, so the rebind arm is never entered, " <>
+          "and this refusal additionally needs a CONTAINER site (which has no binding " <>
+          "to move). CLI/API only. Flip: a console rebind control ships — it must then " <>
+          "hide the control on container sites AND read this code."
+    },
+    %{
+      code: "read_token_inventory_unreadable",
+      site: "router.ex rebind_site_content (PATCH /v1/sites/:id, rebind arm)",
+      reason:
+        "UNREACHABLE from the console today (no app.js rebind caller). A 502 raised " <>
+          "when the box's token inventory cannot be listed, so the incumbent read " <>
+          "credential cannot be NAMED before the replacement is minted; the request " <>
+          "refuses having changed nothing. Operator-facing, retryable. Flip: a console " <>
+          "rebind control ships — this 502 is the one a user WILL hit on a flaky box, " <>
+          "so it owes a sentence then."
+    },
+    %{
+      code: "rebind_ability_required",
+      site: "router.ex PATCH /v1/sites/:id (rebind ability cond arm)",
+      reason:
+        "UNREACHABLE from the console BY CONSTRUCTION, not merely by absence: a " <>
+          "browser session carries [\"root\"], which satisfies the deploy-or-root gate, " <>
+          "so a console caller could never be refused by it even once the control " <>
+          "ships. It exists to refuse a bare `write` PAT, which is a CLI credential. " <>
+          "The sibling deploy_ability_required IS read only because its slug is quoted " <>
+          "in app.js's shared 403 branch. Flip: the console ever authenticates with a " <>
+          "non-root credential."
+    },
+
+    # -------------------------------------------------- operator digest-send arm
+    # gr-backlog-operator-digest-send: POST /v1/operator/digest/send mints ONE
+    # typed refusal of its own. The rest of its vocabulary is already read —
+    # `forbidden` / `unauthorized` through operatorReadFault, `rate_limited`
+    # through the shared quoted slug, `not_found` through the shared branch.
+    %{
+      code: "scope_required",
+      site: "router.ex digest_send_scope (POST /v1/operator/digest/send)",
+      reason:
+        "UNREACHABLE from the console BY CONSTRUCTION, not by absence: this is the " <>
+          "route's DEFAULT arm, and operatorConfirmDigestSend posts the literal " <>
+          "{scope: \"fleet\"} on every call — there is no code path in app.js that " <>
+          "sends this route a body without a scope, and a body with BOTH keys needs a " <>
+          "hand-built request. The refusal exists so a curl, a retried fetch or a " <>
+          "half-built client cannot mail the whole platform by omission, which is a " <>
+          "guarantee owed to people who are not the console. Flip: the console grows a " <>
+          "team picker (the route already supports team_id), because a picker that " <>
+          "can be submitted with nothing chosen WILL hit this and owes a sentence."
     }
   ]
 
@@ -1448,18 +1658,16 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
   end
 
   test "the rot arm: a CLASSIFIED code that gains a reader must leave the map" do
+    js_lines = Census.source!(@app_js, "app.js") |> Census.strip_js_comments()
     rotted = Census.rotted(read(), classified_codes())
 
-    assert rotted == [], """
-    #{length(rotted)} classified code(s) are now READ by the console:
-
-    #{Enum.map_join(rotted, "\n", &"      #{&1}")}
-
-    This is the GOOD direction: a reader landed for a code the map called unread.
-    Delete EVERY @classified row for each code above in the same diff as the
-    reader — the map's whole value is that it never describes a state that has
-    stopped being true.
-    """
+    # The message is built by Census.rot_arm_message/2 — it carries this file's
+    # OWN blind spot (a quoted slug counts as read wherever it appears) and the
+    # app.js sites, because "a reader landed, delete the rows" is CATASTROPHIC
+    # advice when the match is a token collision. 2026-09-22: a group-view state
+    # spelled "conflict" collided with the seven /v1/internal settle rows; the
+    # correct fix was renaming the state to "roster-conflict", not deleting rows.
+    assert rotted == [], Census.rot_arm_message(rotted, js_lines)
   end
 
   test "THE SEAL (D881): no CLASSIFIED row still reads READER OWED" do
@@ -1545,6 +1753,65 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
            "a synthetic READER OWED row injected into a LOCAL classified list did " <>
              "NOT surface through reader_owed/1 — the seal guard has gone vacuous " <>
              "and its green proves nothing"
+  end
+
+  test "the rot arm's GUIDANCE forks on planted fixtures: real reader vs token collision" do
+    # Two planted app.js fixtures for the SAME classified slug. The arm fires on
+    # both (it is not weakened); only the guidance differs, and it differs on the
+    # one distinction this census can honestly make.
+    collision = [
+      ~s|var ERRORS = {|,
+      ~s|  forbidden: "You do not have access to this.",|,
+      ~s|};|,
+      ~s|function groupLabel(state) {|,
+      ~s|  if (state === "conflict") return "Roster conflict";|,
+      ~s|}|
+    ]
+
+    reader = [
+      ~s|var ERRORS = {|,
+      ~s|  forbidden: "You do not have access to this.",|,
+      ~s|  conflict: "That job has already settled.",|,
+      ~s|};|
+    ]
+
+    # Both fixtures DO trip the arm — the mutation is real in both directions.
+    assert Census.rotted(
+             Census.quoted_slugs(collision) |> MapSet.union(Census.errors_keyset(collision)),
+             MapSet.new(["conflict"])
+           ) == ["conflict"]
+
+    assert Census.rotted(
+             Census.quoted_slugs(reader) |> MapSet.union(Census.errors_keyset(reader)),
+             MapSet.new(["conflict"])
+           ) == ["conflict"]
+
+    collision_msg = Census.rot_arm_message(["conflict"], collision)
+    reader_msg = Census.rot_arm_message(["conflict"], reader)
+
+    # [0] Both messages carry the moduledoc blind spot at RUNTIME.
+    for msg <- [collision_msg, reader_msg] do
+      assert msg =~ "Side B counts a slug quoted ANYWHERE in app.js as read"
+      assert msg =~ "UNRELATED purpose"
+      assert msg =~ "CANNOT distinguish the two"
+      assert msg =~ "must be CONFIRMED to consume the code before ANY"
+    end
+
+    # [1] Both print WHERE, with a line number and the source line itself.
+    assert collision_msg =~ "app.js:5  [quoted literal — purpose unknown to this census]"
+    assert collision_msg =~ ~s|if (state === "conflict") return "Roster conflict";|
+    assert reader_msg =~ "app.js:3  [ERRORS map key — a curated console reader]"
+    assert reader_msg =~ ~s|conflict: "That job has already settled.",|
+
+    # [2] The verdicts fork, and each EXCLUDES the other.
+    assert collision_msg =~ "VERDICT: UNCONFIRMED — CONFIRM BEFORE DELETING"
+    assert collision_msg =~ "KEEP the rows and"
+    assert collision_msg =~ "rename the colliding token instead"
+    refute collision_msg =~ "VERDICT: READER CONFIRMED"
+
+    assert reader_msg =~ "VERDICT: READER CONFIRMED"
+    assert reader_msg =~ "Delete EVERY @classified row for `conflict`"
+    refute reader_msg =~ "VERDICT: UNCONFIRMED"
   end
 
   test "FAIL-CLOSED: a missing source, an empty extraction, a lost ERRORS map all raise by name" do

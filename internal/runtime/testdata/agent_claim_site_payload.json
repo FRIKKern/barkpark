@@ -10,8 +10,22 @@
     "`legacy_control_plane` is the pre-change shape: a control plane that sends NO",
     "serving_mode key at all. It is here so the Go decoder's zero-value behaviour",
     "(on_demand, byte-identical to pre-Cloudflare) stays pinned and can never be",
-    "'fixed' into a default of cf_proxied."
+    "'fixed' into a default of cf_proxied.",
+    "`sites_state_*` are the LIVE-SITE half: the objects GET /v1/agent/sites",
+    "emits and internal/runtime/tls_reconcile.go consumes to re-render a site",
+    "whose serving_mode flipped while it was already live. Same vocabulary, a",
+    "different route — one file still owns both wires."
   ],
+  "sites_state_cf_proxied": {
+    "slug": "shop",
+    "domains": ["shop.example.com"],
+    "serving_mode": "cf_proxied"
+  },
+  "sites_state_direct": {
+    "slug": "shop",
+    "domains": ["shop.example.com"],
+    "serving_mode": "direct"
+  },
   "cf_proxied": {
     "slug": "shop",
     "domains": ["shop.example.com"],

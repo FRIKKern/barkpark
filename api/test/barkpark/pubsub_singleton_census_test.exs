@@ -45,7 +45,17 @@ defmodule Barkpark.PubSubSingletonCensusTest do
 
   # The source-level marks that define the class.
   @genserver_mark "use GenServer"
-  @subscribe_mark "Phoenix.PubSub.subscribe"
+
+  # EVERY way a module joins a topic, not just the bare API call
+  # (task-5d0615ee60143cc8). `Content.Broadcast.subscribe_documents/2` wraps
+  # `Phoenix.PubSub.subscribe/2` so a document-list consumer joins the global
+  # and workspace-keyed topics together — and the moment `StudioChat.Recorder`
+  # started calling it, this scanner stopped seeing Recorder as a subscriber and
+  # the ratchet reported it as a GHOST rather than as a member. A subscribe
+  # behind ONE indirection is still a boot-time subscribe; a mark that only
+  # matches the raw call fails OPEN on exactly the refactor that hides one.
+  @subscribe_marks ["Phoenix.PubSub.subscribe", "Broadcast.subscribe_documents"]
+  @subscribe_mark Enum.join(@subscribe_marks, " | ")
 
   describe "the class of boot-time PubSub-subscribed singletons" do
     test "the derivation itself finds something (anti-vacuity)" do
@@ -109,6 +119,13 @@ defmodule Barkpark.PubSubSingletonCensusTest do
 
       assert Barkpark.StudioChat.FleetHub in derived,
              "StudioChat.FleetHub dropped out of the derived class"
+
+      # The member that subscribes THROUGH `Broadcast.subscribe_documents/2`
+      # rather than through the bare API — it is the reason @subscribe_marks is
+      # a list, so pin it or the second mark can be deleted for free.
+      assert Barkpark.StudioChat.Recorder in derived,
+             "StudioChat.Recorder dropped out of the derived class — the wrapped " <>
+               "subscribe mark no longer describes it"
     end
   end
 
@@ -200,7 +217,7 @@ defmodule Barkpark.PubSubSingletonCensusTest do
     for path <- elixir_sources(),
         source = File.read!(path),
         String.contains?(source, @genserver_mark),
-        String.contains?(source, @subscribe_mark),
+        Enum.any?(@subscribe_marks, &String.contains?(source, &1)),
         module = defmodule_of(source),
         module != nil,
         do: module

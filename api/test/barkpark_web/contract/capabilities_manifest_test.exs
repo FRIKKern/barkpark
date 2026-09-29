@@ -157,6 +157,31 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  describe "doc.history pagination flags (task-c59788170e244f51)" do
+    test "history declares BOTH `limit` and `offset` in the SERVED manifest",
+         %{conn: conn} do
+      # LIVE SHAPE, not a file read: this goes through the router and reads the
+      # manifest `bp` and the SDKs actually consume. PR #18882 gave
+      # `GET /v1/data/history/...` real offset pagination, but the capability
+      # stayed undeclared — a flag present in the source yet absent from the
+      # served manifest is undiscoverable from the client, the same shape as
+      # the stripped `--keep-rerun` (task-4d5a2dde8a02d057).
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "doc.history")
+
+      assert cmd != nil, "doc.history command not found in manifest"
+
+      flag_names = Enum.map(cmd["flags"], & &1["name"])
+      assert "limit" in flag_names
+
+      assert "offset" in flag_names,
+             "doc.history must declare an `offset` flag; got: #{inspect(flag_names)}"
+
+      offset_flag = Enum.find(cmd["flags"], &(&1["name"] == "offset"))
+      assert offset_flag["type"] == "int"
+    end
+  end
+
   describe "media.upload path contract (BUG 2)" do
     test "media.upload path_template is /v1/media/:dataset/upload", %{conn: conn} do
       manifest = capabilities(conn)
@@ -1063,6 +1088,73 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  describe "server.version + server.min_cli are honest values (task-ae75712d581fda87)" do
+    # The prod box answered server.version "0.1.0" (mix.exs, frozen) while its
+    # own /status.json said "0.2.26.929" — two public surfaces, two numbers.
+    # The envelope cannot gain a key (previous describe), so the fix is the
+    # VALUE: the same resolver /status.json reads.
+
+    defp server_envelope(conn) do
+      conn
+      |> put_req_header("authorization", "Bearer #{@token}")
+      |> get("/v1/capabilities")
+      |> json_response(200)
+      |> Map.fetch!("server")
+    end
+
+    test "server.version equals /status.json version on the same box", %{conn: conn} do
+      server = server_envelope(conn)
+      status = conn |> get("/status.json") |> json_response(200)
+
+      assert server["version"] == status["version"],
+             "capabilities server.version #{inspect(server["version"])} != /status.json version #{inspect(status["version"])}"
+
+      # Same source, stated by name: BuildInfo, "A.B.C.D" or "unknown" — never
+      # the mix.exs project version, which is what the old code published.
+      assert server["version"] == Barkpark.BuildInfo.version()
+      assert server["version"] =~ ~r/^(\d+\.\d+\.\d+\.\d+|unknown)$/
+    end
+
+    test "server.version is not the mix.exs project version", %{conn: conn} do
+      # mix.exs says "0.1.0" and is never bumped; a release is "A.B.C.D". The
+      # guard is shape-keyed (four segments), not value-keyed, so it holds even
+      # if mix.exs is ever bumped to a real three-segment release.
+      server = server_envelope(conn)
+      mix_vsn = :barkpark |> Application.spec(:vsn) |> List.to_string()
+
+      refute server["version"] == mix_vsn,
+             "server.version still reports the mix.exs project version #{inspect(mix_vsn)}"
+    end
+
+    test "min_cli defaults to 1.0.0 and reads the :capabilities_min_cli app-env VALUE", %{
+      conn: conn
+    } do
+      previous = Application.get_env(:barkpark, :capabilities_min_cli)
+
+      on_exit(fn ->
+        case previous do
+          nil -> Application.delete_env(:barkpark, :capabilities_min_cli)
+          value -> Application.put_env(:barkpark, :capabilities_min_cli, value)
+        end
+      end)
+
+      Application.delete_env(:barkpark, :capabilities_min_cli)
+      assert server_envelope(conn)["min_cli"] == "1.0.0"
+
+      # An operator raises the floor by VALUE: the one channel a strict-decoding
+      # released bp can hear (serverFloorStaleness on the doctor/whoami leg).
+      Application.put_env(:barkpark, :capabilities_min_cli, "1.21.0")
+      assert server_envelope(conn)["min_cli"] == "1.21.0"
+
+      # Not `A.B.C` -> never published; a client cannot compare "latest".
+      Application.put_env(:barkpark, :capabilities_min_cli, "latest")
+      assert server_envelope(conn)["min_cli"] == "1.0.0"
+
+      Application.put_env(:barkpark, :capabilities_min_cli, 121)
+      assert server_envelope(conn)["min_cli"] == "1.0.0"
+    end
+  end
+
   describe "command-level `views` descriptor (wave axi-brief-views, ?views=1 opt-in)" do
     # The commands that support the brief/full projection.
     @views_commands ~w(task.ready task.prime search.query)
@@ -1652,7 +1744,12 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       # the attribute contract agents generate types from
       assert blocks["callout"] == ["id", "tone", "title"]
-      assert blocks["stat"] == ["label", "value", "denom"]
+      # `verdict` LAST, added on purpose by task-8bdef19b5acef8a8: BPML used to
+      # drop a stat's verdict on round-trip while the render leg painted
+      # `.bp-stat__v--loss`/`--peace` off it. This line is the tripwire that
+      # makes the grammar-digest move visible to a reviewer — a client
+      # regenerating types off the digest sees exactly this one new key.
+      assert blocks["stat"] == ["label", "value", "denom", "verdict"]
       assert blocks["paper"] == ["slug", "title"]
       # aliases ride the table — <strong> teaches nothing new
       assert inline["b"] == "strong"
@@ -1825,7 +1922,16 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   describe "app_token.* (mobile app-token exchange) live routes" do
     setup do
       admin = "ucv-appt-admin-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(admin, "ucv-appt-admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          admin,
+          "ucv-appt-admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
+
       reader = "ucv-appt-reader-#{System.unique_integer([:positive])}"
       {:ok, _} = Auth.create_token(reader, "ucv-appt-reader", "test", ["read"])
 
@@ -1947,7 +2053,16 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   describe "fleet_support_token.* (Personal Dev Fleet) live routes" do
     setup do
       admin = "ucv-fst-admin-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(admin, "ucv-fst-admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          admin,
+          "ucv-fst-admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
+
       junior = "ucv-fst-junior-#{System.unique_integer([:positive])}"
       {:ok, _} = Auth.create_token(junior, "ucv-fst-junior", "test", ["read", "write"])
 

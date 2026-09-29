@@ -28,12 +28,14 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
       proxying to the instance. The whole `/api/webhooks*` proxy family.
     * `recent_events_for_team(`   — `Registry.recent_events_for_team(team, id, n)`:
       `Repo.get(Barkpark, id)` matched against `%Barkpark{team_id: ^tid} = bp`,
-      returns nil cross-team. The events/telemetry read pair.
+      returns nil cross-team. The events read (its `/telemetry` twin was removed
+      by cch-w51-bl-metrics-latest-block-is-produced-and-rendered-by-nothing: zero
+      callers, and every fact it served still has a door).
     * inline `tid == team.id`     — the bodies that pattern-match the resolved
       `%Barkpark{team_id: tid}` against `conn.assigns.current_team` inline
       (`when tid == team.id`), the fail-closed scope-clamp the wave standardized.
 
-  THE 30-ROUTE DISPOSITION TABLE (path, verb → signal). Re-derived on
+  THE 31-ROUTE DISPOSITION TABLE (path, verb → signal). Re-derived on
   origin/main; offenders == []. Line numbers are NOT pinned (they drift) — the
   test reads them fresh every run; the table is the human-readable ledger.
 
@@ -66,13 +68,12 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
     | post   | /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay | proxy_instance_webhook |
     | post   | /v1/barkparks/:id/api/webhooks/:webhook_id/test-send       | proxy_instance_webhook  |
     | get    | /v1/barkparks/:id/events                                   | recent_events_for_team  |
-    | get    | /v1/barkparks/:id/telemetry                                | recent_events_for_team  |
     | get    | /v1/barkparks/:id/metrics                                  | resolve_team_barkpark   |
     | get    | /v1/barkparks/:id/usage                                    | resolve_team_barkpark   |
     | get    | /v1/barkparks/:id/usage/history                            | resolve_team_barkpark   |
     | get    | /v1/barkparks/:id/domain-status                            | resolve_team_barkpark   |
 
-    Tally: inline tid==team.id 16 · resolve_team_barkpark 5 · proxy_instance_webhook 9 · recent_events_for_team 2 = 32.
+    Tally: inline tid==team.id 16 · resolve_team_barkpark 5 · proxy_instance_webhook 9 · recent_events_for_team 1 = 31.
     (PDF-D94 added the agent-key pair — both pattern-match the resolved row's team_id inline, fail-closed 404 cross-team.)
 
   CANDOR — what this proves and what it does NOT (D57 marginal value).
@@ -102,7 +103,7 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
   METHOD NOTES.
 
     * Route heads are matched with `^  (get|post|put|patch|delete) "/v1/barkparks/:id`
-      — all thirty are the block form (`verb "..." do ... end`) at 2-space
+      — all of them are the block form (`verb "..." do ... end`) at 2-space
       indentation; none is a parenthesized one-liner.
     * Block bodies are bounded by the STRICT `^  end` terminator at route
       indentation (the same discipline `router_head_fence_census_test.exs`
@@ -132,7 +133,7 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
 
   # Pinned population, re-derived on origin/main. A new barkparks/:id route moves
   # this and must be ruled on here.
-  @expected_route_count 32
+  @expected_route_count 31
 
   defp source, do: File.read!(@router_source)
 
@@ -198,7 +199,7 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
              "inline tid == team.id" => 16,
              "resolve_team_barkpark" => 5,
              "proxy_instance_webhook" => 9,
-             "recent_events_for_team" => 2
+             "recent_events_for_team" => 1
            },
            "signal tally drifted from the pinned disposition table: #{inspect(tally)}. " <>
              "A signal moving without a route being added/removed means a route " <>

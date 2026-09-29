@@ -1,13 +1,56 @@
 package pdrender
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
-// TestSanitizeURL checks control bytes (C0 + DEL) are dropped while all valid
+func TestSanitizeURLC1Controls(t *testing.T) {
+	for r := rune(0x80); r <= 0x9f; r++ {
+		t.Run(fmt.Sprintf("U+%04X", r), func(t *testing.T) {
+			c := string(r)
+			for raw, want := range map[string]string{
+				"https://example.com/a" + c + "b\u00a0世界☕": "https://example.com/ab\u00a0世界☕",
+				"/docs/a" + c + "b":            "/docs/ab",
+				"/" + c + "/evil.example":      "",
+				"/" + c + "\\evil.example":     "",
+				"jav" + c + "ascript:alert(1)": "",
+				"da" + c + "ta:text/html,bad":  "",
+				c:                              "",
+			} {
+				if got := sanitizeURL(raw); got != want {
+					t.Errorf("sanitizeURL(%q) = %q, want %q", raw, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestLinkC1ControlsCannotEscapeOSC8Framing(t *testing.T) {
+	reg := testRegistry()
+	// Keep OSC 8 enabled via RenderCtx, but suppress unrelated SGR styling so
+	// exact equality proves both the framing and the visible text survive.
+	lipgloss.SetColorProfile(3)
+	t.Cleanup(func() { lipgloss.SetColorProfile(3) })
+	for r := rune(0x80); r <= 0x9f; r++ {
+		t.Run(fmt.Sprintf("U+%04X", r), func(t *testing.T) {
+			nodes := []any{map[string]any{
+				"type": "link", "href": "https://example.com/a" + string(r) + "b",
+				"children": []any{map[string]any{"type": "text", "value": "go" + string(r) + "世界"}},
+			}}
+			out := reg.Inline(nodes, RenderCtx{Width: 100, Theme: DarkTheme(), Profile: ANSI256})
+			want := "\x1b]8;;https://example.com/ab\x1b\\go世界\x1b]8;;\x1b\\"
+			if out != want {
+				t.Errorf("OSC 8 framing or sanitized content differs: got %q, want %q", out, want)
+			}
+		})
+	}
+}
+
+// TestSanitizeURL checks control runes (C0, DEL, and C1) are dropped while all valid
 // printable/UTF-8 runes pass through unchanged.
 func TestSanitizeURL(t *testing.T) {
 	cases := []struct {
@@ -24,6 +67,7 @@ func TestSanitizeURL(t *testing.T) {
 		{"csi stripped", "https://x\x1b[31mevil.com", "https://x[31mevil.com"},
 		{"tab stripped", "a\tb", "ab"},
 		{"unicode kept", "https://exämple.com/☕", "https://exämple.com/☕"},
+		{"C1 upper boundary excluded", "/a\u00a0世界", "/a\u00a0世界"},
 		{"empty", "", ""},
 	}
 	for _, c := range cases {

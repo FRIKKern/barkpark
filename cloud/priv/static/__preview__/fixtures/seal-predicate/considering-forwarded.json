@@ -1,5 +1,5 @@
 {
-  "_comment": "A considering row that IS forwarded under the successor. Clause (a) asks for a named forwarding address and this row has one, so it seals — the wave-28 bucket split is a re-labelling of UNNAMED residue, never a new way for unfinished work to red. The row is still printed by name (charter D90), on the re-disclosure line, proving the disclosure does not depend on which bucket the row landed in.",
+  "_comment": "A considering row that IS forwarded under the successor, LEGALLY PLACED (task-8532dae7b075f4b3): the prior census remembers it as `considering`, it has been re-parented onto the successor (so it is in `forwarded`, the successor’s direct roster, and NOT in the epic’s `children` — `parent_id` is one field). Clause (a) asks for a named forwarding address and this row has one, so it seals — the wave-28 bucket split is a re-labelling of UNNAMED residue, never a new way for unfinished work to red. The row is still printed BY NAME (charter D90), on the forwarded line and under RE-HOMED with was=considering. Until task-8532dae7b075f4b3 this fixture listed the row in BOTH `children` and `forwarded` — two parents, a world the ledger cannot produce — and scored it through the in-roster forwarded bucket, which R4/R6/R9 make unreachable on any legal invocation.",
   "successor": "cch-fixture-successor-epic",
   "tasks": {
     "cch-fixture-successor-epic": {
@@ -14,15 +14,22 @@
     {
       "_id": "gr-fixture-done-1",
       "lifecycle_status": "done"
-    },
-    {
-      "_id": "gr-fixture-considering-1",
-      "lifecycle_status": "considering"
     }
   ],
   "forwarded": [
     "gr-fixture-considering-1"
   ],
+  "priorCensus": {
+    "gr-fixture-considering-1": "considering",
+    "gr-fixture-done-1": "done"
+  },
+  "departed": {
+    "gr-fixture-considering-1": {
+      "_id": "gr-fixture-considering-1",
+      "lifecycle_status": "considering",
+      "parent_id": "cch-fixture-successor-epic"
+    }
+  },
   "gates": {
     "gr-ops-platform-admin-emails": {
       "_id": "gr-ops-platform-admin-emails",

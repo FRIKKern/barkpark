@@ -30,6 +30,7 @@
 // The shipped <bp-paper-editor> behavior is byte-unchanged.
 
 import { Editor } from "@tiptap/core";
+import { clipboardPastePolicy } from "./clipboard-paste-policy.js";
 import StarterKit from "@tiptap/starter-kit";
 import { ListItemSource } from "../list-item-source.js";
 import { HeadingSource } from "../heading-source.js";
@@ -38,12 +39,24 @@ import { portableTextBoundary } from "../portable-text-boundary.js";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
+import Underline from "@tiptap/extension-underline";
+// The highlight mark: `==text==` shorthand and Mod-Shift-h come with the extension; it persists as the
+// portable-doc `highlight` wrapper (convert.js) and renders as <mark> on both surfaces.
+import Highlight from "@tiptap/extension-highlight";
+// Subscript (Mod-,) and superscript (Mod-.): the portable-doc `sub` / `sup` wrappers.
+import Subscript from "@tiptap/extension-subscript";
+import Superscript from "@tiptap/extension-superscript";
+// Text alignment on paragraphs and headings: the portable-doc `align` attribute.
+import TextAlign from "@tiptap/extension-text-align";
+import TiptapTaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
 // ProseMirror selection constructors — used by the slash direct-insert to place the
 // caret naturally after the swap (TextSelection INTO a prose/callout body;
 // NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
 // PM core modules, so this is the canonical TipTap-vanilla import (no extra dep).
 import { TextSelection, NodeSelection, Plugin } from "@tiptap/pm/state";
-import { Fragment, Slice, Mark } from "@tiptap/pm/model";
+import { Fragment, Slice, Mark, DOMParser as PMDOMParser } from "@tiptap/pm/model";
+import { prepareHTMLTablePaste } from "./html-table-paste.js";
 import { Extension } from "@tiptap/core";
 
 // PURE S0 projector + op-mapper — used verbatim (do NOT reinvent the diff).
@@ -65,6 +78,7 @@ import {
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
 import { restingScaffolds } from "./resting-scaffolds.js";
+import { RestingSelection } from "./resting-selection.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
 // INSIDE the canvas document (so a prose run can CONTAIN dividers). A leaf with
 // no edit UI; PM's atom selection + Backspace-delete come free. See ./divider-node.js.
@@ -106,6 +120,14 @@ import { Code } from "./code-node.js";
 // ships no `diagram` node), so NO StarterKit node is disabled for it. See
 // ./diagram-node.js.
 import { Diagram } from "./diagram-node.js";
+// scaffy-backlog-blocks-editable-studio: the `diff` + `filetree` blocks as canvas
+// ATTR-ATOM nodes — the code/diagram shape GENERALIZED to one verbatim-body attr
+// plus optional scalar metadata. UNLIKE code/diagram their PREVIEW is the reader's
+// OWN server-pushed HTML (bp:block-html), because no client runtime can produce
+// diff/filetree markup and the parity gate forbids hand-mirroring it. Named
+// `bpDiff` / `bpFiletree`; NO StarterKit collision, so no StarterKit node is
+// disabled for them. See ./technical-node.js.
+import { Diff, Filetree } from "./technical-node.js";
 // S3.5: the 7 native-control field-* blocks as a canvas CONTROL-ATOM node — the
 // FOURTH node-view variant. A SINGLE `bpField` node serves all 7 native field types
 // (string/slug/text/boolean/select/datetime/color), discriminated by bpType; the
@@ -130,6 +152,18 @@ import { Action } from "./action-node.js";
 // atom → remove-block, and DO participate in structural ops. See ./embed-node.js.
 import { Sheet, Embed, Fleet } from "./embed-node.js";
 import { Figure } from "./figure-node.js";
+// The expandable (native toggle) container: a summary island over a block+ body.
+import { Expandable } from "./expandable-node.js";
+// steps / tabs: containers of titled rows (a title input over a block+ body each).
+import { Steps, Step, Tabs, Tab } from "./rows-node.js";
+// The "data + island" atoms: equation, footnotes, contents, video.
+import { Equation, Footnote, Toc, Video } from "./island-node.js";
+// The `:` emoji picker: a local shortcode table, plain text on pick (no server change).
+import { searchEmoji } from "../emoji.js";
+// Find in the paper + replace one/all: a decoration plugin driven by the host's bar.
+import { findReplace, findSet as frSet, findClear as frClear, findStep as frStep, findState as frState, replaceCurrent as frReplaceCurrent, replaceAll as frReplaceAll } from "./find-replace.js";
+// editable-image: the `image` block as a self-painting atom with alt + url inputs.
+import { Image } from "./image-node.js";
 // live-data task-list: the EDITABLE-QUERY + server-painted-ROWS atom (`bpTaskList`).
 import { TaskList } from "./task-list-node.js";
 // article-chrome roles: the eyebrow / byline / ingress / pullquote blocks as PLAIN
@@ -137,7 +171,7 @@ import { TaskList } from "./task-list-node.js";
 // element with a bp-role-* class). Each renders `["p", {class:"bp-role-*"}, 0]` so
 // PM derives the contentDOM from the content hole; getJSON round-trips the styled
 // element + bpId/bpType, and run-convert.js maps the block ⇄ node. See ./role-nodes.js.
-import { Eyebrow, Byline, Ingress, Pullquote } from "./role-nodes.js";
+import { Eyebrow, Byline, Ingress, Pullquote, Blockquote } from "./role-nodes.js";
 // editable table: the `table` block as FOUR hand-rolled NESTED nodes (bpTable >
 // bpTableRow > bpTableHeaderCell|bpTableCell), NOT @tiptap/extension-table. Cell bodies
 // are PM `inline*` holes reusing the shared inline serializer (marks round-trip); the
@@ -176,16 +210,21 @@ import { Opaque } from "./opaque-node.js";
 import { Terminal, TerminalAtom } from "./terminal-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
+import { BlockHandle, moveTopLevel, duplicateTopLevel, topLevelIndexAtSelection, turnTopLevelInto } from "./block-handle.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
 // for BOTH triggers via a row adapter) + the PURE, DOM-free trigger detectors and
 // replace-range mappers. All shipped + browser-verified in the per-block editor;
 // the canvas REUSES them verbatim — only the WC-side wiring is ported below.
 import { WikilinkMenu } from "../wikilink-menu.js";
+// The hover card on a link / wikilink: address, resolved title + first line, Open, Edit (plan #23).
+import { LinkPreview } from "./link-preview.js";
 import {
   parseOpenWikilink,
   wikilinkReplaceRange,
   parseOpenTag,
   tagReplaceRange,
+  parseOpenEmoji,
+  emojiReplaceRange,
 } from "../wikilink-trigger.js";
 // P4 S-slash: the SAME caret-anchored "/" insert popup the per-block editor uses
 // (slash-menu.js), REUSED verbatim — only the WC-side wiring differs. SLASH_ITEMS
@@ -196,7 +235,7 @@ import {
 // default_block/2 to build), the canvas inserts the default NODE DIRECTLY into the
 // ProseMirror doc — so runToOps emits an insert-after carrying the reconstructed
 // block and the S4a echo stamps the server id. See _maybeSlash / _chooseSlash below.
-import { SlashMenu, SLASH_ITEMS } from "../slash-menu.js";
+import { SlashMenu, SLASH_ITEMS, readExpectedItems, readMasterItems } from "../slash-menu.js";
 // The DOM-free tone normalizer (note→info, warn→warning, error→danger, …) shared
 // with the per-block `> [!type]` callout shorthand. Reused VERBATIM so the canvas
 // shorthand maps tones identically. See _maybeCalloutShorthand below.
@@ -206,6 +245,7 @@ import { normalizeTone } from "../tone.js";
 // insertable-type allowlist; canvasDefaultBlock mirrors default_block/2; slashTypeToNode
 // builds the per-type default NODE via runToTiptap (so it round-trips byte-identically);
 // CANVAS_SLASH_TEXTABLE_NODES marks which inserted nodes take an into-body caret.
+import { CANVAS_SECTION_PRESETS } from "./section-presets.js";
 import {
   CANVAS_SLASH_TYPES,
   canvasDefaultBlock,
@@ -213,6 +253,7 @@ import {
   CANVAS_SLASH_TEXTABLE_NODES,
   slashTriggerAllowsParent,
   CANVAS_COMPOUND_INSERTS,
+  masterInsertAnchor,
 } from "./slash-insert.js";
 // P5 command palette: the Obsidian Cmd-P analog — a fuzzy, keyboard-triggered (Mod-p)
 // launcher over editor COMMANDS (NOT a typed "/" trigger). CommandPalette is a THIN
@@ -228,6 +269,7 @@ import {
   buildCommandRegistry,
   insertSlashTypeAtSelection,
   insertCompoundAtSelection,
+  insertSectionPresetAtSelection,
 } from "./command-palette.js";
 // P5 MARKDOWN SOURCE-MODE: the merged, PURE, dependency-free blocks⇄markdown
 // converter (../markdown.js). The "source mode" toggle swaps the rich ProseMirror
@@ -292,6 +334,56 @@ function attributeRefreshes(node, replacement, position) {
     offset += child.nodeSize;
   }
   return changes;
+}
+
+// Preserve positions inside unchanged descendants of a list or table. Only
+// recurse through an unchanged structural shape; inserted/deleted/retyped
+// containers retain the existing replacement path.
+const mappedContainers = new Set(["bulletList", "orderedList", "listItem", "taskList", "taskItem", "bpTable", "bpTableRow", "bpTableCell", "bpTableHeaderCell"]);
+function canMapExternalNode(node, next) {
+  if (node.eq(next)) return true;
+  if (node.type !== next.type) return false;
+  if (node.isTextblock) return true;
+  if (!mappedContainers.has(node.type.name) || node.childCount !== next.childCount) return false;
+  const oldId = node.attrs.bpListSource?.id;
+  const newId = next.attrs.bpListSource?.id;
+  if (oldId !== newId) return false;
+  for (let i = 0; i < node.childCount; i++) if (!canMapExternalNode(node.child(i), next.child(i))) return false;
+  return true;
+}
+function mapExternalNode(tr, node, next, position) {
+  if (node.eq(next)) return;
+  tr.setNodeMarkup(position, next.type, next.attrs, next.marks);
+  if (node.isTextblock) {
+    const bare = content => {
+      const children = []; content.forEach(child => children.push(child.mark([])));
+      return Fragment.fromArray(children);
+    };
+    if (bare(node.content).eq(bare(next.content))) {
+      // Marks and link destinations do not delete text. Mark steps have empty
+      // position maps, retaining forward/backward selections and local history.
+      tr.removeMark(position + 1, position + 1 + node.content.size);
+      next.forEach((child, offset) => {
+        for (const mark of child.marks) tr.addMark(position + 1 + offset, position + 1 + offset + child.nodeSize, mark);
+      });
+      return;
+    }
+    const start = node.content.findDiffStart(next.content);
+    if (start != null) {
+      const end = node.content.findDiffEnd(next.content);
+      let oldEnd = end.a, newEnd = end.b;
+      const overlap = start - Math.min(oldEnd, newEnd);
+      if (overlap > 0) { oldEnd += overlap; newEnd += overlap; }
+      tr.replaceWith(position + 1 + start, position + 1 + oldEnd, next.content.cut(start, newEnd));
+    }
+    return;
+  }
+  // Apply from the end so earlier child positions remain valid when text grows.
+  let offset = position + 1 + node.content.size;
+  for (let i = node.childCount - 1; i >= 0; i--) {
+    const child = node.child(i); offset -= child.nodeSize;
+    mapExternalNode(tr, child, next.child(i), offset);
+  }
 }
 
 // One-shot, id-guarded self-inject of the standalone stylesheet — IDENTICAL
@@ -375,7 +467,10 @@ function figurePastePlan(slice) {
 function normalizeCanvasDoc(doc) {
   const stripNested = (node) => {
     if (node && node.attrs) {
-      const a = node.attrs;
+      // ProseMirror toJSON retains each live attrs object by reference.
+      // Normalize a projection-owned bag; deleting live defaults creates
+      // phantom DOM-reparse edits and poisons native Undo history.
+      const a = node.attrs = { ...node.attrs };
       if (a.bpParagraphSource == null) delete a.bpParagraphSource;
       if (a.bpListFrameSource == null) delete a.bpListFrameSource;
       if (
@@ -460,7 +555,8 @@ function hasOnlyBpKeys(attrs) {
 // kind only for the row's dataset/filter haystack — it is NOT a portable-doc type,
 // and _chooseSlash's CANVAS_SLASH_TYPES guard would no-op it defensively anyway.
 const CANVAS_SLASH_ITEMS = [
-  ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)),
+  ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)).flatMap((it) =>
+    it.type === "list" ? [it, { group: "Text", type: "checklist", label: "Checklist", hint: "☑", desc: "to-do items" }] : [it]),
   ...CANVAS_COMPOUND_INSERTS.map((c) => ({
     group: "Starters",
     type: c.kind,
@@ -468,6 +564,21 @@ const CANVAS_SLASH_ITEMS = [
     label: c.label,
     hint: c.hint,
     desc: c.desc,
+  })),
+  // …and the CANVAS-ONLY section presets (CANVAS_SECTION_PRESETS): each becomes a
+  // "Presets" row carrying a `preset` marker _chooseSlash branches on, the exact
+  // Starters precedent one shape up — a preset inserts N TOP-LEVEL blocks, so it is
+  // likewise absent from SLASH_ITEMS (the per-block menu dispatches bp-slash-insert to
+  // default_block/2, which has no multi-block path) and lands client-side via
+  // insertSectionPresetAtSelection. `type` mirrors the kind for the row's dataset /
+  // filter haystack only — it is NOT a portable-doc type.
+  ...CANVAS_SECTION_PRESETS.map((p) => ({
+    group: "Presets",
+    type: p.kind,
+    preset: p.kind,
+    label: p.label,
+    hint: p.hint,
+    desc: p.desc,
   })),
 ];
 
@@ -481,6 +592,9 @@ class BpPaperCanvas extends HTMLElement {
     this._editor = null;
     this._mount = null;
     this._bubble = null; // FormatBubble instance (selection format toolbar)
+    this._linkPreview = null; // LinkPreview instance (hover card on links and wikilinks)
+    this._composeEndEmit = null; // one-shot compositionend listener: an ops emit held back by an open IME composition
+    this._linkPreviewSource = null; // injected async ({ kind, href, target, docId }) => { title, excerpt, href }
     this._debounceTimer = null;
     // Baseline captured when a local debounce window opens. Server broadcasts may
     // advance `_blocks` while that draft is waiting; the eventual diff must still
@@ -530,7 +644,16 @@ class BpPaperCanvas extends HTMLElement {
     this._tag = null; // WikilinkMenu instance reused for tags (lazy)
     this._tagSeq = 0; // monotonic open/query counter — stale async-result guard
     this._tagSource = null; // injected async (query) => [ "design", "obsidian", … ]
+    // injected async (file) => { src, alt?, width?, height? } — where a pasted or dropped
+    // picture goes (the host's Barkpark media); unset → the image node says so.
+    this._mediaUploader = null;
+    this._uploadSeq = 0;
+    // Settled receipts survive native history while this editor is mounted.
+    // They contain metadata only, never another upload request.
+    this._uploadResults = new Map();
     this._tagRange = null; // { from, to } PM range to replace on the current pick
+    this._emoji = null; // WikilinkMenu instance reused for the `:` emoji picker (lazy)
+    this._emojiRange = null; // { from, to } PM range to replace on the current pick
     // P4 S-slash: the "/" insert popup (lazy, created on first trigger). UNLIKE the
     // wikilink/tag popups it needs no injected source — the item list is the static
     // CANVAS_SLASH_ITEMS (SLASH_ITEMS filtered to the insertable set) + EXPECTED-group
@@ -596,6 +719,8 @@ class BpPaperCanvas extends HTMLElement {
     this._upgradeProperty("acknowledgedSaves");
     this._upgradeProperty("wikilinkSource");
     this._upgradeProperty("tagSource");
+    this._upgradeProperty("mediaUploader");
+    this._upgradeProperty("linkPreviewSource");
 
     // Default true; only the literal string "false" disables editing. Mount-time
     // read is authoritative — attributeChangedCallback handles later toggles.
@@ -695,7 +820,7 @@ class BpPaperCanvas extends HTMLElement {
         }),
         // Link mark — same config as ../index.js so existing `link` inline nodes
         // render/edit and the format bubble's link button works.
-        Link.configure({ openOnClick: false, autolink: false }),
+        Link.configure({ openOnClick: false, autolink: true }),
         // Empty-block ghost text — same contract as ../index.js. includeChildren
         // :false so one placeholder shows on the focused top-level textblock only.
         Placeholder.configure({
@@ -711,6 +836,18 @@ class BpPaperCanvas extends HTMLElement {
         // Smart typography — parity with ../index.js. A prose run holds no code
         // block, so nothing to exclude.
         Typography,
+        // Underline (Mod-u) — the PortableDoc inline wire already carries an `underline`
+        // wrapper (convert.js), so this only adds the mark the schema was missing.
+        Underline,
+        Highlight.configure({ HTMLAttributes: { class: "bp-highlight" } }),
+        Subscript,
+        Superscript,
+        TextAlign.configure({ types: ["heading", "paragraph"], alignments: ["left", "center", "right"], defaultAlignment: "left" }),
+        // Checklist: the list block with task:true (convert.js listToTiptap). `[ ] ` typed at the
+        // start of a paragraph wraps it; the checkbox is a native control whose toggle is an
+        // ordinary transaction, so runToOps patches the item's `checked`.
+        TiptapTaskList,
+        TaskItem.configure({ nested: true }),
         // Internal-link marks — schema registration only (see import note). This
         // keeps existing inline wikilink/blockref/tag marks round-tripping; the
         // [[ / # autocomplete UI is OUT of S1.
@@ -722,6 +859,10 @@ class BpPaperCanvas extends HTMLElement {
         // ids survive the setContent->getJSON round-trip runToOps depends on.
         BpAttrs,
         restingScaffolds(this),
+        findReplace(),
+        // A hydrated run rests on a caret, not on an AllSelection a first keystroke would
+        // replace wholesale. See ./resting-selection.js.
+        RestingSelection,
         // S3: the divider atom node — a non-prose leaf living INSIDE the canvas
         // document. Registers the `divider` node type (toDOM <hr>, bpId/bpType
         // attrs) so runToTiptap's { type:"divider" } node mounts as an atom and
@@ -773,6 +914,17 @@ class BpPaperCanvas extends HTMLElement {
         // <pre data-bp-type='diagram'> (it does NOT claim the bare <pre> the code node
         // already owns).
         Diagram,
+        // scaffy-backlog-blocks-editable-studio: the diff + filetree attr-atom nodes
+        // + their shared node-view. Registers the `bpDiff` / `bpFiletree` node types
+        // (atoms; the verbatim body + optional metadata ride data-* attrs; a NodeView
+        // pairing a SERVER-PAINTED reader preview hole with a non-PM <textarea>
+        // island that uses stopEvent/ignoreMutation so PM never turns diff keystrokes
+        // into transactions) so runToTiptap's { type:"bpDiff", attrs:{diff,file?,lang?} }
+        // / { type:"bpFiletree", attrs:{text,legend?} } nodes mount as editable blocks
+        // whose fields round-trip through getJSON(). Each parses ONLY its own
+        // <div data-bp-type='diff'|'filetree'>.
+        Diff,
+        Filetree,
         // S3.5 + run-splitter tail: the field CONTROL-ATOM node + its node-view.
         // Registers the SINGLE `bpField` node type serving ALL 9 field-* kinds — the 7
         // NATIVE controls (field-string / field-slug / field-text / field-boolean /
@@ -836,6 +988,7 @@ class BpPaperCanvas extends HTMLElement {
         // by construction). Parses ONLY its own <figure data-bp-type='figure'>. See
         // ./figure-node.js.
         Figure,
+        Image,
         // live-data task-list: the EDITABLE-QUERY + server-painted-ROWS atom
         // (`bpTaskList`). Registers the single node so runToTiptap's { type:"bpTaskList",
         // attrs:{query, title, config} } mounts as a widget whose ROWS paint hole
@@ -859,6 +1012,7 @@ class BpPaperCanvas extends HTMLElement {
         Byline,
         Ingress,
         Pullquote,
+        Blockquote,
         // editable table: the four nested nodes (bpTable > bpTableRow >
         // bpTableHeaderCell|bpTableCell). Registers the container + row/cell types so
         // runToTiptap's { type:"bpTable", content:[rows…] } tree mounts with editable
@@ -891,6 +1045,15 @@ class BpPaperCanvas extends HTMLElement {
         // expression FORBIDS bpSection-in-bpSection (v1 no-nested-container). See
         // ./section-node.js.
         Section,
+        Expandable,
+        Steps,
+        Step,
+        Tabs,
+        Tab,
+        Equation,
+        Footnote,
+        Toc,
+        Video,
         // The mountable bpOpaque verbatim carry. Registers `bpOpaque` (atom, bpBlock
         // whole-block attr, a read-only chip) so run-convert's opaque projection —
         // a section's non-canvas child (nested section / composite / codelist / …) —
@@ -917,6 +1080,9 @@ class BpPaperCanvas extends HTMLElement {
         // TipTap unchanged, so cross-block caret / split / merge are untouched.
         handleKeyDown: (_view, event) => this._onKeyDown(event),
         handlePaste: (view, event, slice) => this._onPaste(view, event, slice),
+        // Image files dropped onto the canvas land as image nodes at the drop point
+        // and upload through the host's mediaUploader (see _insertImageFiles).
+        handleDrop: (view, event, _slice, moved) => this._onDrop(view, event, moved),
         // pdd-t2: the doctrine template-lock veto. Reject any transaction that
         // deletes or moves a locked mandated block (returning false from
         // filterTransaction drops the whole tx). Content edits inside a locked
@@ -929,6 +1095,7 @@ class BpPaperCanvas extends HTMLElement {
         // never race the Editor construction.
       },
       onUpdate: () => {
+        this._restoreUploadResults();
         this._clearFigureConstraint();
         this._scheduleEmit();
         // P4 mutual-exclusion chain (ported from ../index.js's onUpdate ~174-193):
@@ -942,12 +1109,16 @@ class BpPaperCanvas extends HTMLElement {
         // others shut so a stale popup never lingers (triggers disjoint by leading
         // token "[[" vs "#" vs "/", but the gate makes the single-popup invariant
         // code-enforced rather than incidental).
-        const consumed = this._maybeCalloutShorthand();
+        const consumed = this._maybeBlockShorthand() || this._maybeCalloutShorthand();
         if (!consumed) {
           if (this._maybeWikilink()) {
             this._closeTag();
+            this._closeEmoji();
             this._closeSlash();
           } else if (this._maybeTag()) {
+            this._closeEmoji();
+            this._closeSlash();
+          } else if (this._maybeEmoji()) {
             this._closeSlash();
           } else {
             this._maybeSlash();
@@ -983,7 +1154,38 @@ class BpPaperCanvas extends HTMLElement {
     // mode; every consumer is `if (this._bubble)` guarded.
     if (this._editable) {
       this._bubble = new FormatBubble({ editor: this._editor });
+      // Notion-style block gutter: + to add below, ⋮⋮ to drag / open the block menu.
+      this._handle = new BlockHandle({
+        host: this,
+        editor: this._editor,
+        openSlash: () => this._openSlash(""),
+        // Paper masters: "Save as master" in the block menu, offered only where
+        // the editor carries the masters carrier (the pane may write) and the
+        // block is one the server already holds.
+        canSaveMaster: (node) => this._canSaveMaster(node),
+        saveMaster: (node) => this._saveMaster(node),
+      });
     }
+    // The link hover card works in both modes (a reader wants the address too); Edit shows only
+    // when editable. Open is the host's call first (`bp-canvas-open-link`, cancelable) — a plain
+    // link falls back to a new window; a wikilink has nowhere to go without the host.
+    this._linkPreview = new LinkPreview({
+      editor: this._editor,
+      host: this,
+      editable: () => this._editable,
+      resolve: (info) => (typeof this._linkPreviewSource === "function" ? this._linkPreviewSource(info) : null),
+      onOpen: (detail) => {
+        const ev = new CustomEvent("bp-canvas-open-link", { detail, bubbles: true, composed: true, cancelable: true });
+        const go = this.dispatchEvent(ev);
+        if (go && detail.kind === "link" && detail.href && typeof window !== "undefined" && window.open) {
+          try { window.open(detail.href, "_blank", "noopener,noreferrer"); } catch (_e) {}
+        }
+      },
+      onEdit: (detail) => {
+        if (detail.kind === "link" && this._bubble) this._bubble.openLink();
+        else if (this._bubble) this._bubble.update();
+      },
+    });
 
     // Lifecycle: one-shot bubbling/composed signal a host hook can await —
     // mirrors ../index.js's bp-ready.
@@ -1004,6 +1206,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._clearHTMLPasteNotice();
     // LiveView may move this keyed canvas between responsive Studio columns.
     // Custom-element reactions report that connected-to-connected reparent as a
     // disconnect followed synchronously by a reconnect. Defer destructive
@@ -1149,6 +1352,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   _teardownDisconnected() {
+    this._uploadResults.clear();
     this._clearResumeFocusIntent();
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
@@ -1182,6 +1386,18 @@ class BpPaperCanvas extends HTMLElement {
     if (this._bubble) {
       this._bubble.destroy();
       this._bubble = null;
+    }
+    if (this._linkPreview) {
+      this._linkPreview.destroy();
+      this._linkPreview = null;
+    }
+    if (this._composeEndEmit && this._mount) {
+      this._mount.removeEventListener("compositionend", this._composeEndEmit, true);
+      this._composeEndEmit = null;
+    }
+    if (this._handle) {
+      this._handle.destroy();
+      this._handle = null;
     }
     // P5 source-mode: tear down the markdown textarea + its keydown listener if the
     // element disconnects while in source mode (so neither the node nor the listener
@@ -1228,12 +1444,22 @@ class BpPaperCanvas extends HTMLElement {
   // Synchronous host seam for navigation / beforeunload guards. A debounced
   // transaction is unsaved before bp-canvas-ops exists; source-mode text and
   // edits queued behind an acknowledgement must also survive an attempted exit.
+  // ── find and replace (the host draws the bar; see canvas/find-replace.js) ──
+  findSet(query, opts) { return this._editor ? frSet(this._editor, query, opts) : { query: "", count: 0, index: -1 }; }
+  findNext() { return this._editor ? frStep(this._editor, 1) : { count: 0, index: -1 }; }
+  findPrev() { return this._editor ? frStep(this._editor, -1) : { count: 0, index: -1 }; }
+  findClear() { if (this._editor) frClear(this._editor); }
+  findState() { return this._editor ? frState(this._editor) : { query: "", count: 0, index: -1 }; }
+  replaceCurrent(text) { return this._editor && this._editable ? frReplaceCurrent(this._editor, text) : this.findState(); }
+  replaceAll(text) { return this._editor && this._editable ? frReplaceAll(this._editor, text) : { replaced: 0, ...this.findState() }; }
+
   hasPendingChanges() {
     const sourceChanged =
       this._mode === "source" && this._sourceEl &&
       this._sourceEl.value !== this._sourceOriginalMd;
     return Boolean(
-      sourceChanged || this._debounceTimer || this._inflightOps ||
+      sourceChanged || this.querySelector(".bp-canvas-note[data-note-pending]") ||
+      this._debounceTimer || this._inflightOps ||
       this._dirtyWhileInflight
     );
   }
@@ -1315,6 +1541,15 @@ class BpPaperCanvas extends HTMLElement {
     }
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     this._debounceTimer = setTimeout(() => {
+      // An IME composition still open when the debounce fires (a dead key held, a CJK run being
+      // picked): ProseMirror has already read the candidate text into the doc, so emitting now would
+      // send the half-composed run as a patch, then the committed one as another (Barkdown row 15).
+      // Hold the timer instead; compositionend re-arms it and the run lands once.
+      if (this._editor && this._editor.view && this._editor.view.composing) {
+        this._debounceTimer = setTimeout(() => { this._debounceTimer = null; this._scheduleEmit(); }, DEBOUNCE_MS);
+        this._armComposeEndEmit();
+        return;
+      }
       this._debounceTimer = null;
       const emitted = this._emitOps();
       // An external echo can arrive after blur but before this debounce fires.
@@ -1325,6 +1560,19 @@ class BpPaperCanvas extends HTMLElement {
     }, DEBOUNCE_MS);
   }
 
+  // One-shot: when the IME releases, run the debounce path at once (still debounced by
+  // DEBOUNCE_MS from the release, so a commit followed by more typing stays one batch).
+  _armComposeEndEmit() {
+    if (this._composeEndEmit || !this._mount) return;
+    this._composeEndEmit = () => {
+      this._mount.removeEventListener("compositionend", this._composeEndEmit, true);
+      this._composeEndEmit = null;
+      if (this._debounceTimer) { clearTimeout(this._debounceTimer); this._debounceTimer = null; }
+      this._scheduleEmit();
+    };
+    this._mount.addEventListener("compositionend", this._composeEndEmit, true);
+  }
+
   // Diff the live doc against the current baseline run and, if anything changed,
   // emit the ordered op array S0 produces. The diff is runToOps VERBATIM — the
   // canvas is a thin shell over S0's PURE projector/op-mapper.
@@ -1333,6 +1581,8 @@ class BpPaperCanvas extends HTMLElement {
   // the next dispatch is incremental even if its server echo arrives later.
   _emitOps() {
     if (!this._editor) return false;
+    // Never mid-composition (see _scheduleEmit): the doc holds the IME's candidate text.
+    if (this._editor.view && this._editor.view.composing) { this._armComposeEndEmit(); return false; }
     const diffBaseline = this._debounceBaselineBlocks || this._blocks;
     const nextDoc = normalizeCanvasDoc(this._editor.getJSON());
     const nextBlocks = docToBlocks(nextDoc);
@@ -1406,6 +1656,11 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._acknowledgedSaves) return false;
     const current = this._inflightOps;
     if (!current || current.seq !== seq) return false;
+    // A `saved:false` acknowledgement keeps the batch in flight: the Studio host's
+    // contract is that a failed head stays pending and its Retry resends the same
+    // batch verbatim, with later edits waiting behind it (__save_ack_mounted). A host
+    // that wants the other behaviour — drop the refused batch and fold it into the
+    // next edit — calls discardInflightOps(seq) instead.
     if (saved !== true) return false;
 
     // Diff against the local snapshot the author still sees. A canonical reply
@@ -1446,6 +1701,40 @@ class BpPaperCanvas extends HTMLElement {
     return true;
   }
 
+  // The host's OTHER answer to a refused batch (a lifecycle veto such as "a published
+  // paper cannot be hollowed out", or a request that will not succeed by retrying):
+  // drop the in-flight batch WITHOUT advancing the baseline. `_blocks` still holds the
+  // last SAVED snapshot, so the next local edit diffs against it and carries the
+  // refused change along — the author keeps what they see, and it lands as soon as
+  // the server will take it (a batch that would hollow the paper saves once they
+  // write again). Edits made while the batch was travelling are emitted now: that
+  // diff already differs from the refused one. An unchanged vetoed batch is never
+  // resent on its own; resendPendingOps() is the host's explicit "try again".
+  // Without this seam a refused batch pinned the pipeline: every later edit queued
+  // behind it, never sent (found by Barkdown's editor-multiblock row: cut all, type).
+  discardInflightOps(seq) {
+    if (!this._acknowledgedSaves) return false;
+    const current = this._inflightOps;
+    if (!current || current.seq !== seq) return false;
+    this._inflightOps = null;
+    const dirty = this._dirtyWhileInflight;
+    this._dirtyWhileInflight = false;
+    if (dirty) this._emitOps();
+    return true;
+  }
+
+  // Re-diff the live document against the saved baseline and emit the batch, if any
+  // and if nothing is in flight. The host's Retry after discardInflightOps: it must
+  // NOT resend the discarded ops (an insert would land twice); it asks for a fresh diff.
+  resendPendingOps() {
+    if (this._inflightOps || !this._editor) return false;
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
+    return this._emitOps() === true;
+  }
+
   // ── P4 autocomplete: keyboard routing + caret rect ─────────────────────────
   //
   // Keyboard handler installed via editorProps.handleKeyDown. Only ACTS when a
@@ -1454,6 +1743,62 @@ class BpPaperCanvas extends HTMLElement {
   // (wikilink / tag / slash) are mutually exclusive — at most one branch ever owns
   // the keystroke. Ported from ../index.js:_onKeyDown (all three branches).
   _onKeyDown(event) {
+    if (this._editable && this._editor && (event.metaKey || event.ctrlKey) && !event.altKey) {
+      const key = event.key;
+      if (event.shiftKey && (key === "ArrowUp" || key === "ArrowDown")) {
+        const index = topLevelIndexAtSelection(this._editor);
+        event.preventDefault();
+        moveTopLevel(this._editor, index, key === "ArrowUp" ? index - 1 : index + 1);
+        return true;
+      }
+      if (!event.shiftKey && (key === "d" || key === "D")) {
+        event.preventDefault();
+        duplicateTopLevel(this._editor, topLevelIndexAtSelection(this._editor));
+        return true;
+      }
+      // (Backspace handling sits below, outside the modifier branch.)
+      // Notion's turn-into chords: Mod-Shift-0 text, 1..3 headings, 5 bulleted, 6 numbered,
+      // 8 code block. event.code keeps them working on layouts where Shift+digit yields a symbol.
+      const digit = /^Digit([0-9])$/.exec(event.code || "")?.[1] ?? (/^[0-9]$/.test(key) ? key : null);
+      if (event.shiftKey && digit != null && !this._slash?.isOpen?.()) {
+        const kind = { 0: "paragraph", 1: "h1", 2: "h2", 3: "h3", 4: "task", 5: "bullet", 6: "ordered" }[digit];
+        if (kind) {
+          event.preventDefault();
+          turnTopLevelInto(this._editor, topLevelIndexAtSelection(this._editor), kind);
+          return true;
+        }
+        if (digit === "8") {
+          event.preventDefault();
+          insertSlashTypeAtSelection(this._editor, "code");
+          return true;
+        }
+      }
+      if (!event.shiftKey && (key === "k" || key === "K") && this._bubble && !this._editor.state.selection.empty) {
+        event.preventDefault();
+        this._bubble.update();
+        this._bubble.openLink();
+        return true;
+      }
+    }
+    // Backspace at the very start of a block: a list item lifts out one level (a top-level item
+    // becomes a paragraph) and a quote turns back into a paragraph, instead of merging into the
+    // block above. Notion and Tiptap 3's list keymap behave this way.
+    if (event.key === "Backspace" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && this._editable && this._editor) {
+      const { $from, empty } = this._editor.state.selection;
+      if (empty && $from.parentOffset === 0) {
+        // Only the FIRST item of a list lifts; a later item keeps ProseMirror's join into the
+        // item above, which is how an Enter-split is undone without losing nested children.
+        const itemType = $from.depth >= 3 ? $from.node(-1).type.name : null;
+        if ((itemType === "listItem" || itemType === "taskItem") && $from.index(-1) === 0 && $from.index(-2) === 0) {
+          if (this._editor.commands.liftListItem(itemType)) { event.preventDefault(); return true; }
+        }
+        if ($from.depth === 1 && $from.parent.type.name === "pullquote") {
+          event.preventDefault();
+          this._editor.commands.setNode("paragraph");
+          return true;
+        }
+      }
+    }
     // P5 MARKDOWN SOURCE-MODE — Mod-Shift-m (Cmd-Shift-M on mac / Ctrl-Shift-M
     // elsewhere) ENTERS source mode from the rich editor. Detected FIRST, before the
     // palette/popup branches: it is a deliberately FREE combo (Mod-p = palette, Mod-b
@@ -1491,6 +1836,7 @@ class BpPaperCanvas extends HTMLElement {
       const anyPopupOpen =
         (this._wikilink && this._wikilink.isOpen()) ||
         (this._tag && this._tag.isOpen()) ||
+        (this._emoji && this._emoji.isOpen()) ||
         (this._slash && this._slash.isOpen());
       // If the palette is ALREADY open, Mod-p closes it (toggle); else open it — but
       // never co-open alongside a text-triggered popup.
@@ -1548,6 +1894,27 @@ class BpPaperCanvas extends HTMLElement {
           return true;
         case "Escape":
           this._dismissWikilink();
+          return true;
+        default:
+          return false;
+      }
+    }
+
+    // `:` emoji picker owns the nav keys while open — the same contract.
+    if (this._emoji && this._emoji.isOpen()) {
+      switch (event.key) {
+        case "ArrowDown":
+          this._emoji.move(1);
+          return true;
+        case "ArrowUp":
+          this._emoji.move(-1);
+          return true;
+        case "Enter":
+        case "Tab":
+          this._emoji.choose();
+          return true;
+        case "Escape":
+          this._dismissEmoji();
           return true;
         default:
           return false;
@@ -1622,6 +1989,17 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   _onPaste(view, _event, slice) {
+    const policy = this._editable ? clipboardPastePolicy(view, _event, slice) : null;
+    if (this._editable) {
+      if (policy?.blocked) {
+        this._showHTMLPasteNotice(`Nothing was pasted. ${policy.blocked}`);
+        return true;
+      }
+      if (policy?.plain && !isFigureSingletonCanvas(this)) return false;
+    }
+    if (this._editable && !isFigureSingletonCanvas(this) && this._pasteImageFiles(view, _event, policy?.imageAlt)) return true;
+    if (this._editable && !isFigureSingletonCanvas(this) && this._pasteHTMLTables(view, _event)) return true;
+    if (this._editable && !isFigureSingletonCanvas(this) && this._pasteMarkdown(view, _event)) return true;
     if (!this._editable || !isFigureSingletonCanvas(this)) return false;
     const plan = figurePastePlan(slice);
     if (plan.native) return false;
@@ -1633,6 +2011,220 @@ class BpPaperCanvas extends HTMLElement {
     }
     view.dispatch(view.state.tr.replaceSelection(plan.inline).scrollIntoView());
     return true;
+  }
+
+  // Plain-text paste that carries markdown block syntax (headings, lists, quotes, fences, rules)
+  // lands as the corresponding blocks instead of literal `## ` and `- ` paragraphs. HTML on the
+  // clipboard keeps the native path (the browser already structured it); a single plain line too.
+  // ── pasted / dropped pictures ────────────────────────────────────────────────
+  //
+  // A picture on the clipboard or dropped on the canvas becomes a bpImage node at
+  // once (its alt is the file name, its src is empty, a local object URL previews
+  // it), then uploads through the host-injected mediaUploader; when the upload
+  // lands the node's src is set (one patch-block), a failure stays on the node.
+  // Without an uploader the node says so instead of storing a data: URL.
+  static _imageFiles(list) {
+    return [...(list || [])].filter((f) => f && typeof f.type === "string" && f.type.startsWith("image/"));
+  }
+
+  _pasteImageFiles(view, event, imageAlt = null) {
+    const files = BpPaperCanvas._imageFiles(event && event.clipboardData && event.clipboardData.files);
+    if (!files.length) return false;
+    this._insertImageFiles(view, files, null, imageAlt);
+    return true;
+  }
+
+  _onDrop(view, event, moved) {
+    if (!this._editable || moved || isFigureSingletonCanvas(this)) return false;
+    const files = BpPaperCanvas._imageFiles(event && event.dataTransfer && event.dataTransfer.files);
+    if (!files.length) return false;
+    const at = view.posAtCoords({ left: event.clientX, top: event.clientY });
+    this._insertImageFiles(view, files, at ? at.pos : null);
+    event.preventDefault();
+    return true;
+  }
+
+  _insertImageFiles(view, files, atPos, imageAlt = null) {
+    const { state } = view;
+    const imageType = state.schema.nodes.bpImage;
+    if (!imageType) return;
+    const $pos = atPos != null ? state.doc.resolve(atPos) : state.selection.$from;
+    // Insert after the block the position sits in (top-level), never inside it.
+    let insertAt = $pos.depth >= 1 ? $pos.after(1) : $pos.pos;
+    const tr = state.tr;
+    const nodes = files.map((file) => {
+      const key = "up-" + (++this._uploadSeq) + "-" + Date.now().toString(36);
+      const alt = imageAlt ?? String(file.name || "image").replace(/\.[a-z0-9]+$/i, "");
+      let previewUrl = null;
+      try { previewUrl = URL.createObjectURL(file); } catch (_) {}
+      return { key, file, node: imageType.create({ bpId: null, bpType: "image", src: null, alt, uploading: true, previewUrl, uploadKey: key }) };
+    });
+    for (const n of nodes) { tr.insert(insertAt, n.node); insertAt += n.node.nodeSize; }
+    view.dispatch(tr.scrollIntoView());
+    for (const n of nodes) this._uploadImage(n.key, n.file, n.node.attrs.previewUrl);
+  }
+
+  _findUploadNode(key) {
+    if (!this._editor || this._editor.isDestroyed) return null;
+    let found = null;
+    this._editor.state.doc.descendants((node, pos) => {
+      if (found) return false;
+      if (node.type.name === "bpImage" && node.attrs.uploadKey === key) { found = { node, pos }; return false; }
+      return true;
+    });
+    return found;
+  }
+
+  _patchUploadNode(key, receipt) {
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed || receipt.editor !== editor) return;
+    let hit = this._findUploadNode(key);
+    if (!hit) return;
+    // Flush the image island before its async repaint can replace draft inputs.
+    editor.view.nodeDOM(hit.pos)?.dispatchEvent(new CustomEvent("bp-flush-node"));
+    hit = this._findUploadNode(key);
+    if (!hit) return;
+    const patch = { ...receipt.patch };
+    // A person may edit the URL or alt while the request is in flight.
+    // Completion owns the pending upload, not those subsequent edits.
+    if (hit.node.attrs.src || hit.node.attrs.uploadSrcEdited) delete patch.src;
+    if (hit.node.attrs.uploadAltEdited || hit.node.attrs.alt !== receipt.initialAlt) delete patch.alt;
+    editor.view.dispatch(editor.state.tr
+      .setNodeMarkup(hit.pos, undefined, { ...hit.node.attrs, ...patch })
+      .setMeta("addToHistory", false));
+  }
+
+  _restoreUploadResults() {
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed || !this._uploadResults.size) return;
+    const keys = [];
+    editor.state.doc.descendants(node => {
+      if (node.type.name === "bpImage" && node.attrs.uploadKey && this._uploadResults.has(node.attrs.uploadKey)) keys.push(node.attrs.uploadKey);
+    });
+    for (const key of keys) this._patchUploadNode(key, this._uploadResults.get(key));
+  }
+
+  async _uploadImage(key, file, previewUrl) {
+    const uploader = this._mediaUploader;
+    const editor = this._editor;
+    const initialAlt = this._findUploadNode(key)?.node.attrs.alt;
+    const release = () => { if (previewUrl) { try { URL.revokeObjectURL(previewUrl); } catch (_) {} } };
+    const settle = patch => {
+      // A disconnected/remounted canvas must never consume an old callback.
+      if (this._editor !== editor || editor.isDestroyed) return;
+      const receipt = { editor, initialAlt, patch: { ...patch, uploadKey: null } };
+      this._uploadResults.set(key, receipt);
+      this._patchUploadNode(key, receipt);
+    };
+    if (typeof uploader !== "function") {
+      settle({ uploading: null, uploadError: "no media uploader is connected" });
+      return;
+    }
+    try {
+      const result = await uploader(file);
+      const src = result && typeof result === "object" ? result.src || result.url || "" : String(result || "");
+      if (!src) throw new Error("the uploader returned no url");
+      const patch = { src, uploading: null, uploadError: null, previewUrl: null };
+      if (result && result.alt) patch.alt = String(result.alt);
+      settle(patch);
+      // Let the <img> switch to the uploaded source before the object URL goes.
+      setTimeout(release, 2000);
+    } catch (e) {
+      settle({ uploading: null, uploadError: (e && e.message) || String(e) });
+      setTimeout(release, 60000);
+    }
+  }
+
+  set mediaUploader(fn) {
+    this._mediaUploader = fn;
+  }
+
+  get mediaUploader() {
+    return this._mediaUploader;
+  }
+
+  _pasteHTMLTables(view, event) {
+    // Shift-paste deliberately chooses the native plain-text path.
+    if ((view.input?.shiftKey && view.input.lastKeyCode !== 45) || view.state.selection.$from.parent.type.spec.code) return false;
+    const html = event?.clipboardData?.getData("text/html");
+    const plan = prepareHTMLTablePaste(html);
+    if (!plan) return false;
+    const insideTable = [...Array(view.state.selection.$from.depth).keys()]
+      .some((depth) => view.state.selection.$from.node(depth + 1).type.name === "bpTable");
+    if (plan.blocked || insideTable) {
+      this._showHTMLPasteNotice(`${plan.blocked || "A table cannot be nested inside another table."} Nothing was pasted. Paste as plain text with Ctrl+Shift+V, or copy the cell text instead.`);
+      return true;
+    }
+    const parsed = PMDOMParser.fromSchema(view.state.schema).parse(plan.dom);
+    view.dispatch(view.state.tr.replaceSelection(new Slice(parsed.content, 0, 0)).scrollIntoView());
+    return true;
+  }
+
+  _pasteMarkdown(view, event) {
+    const data = event && event.clipboardData;
+    if (!data) return false;
+    const html = data.getData("text/html");
+    const text = data.getData("text/plain");
+    if (html || !text) return false;
+    const lines = text.split(/\r?\n/);
+    const blockish = /^(#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|```|---\s*$)/;
+    // A GFM pipe table announces itself by a delimiter row (dashes with a pipe) under a header line.
+    const tableDelimiter = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+    const pipeTable = lines.some((line, k) => k + 1 < lines.length && line.includes("|") && lines[k + 1].includes("|") && tableDelimiter.test(lines[k + 1]));
+    if (!lines.some((line) => blockish.test(line)) && !pipeTable) return false;
+    let nodes;
+    try {
+      const blocks = markdownToBlocks(text);
+      if (!blocks.length) return false;
+      nodes = runToTiptap(blocks).content.map((json) => view.state.schema.nodeFromJSON(json));
+    } catch (_e) {
+      return false;
+    }
+    if (!nodes.length) return false;
+    const tr = view.state.tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0)).scrollIntoView();
+    view.dispatch(tr);
+    return true;
+  }
+
+  _showHTMLPasteNotice(message) {
+    this._clearHTMLPasteNotice();
+    const notice = this.ownerDocument.createElement("div");
+    notice.dataset.bpPasteNotice = "";
+    notice.setAttribute("role", "status");
+    notice.textContent = message;
+    this.appendChild(notice);
+    const viewport = this.ownerDocument.defaultView;
+    const bounds = this.getBoundingClientRect();
+    const availableWidth = Math.max(1, Math.min(bounds.right, viewport.innerWidth) - Math.max(0, bounds.left) - 16);
+    const width = Math.min(420, availableWidth, Math.max(1, viewport.innerWidth - 16));
+    notice.style.width = `${width}px`;
+    notice.style.maxHeight = `${Math.max(1, viewport.innerHeight - 16)}px`;
+    notice.style.left = `${Math.max(8, Math.min(bounds.left + 8, viewport.innerWidth - width - 8))}px`;
+    notice.tabIndex = 0;
+    const caret = this._caretRect();
+    const height = notice.getBoundingClientRect().height;
+    const below = caret.bottom + 8;
+    const preferred = below + height <= viewport.innerHeight - 8 ? below : caret.top - height - 8;
+    notice.style.top = `${Math.max(8, Math.min(preferred, viewport.innerHeight - height - 8))}px`;
+    // A fixed notice does not push the document. Dismiss when its anchor moves
+    // or the person resumes work; no timeout can hide the recovery guidance.
+    this._pasteNoticeDismiss = (event) => {
+      if (["pointerdown", "scroll"].includes(event.type) && notice.contains(event.target)) return;
+      if (event.type === "keydown" && event.key !== "Escape") return;
+      const restoreFocus = event.type === "keydown" && event.key === "Escape" && notice.contains(this.ownerDocument.activeElement);
+      this._clearHTMLPasteNotice();
+      if (restoreFocus) this._editor?.commands.focus();
+    };
+    for (const name of ["pointerdown", "scroll", "keydown"]) this.ownerDocument.addEventListener(name, this._pasteNoticeDismiss, true);
+    viewport.addEventListener("resize", this._pasteNoticeDismiss);
+  }
+
+  _clearHTMLPasteNotice() {
+    this.querySelector("[data-bp-paste-notice]")?.remove();
+    if (!this._pasteNoticeDismiss) return;
+    for (const name of ["pointerdown", "scroll", "keydown"]) this.ownerDocument.removeEventListener(name, this._pasteNoticeDismiss, true);
+    this.ownerDocument.defaultView?.removeEventListener("resize", this._pasteNoticeDismiss);
+    this._pasteNoticeDismiss = null;
   }
 
   _showFigureConstraint(message = "A Figure keeps one content block. Enter cannot split or remove it.") {
@@ -1648,6 +2240,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   _clearFigureConstraint() {
+    this._clearHTMLPasteNotice();
     this.querySelector("[data-bp-figure-constraint]")?.remove();
   }
 
@@ -1706,7 +2299,7 @@ class BpPaperCanvas extends HTMLElement {
     // remember the PM range to replace on pick — anchored to the DOCUMENT position
     // (selection.from), not the block-local offset hit carries.
     this._openWikilink(this._caretRect(), hit.query);
-    this._wlRange = wikilinkReplaceRange(this._editor.state.selection.from, hit.query);
+    this._wlRange = wikilinkReplaceRange(this._editor.state.selection.from, hit.query, hit.trigger);
 
     // Async source with a STALE GUARD: each open/keystroke bumps _wlSeq; a
     // resolved batch is dropped unless it is still the latest request AND the menu
@@ -1784,6 +2377,17 @@ class BpPaperCanvas extends HTMLElement {
     return this._wikilinkSource;
   }
 
+  // ── link hover card: what the host knows about a target ────────────────────
+  // async ({ kind: "link" | "wikilink", href, target, docId }) => { title, excerpt, href } | null.
+  // Unset → the card shows the address only.
+  set linkPreviewSource(fn) {
+    this._linkPreviewSource = fn;
+  }
+
+  get linkPreviewSource() {
+    return this._linkPreviewSource;
+  }
+
   // ── P4 `#` tag autocomplete ────────────────────────────────────────────────
   //
   // Obsidian-parity inline tag picker — the `#` analogue of the `[[` wikilink
@@ -1838,6 +2442,68 @@ class BpPaperCanvas extends HTMLElement {
       })
       .catch(() => {});
     return true;
+  }
+
+  // ── `:` emoji picker ───────────────────────────────────────────────────────
+  //
+  // GitHub's shorthand: `:` + two letters opens a picker over a local shortcode
+  // table (emoji.js); the pick inserts the character as plain text and a space, so
+  // the server sees ordinary text. Same popup class as [[ and #, eyebrow "Emoji".
+  _maybeEmoji() {
+    if (!this._editable || !this._editor) return false;
+    const $from = this._editor.state.selection.$from;
+    const hit = parseOpenEmoji($from.parent.textContent, $from.parentOffset);
+    if (!hit) {
+      this._closeEmoji();
+      return false;
+    }
+    const rows = searchEmoji(hit.query).map(({ name, char }) => ({ title: char + "  " + name, id: char, type: "emoji" }));
+    if (!rows.length) {
+      this._closeEmoji();
+      return false;
+    }
+    this._openEmoji(this._caretRect(), hit.query);
+    this._emojiRange = emojiReplaceRange(this._editor.state.selection.from, hit.query);
+    this._emoji.setResults(rows);
+    return true;
+  }
+
+  _openEmoji(rect, query = "") {
+    if (!this._emoji) {
+      this._emoji = new WikilinkMenu({
+        onChoose: (c) => this._chooseEmoji(c),
+        onDismiss: () => this._dismissEmoji(),
+        eyebrow: "Emoji",
+        kind: "emoji",
+      });
+    }
+    this._emoji.open(rect, query);
+  }
+
+  _closeEmoji() {
+    if (this._emoji && this._emoji.isOpen()) this._emoji.close();
+  }
+
+  _chooseEmoji(candidate) {
+    const range = this._emojiRange;
+    if (!range || !candidate || !candidate.id) {
+      this._closeEmoji();
+      return;
+    }
+    this._editor
+      .chain()
+      .focus()
+      .insertContentAt({ from: range.from, to: range.to }, [
+        { type: "text", text: String(candidate.id) },
+        { type: "text", text: " " },
+      ])
+      .run();
+    this._closeEmoji();
+  }
+
+  _dismissEmoji() {
+    this._closeEmoji();
+    this._editor.commands.focus();
   }
 
   _openTag(rect, query = "") {
@@ -1947,7 +2613,9 @@ class BpPaperCanvas extends HTMLElement {
     // body). Requiring parent.type.name ∈ {paragraph, heading} excludes the callout
     // body (and any future inline-content node-view), and also keeps rejecting a
     // paragraph nested in a list item (depth 3). See slashTriggerAllowsParent.
-    if (!slashTriggerAllowsParent($from.depth, $from.parent.type.name)) {
+    // Notion parity: "/" also works inside an otherwise-empty list item; the item is lifted
+    // out of the list when a block is chosen (see _chooseSlash).
+    if (!slashTriggerAllowsParent($from.depth, $from.parent.type.name) && !this._slashInListItem($from)) {
       this._closeSlash();
       return;
     }
@@ -1980,6 +2648,71 @@ class BpPaperCanvas extends HTMLElement {
   // Predicate parity with _maybeSlash: caret collapsed, caret at end, single line —
   // all evaluated BLOCK-LOCALLY (the multi-block canvas frame), so it never fires
   // mid-prose or across blocks. The trailing space in the regex commits the gesture.
+  _maybeBlockShorthand() {
+    if (!this._editable || !this._editor) return false;
+    const { selection } = this._editor.state;
+    if (!selection.empty) return false;
+    const $from = selection.$from;
+    if ($from.parent.type.name !== "paragraph" || $from.depth !== 1) return false;
+    const blockText = $from.parent.textContent;
+    if ($from.parentOffset !== blockText.length) return false;
+    // Typography turns the first two dashes into an en/em dash before the third arrives; accept both spellings.
+    const divider = /^(---|—-|–-)$/.test(blockText);
+    const code = /^```$/.test(blockText);
+    const quote = /^>\s$/.test(blockText);
+    if (quote) {
+      // `> ` → the plain quote block (`blockquote`, what Notion and Tiptap authors mean by a
+      // quote; the pullquote stays article chrome, reached from the slash menu). The callout
+      // gesture `> [!note] ` still works: _maybeCalloutShorthand accepts `[!note] ` typed inside.
+      const { state, view } = this._editor;
+      const start = $from.before(1);
+      const end = $from.after(1);
+      // Keep the block's id so the save is a same-id replace-block, not remove + insert.
+      const quoteNode = state.schema.nodes.blockquote
+        ? state.schema.nodes.blockquote.create({ bpId: $from.parent.attrs.bpId || null, bpType: "blockquote" })
+        : null;
+      if (!quoteNode) return false;
+      let tr = state.tr.replaceWith(start, end, quoteNode);
+      try { tr = tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1))); } catch (_e) {}
+      view.dispatch(tr);
+      this._editor.commands.focus();
+      return true;
+    }
+    if (!divider && !code) return false;
+    if (code) {
+      // Clear the fence text, then reuse the slash-insert seam so the code atom takes the
+      // caret exactly as it does from the menu (its own editing surface, not a PM text hole).
+      const { state, view } = this._editor;
+      view.dispatch(state.tr.delete($from.start(1), $from.end(1)));
+      insertSlashTypeAtSelection(this._editor, "code");
+      // The code atom edits in its own textarea island; hand it the caret at once so the very
+      // next keystroke lands inside the block (a deferred focus would swallow fast typing).
+      const focusArea = () => {
+        if (!this._editor || this._editor.isDestroyed) return false;
+        const dom = this._editor.view.nodeDOM(this._editor.state.selection.from);
+        const area = dom && dom.querySelector ? dom.querySelector(".bp-canvas-code-area") : null;
+        if (!area) return false;
+        area.focus();
+        return true;
+      };
+      if (!focusArea()) requestAnimationFrame(focusArea);
+      return true;
+    }
+    const block = canvasDefaultBlock("divider");
+    const node = runToTiptap([block]).content[0];
+    const { state, view } = this._editor;
+    const start = $from.before(1);
+    const end = $from.after(1);
+    const pmNode = state.schema.nodeFromJSON(node);
+    let tr = state.tr.replaceWith(start, end, pmNode);
+    const after = start + pmNode.nodeSize;
+    tr = tr.insert(after, state.schema.nodes.paragraph.create());
+    try { tr = tr.setSelection(TextSelection.near(tr.doc.resolve(after + 1))); } catch (_e) {}
+    view.dispatch(tr);
+    this._editor.commands.focus();
+    return true;
+  }
+
   _maybeCalloutShorthand() {
     if (!this._editable) return false; // read mode: no shorthand
     if (!this._editor) return false;
@@ -2001,15 +2734,18 @@ class BpPaperCanvas extends HTMLElement {
     // callout. Requiring parent.type.name ∈ {paragraph, heading} excludes the callout
     // body, and still rejects a paragraph nested in a list item. See
     // slashTriggerAllowsParent.
-    if (!slashTriggerAllowsParent($from.depth, $from.parent.type.name)) return false;
+    // `> ` has already become a quote block (the plain blockquote now; a pullquote when one
+    // was authored from the menu), so the `[!note] ` that follows arrives inside it.
+    const inQuote = $from.depth === 1 && ($from.parent.type.name === "blockquote" || $from.parent.type.name === "pullquote");
+    if (!inQuote && !slashTriggerAllowsParent($from.depth, $from.parent.type.name)) return false;
     const blockText = $from.parent.textContent;
     const atEnd = $from.parentOffset === blockText.length;
     if (!atEnd || blockText.includes("\n")) return false;
 
     // ^>\s*\[!(\w+)\]([+-]?)\s$ — identical to the per-block editor. The trailing \s
     // (the committing space) + the no-newline guard above mean \s only matches that
-    // space here.
-    const m = /^>\s*\[!(\w+)\]([+-]?)\s$/.exec(blockText);
+    // space here. Inside a quote block (`> ` already consumed) the leading `>` is absent.
+    const m = (inQuote ? /^\[!(\w+)\]([+-]?)\s$/ : /^>\s*\[!(\w+)\]([+-]?)\s$/).exec(blockText);
     if (!m) return false;
 
     const tone = normalizeTone(m[1]);
@@ -2064,6 +2800,12 @@ class BpPaperCanvas extends HTMLElement {
         ),
         onChoose: (item) => this._chooseSlash(item),
         onDismiss: () => this._dismissSlash(),
+        // EXPECTED fields (the default extra group) plus the paper's MASTERS,
+        // read fresh on every open from this editor's own carrier.
+        readExtraItems: () => {
+          const root = this._mastersRoot();
+          return [...readExpectedItems(), ...(root ? readMasterItems(root) : [])];
+        },
       });
     }
     // Anchor the popup to the live caret rectangle. open() handles both the first
@@ -2088,13 +2830,40 @@ class BpPaperCanvas extends HTMLElement {
   // DEFENSIVE: an EXPECTED-group pick (or any item) whose type is NOT canvas-
   // insertable is a no-op — CANVAS_SLASH_TYPES is the same allowlist that built the
   // base menu, so a non-insertable EXPECTED field never produces a bad insert.
+  // True when the caret sits in a list item's only paragraph and that paragraph holds nothing but the slash query.
+  _slashInListItem($from) {
+    if ($from.parent.type.name !== "paragraph" || $from.depth < 2) return false;
+    const item = $from.node($from.depth - 1);
+    if (!item || (item.type.name !== "listItem" && item.type.name !== "taskItem") || item.childCount !== 1) return false;
+    return /^\/[^\s]*$/.test($from.parent.textContent) || $from.parent.textContent === "";
+  }
+
   _chooseSlash(item) {
     this._closeSlash();
+    // A slash pick inside a list item first lifts the item out of the list, so the chosen block
+    // lands at the top level where insertSlashTypeAtSelection replaces the paragraph.
+    let guard = 0;
+    while (this._editor.state.selection.$from.depth > 1 && guard++ < 6) {
+      if (!this._editor.commands.liftListItem("listItem")) break;
+    }
     // A COMPOUND starter row (the Starters group): insert the whole pre-composed
     // subtree through the shared landing seam — same guard, same caret rules as a
     // single-node pick, but the carried node is a container + seeded children.
     if (item && item.compound) {
       insertCompoundAtSelection(this._editor, item.compound);
+      return;
+    }
+    // A MASTER row (the Masters group): the SERVER inserts the detached copy.
+    // A linked row (`item.linked`) asks for a LINKED instance instead.
+    if (item && item.master) {
+      this._insertMaster(item.master, item.linked === true ? "linked" : null);
+      return;
+    }
+    // A SECTION PRESET row (the Presets group): insert the whole ORDERED SEQUENCE of
+    // top-level blocks through the same landing seam — same guard, same degrade, and
+    // the preset's declared placeholder is selected so the next keystroke overtypes it.
+    if (item && item.preset) {
+      insertSectionPresetAtSelection(this._editor, item.preset);
       return;
     }
     if (!item || !CANVAS_SLASH_TYPES.has(item.type)) {
@@ -2114,6 +2883,77 @@ class BpPaperCanvas extends HTMLElement {
     // items carry a `fieldName` binding (threaded through so a bound-field insert
     // round-trips). Caret placement (into-body vs atom-select) is handled by the seam.
     insertSlashTypeAtSelection(this._editor, item.type, item.fieldName);
+  }
+
+  // ── paper masters (task-3b6e562e916c8ce4) ──────────────────────────────────
+  //
+  // The masters affordances exist only inside a Studio paper editor that rendered
+  // the `[data-paper-masters]` carrier (the pane may write). A field canvas
+  // (data-vocabulary) and the public reader never get them.
+  _mastersRoot() {
+    if (this.hasAttribute("data-vocabulary")) return null;
+    const editor = this.closest(".bp-paper-editor");
+    return editor && editor.querySelector("[data-paper-masters]") ? editor : null;
+  }
+
+  _canSaveMaster(node) {
+    if (!this._editable || !node || !this._mastersRoot()) return false;
+    const id = node.attrs && node.attrs.bpId;
+    if (typeof id !== "string" || id === "" || node.attrs.locked === true) return false;
+    return (this._blocks || []).some((block) => block && block.id === id);
+  }
+
+  // Ask the host to save a confirmed block as a master (the hook forwards it as
+  // `paper-save-master`); the server re-validates masterability.
+  _saveMaster(node) {
+    if (!this._canSaveMaster(node)) return false;
+    this.dispatchEvent(
+      new CustomEvent("bp-save-master", {
+        detail: { block_id: node.attrs.bpId },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    return true;
+  }
+
+  // A Masters pick: remove the "/query" paragraph, flush that removal so it is
+  // queued BEFORE the insert, then ask the host to insert the detached copy after
+  // a block the server already holds (masterInsertAnchor). The editor is blurred
+  // so the server echo carrying the copy renders as soon as it lands instead of
+  // waiting for the author to leave the editor.
+  // `mode` "linked" (task-59be65118320fa0e) asks for a `master-ref` instance;
+  // null keeps the detached copy (no mode on the wire).
+  _insertMaster(masterId, mode = null) {
+    const editor = this._editor;
+    if (!editor || typeof masterId !== "string" || masterId === "") return false;
+    const slashIndex = topLevelIndexAtSelection(editor);
+    const liveIds = [];
+    editor.state.doc.forEach((node) => liveIds.push(node.attrs.bpId));
+    const confirmed = new Set((this._blocks || []).map((block) => block && block.id));
+    const afterId = masterInsertAnchor(liveIds, slashIndex, confirmed);
+
+    // Drop the "/query" block (an only child is replaced by an empty paragraph).
+    const { state } = editor;
+    let offset = 0;
+    for (let i = 0; i < slashIndex; i++) offset += state.doc.child(i).nodeSize;
+    const slashNode = state.doc.child(slashIndex);
+    let tr = state.tr.delete(offset, offset + slashNode.nodeSize);
+    if (tr.doc.childCount === 0) tr = tr.insert(0, state.schema.nodes.paragraph.create());
+    editor.view.dispatch(tr);
+    this.flushPendingChanges();
+    editor.commands.blur();
+
+    this.dispatchEvent(
+      new CustomEvent("bp-master-insert", {
+        detail: mode === "linked"
+          ? { master_id: masterId, after_id: afterId, mode: "linked" }
+          : { master_id: masterId, after_id: afterId },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    return true;
   }
 
   // Esc / outside-click: close the menu but LEAVE the typed "/" in place — the user
@@ -2229,6 +3069,7 @@ class BpPaperCanvas extends HTMLElement {
     // [[ / # / slash / palette popup would float over a now-hidden editor.
     this._closeWikilink();
     this._closeTag();
+    this._closeEmoji();
     this._closeSlash();
     this._closePalette();
 
@@ -2460,6 +3301,37 @@ class BpPaperCanvas extends HTMLElement {
   //     its debounce window, we QUEUE the update and apply it after that local
   //     state settles so we never yank the caret or erase an un-emitted draft —
   //     the diff baseline stays with the displayed snapshot until that render lands.
+  // A revision-owning host may present acknowledged external content while an
+  // idle rich-text caret remains focused. Unlike applyServerBlocks this never
+  // queues: true means the content and baseline landed synchronously; false
+  // means the host must retain its previous revision. The caller must fence old
+  // read/echo responses by revision. It never discards an unacknowledged draft.
+  applyServerBlocksIfIdle(blocks) {
+    if (!this._editor || this._mode === "source" || this._editor.view.composing ||
+        this._bubble?.hasFocus()) return false;
+    const active = this.ownerDocument.activeElement;
+    if (active && this.contains(active) && active !== this._editor.view.dom) return false;
+    // Some node views buffer fields outside ProseMirror. Flush their real input
+    // first so a recently blurred field cannot masquerade as an idle canvas.
+    this.querySelectorAll("[data-bp-type]").forEach(node => {
+      node.dispatchEvent(new CustomEvent("bp-flush-node"));
+    });
+    if (this.hasPendingChanges()) return false;
+    if (!Array.isArray(blocks)) throw new TypeError("Expected confirmed Paper blocks");
+    this._programmaticApply = true;
+    try {
+      this._applyExternalContent(blocks);
+      this._blocks = deepCloneBlocks(blocks);
+      this._clearPendingServerBlocks();
+      // These receipts already completed successfully; this newer authority
+      // supersedes them. Actual in-flight saves remain guarded above.
+      this._awaitingOwnEchoes = [];
+      return true;
+    } finally {
+      this._programmaticApply = false;
+    }
+  }
+
   applyServerBlocks(blocks, echoMeta = null) {
     if (!this._editor) return;
     const next = Array.isArray(blocks) ? blocks : [];
@@ -2598,7 +3470,13 @@ class BpPaperCanvas extends HTMLElement {
       if (w.bpType != null && node.attrs && node.attrs.bpType == null) {
         attrs.bpType = w.bpType;
       }
-      tr.setNodeMarkup(offset, undefined, attrs);
+      if (node.type.name === "note") {
+        // Note field history must survive the non-history identity stamp.
+        tr.setNodeAttribute(offset, "bpId", attrs.bpId);
+        if (attrs.bpType !== node.attrs.bpType) tr.setNodeAttribute(offset, "bpType", attrs.bpType);
+      } else {
+        tr.setNodeMarkup(offset, undefined, attrs);
+      }
       mutated = true;
     });
     if (!mutated) return;
@@ -2627,15 +3505,26 @@ class BpPaperCanvas extends HTMLElement {
     const tr = state.tr;
     let index = 0;
     let mutated = false;
-    state.doc.descendants((node, pos) => {
+    const topIds = new Set();
+    state.doc.descendants((node, pos, parent) => {
       const stable = stableNodes[index++];
       const stableId = stable?.attrs?.bpId;
-      if (!node.isText && node.attrs?.bpId == null && stableId != null) {
-        tr.setNodeMarkup(pos, undefined, {
-          ...node.attrs,
-          bpId: stableId,
-          bpType: node.attrs.bpType == null ? stable.attrs?.bpType : node.attrs.bpType,
-        });
+      // Enter inherits the original paragraph's attrs. normalizeCanvasDoc
+      // treats only the second top-level occurrence as new; materialize its
+      // projected ID too, otherwise every subsequent save/read mints it again.
+      // Keep the first occurrence and all unrelated/nested identities intact.
+      const id = node.attrs?.bpId;
+      const duplicateTopId = parent === state.doc && id != null && topIds.has(id);
+      if (parent === state.doc && id != null) topIds.add(id);
+      if (!node.isText && (id == null || duplicateTopId) && stableId != null) {
+        const bpType = node.attrs.bpType == null ? stable.attrs?.bpType : node.attrs.bpType;
+        if (node.type.name === "note") {
+          // Keep pre-save label/lead AttrSteps mapped to this same note.
+          tr.setNodeAttribute(pos, "bpId", stableId);
+          if (bpType !== node.attrs.bpType) tr.setNodeAttribute(pos, "bpType", bpType);
+        } else {
+          tr.setNodeMarkup(pos, undefined, { ...node.attrs, bpId: stableId, bpType });
+        }
         mutated = true;
       }
     });
@@ -2660,7 +3549,8 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._editor) return false;
     if (this._mode === "source") return true;
     const composing = !!(this._editor.view && this._editor.view.composing);
-    return this._editor.isFocused || this._bubble?.hasFocus() || composing || this._debounceTimer != null;
+    const noteIslandFocused = this.querySelector('.bp-canvas-note [role="textbox"]:focus, .bp-canvas-note[data-note-pending]');
+    return this._editor.isFocused || noteIslandFocused || this._bubble?.hasFocus() || composing || this._debounceTimer != null;
   }
 
   // Apply the confirmed external content to the editor WITHOUT entering the undo
@@ -2708,8 +3598,20 @@ class BpPaperCanvas extends HTMLElement {
           if (refreshes !== null) {
             for (const refresh of refreshes) {
               const target = refresh.replacement;
-              tr.setNodeMarkup(refresh.position, target.type, target.attrs, target.marks);
+              const current = tr.doc.nodeAt(refresh.position);
+              if (target.type.name === "note" &&
+                  current.attrs.label === target.attrs.label && current.attrs.lead === target.attrs.lead) {
+                // Preserve local field history only for same-visible metadata.
+                // Remote field edits must map conflicting label/lead steps away.
+                for (const [key, value] of Object.entries(target.attrs)) {
+                  if (current.attrs[key] !== value) tr.setNodeAttribute(refresh.position, key, value);
+                }
+              } else {
+                tr.setNodeMarkup(refresh.position, target.type, target.attrs, target.marks);
+              }
             }
+          } else if (canMapExternalNode(node, replacement)) {
+            mapExternalNode(tr, node, replacement, position);
           } else {
             tr.replaceWith(position, position + node.nodeSize, replacement);
           }
@@ -2774,6 +3676,7 @@ class BpPaperCanvas extends HTMLElement {
     if (this._mode === "source") return;
     if (this._editor && this._editor.isFocused) return;
     if (this._bubble?.hasFocus()) return;
+    if (this.querySelector('.bp-canvas-note [role="textbox"]:focus, .bp-canvas-note[data-note-pending]')) return;
     if (this._debounceTimer) return;
     if (this._inflightOps || this._dirtyWhileInflight || this._awaitingOwnEchoes.length > 0) return;
     const pending = this._pendingServerBlocks;

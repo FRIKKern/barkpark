@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "canonical_for": "the do-not-build marker vocabulary on the task ready projection",
+  "doc": "THE PREDICATE, stated so a stranger can re-run it. A ready row's three prose fields (`fields` below, ALL THREE — searching any one undercounts) are concatenated and scanned for every `needle`. `case_sensitive:false` lowercases both sides. The row's class is the FIRST entry of `classes` that any matching needle carries, so `classes` IS the precedence order, strongest first. No match, or no populated field, answers nothing and the card is byte-identical to what it has always been. This file is the ONE copy: api/lib/barkpark/tasks/dispatchability.ex reads it at COMPILE TIME and internal/cli/dispatch_markers.json is a byte copy pinned to it by TestDispatchMarkerSpecMirrorsTheServerCopy.",
+  "fields": ["description", "disposition_reason", "operating_instruction"],
+  "classes": ["forbidden", "deferred"],
+  "class_meaning": {
+    "forbidden": "An imperative addressed to a DISPATCHER: this row must not be handed to a builder. Do not claim it, do not commission work against it.",
+    "deferred": "Buildable in principle, but gated or ordered by something outside the builder's reach (an owner, a wave, a queue position). LOOK before dispatching."
+  },
+  "calibration": {
+    "measured_at": "2026-09-22",
+    "population": "150 open rows from `bp task ls --status open --limit 150` (content-bearing cards: description 150/150, disposition_reason 70/150, operating_instruction 47/150)",
+    "hits": {"forbidden": 5, "deferred": 9},
+    "hand_labelled": "Every one of the 5 forbidden hits and the 9 deferred hits was read in context and is a TRUE marker (precision 14/14 on this sample). RECALL IS UNMEASURED and the vocabulary is necessarily incomplete — a marker nobody has phrased yet is invisible here, so the absence of a class is never a licence to dispatch, only the absence of a refusal.",
+    "rejected": "A bare case-insensitive `backlog` was MEASURED AND REFUSED: 12 of 150 rows match and most are prose or a row id (`dr-backlog-never-started`, `stw-backlog-catalog-family`, 'the ready backlog'). The shouted spellings below are what survive."
+  },
+  "markers": [
+    {"class": "forbidden", "needle": "do not commission", "case_sensitive": false},
+    {"class": "forbidden", "needle": "do not build", "case_sensitive": false},
+    {"class": "forbidden", "needle": "do not dispatch", "case_sensitive": false},
+    {"class": "forbidden", "needle": "do not work it", "case_sensitive": false},
+    {"class": "deferred", "needle": "owner-gated", "case_sensitive": false},
+    {"class": "deferred", "needle": "strictly last", "case_sensitive": false},
+    {"class": "deferred", "needle": "future wave", "case_sensitive": false},
+    {"class": "deferred", "needle": "BACKLOG", "case_sensitive": true},
+    {"class": "deferred", "needle": "Backlog /", "case_sensitive": true}
+  ]
+}

@@ -6,6 +6,7 @@ defmodule Barkpark.Auth do
   alias Barkpark.Repo
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Auth.LoginTicket
+  alias Barkpark.Auth.TokenExpiry
   alias Barkpark.Sharing
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
@@ -21,9 +22,10 @@ defmodule Barkpark.Auth do
 
   # P5 share-edit token TTL policy (owner decision 2026-06-09): default 7 days,
   # hard cap 1 year. Write access is higher-risk than the anonymous read share,
-  # so an edit token always expires.
+  # so an edit token always expires. The cap is `Barkpark.Auth.TokenExpiry`'s
+  # share max (365 days); above it a ttl is REFUSED, no longer clamped
+  # (task-a0f8cfd7f4800236).
   @share_token_default_ttl 7 * 24 * 3600
-  @share_token_max_ttl 365 * 24 * 3600
 
   # The ONLY surfaces an edit token may cover. Papers-edit is out of scope (it
   # rides the Bulldocs shared-secret ingest API, a different auth model).
@@ -350,8 +352,10 @@ defmodule Barkpark.Auth do
 
   def revoke_token(token_id) when is_binary(token_id) do
     # Guard the UUID cast: the id column is :binary_id, so a non-UUID token_id
-    # (e.g. from `DELETE /v1/shares/tokens/garbage`) would raise Ecto.CastError
-    # → 500. A malformed id can't identify any row, so it's a clean not_found.
+    # (e.g. from `DELETE /v1/shares/tokens/garbage`) would raise
+    # Ecto.Query.CastError → an opaque 400 (phoenix_ecto maps that struct to 400;
+    # it is NOT Ecto.CastError). A malformed id can't identify any row, so it's a
+    # clean not_found.
     case Repo.uuid_or_nil(token_id) do
       nil ->
         {:error, :not_found}
@@ -400,7 +404,13 @@ defmodule Barkpark.Auth do
   # revoke fail. The DB row is the source of truth for every other consumer,
   # and a revoke that rolled back because a socket could not be notified would
   # be strictly worse than one whose notification was missed.
-  defp broadcast_socket_teardown(%ApiToken{id: id}) when is_binary(id) do
+  #
+  # Public so a caller that revokes inside a transaction
+  # (`Barkpark.Accounts.Privacy.erase_subject/1`) can re-send the teardown
+  # after commit, when the revoke is visible to a reconnecting socket.
+  @doc false
+  @spec broadcast_socket_teardown(ApiToken.t()) :: :ok
+  def broadcast_socket_teardown(%ApiToken{id: id}) when is_binary(id) do
     BarkparkWeb.Endpoint.broadcast(BarkparkWeb.UserSocket.disconnect_topic(id), "disconnect", %{})
     :ok
   rescue
@@ -409,7 +419,213 @@ defmodule Barkpark.Auth do
     _, _ -> :ok
   end
 
-  defp broadcast_socket_teardown(_token), do: :ok
+  def broadcast_socket_teardown(_token), do: :ok
+
+  # ── Token rotation (task-e78edcc2145ed3df) ──────────────────────────────
+
+  # Default grace window: the old secret keeps working for 24h so a deploy can
+  # swap it without an outage. 0 is the compromise path (dead now). The cap
+  # keeps a "rotation" from being a way to hold two live secrets indefinitely.
+  @rotation_default_grace 24 * 3600
+  @rotation_max_grace 7 * 24 * 3600
+
+  @doc false
+  def rotation_default_grace, do: @rotation_default_grace
+  @doc false
+  def rotation_max_grace, do: @rotation_max_grace
+
+  @doc """
+  Rotate a live api token: mint a successor carrying the SAME label, name,
+  kind, permissions, dataset, workspace binding, owner, expiry and every
+  workspace seat (same role), and put the old token on a grace clock.
+
+  Returns `{:ok, {raw_successor, successor, old}}` — the raw secret exists only
+  in this return value (the row stores its hash), and the old secret is never
+  read, because only its hash was ever stored.
+
+  ## The grace window IS `expires_at`
+
+  `verify_token/1` — the one choke point every HTTP, LiveView and socket-connect
+  path resolves a bearer through — already rejects `expires_at <= now` in its
+  WHERE clause. So the window is set as
+  `old.expires_at = min(old.expires_at, now + grace)`: the old token stops
+  authenticating at the window's end with no job, no cron and no new read-path
+  code. The `min` means a rotation can never EXTEND the old token's life.
+
+  `Barkpark.Auth.RotationRetireWorker` is enqueued for the same instant and
+  stamps `revoked_at` through `revoke_token/1` — the record, the
+  `token_revoked` audit row, and the socket teardown. The teardown is why the
+  job is not decoration: `UserSocket.connect/3` verifies once, so an open socket
+  outlives an expiry but not a revoke broadcast. `grace_seconds: 0` revokes in
+  this call instead (the compromise path).
+
+  ## Authority
+
+  The caller (the controller) has already applied revoke's gate: an owner/admin
+  of the path workspace, and the token holds a seat there. Rotation hands the
+  caller a SECRET, which revoke never does, so two ceilings are added here and
+  a failure of either is `{:error, :forbidden}`:
+
+    * every permission the token carries must be one the actor's own token
+      carries — rotation cannot turn an admin-of-this-workspace into the holder
+      of an instance-`admin` secret;
+    * the actor must be `Tenancy.Auth.workspace_admin?/2` in EVERY workspace the
+      token is bound to or seated in — an admin of A cannot mint a live secret
+      for a credential whose reach extends into B.
+
+  The successor is a copy by construction: no caller-supplied permission,
+  scope or kind reaches it, so a token cannot rotate itself wider.
+
+  `{:error, :not_rotatable}` — revoked, expired, or not an `api`-kind token.
+  `{:error, :invalid_grace}` — not an integer in `0..#{@rotation_max_grace}`.
+  """
+  @spec rotate_token(binary(), ApiToken.t(), keyword()) ::
+          {:ok, {binary(), ApiToken.t(), ApiToken.t()}}
+          | {:error, :not_found | :not_rotatable | :forbidden | :invalid_grace | term()}
+  def rotate_token(token_id, %ApiToken{} = actor, opts \\ []) when is_binary(token_id) do
+    grace = Keyword.get(opts, :grace_seconds, @rotation_default_grace)
+    workspace_id = Keyword.get(opts, :workspace_id)
+
+    with :ok <- validate_grace(grace),
+         uuid when is_binary(uuid) <- Repo.uuid_or_nil(token_id) || {:error, :not_found} do
+      Repo.transaction(fn ->
+        now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+        # Row lock: two concurrent rotations serialize, and the second sees the
+        # first's shortened expiry.
+        old =
+          ApiToken
+          |> where([t], t.id == ^uuid)
+          |> lock("FOR UPDATE")
+          |> Repo.one()
+
+        seats = token_seats(uuid)
+
+        with %ApiToken{} <- old || {:error, :not_found},
+             :ok <- rotatable(old, now),
+             :ok <- within_ceiling(old, seats, actor),
+             raw = mint_raw(old),
+             {:ok, successor} <- insert_successor(old, raw),
+             :ok <- copy_seats(seats, successor.id),
+             retire_at = retire_at(old, now, grace),
+             {:ok, old} <- old |> Ecto.Changeset.change(expires_at: retire_at) |> Repo.update(),
+             {:ok, _job} <- enqueue_retire(old.id, retire_at),
+             {:ok, _event} <- audit_rotation(old, successor, actor, workspace_id, retire_at) do
+          {raw, successor, old}
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+      |> case do
+        {:ok, {raw, successor, old}} when grace == 0 ->
+          # After commit: the old token is already dead (expires_at = now);
+          # this stamps the record and tears its open sockets down now.
+          {:ok, old} = revoke_token(old)
+          {:ok, {raw, successor, old}}
+
+        {:ok, result} ->
+          {:ok, result}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp validate_grace(g) when is_integer(g) and g >= 0 and g <= @rotation_max_grace, do: :ok
+  defp validate_grace(_), do: {:error, :invalid_grace}
+
+  defp rotatable(%ApiToken{kind: "api", revoked_at: nil, expires_at: nil}, _now), do: :ok
+
+  defp rotatable(%ApiToken{kind: "api", revoked_at: nil, expires_at: %DateTime{} = exp}, now) do
+    if DateTime.compare(exp, now) == :gt, do: :ok, else: {:error, :not_rotatable}
+  end
+
+  defp rotatable(_token, _now), do: {:error, :not_rotatable}
+
+  defp within_ceiling(%ApiToken{} = old, seats, %ApiToken{} = actor) do
+    perms_ok? = Enum.all?(old.permissions || [], &(&1 in (actor.permissions || [])))
+
+    workspaces =
+      [old.workspace_id | Enum.map(seats, & &1.workspace_id)]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    if perms_ok? and Enum.all?(workspaces, &TenancyAuth.workspace_admin?(actor, &1)),
+      do: :ok,
+      else: {:error, :forbidden}
+  end
+
+  defp token_seats(token_id) do
+    Barkpark.Tenancy.Membership
+    |> where([m], m.principal_type == "api_token" and m.principal_id == ^token_id)
+    |> Repo.all()
+  end
+
+  # A PAT (the only mint that sets `name`) keeps its leak-scanner prefix.
+  defp mint_raw(%ApiToken{name: name}) do
+    body = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+    if is_nil(name), do: body, else: pat_token_prefix() <> body
+  end
+
+  defp insert_successor(%ApiToken{} = old, raw) do
+    %ApiToken{dataset_id: old.dataset_id}
+    |> ApiToken.changeset(%{
+      token_hash: ApiToken.hash_token(raw),
+      label: old.label,
+      name: old.name,
+      kind: old.kind,
+      dataset: old.dataset,
+      permissions: old.permissions,
+      workspace_id: old.workspace_id,
+      share_scope: old.share_scope,
+      owner_user_id: old.owner_user_id,
+      created_by: old.created_by,
+      expires_at: old.expires_at
+    })
+    |> Repo.insert()
+  end
+
+  defp copy_seats(seats, successor_id) do
+    Enum.reduce_while(seats, :ok, fn seat, :ok ->
+      case TenancyAuth.create_membership(seat.workspace_id, successor_id, seat.role, "api_token") do
+        {:ok, _} -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp retire_at(%ApiToken{expires_at: exp}, now, grace) do
+    candidate = DateTime.add(now, grace, :second)
+
+    case exp do
+      nil -> candidate
+      exp -> if DateTime.compare(exp, candidate) == :lt, do: exp, else: candidate
+    end
+  end
+
+  defp enqueue_retire(token_id, retire_at) do
+    %{"token_id" => token_id}
+    |> Barkpark.Auth.RotationRetireWorker.new(scheduled_at: retire_at)
+    |> Oban.insert()
+  end
+
+  # Ids and the window only — never a secret, never a hash.
+  defp audit_rotation(old, successor, actor, workspace_id, retire_at) do
+    Audit.emit(%{
+      category: "token",
+      action: "token_rotated",
+      subject: old.id,
+      actor_type: "api_token",
+      actor_id: actor.id,
+      workspace_id: workspace_id,
+      metadata: %{
+        "old_token_id" => old.id,
+        "new_token_id" => successor.id,
+        "old_token_expires_at" => DateTime.to_iso8601(retire_at)
+      }
+    })
+  end
 
   @doc """
   Resolve a RAW bearer to its `%ApiToken{}` row regardless of revocation or
@@ -691,7 +907,8 @@ defmodule Barkpark.Auth do
   @spec revoke_app_token_by_id(binary(), ApiToken.t()) :: {:ok, ApiToken.t()} | {:error, atom()}
   def revoke_app_token_by_id(token_id, %ApiToken{} = actor) when is_binary(token_id) do
     # Same UUID cast guard as revoke_token/1: the id column is :binary_id, so a
-    # non-UUID would raise Ecto.CastError -> 500 instead of a clean not_found.
+    # non-UUID would raise Ecto.Query.CastError -> an opaque 400 instead of a clean
+    # not_found.
     case Repo.uuid_or_nil(token_id) do
       nil ->
         {:error, :not_found}
@@ -716,29 +933,99 @@ defmodule Barkpark.Auth do
   ("admin" perm → "admin", else "member"). The token + membership commit
   atomically, so a failed membership insert rolls the token back.
 
-  When `workspace_id` is `nil` the token falls back to the seeded Default
-  Workspace if one exists (the backfill's target); when no Default Workspace
-  exists the token is created un-bound (no membership) for back-compat with
-  pre-tenancy callers and the existing test suite.
+  ## `workspace_id` — NO implicit Default-Workspace fallback (SECURITY)
+
+  When `workspace_id` is `nil` (or omitted) the token is minted WORKSPACE-LESS:
+  `insert_token_with_membership/3` is skipped entirely and NO
+  `Barkpark.Tenancy.Membership` row is ever created. This is the same posture
+  `create_personal_access_token/3` and `create_claude_session_token/3` already
+  hold — `create_token/5` was the last of the three mints still carrying the
+  fallback (task-e0e6454b8b2045ae).
+
+  There used to be an unconditional `|| default_workspace_id()` here. It bound
+  the token to the seeded Default Workspace AND handed it a membership row in
+  that workspace with ZERO relationship check between the caller and it: a
+  caller that simply forgot to thread a workspace got a seat at whatever tenant
+  happens to hold the default seat. A caller that WANTS the instance default
+  must now resolve it itself and pass it — `Barkpark.Auth.PublicRead`, the one
+  caller that meant it, does exactly that. There is no default to fall into.
+
+  ## `opts` — mint-time expiry (task-a0f8cfd7f4800236)
+
+    * `:expires_at` — `nil` (default), a `DateTime`, or `:no_expiry`. Resolved
+      by `Barkpark.Auth.TokenExpiry.resolve/3`: over the class max →
+      `{:error, {:expiry_exceeds_max, class, days}}` (never clamped); `nil` →
+      the configured class default, which SHIPS nil, so an opts-less call mints
+      exactly what it minted before this option existed.
+    * `:class` — `:api` / `:share` / `:app`; inferred from `permissions` when
+      absent (`public-read` → `:share`). The app-token mint passes `:app`.
+    * `:actor` — the minting principal. `:no_expiry` is admitted only when it
+      is an `%ApiToken{}` holding the flat `"admin"` permission, and the mint +
+      its `token/token_no_expiry_opt_out` audit row commit together.
   """
-  def create_token(raw_token, label, dataset, permissions, workspace_id \\ nil) do
-    ws_id = workspace_id || default_workspace_id()
+  def create_token(raw_token, label, dataset, permissions, workspace_id \\ nil, opts \\ []) do
+    ws_id = workspace_id
 
-    token_attrs = %{
-      token_hash: ApiToken.hash_token(raw_token),
-      label: label,
-      dataset: dataset,
-      permissions: permissions,
-      workspace_id: ws_id
-    }
+    class =
+      Keyword.get_lazy(opts, :class, fn -> TokenExpiry.class_for_permissions(permissions) end)
 
-    if is_nil(ws_id) do
-      %ApiToken{}
-      |> ApiToken.changeset(token_attrs)
-      |> Repo.insert()
-    else
-      insert_token_with_membership(token_attrs, ws_id, permissions)
+    request = Keyword.get(opts, :expires_at)
+    actor = Keyword.get(opts, :actor)
+
+    with {:ok, expires_at} <-
+           TokenExpiry.resolve(class, request, admin?: no_expiry_admin?(actor)) do
+      token_attrs = %{
+        token_hash: ApiToken.hash_token(raw_token),
+        label: label,
+        dataset: dataset,
+        permissions: permissions,
+        workspace_id: ws_id,
+        expires_at: expires_at
+      }
+
+      insert = fn ->
+        if is_nil(ws_id) do
+          %ApiToken{}
+          |> ApiToken.changeset(token_attrs)
+          |> Repo.insert()
+        else
+          insert_token_with_membership(token_attrs, ws_id, permissions)
+        end
+      end
+
+      if request == :no_expiry,
+        do: insert_with_no_expiry_audit(insert, class, actor),
+        else: insert.()
     end
+  end
+
+  # The opt-out is the INSTANCE admin bit — the flat permission
+  # `BarkparkWeb.Plugs.RequireAdmin` reads — not a workspace role: a
+  # never-expiring credential is an exception to instance policy, so a
+  # workspace owner holding a read/write PAT may not grant it to themselves.
+  defp no_expiry_admin?(%ApiToken{} = actor), do: has_permission?(actor, "admin")
+  defp no_expiry_admin?(_), do: false
+
+  # Mint + audit row in ONE transaction: an opt-out that cannot be audited is
+  # not minted (Audit.emit's rollback takes the insert down with it).
+  defp insert_with_no_expiry_audit(insert, class, %ApiToken{} = actor) do
+    Repo.transaction(fn ->
+      with {:ok, token} <- insert.(),
+           {:ok, _event} <-
+             Audit.emit(%{
+               category: "token",
+               action: "token_no_expiry_opt_out",
+               subject: token.id,
+               actor_type: "api_token",
+               actor_id: actor.id,
+               workspace_id: token.workspace_id,
+               metadata: %{"kind" => to_string(class), "label" => token.label}
+             }) do
+        token
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
   end
 
   # ── Connectors: the per-install chat token (D36/D48) ───────────────────────
@@ -866,13 +1153,6 @@ defmodule Barkpark.Auth do
     end)
   end
 
-  defp default_workspace_id do
-    case Tenancy.get_default_workspace() do
-      nil -> nil
-      ws -> ws.id
-    end
-  end
-
   @doc """
   Tokens bound to `dataset` **inside `workspace_id`** — SECRET-FREE rows.
 
@@ -930,12 +1210,14 @@ defmodule Barkpark.Auth do
 
   # ── PAT fast-follow: self-service Personal Access Tokens ───────────────
 
-  # PAT TTL policy: default 30 days, hard-capped at 1 year. A PAT is a
+  # PAT TTL policy: default 30 days; above the api max age (365 days,
+  # `Barkpark.Auth.TokenExpiry`) a ttl is refused, not clamped. A PAT is a
   # longer-lived self-service credential than the dev token, so it always
   # carries a finite horizon (mirrors cloud/'s bounded expiry).
   @pat_default_ttl 30 * 24 * 3600
-  @pat_max_ttl 365 * 24 * 3600
   @pat_token_prefix "bppat_"
+
+  defp pat_token_prefix, do: @pat_token_prefix
 
   # Roles that may mint an ELEVATED (write-tier) token. A `member` may only
   # mint a read token (Coolify's ApiTokenPolicy: only admin/owner mint elevated
@@ -987,7 +1269,7 @@ defmodule Barkpark.Auth do
 
   `opts`: `:role` (default `"member"`), `:workspace_id`, `:dataset`
   (default `"production"`), `:created_by`, `:ttl` (seconds; `nil` = never;
-  default 30 days; capped at 1 year), `:owner_user_id` (bind the token to a
+  default 30 days; over 365 days is refused, never clamped), `:owner_user_id` (bind the token to a
   USER identity — set ONLY by the session-gated self-mint, hard-bound to the
   authenticated caller; never a client-supplied value).
 
@@ -1005,25 +1287,16 @@ defmodule Barkpark.Auth do
   `create_personal_access_token` before relying on this.)
   """
   @spec create_personal_access_token(binary(), [binary()], keyword()) ::
-          {:ok, {binary(), ApiToken.t()}} | {:error, :forbidden | Ecto.Changeset.t()}
+          {:ok, {binary(), ApiToken.t()}}
+          | {:error, :forbidden | TokenExpiry.reason() | Ecto.Changeset.t()}
   def create_personal_access_token(name, permissions, opts \\ [])
       when is_binary(name) and is_list(permissions) do
     role = Keyword.get(opts, :role, "member")
 
-    with :ok <- authorize_pat_permissions(role, permissions) do
+    with :ok <- authorize_pat_permissions(role, permissions),
+         {:ok, expires_at} <- pat_expires_at(Keyword.get(opts, :ttl, @pat_default_ttl)) do
       raw = @pat_token_prefix <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
       ws_id = Keyword.get(opts, :workspace_id)
-
-      expires_at =
-        case Keyword.get(opts, :ttl, @pat_default_ttl) do
-          nil ->
-            nil
-
-          ttl ->
-            DateTime.utc_now()
-            |> DateTime.add(clamp_pat_ttl(ttl))
-            |> DateTime.truncate(:second)
-        end
 
       token_attrs = %{
         token_hash: ApiToken.hash_token(raw),
@@ -1127,8 +1400,16 @@ defmodule Barkpark.Auth do
     end
   end
 
-  defp clamp_pat_ttl(ttl) when is_integer(ttl) and ttl > 0, do: min(ttl, @pat_max_ttl)
-  defp clamp_pat_ttl(_), do: @pat_default_ttl
+  # `:ttl nil` stays "never" (an in-process, trusted-caller choice — no HTTP
+  # route reaches it). A positive ttl over the api max age is REFUSED naming
+  # the max (task-a0f8cfd7f4800236) — it used to be silently clamped to 1 year.
+  # A non-positive/non-integer ttl still falls back to the 30-day default.
+  defp pat_expires_at(nil), do: {:ok, nil}
+
+  defp pat_expires_at(ttl) do
+    ttl = if is_integer(ttl) and ttl > 0, do: ttl, else: @pat_default_ttl
+    TokenExpiry.resolve(:api, DateTime.add(DateTime.utc_now(), ttl, :second))
+  end
 
   # ── P5: scoped-share EDIT tokens ───────────────────────────────────────
 
@@ -1147,8 +1428,8 @@ defmodule Barkpark.Auth do
     * `share_scope` byte-binds it to one `"ws/proj/dataset"`.
 
   Defense-in-depth: refuses to mint unless the scope is live-`:edit`-shared for
-  every requested surface RIGHT NOW. `opts`: `:ttl` (seconds, default 7 days,
-  capped at 1 year), `:label`. Returns `{:ok, {raw_token, %ApiToken{}}}` — the
+  every requested surface RIGHT NOW. `opts`: `:ttl` (seconds, default 7 days;
+  over 365 days is refused, never clamped), `:label`. Returns `{:ok, {raw_token, %ApiToken{}}}` — the
   raw token is shown ONCE and never recoverable after.
   """
   @spec create_share_token(binary(), binary(), binary(), [binary() | atom()], keyword()) ::
@@ -1164,9 +1445,9 @@ defmodule Barkpark.Auth do
          %Tenancy.Workspace{} = ws <-
            Tenancy.get_workspace_by_slug(ws_slug) || {:error, :unknown_scope},
          %Tenancy.Project{} <-
-           Tenancy.get_project(ws_slug, proj_slug) || {:error, :unknown_scope} do
+           Tenancy.get_project(ws_slug, proj_slug) || {:error, :unknown_scope},
+         {:ok, expires_at} <- share_expires_at(opts[:ttl]) do
       raw = "bpshare_" <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
 
       attrs = %{
         token_hash: ApiToken.hash_token(raw),
@@ -1177,7 +1458,7 @@ defmodule Barkpark.Auth do
         permissions: Enum.map(surfaces, &"share-edit-#{&1}"),
         workspace_id: ws.id,
         share_scope: "#{ws_slug}/#{proj_slug}/#{dataset}",
-        expires_at: DateTime.add(now, clamp_ttl(opts[:ttl]))
+        expires_at: expires_at
       }
 
       case %ApiToken{} |> ApiToken.changeset(attrs) |> Repo.insert() do
@@ -1257,9 +1538,13 @@ defmodule Barkpark.Auth do
     end
   end
 
-  defp clamp_ttl(nil), do: @share_token_default_ttl
-  defp clamp_ttl(ttl) when is_integer(ttl) and ttl > 0, do: min(ttl, @share_token_max_ttl)
-  defp clamp_ttl(_), do: @share_token_default_ttl
+  # A share-edit token ALWAYS expires. A missing/non-positive ttl is the 7-day
+  # default; a positive ttl over the share max age (365 days) is REFUSED naming
+  # the max (task-a0f8cfd7f4800236) — it used to be silently clamped to it.
+  defp share_expires_at(ttl) do
+    ttl = if is_integer(ttl) and ttl > 0, do: ttl, else: @share_token_default_ttl
+    TokenExpiry.resolve(:share, DateTime.add(DateTime.utc_now(), ttl, :second))
+  end
 
   # ── scc-w12: Claude-chat loopback session tokens (charter D63) ──────────
 
@@ -1306,8 +1591,10 @@ defmodule Barkpark.Auth do
   backstop; `revoke_token/1` (idempotent) in the Session's terminate clauses
   is the primary teardown.
 
-  `opts`: `:ttl`, `:workspace_id` (default: the minter token's workspace,
-  then the Default workspace), `:dataset` (default `"production"`). Returns
+  ATTRIBUTION FAILS CLOSED: `:workspace_id`, else the minter token's own
+  workspace binding, else `{:error, :no_workspace}` — there is NO fall-through
+  to the seeded Default workspace. `:dataset` defaults to `"production"`.
+  `opts`: `:ttl`, `:workspace_id`, `:dataset`. Returns
   `{:ok, {raw_token, %ApiToken{}}}` — the raw token is written ONLY into the
   session's temp mcp-config env block, never logged, never recoverable.
   """
@@ -1317,7 +1604,8 @@ defmodule Barkpark.Auth do
 
   def create_claude_session_token(minter, session_id, opts) when is_binary(session_id) do
     ws_id =
-      Keyword.get(opts, :workspace_id) || minter_workspace_id(minter) || default_workspace_id()
+      concrete_workspace_id(Keyword.get(opts, :workspace_id)) ||
+        concrete_workspace_id(minter_workspace_id(minter))
 
     with ws_id when is_binary(ws_id) <- ws_id || {:error, :no_workspace},
          :ok <- TenancyAuth.authorize(minter, ws_id, :write) do
@@ -1351,6 +1639,26 @@ defmodule Barkpark.Auth do
 
   defp minter_workspace_id(%ApiToken{workspace_id: ws_id}), do: ws_id
   defp minter_workspace_id(_), do: nil
+
+  # THE TWO HALVES OF ONE BOUNDARY NOW AGREE (task-1db81c1568866df8). This
+  # predicate is deliberately the same one
+  # `Barkpark.StudioChat.Provider.Claude.cloud_workspace_id!/1` (claude.ex,
+  # `defp cloud_workspace_id!`) applies before it will spawn a cloud turn:
+  # a concrete binary passes; `nil`, `""` and the `"global"` sentinel do not.
+  # There it RAISES ("refusing to spawn an unattributed cloud turn"); here it
+  # yields nil so the `with` above answers `{:error, :no_workspace}` and every
+  # caller's fail-soft mint-refused branch runs. Same verdict, two shapes.
+  #
+  # DO NOT RESTORE THE `|| default_workspace_id()` FALLBACK. It was here, and
+  # it made the `{:error, :no_workspace}` arm DEAD CODE: an unbound minter
+  # called with no `:workspace_id` was silently issued a credential stamped
+  # with the seeded Default workspace it never selected. That was never a
+  # privilege escalation — `TenancyAuth.authorize/3` below still had to pass
+  # for Default — it was a MIS-ATTRIBUTION, and the attribution is what the
+  # audit trail reads afterwards. A refused mint is fail-soft at every caller
+  # (a chat spawns without hands); a mis-attributed one is silent forever.
+  defp concrete_workspace_id(id) when is_binary(id) and id != "" and id != "global", do: id
+  defp concrete_workspace_id(_), do: nil
 
   defp clamp_claude_session_ttl(ttl) when is_integer(ttl) and ttl > 0,
     do: min(ttl, @claude_session_max_ttl)

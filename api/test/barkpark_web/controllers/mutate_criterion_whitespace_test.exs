@@ -55,7 +55,13 @@ defmodule BarkparkWeb.MutateCriterionWhitespaceTest do
 
   setup do
     {:ok, _} =
-      Auth.create_token(@token, "test-mutate-crit-ws", "test", ["read", "write", "admin"])
+      Auth.create_token(
+        @token,
+        "test-mutate-crit-ws",
+        "test",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]

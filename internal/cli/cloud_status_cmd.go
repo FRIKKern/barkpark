@@ -60,20 +60,28 @@ const (
 const fillingDiskPercent = 90.0
 
 // attentionStatus classifies one Barkpark into its charter-decision-15 status
-// label. The TWELVE labels (charter D69 + jpf-w1 D7), MOST URGENT FIRST, are:
+// label. The FIFTEEN labels (charter D69 + jpf-w1 D7 + dr-w10-s1 +
+// dr-w24-followup + dr-w15-s5), MOST URGENT FIRST — attentionRankOrder is the
+// authority and TestAttentionLadderIsFifteenRungs pins it; this list is its
+// prose (it read TWELVE, with no deploys_failing or diverged, for as long as
+// those two rungs were on main):
 //
-//  1. removal_failed — deprovision_status = "failed"
-//  2. failed         — no host && provision_status = "failed"
-//  3. suspended      — suspended = true (and not removing)
-//  4. degraded       — live && (health_status != "up" || agent_status != "online")
-//  5. strained       — live && sustained load per core over the D67 fence
-//  6. filling        — live && disk_used_percent >= 90
-//  7. unreported     — live && the CP has never heard a byte from the box
-//  8. deploy_stalled — live && a queued deployment no builder has claimed for 5m
-//  9. behind         — live && (update_state = "behind" || commit_ancestry = "behind")
-//  10. removing      — deprovision_status ∈ {pending, claimed}
-//  11. provisioning  — no host, nothing failed
-//  12. ok            — live, healthy, current
+//  1. removal_failed  — deprovision_status = "failed"
+//  2. failed          — no host && provision_status = "failed"
+//  3. suspended       — suspended = true (and not removing)
+//  4. degraded        — live && (health_status != "up" || agent_status != "online")
+//  5. cannot_deploy   — live && the box has sites && it MEASURED a refusal
+//     (site_deploy.configured = false, or runner_alive = false)
+//  6. deploys_failing — live && measured deploy failure rate >= 20%
+//  7. diverged        — live && commit_ancestry = "diverged"
+//  8. strained        — live && sustained load per core over the D67 fence
+//  9. filling         — live && disk_used_percent >= 90
+//  10. unreported     — live && the CP has never heard a byte from the box
+//  11. deploy_stalled — live && a queued deployment no builder has claimed for 5m
+//  12. behind         — live && (update_state = "behind" || commit_ancestry = "behind")
+//  13. removing       — deprovision_status ∈ {pending, claimed}
+//  14. provisioning   — no host, nothing failed
+//  15. ok             — live, healthy, current
 //
 // where "live" = a host is set with nothing in-flight/failed/suspended.
 //
@@ -87,12 +95,39 @@ const fillingDiskPercent = 90.0
 // live box that is both strained and behind is "strained") falls out of the
 // ordering itself.
 //
-// Charter edge left as specified: a box with a host SET and provision_status =
-// "failed" matches no decision-15 rule (rank 2 requires no host; the live arms
-// require live, which a failed provision is not) and falls through to "ok".
-// Both surfaces implement the charter verbatim, so changing it here alone would
-// create exactly the drift D32 exists to prevent — if this state is reachable,
-// amend decision 15 first, then both implementations together.
+// Charter edge NOT ranked by decision 15: a box with a host SET and
+// provision_status = "failed" matches no decision-15 rule (rank 2 requires no
+// host; the live arms require live, which the predicate below denies a failed
+// provision) and falls through to "ok".
+//
+// THE TWO SURFACES DISAGREE HERE — they do NOT implement the charter verbatim,
+// and the comments that said they did were the false part. This function's
+// `live` carries a fourth conjunct, ProvisionStatus != "failed"; the console's
+// classifyBp (cloud/priv/static/app.js) builds `live` from host, removing and
+// suspended only. So a host-set box with provision_status "failed" and an
+// unhealthy read would print "ok" here and "degraded" there.
+//
+// REACHABILITY, derived from the WRITERS rather than from any reader's guard
+// (cloud/lib/barkpark_cloud/registry.ex): barkparks.host is written non-empty by
+// exactly two functions — upsert_succeeded_barkpark, which runs only inside
+// succeed_job's transaction and so lands host in the same commit as that job
+// flipping to "succeeded", and adopt_barkpark, which creates no job at all. A
+// provision-kind job reaches "failed" only through fail_job (which rolls back
+// :conflict rather than un-succeed a succeeded job), claim_loop and
+// reap_stale_provision_jobs (both of which write only a row whose status is
+// "claimed"). No writer can un-succeed the job that set the host. A LATER
+// provision-kind job on an already-host-set row would need one of the three
+// creators, and all three refuse: go_live and do_fleet_provision_support run on
+// freshly registered host-nil rows, and POST /v1/barkparks/:id/retry is gated by
+// retryable_provision_state? in cloud/lib/barkpark_cloud/web/router.ex, which
+// requires either the latest kind-"provision" job to already be "failed" (the
+// state itself — circular) or a blank host. So the state is UNREACHABLE today
+// and the divergence is latent, not a live false-green.
+//
+// That makes this a comment fix, not a behaviour fix, and it must stay one: do
+// NOT drop the fourth conjunct here alone. If a future writer makes the state
+// reachable, amend decision 15 first, then both implementations together in one
+// round.
 func attentionStatus(b cloudclient.Barkpark) string {
 	host := strings.TrimSpace(b.Host)
 	removing := b.DeprovisionStatus == "pending" || b.DeprovisionStatus == "claimed"
@@ -117,6 +152,14 @@ func attentionStatus(b cloudclient.Barkpark) string {
 	// pre-contract producer, not evidence that the deploy queue is healthy.
 	case live && b.QueuedDeployAgeSecondsMissing:
 		return "degraded"
+	// dr-w15-s5: THE CAPABILITY RUNG, evaluated (and ranked) directly above
+	// deploys_failing. deploys_failing says >= 20% of PAST attempts failed; this
+	// says the NEXT attempt will be refused, by the very expression the box's
+	// deploy trigger branches on. Where both are true this one names the CAUSE,
+	// so it must win the switch as well as the sort. It fires only on a MEASURED
+	// false — an unmeasured box (nil) never reaches it.
+	case live && cannotDeploy(b):
+		return "cannot_deploy"
 	// dr-w10-s1: THE DEPLOY VERDICT. Above every capacity rung below it because
 	// a confirmed failure outranks a "may be heading somewhere bad" — see
 	// attentionRankOrder's block for the orchestrator's 2026-09-06 ruling. The
@@ -213,6 +256,76 @@ const queuedDeployStalledAfterSeconds = 300
 // the vitals fences keep: an alarm may only fire on a number it was given).
 func deployStalled(b cloudclient.Barkpark) bool {
 	return b.QueuedDeployAgeSeconds != nil && *b.QueuedDeployAgeSeconds >= queuedDeployStalledAfterSeconds
+}
+
+// --- the deploy capability (dr-w15-s5) --------------------------------------
+
+// cannotDeploy is the capability rung's predicate: the box OWNS sites (the
+// deploy_rate node says sites > 0) AND it has told us, on its latest beat, that
+// it cannot deploy them — site_deploy.configured is a real false (the instance's
+// DeployRunner.enabled?/0, literally what its trigger branches on to answer
+// feature_not_configured) or site_deploy.runner_alive is a real false (the
+// Runner is supervised unconditionally, so false means CRASHED).
+//
+// TWO GUARDS, BOTH HONESTY RULES ALREADY ON THIS SCREEN:
+//
+//   - nil NEVER fires. SiteDeploy nil (an older control plane) and a nil field
+//     (an agent or instance that predates the probe, a probe that 404ed) are
+//     UNMEASURED. An alarm may only fire on a verdict the box actually gave —
+//     reporting an un-upgraded box as refusing deploys is the fabricated false
+//     dr-w15-s5 exists to prevent.
+//   - no deploy surface NEVER fires (charter D149, deployNoSurface). The
+//     feature is off by default, so a box that hosts no sites honestly answers
+//     configured=false; alarming on it would put most of the fleet in a
+//     permanent rung nobody reads — the exact failure D69 ruled against for
+//     `unmetered`. A box with nothing to deploy has not been refused anything.
+func cannotDeploy(b cloudclient.Barkpark) bool {
+	c := b.SiteDeploy
+	if c == nil {
+		return false
+	}
+	if kind, _ := deployVerdict(b); kind == deployNoSurface {
+		return false
+	}
+	return (c.Configured != nil && !*c.Configured) || (c.RunnerAlive != nil && !*c.RunnerAlive)
+}
+
+// cannotDeployReason is the rung's WHY: which of the two measured refusals the
+// box gave, and how many sites are waiting on it. Both can be true at once.
+func cannotDeployReason(b cloudclient.Barkpark) string {
+	if !cannotDeploy(b) {
+		return ""
+	}
+	c := b.SiteDeploy
+	parts := make([]string, 0, 2)
+	if c.Configured != nil && !*c.Configured {
+		parts = append(parts, "site deploys not configured on the box")
+	}
+	if c.RunnerAlive != nil && !*c.RunnerAlive {
+		parts = append(parts, "deploy runner not running")
+	}
+	return fmt.Sprintf("%s (%d site(s))", strings.Join(parts, " · "), b.DeployRate.Sites)
+}
+
+// siteDeployRow is the -o json projection of the capability block, present only
+// when the control plane sent it. Each boolean keeps its three states: a JSON
+// null is UNMEASURED, never false.
+func siteDeployRow(b cloudclient.Barkpark) map[string]any {
+	c := b.SiteDeploy
+	boolOrNil := func(p *bool) any {
+		if p == nil {
+			return nil
+		}
+		return *p
+	}
+	row := map[string]any{
+		"configured":   boolOrNil(c.Configured),
+		"runner_alive": boolOrNil(c.RunnerAlive),
+	}
+	if c.ReportedAt != nil {
+		row["reported_at"] = *c.ReportedAt
+	}
+	return row
 }
 
 // --- the deploy verdict (dr-w10-s1) ------------------------------------------
@@ -459,6 +572,64 @@ func fillingReason(b cloudclient.Barkpark) string {
 // It is keyed on the PRESENCE of reported_at, not on its age: no measurement in
 // this wave justifies a staleness window, and inventing one would be exactly the
 // fabricated number the honesty law exists to refuse.
+// --- the suspension stamp (task-85c531c2adbf0dff) ----------------------------
+//
+// suspendedSinceMark renders `suspended_at` — the day the control plane stamped
+// the suspension — as a DAY, or as an explicit em dash when the plane did not
+// tell us. It is only ever called on a row the ladder already ranked
+// `suspended`, so the dash says one narrow thing: this box IS suspended and the
+// plane carries no stamp for it.
+//
+// WHY A DASH AND NOT A BLANK, AND NEVER A ZERO-VALUE DATE. The console shipped
+// the opposite of this and it was the whole defect cch-w54-bl existed to fix:
+// `suspendedCardBannerHtml` had no suspension day so it fell through to a
+// helper computed off `sub.current_period_end` — the NEXT renewal — and painted
+// a FUTURE date as a past-tense suspension day. Anything that LOOKS like a date
+// here is a claim about when billing cut the box off, so an unmeasured stamp
+// must look like nothing else on the line. `0001-01-01` (Go's zero time) and a
+// silently-dropped clause are both worse than a dash: the first is a lie with a
+// calendar behind it, the second is invisible.
+//
+// TWO HONEST POPULATIONS READ NIL, and neither is "suspended just now": a
+// control plane older than cch-w54-bl omits the key entirely, and any future
+// suspension path that forgets to stamp the column would too. NULL on a LIVE
+// box is a third thing this function never sees — `unsuspend_barkpark/1` and
+// the bulk resume clear suspended/suspended_reason/suspended_at together, so a
+// resumed box carries no stale stamp and never reaches the `suspended` arm.
+//
+// The DAY, not the instant: the producer sends `:utc_datetime_usec`
+// (`2026-09-01T12:34:56.000000Z`) and the operator question this answers is
+// "since when", to the day. A value that does not parse as RFC3339 is printed
+// verbatim rather than swallowed — an unexpected shape from the plane is a fact
+// worth seeing, not one worth hiding behind a dash that means something else.
+func suspendedSinceMark(b cloudclient.Barkpark) string {
+	if b.SuspendedAt == nil {
+		return "—"
+	}
+	raw := strings.TrimSpace(*b.SuspendedAt)
+	if raw == "" {
+		return "—"
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t.UTC().Format("2006-01-02")
+	}
+	return raw
+}
+
+// suspendedDetail is the DETAIL cell for a `suspended` row: the control plane's
+// own suspension reason, then the day it happened, joined by the separator this
+// screen already uses. The "since" clause is unconditional — a suspended box
+// with no stamp prints `since —`, because "we do not know when" is the answer
+// the operator needs and an omitted clause reads as "nobody asked".
+func suspendedDetail(b cloudclient.Barkpark) string {
+	since := "since " + suspendedSinceMark(b)
+	reason := strings.TrimSpace(b.SuspendedReason)
+	if reason == "" {
+		return since
+	}
+	return reason + " · " + since
+}
+
 func unmeteredMarker(b cloudclient.Barkpark) string {
 	p := b.Pressure
 	if p == nil || p.ReportedAt == nil || strings.TrimSpace(*p.ReportedAt) == "" {
@@ -742,25 +913,38 @@ func round1(n float64) float64 { return math.Round(n*10) / 10 }
 // unmeteredMarker), and boxDeployRateMarker keeps that ruling for the deploy
 // vital. A rung for "we could not read it" would put 6 of 8 boxes in a
 // permanent alarm nobody reads.
+//
+// dr-w15-s5 INSERTS `cannot_deploy` AT 5, directly above deploys_failing, by the
+// same ruling's logic carried one step further. Both are CONFIRMED, measured
+// deploy facts, not "may be heading somewhere bad" signals, so both sit above
+// every capacity rung. Between the two, the refusal is the stronger and the
+// more specific: deploys_failing is a RATE over the past window (>= 20% of
+// terminal attempts), cannot_deploy is the box's own statement that the NEXT
+// attempt will be refused — 100%, by the expression its trigger branches on —
+// and where both fire it names the cause the rate is only the symptom of. It
+// sits BELOW degraded because a box that is down or offline cannot be trusted
+// to have reported its capability freshly; the older, broader signal explains
+// more.
 var attentionRankOrder = []string{
 	"removal_failed",  // 1
 	"failed",          // 2
 	"suspended",       // 3
 	"degraded",        // 4
-	"deploys_failing", // 5 (dr-w10-s1 / D202 — a measured, customer-visible outcome)
-	"diverged",        // 6 (dr-w24-followup — off the release train, behind deploys_failing)
-	"strained",        // 7
-	"filling",         // 8
-	"unreported",      // 9
-	"deploy_stalled",  // 10 (jpf-w1 D7 — after the box-condition rungs, before behind)
-	"behind",          // 11
-	"removing",        // 12
-	"provisioning",    // 13
-	"ok",              // 14
+	"cannot_deploy",   // 5 (dr-w15-s5 — the box itself refuses the next deploy)
+	"deploys_failing", // 6 (dr-w10-s1 / D202 — a measured, customer-visible outcome)
+	"diverged",        // 7 (dr-w24-followup — off the release train, behind deploys_failing)
+	"strained",        // 8
+	"filling",         // 9
+	"unreported",      // 10
+	"deploy_stalled",  // 11 (jpf-w1 D7 — after the box-condition rungs, before behind)
+	"behind",          // 12
+	"removing",        // 13
+	"provisioning",    // 14
+	"ok",              // 15
 }
 
 // attentionRank is the sort key for a status label — its charter rank, 1 (most
-// urgent) through 14 (ok), matching the decision-32 fixture byte-for-byte. An
+// urgent) through 15 (ok), matching the decision-32 fixture byte-for-byte. An
 // unknown label ranks past the end (never panics) and so sorts last.
 func attentionRank(status string) int {
 	for i, s := range attentionRankOrder {
@@ -772,8 +956,8 @@ func attentionRank(status string) int {
 }
 
 // attentionBucket groups a status into the three charter buckets: attention
-// (ranks 1–11: removal_failed…behind), in-flight (12–13: removing/provisioning),
-// healthy (14: ok). The bucket strings are the decision-32 fixture's, verbatim —
+// (ranks 1–12: removal_failed…behind), in-flight (13–14: removing/provisioning),
+// healthy (15: ok). The bucket strings are the decision-32 fixture's, verbatim —
 // note "in-flight" is hyphenated there, so it is hyphenated here and in -o json.
 //
 // The boundary is stated as a MEMBERSHIP switch, not as a rank comparison, so a
@@ -787,7 +971,7 @@ func attentionBucket(status string) string {
 	case "ok":
 		return "healthy"
 	default:
-		// removal_failed, failed, suspended, degraded, deploys_failing,
+		// removal_failed, failed, suspended, degraded, cannot_deploy, deploys_failing,
 		// diverged, strained, filling, unreported, deploy_stalled, behind — and
 		// any unknown label defensively surfaces in the attention bucket rather
 		// than hiding.
@@ -814,11 +998,18 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 	case "failed":
 		reason = strings.TrimSpace(b.ProvisionError)
 	case "suspended":
-		reason = strings.TrimSpace(b.SuspendedReason)
+		reason = suspendedDetail(b)
+	case "degraded", "unreported":
+		// The EVIDENCE behind a non-up verdict (dr-w11-payload-divergence-close):
+		// the plane's own missed-check counter and alert latch. "" when neither
+		// says anything, so the label stands alone exactly as before.
+		reason = reachabilityEvidence(b)
 	case "strained":
 		reason = strainedReason(b)
 	case "filling":
 		reason = fillingReason(b)
+	case "cannot_deploy":
+		reason = cannotDeployReason(b)
 	case "deploys_failing":
 		reason = deploysFailingReason(b)
 	case "diverged":
@@ -838,11 +1029,37 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 	// FAILED blue is correctly `ok` and still needs the sentence). Joined with
 	// the same separator the strained reason uses for its swap clause, and every
 	// empty one drops out rather than leaving a dangling dot.
-	parts := make([]string, 0, 7)
-	for _, s := range []string{reason, queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
+	//
+	// darkMarker LEADS (dr-bl-w9-muscle-1): how long the box has been silent is
+	// the first thing an operator needs and the one thing the rung word cannot
+	// say — muscle-1's rung is removal_failed and its reason is a 200-character
+	// deprovision error, behind which a trailing "dark 50d" would be cut off.
+	parts := make([]string, 0, 8)
+	for _, s := range []string{darkMarker(b, status), reason, queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
 		if s != "" {
 			parts = append(parts, s)
 		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// reachabilityEvidence renders the two counters `health_status` is computed
+// from — the sweep's consecutive-missed-check count and the once-per-outage
+// alert latch — as EVIDENCE ONLY, the console's `missedChecksText` rule: a
+// number the control plane measured, never advice. Silence for an absent or
+// zero count (an older plane, or a box answering every check), never "0 missed
+// checks"; the latch speaks only when it is set.
+func reachabilityEvidence(b cloudclient.Barkpark) string {
+	parts := make([]string, 0, 2)
+	if n := b.UnreachableCount; n != nil && *n > 0 {
+		noun := "missed health checks"
+		if *n == 1 {
+			noun = "missed health check"
+		}
+		parts = append(parts, fmt.Sprintf("%d consecutive %s", *n, noun))
+	}
+	if b.UnreachableNotificationSent {
+		parts = append(parts, "unreachable alert sent for this outage")
 	}
 	return strings.Join(parts, " · ")
 }
@@ -858,8 +1075,20 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 // 60s PER-SLOT ring that re-arms EMPTY on every blue/green flip — a rung keyed
 // on it would flap to "unmeasured" on every deploy, and this fleet deploys
 // constantly. A detail line pays no flap cost: it changes no rank and no
-// bucket, it simply says the sentence D75 exists to make sayable — "this box
-// the table calls healthy is answering ~0.22 5xx/s" — on whatever row it rides.
+// bucket, it simply says the sentence D75 exists to make sayable — "the HTTP
+// router on this box the table calls healthy is answering ~0.22 5xx/s" — on
+// whatever row it rides.
+//
+// AND IT SAYS *ROUTER*, NEVER *BOX* (charter D132). The number counts
+// [:phoenix, :endpoint, :stop] events with a 5xx status, so it is a rate of
+// what the HTTP router ANSWERED and nothing wider. Two failure shapes never
+// reach it: a 5xx the BEAM never served (a Caddy 502/504 over an unresponsive
+// VM — exactly the total-outage case), and a LiveView killed by a pool timeout,
+// which emits no :stop event at all (7 of 2,673 attributed timeouts on blue).
+// So this marker may NOT be worded as box health in either direction: a rate
+// here is not "the box is sick", and — the dangerous half — its ABSENCE is not
+// "the box is well". That is why the zero and unmeasured states print no
+// sentence at all rather than a reassuring one.
 //
 // THE THREE STATES STAY THREE STATES, and none of them is another. The TABLE
 // marker below prints only the positive rate — exactly runawayMarker's policy:
@@ -873,7 +1102,15 @@ func err5xxMarker(b cloudclient.Barkpark) string {
 	if p == nil || p.Err5xxPerS == nil || *p.Err5xxPerS <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("answering %.2f 5xx/s (60s per-slot ring — the beat's own number, blind to 5xx the BEAM never served)", *p.Err5xxPerS)
+	// THE DENOMINATOR RIDES WITH THE RATE (charter D103): a 5xx rate cannot be
+	// graded without the volume it came out of, so when the beat measured the
+	// request rate it is printed beside the error rate — never divided into a
+	// share here, and never invented when the beat did not carry it.
+	volume := ""
+	if p.ReqPerS != nil && *p.ReqPerS >= 0 {
+		volume = fmt.Sprintf(" of %.2f req/s", *p.ReqPerS)
+	}
+	return fmt.Sprintf("HTTP router answering %.2f 5xx/s%s (60s per-slot ring — the beat's own number; a ROUTER rate, never a verdict on the box: blind to 5xx the BEAM never served, and to a LiveView killed mid-request, which emits no stop event to count)", *p.Err5xxPerS, volume)
 }
 
 // err5xxRow is the `-o json` projection of the same reading, and it is where
@@ -885,15 +1122,24 @@ func err5xxMarker(b cloudclient.Barkpark) string {
 //     never served.
 //   - state "answering", per_s <rate> — the beat's own number, never
 //     recomputed here.
+//
+// Every state also carries `req_per_s`, the rate's DENOMINATOR (charter D103),
+// under the same law: null when the beat did not measure it (nil, or the -1
+// sentinel), the beat's own number otherwise. It is never divided into a share
+// here — a script that wants one has both halves and owns the division.
 func err5xxRow(b cloudclient.Barkpark) map[string]any {
 	p := b.Pressure
+	var req any
+	if p != nil && p.ReqPerS != nil && *p.ReqPerS >= 0 {
+		req = *p.ReqPerS
+	}
 	if p == nil || p.Err5xxPerS == nil || *p.Err5xxPerS < 0 {
-		return map[string]any{"state": "unmeasured", "per_s": nil}
+		return map[string]any{"state": "unmeasured", "per_s": nil, "req_per_s": req}
 	}
 	if *p.Err5xxPerS == 0 {
-		return map[string]any{"state": "zero", "per_s": 0.0}
+		return map[string]any{"state": "zero", "per_s": 0.0, "req_per_s": req}
 	}
-	return map[string]any{"state": "answering", "per_s": *p.Err5xxPerS}
+	return map[string]any{"state": "answering", "per_s": *p.Err5xxPerS, "req_per_s": req}
 }
 
 // --- the slot-unit marker (dr-bl-w5-failed-slot-unit-is-invisible) -----------
@@ -930,7 +1176,16 @@ func slotUnitMarker(b cloudclient.Barkpark) string {
 		sites   []cloudclient.SlotUnit
 	)
 	for _, u := range p.SlotUnits {
-		if strings.Contains(u.Unit, slotUnitPrefix) {
+		// HasPrefix, not Contains: slotUnitPrefix is a PREFIX (its name and its
+		// own doc comment below both say so), and the two branches here are
+		// mutually exclusive — anything this call accepts is reported through
+		// slotUnitFailureClause and can never reach the site list. A `Contains`
+		// accepts the token ANYWHERE, so a spawned site unit that merely embeds
+		// it (`barkpark-site@barkpark-slot@blue__a.service` — systemd permits a
+		// further `@` inside an instance name) would be filed as half of the
+		// blue/green pair and its failure told as a slot failure. Pinned by
+		// TestASiteUnitEmbeddingTheSlotTokenIsStillASiteUnit.
+		if strings.HasPrefix(u.Unit, slotUnitPrefix) {
 			slots = append(slots, u)
 			switch {
 			case u.ActiveState == "active" && slotUnitRunning(u):
@@ -1163,7 +1418,9 @@ func rankBarkparks(list []cloudclient.Barkpark) []rankedBarkpark {
 // fields (isu-w5) ride here too: the running/latest release, when the verdict was
 // checked, the full autoupdate policy, and the channel. autoupdate_enabled is a
 // tri-state — true/false when the control plane reported it, absent entirely when
-// it didn't (an older CP) so a script never mistakes "unknown" for "off".
+// it didn't (an older CP) so a script never mistakes "unknown" for "off", and
+// update_checked_at follows the same rule (cch-w65-bl) so a script never mistakes
+// "no check was ever made" for a timestamp.
 func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 	row := map[string]any{
 		// dr-w21-s3: the SERVING COMMIT — the raw sha the box actually runs, the
@@ -1206,25 +1463,35 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		// box whose stored sha was blank when a sha first arrived (that commit may
 		// have been running long before the first beat carrying it reached us).
 		"git_commit_first_seen_at": r.BP.GitCommitFirstSeenAt,
+		// dr-bl-w9-muscle-1: the raw last beat, ALWAYS present (empty when the
+		// plane has none — git_commit's rule), and its reading: state plus a
+		// duration key that exists only when a number stands behind it
+		// (cloud_status_dark.go beatRow). Never a zero for "no beat on record".
+		"last_seen_at": r.BP.LastSeenAt,
+		"beat":         beatRow(r.BP),
 		// The 5xx tri-state (dr-w5-followup): nil-as-unmeasured, zero-as-zero,
 		// rate-as-itself — the json render where the three states stay three.
-		"err_5xx":                err5xxRow(r.BP),
-		"name":                   r.BP.Name,
-		"slug":                   r.BP.Slug,
-		"id":                     r.BP.ID,
-		"host":                   r.BP.Host,
-		"url":                    r.BP.URL,
-		"status":                 r.Status,
-		"bucket":                 r.Bucket,
-		"rank":                   r.Rank,
-		"detail":                 r.Detail,
-		"health_status":          r.BP.HealthStatus,
-		"agent_status":           r.BP.AgentStatus,
-		"update_state":           r.BP.UpdateState,
-		"suspended":              r.BP.Suspended,
+		"err_5xx":       err5xxRow(r.BP),
+		"name":          r.BP.Name,
+		"slug":          r.BP.Slug,
+		"id":            r.BP.ID,
+		"host":          r.BP.Host,
+		"url":           r.BP.URL,
+		"status":        r.Status,
+		"bucket":        r.Bucket,
+		"rank":          r.Rank,
+		"detail":        r.Detail,
+		"health_status": r.BP.HealthStatus,
+		"agent_status":  r.BP.AgentStatus,
+		"update_state":  r.BP.UpdateState,
+		"suspended":     r.BP.Suspended,
+		// `suspended_at` is NOT here: it is emitted conditionally below, because
+		// nil and a real stamp are different sentences and this map has no way to
+		// say the first one. See the block after the literal.
 		"update_running_release": r.BP.UpdateRunningRelease,
 		"update_latest_release":  r.BP.UpdateLatestRelease,
-		"update_checked_at":      r.BP.UpdateCheckedAt,
+		// update_checked_at is TRI-STATE below, with autoupdate_enabled and
+		// commit_distance — it is deliberately NOT in this always-present block.
 		// dr-w24-s2: the plane's own commit-distance measurement, beside the
 		// release-tag grade it contradicts. ancestry + checked_at are ALWAYS
 		// present (empty on a plane that predates the emission) so a script can
@@ -1235,11 +1502,81 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		"autoupdate_paused":          r.BP.AutoupdatePaused,
 		"pinned_release":             r.BP.PinnedRelease,
 		"channel":                    r.BP.Channel,
+		// dr-w11-payload-divergence-close: the launch placement/size pins and the
+		// alert latch. ALWAYS present, like `channel` beside them — an empty
+		// region/server_type is the plane's own "no pin recorded" (an adopted
+		// box), and `false` is the truthful reading of an absent latch.
+		"region":                        r.BP.Region,
+		"server_type":                   r.BP.ServerType,
+		"unreachable_notification_sent": r.BP.UnreachableNotificationSent,
+	}
+	// dr-w15-s5: the site-deploy capability block, only when the plane sent it
+	// (an older plane omits the key, and an absent key says so). Inside it a
+	// JSON null is UNMEASURED and never false — see siteDeployRow.
+	if r.BP.SiteDeploy != nil {
+		row["site_deploy"] = siteDeployRow(r.BP)
+	}
+	// Tri-state, the house idiom (dr-w11-payload-divergence-close): the
+	// consecutive-missed-check count behind `health_status`. Absent key = the
+	// plane predates it; a measured 0 is a real "answering every check".
+	if r.BP.UnreachableCount != nil {
+		row["unreachable_count"] = *r.BP.UnreachableCount
+	}
+	// Tri-state: the in-flight rollout marker. Present only while a rollout is
+	// landing — which is exactly when `update_state` above is a cached verdict
+	// from before the trigger.
+	if r.BP.AutoupdateTriggeredAt != nil {
+		if at := strings.TrimSpace(*r.BP.AutoupdateTriggeredAt); at != "" {
+			row["autoupdate_triggered_at"] = at
+		}
+	}
+	// The attached custom domain, only when one is attached.
+	if h := strings.TrimSpace(r.BP.CustomHost); h != "" {
+		row["custom_host"] = h
+	}
+	// p95 latency (charter D131: a VITAL, never a fence) — emitted only when the
+	// beat measured it. The agent's -1 "unwired" sentinel is not a latency.
+	if p := r.BP.Pressure; p != nil && p.P95Ms != nil && *p.P95Ms >= 0 {
+		row["p95_ms"] = *p.P95Ms
 	}
 	// Tri-state: only emit autoupdate_enabled when the CP actually reported it, so
 	// -o json is as honest as the table (nil = policy unknown, never a fake false).
 	if r.BP.AutoupdateEnabled != nil {
 		row["autoupdate_enabled"] = *r.BP.AutoupdateEnabled
+	}
+	// Tri-state, the SAME idiom, for the suspension stamp
+	// (task-85c531c2adbf0dff): emit `suspended_at` only when the control plane
+	// actually sent one. `"suspended": false` one block above is a real answer on
+	// every row, but the DAY is not — NULL means not suspended, and an older
+	// plane (pre-cch-w54-bl) omits the key entirely. Writing `""` would fuse
+	// those two with a real RFC3339 stamp into one shape a script cannot take
+	// apart, and — the dangerous half — it invites `time.Parse` on a value that
+	// measures nothing. An absent key forces the consumer to branch, exactly as
+	// update_checked_at and commit_distance argue directly above and below.
+	//
+	// An EMPTY STRING the plane actually sent is not a stamp either, so it is
+	// trimmed away for the same reason `refusal_phase` trims (PR #18566): there
+	// is no day to print. The pointer keeps the two distinguishable in the
+	// struct. The table's DETAIL cell says the same nil out loud as `since —`;
+	// this payload says it by silence, which is what a script wants.
+	if r.BP.SuspendedAt != nil {
+		if at := strings.TrimSpace(*r.BP.SuspendedAt); at != "" {
+			row["suspended_at"] = at
+		}
+	}
+	// Tri-state, the SAME idiom, three lines from its two neighbours
+	// (cch-w65-bl): emit update_checked_at only when the plane actually recorded
+	// a check. cch-w65-s2 made the column honest — the three unclocked rungs
+	// (:no_admin_token, :decrypt_failed, :not_live) return before a request is
+	// built, so the plane serves an explicit null rather than inventing a time.
+	// Emitting `"update_checked_at": ""` for that row put a never-checked box,
+	// an older control plane, and a parseable timestamp field into one shape:
+	// a script reading it cannot tell which, and an empty string invites
+	// time.Parse far more readily than an absent key does. An absent key forces
+	// the consumer to branch — exactly the argument commit_distance's *int
+	// already makes one comment below.
+	if r.BP.UpdateCheckedAt != nil {
+		row["update_checked_at"] = *r.BP.UpdateCheckedAt
 	}
 	// Tri-state, the same idiom: emit commit_distance only when the plane
 	// actually measured one. `"commit_distance": 0` for an ungradeable box would
@@ -1295,6 +1632,17 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 func updateCell(b cloudclient.Barkpark) string {
 	running := strings.TrimSpace(b.UpdateRunningRelease)
 	latest := strings.TrimSpace(b.UpdateLatestRelease)
+	// IN FLIGHT OUTRANKS THE CACHED VERDICT (dr-w11-payload-divergence-close),
+	// the console's own precedence: while autoupdate_triggered_at is stamped a
+	// rollout is landing, and update_state / running are readings from BEFORE
+	// the trigger. Printing "1.4.2 → 1.5.0" over it reads as "stuck behind" on
+	// a box that is mid-update.
+	if at := b.AutoupdateTriggeredAt; at != nil && strings.TrimSpace(*at) != "" {
+		if latest != "" {
+			return "updating → " + sanitizeCell(latest)
+		}
+		return "updating"
+	}
 	if running == "" && latest == "" {
 		return ""
 	}
@@ -1412,6 +1760,9 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 			},
 			"deploy":    fleetDeploy,
 			"barkparks": rows,
+			// dr-bl-w9-muscle-1: always present, with `checked` — an empty
+			// `groups` is only evidence when the reader can see what was looked at.
+			"duplicates": duplicatesJSON(findDuplicateRows(list)),
 		})
 		return exitOK
 	}
@@ -1427,6 +1778,7 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 	renderStatusBucket(out, "IN-FLIGHT", "in-flight", ranked)
 	renderStatusBucket(out, "HEALTHY", "healthy", ranked)
 	renderStatusDeploy(out, deploy, ranked)
+	renderDuplicates(out, findDuplicateRows(list))
 	return exitOK
 }
 

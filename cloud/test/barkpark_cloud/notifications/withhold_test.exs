@@ -478,8 +478,11 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
   ##    server would reject. The counterpart pin is in
   ##    `cloud/priv/static/__app.test.mjs` ("pinned by EQUALITY").
 
-  test "the delivery status vocabulary is EXACTLY these four words" do
-    assert Delivery.statuses() == ~w(pending sent failed suppressed)
+  # ccpca-bl added the FIFTH word, `unconfirmed`, and this pin is exactly why
+  # that was not a one-line change: it reds in both trees at once, and the
+  # console counterpart had to move in the same PR.
+  test "the delivery status vocabulary is EXACTLY these five words" do
+    assert Delivery.statuses() == ~w(pending sent failed suppressed unconfirmed)
   end
 
   test "a suppressed row inserts, reads back team-scoped, and answers ?status=suppressed" do
@@ -732,11 +735,20 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
   # their own filed backlog task, `cch-w32-bl-receipt-loss-branches-have-no-trace`,
   # which needs a trace of its own class — this row does not silently duplicate it.
   @receipt_loss %{
-    # cch-w52-s3 widened this to /6 (the carrier the send actually used rides in
-    # as the sixth argument). The BRANCH is unchanged — same `{:error, changeset}`
-    # arm, same class, same owner — so this row is re-keyed rather than re-judged.
-    {:record_delivery, 6, :nil_shape} =>
-      "record_delivery/6's `{:error, changeset}` arm: the email send returned, " <>
+    # RE-KEYED TWICE, RE-JUDGED NEVER. cch-w52-s3 widened this to /6 (the carrier
+    # the send actually used rides in as the sixth argument); dr-w34 widened it
+    # to /7 (the rendered `%Swoosh.Email{}` the receipt fingerprints, defaulted to
+    # `nil`). The BRANCH is unchanged through both — same `{:error, changeset}`
+    # arm, same class, same owner.
+    #
+    # The key is the CLAUSE HEAD's arity, which is 7 even though the default
+    # argument also makes `record_delivery/6` callable: the census reads the
+    # source, not the export list. So the /6 row is DELETED rather than kept
+    # beside this one — a named branch the census can no longer derive is a row
+    # that would red this test in the other direction, and this map is an
+    # adjudication of branches, not a changelog of signatures.
+    {:record_delivery, 7, :nil_shape} =>
+      "record_delivery/7's `{:error, changeset}` arm: the email send returned, " <>
         "the row did not write. Logger-only; owned by cch-w32-bl-receipt-loss-*.",
     {:log_chat_delivery, 6, :nil_shape} =>
       "log_chat_delivery/6's `{:error, changeset}` arm: the chat POST returned, " <>
@@ -941,9 +953,26 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
     assert %{recipient: ["can't be blank"]} = errors_on(cs)
 
     # W2 — an empty team: the fan-out runs zero times and NOTHING is written.
+    #
+    # cch-w52-bl: was `:test`. That event has been deleted from `@always_send`
+    # as producerless, and this assertion would then have stayed GREEN for the
+    # WRONG reason — `should_send?/2` refusing an unknown event writes no rows
+    # either, so the test would prove nothing about the empty fan-out. It is
+    # `:trial_expiring` now: allowlisted, `alerts_enabled` on, `should_send?/2`
+    # SAYS YES, and the empty-recipient loop is the only thing standing between
+    # that yes and a row.
     team = empty_team()
-    assert :ok = Notifications.dispatch_event(team, :test, %{})
+    assert :ok = Notifications.dispatch_event(team, :trial_expiring, %{days: 3, name: "prod"})
     assert Notifications.list_deliveries(team, limit: 50) == []
+
+    # POSITIVE CONTROL for the line above, because "zero rows" is what a REFUSAL
+    # looks like too and the assertion alone cannot tell the two apart. The same
+    # event, the same call, a team that HAS a member: rows appear. So the empty
+    # team's zero is attributable to the empty fan-out — W2 — and not to
+    # `should_send?/2` having quietly said no.
+    {peer, _emails} = team_with_members(1)
+    assert :ok = Notifications.dispatch_event(peer, :trial_expiring, %{days: 3, name: "prod"})
+    assert length(Notifications.list_deliveries(peer, limit: 50)) == 1
 
     # W6 — the fleet digest with no reachable recipient. It writes no row, and
     # it now says so THROUGH THE FUNNEL: `deliver_fleet_digest/1` calls

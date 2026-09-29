@@ -376,15 +376,9 @@ func finishLoginConnect(out *writer, cfg *Config) int {
 // server, we do NOT silently re-point it — we report the barkpark and how to
 // connect, leaving the active server untouched (exit 0). When the active server IS
 // this barkpark, it's a reconnect: we fall through and re-save with a FRESH admin
-// token (GetCredentials always mints/returns the current one).
+// token (GetCredentialsForTeam always mints/returns the current one).
 func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient.Barkpark) int {
 	target := fleetTarget(only.URL, only.Host)
-	if only.Team != nil && strings.EqualFold(strings.TrimSpace(only.Team.Role), "member") {
-		out.outf("")
-		out.outf("You're logged in. %q belongs to %s, where your member role cannot retrieve its admin token.", only.Name, fleetTeamName(only))
-		out.outf("Ask a team owner or admin for access, or connect with your own token:  bp setup --target cloud")
-		return exitOK
-	}
 
 	if active, ok := activeSavedServer(); ok && strings.TrimSpace(active.Server) != "" {
 		if normalizeServerURL(active.Server) != normalizeServerURL(target) {
@@ -397,18 +391,40 @@ func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient
 		// Same server → a reconnect: fall through to fetch a fresh token + re-save.
 	}
 
+	// AUTHORITY IS THE SERVER'S. bp does not pre-judge the caller's role here (it
+	// used to, on a local "not member" test that failed open on a nil Team and on
+	// an empty Role — see fleet_credential_refusal.go). Every role asks; the
+	// answer decides, and the three answers are told apart by the TYPED refusal,
+	// not by matching prose.
 	creds, gerr := client.GetCredentialsForTeam(cloudCtx(), only.ID, fleetTeamID(only))
 	if gerr != nil {
-		if strings.Contains(gerr.Error(), "no_admin_token") {
+		switch outcome, refusal := classifyFleetCredentialError(gerr); outcome {
+		case fleetCredNoAdminToken:
 			// No stored admin token (an older / ip-only provision): fall back to the
 			// manual-paste path — never a dead end.
 			out.outf("")
 			out.outf("%q has no stored admin token (an older or ip-only provision).", only.Name)
 			out.outf("Connect by pasting an admin token:  bp setup --target cloud")
 			return exitOK
+		case fleetCredForbidden:
+			// The server REFUSED this account. Say what the server said, and never
+			// restate it as a role bp inferred.
+			out.outf("")
+			out.outf("You're logged in. %s", fleetRefusalSentence(only, refusal))
+			if req := fleetRefusalRequirement(refusal); req != "" {
+				out.outf("%s", req)
+			}
+			if hint := fleetRefusalCLIHint(refusal); hint != "" {
+				out.outf("%s", hint)
+			}
+			out.outf("Ask a team owner or admin for access, or connect with your own token:  bp setup --target cloud")
+			return exitOK
+		default:
+			// Nothing was decided about authority: a blip, and it must not read as
+			// a refusal.
+			out.errf("logged in, but couldn't fetch credentials for %q (%v) — try `bp setup --target cloud`.", only.Name, gerr)
+			return exitOK
 		}
-		out.errf("logged in, but couldn't fetch credentials for %q (%v) — try `bp setup --target cloud`.", only.Name, gerr)
-		return exitOK
 	}
 
 	connectTarget := fleetTarget(creds.URL, creds.Host)
@@ -778,9 +794,39 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 		"health_status": b.HealthStatus,
 		"agent_status":  b.AgentStatus,
 		"last_seen_at":  b.LastSeenAt,
-		"version":       b.Version,
-		"git_commit":    b.GitCommit,
-		"team_id":       b.TeamID,
+		// The registry `version` field is deliberately NOT here under any name,
+		// and this is the SECOND projection of the same struct to say so —
+		// rankedBarkparkRow (cloud_status_cmd.go) wrote the decision down first
+		// and this row contradicted it for the whole time both existed. It is
+		// the AGENT BINARY version (internal/agent/report.go `const Version =
+		// "0.1.0"`), a compile-time constant reading 0.1.0 fleet-wide while the
+		// boxes serve 0.2.25.164 … 0.2.25.2628, so `bp barkparks -o json` told
+		// every script the fleet was version-homogeneous. A number that can
+		// never move, sitting beside one that does (git_commit, right below),
+		// reads as freshness.
+		//
+		// It does NOT ship as `agent_version` either, which is the name the
+		// first decision reserved for it: `agent_version` is a REAL field on
+		// the beat (internal/agent/report.go, json tag "agent_version",
+		// resolved from the -X build stamp, else the embedded VCS revision,
+		// else the explicit AgentVersionUnknown marker — never ""), and the
+		// control plane does not surface it on GET /v1/barkparks (no
+		// `agent_version` anywhere in cloud/, and cloudclient.Barkpark has no
+		// such field to project). Emitting the 0.1.0 constant under that name
+		// would put the honest name on the dishonest number. When the plane
+		// starts serving agent_version, decode it and emit it under its own
+		// name, ALWAYS present and never "" — the honesty rule the agent side
+		// already keeps.
+		//
+		// The WIRE key is untouched: internal/agent/report.go still marshals
+		// Version under the json tag "version" and the plane still stores it
+		// (cloud/lib/barkpark_cloud/registry/barkpark.ex `field :version`).
+		// This is a PROJECTION change, never a payload change.
+		//
+		// TestCloudAndStatusRowsAgreeOnVersionKey (cloud12_cmd_test.go) reds if
+		// the two projections diverge on this key again.
+		"git_commit": b.GitCommit,
+		"team_id":    b.TeamID,
 	}
 	if b.Team != nil {
 		row["team"] = map[string]any{

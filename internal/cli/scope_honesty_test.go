@@ -159,7 +159,7 @@ func TestRefusalNamesTheDeclaredReason(t *testing.T) {
 	if !ok || d.Reason == "" {
 		t.Fatalf("task.ls has no declared reason (ok=%v) — the manifest-wide enumeration should have caught this", ok)
 	}
-	msg := refuseUnrepresentableScope(cmd, scopeCtx("gyldendal", "books", true))
+	msg := refuseUnrepresentableScope(cmd, scopeCtx("gyldendal", "books", true), nil)
 	if !strings.Contains(msg, d.Reason) {
 		t.Errorf("refusal does not carry the declared reason %q:\n%s", d.Reason, msg)
 	}

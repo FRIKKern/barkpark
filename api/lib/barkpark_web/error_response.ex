@@ -32,11 +32,12 @@ defmodule BarkparkWeb.ErrorResponse do
   human message while keeping the canonical code/status (resource-specific text).
   """
   # @canonical capability:error-response-emit aka:error_json,enveloped,halt_json,parse_error_json doc:docs/api-v1.md
-  @spec emit(Plug.Conn.t(), term(), String.t() | nil) :: Plug.Conn.t()
-  def emit(conn, reason, message_override \\ nil) do
+  @spec emit(Plug.Conn.t(), term(), String.t() | nil, String.t() | nil) :: Plug.Conn.t()
+  def emit(conn, reason, message_override \\ nil, hint_override \\ nil) do
     reason
     |> Errors.to_envelope(conn)
     |> maybe_override_message(message_override)
+    |> maybe_override_hint(hint_override)
     |> write(conn)
   end
 
@@ -45,13 +46,62 @@ defmodule BarkparkWeb.ErrorResponse do
   auth plug's bespoke "invalid ingest token" message). Still routed through
   `Content.Errors.stamp/2`, so the additive `hint` and the `request_id` are put
   on by the one owner. `status` may be an atom (`:unauthorized`) or integer.
+
+  The optional 6th argument is a ROUTE-DERIVED hint (task-57081836b628df35).
+  Without it this function built `%{code, message, status}` (+ `:details`) and
+  NEVER a `:hint`, so `Errors.put_hint/1`'s "an arm that spoke for itself wins"
+  clause could not match for ANY external emitter — the code-keyed default
+  always applied. For a code whose remedy depends on the ROUTE rather than the
+  code (`"unauthorized"`: eleven emitters, each wanting a different credential)
+  that default can only ever be right for one of them. A plug that knows which
+  credential its own route accepts passes it here; everything else keeps the
+  (now credential-agnostic) table default. This mirrors `emit/4`'s existing
+  `hint_override`, which the reason-tuple path has always had.
   """
-  @spec emit_custom(Plug.Conn.t(), atom() | integer(), String.t(), String.t(), map()) ::
-          Plug.Conn.t()
-  def emit_custom(conn, status, code, message, details \\ %{})
-      when is_binary(code) and is_binary(message) and is_map(details) do
+  @spec emit_custom(
+          Plug.Conn.t(),
+          atom() | integer(),
+          String.t(),
+          String.t(),
+          map(),
+          String.t() | nil
+        ) :: Plug.Conn.t()
+  def emit_custom(conn, status, code, message, details \\ %{}, hint \\ nil)
+      when is_binary(code) and is_binary(message) and is_map(details) and
+             (is_nil(hint) or is_binary(hint)) do
     %{code: code, message: message, status: status}
     |> maybe_put_details(details)
+    |> maybe_override_hint(hint)
+    |> Errors.stamp(conn)
+    |> write(conn)
+  end
+
+  @doc """
+  Emit an envelope the caller has ALREADY built as a flat map of top-level
+  fields — `%{code: …, message: …}` plus whatever endpoint-specific siblings
+  that response's consumers already read (`:errors`, `:op`, `:fields`,
+  `:retry_after`, `:reason`, …).
+
+  This is `emit_custom/5`'s shape-preserving twin, and it exists because the
+  ~138 hand-built `json(%{error: %{code: …}})` sites this module was written to
+  retire (task-8737e2d7ff1884e0) are not uniformly `{code, message}`: a minority
+  carry extra keys AT THE TOP LEVEL of `error`, and a couple carry no `message`
+  at all. Routing those through `emit_custom/5`'s `details` map would move
+  `error.errors` to `error.details.errors` — a wire-shape change to a response
+  that is already correct — so the sweep would have had to choose between
+  breaking consumers and leaving the fork open. It does neither: the caller's
+  map is passed through verbatim and only `hint` + `request_id` are ADDED by
+  `Content.Errors.stamp/2`, the one owner.
+
+  Use `emit/4` when a `Content.Errors` reason tuple already names the
+  code/message/status, `emit_custom/5` for a bespoke `{code, message}` (+
+  `details`), and this only when the response carries top-level siblings.
+  """
+  @spec emit_fields(Plug.Conn.t(), atom() | integer(), map()) :: Plug.Conn.t()
+  def emit_fields(conn, status, fields)
+      when is_map(fields) and is_map_key(fields, :code) do
+    fields
+    |> Map.put(:status, status)
     |> Errors.stamp(conn)
     |> write(conn)
   end
@@ -65,6 +115,14 @@ defmodule BarkparkWeb.ErrorResponse do
 
   defp maybe_override_message(env, nil), do: env
   defp maybe_override_message(env, message), do: Map.put(env, :message, message)
+
+  # The code-keyed default hint is put on by `Errors.stamp/2`; a caller that
+  # knows the SPECIFIC remedy (which tier to mint, which flag to pass) replaces
+  # it here so the envelope never names the wrong tier for a denial it did not
+  # make (the public-read perspective clamp used to hint "write/admin" while a
+  # read-tier token was the actual answer — gyldendal friction 68).
+  defp maybe_override_hint(env, nil), do: env
+  defp maybe_override_hint(env, hint), do: Map.put(env, :hint, hint)
 
   defp maybe_put_details(env, details) when details == %{}, do: env
   defp maybe_put_details(env, details), do: Map.put(env, :details, details)

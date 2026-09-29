@@ -10,7 +10,7 @@
   "license": "Apache-2.0",
   "packageManager": "pnpm@9.12.0",
   "engines": {
-    "node": ">=20",
+    "node": ">=22",
     "pnpm": ">=9"
   },
   "scripts": {
@@ -21,6 +21,7 @@
     "size": "turbo run size",
     "changeset": "changeset",
     "version-packages": "changeset version",
+    "selftest:changesets": "node scripts/changelog-batched.selftest.mjs",
     "release": "turbo run build && changeset publish"
   },
   "devDependencies": {
@@ -54,5 +55,8 @@
       "brace-expansion@>=5.0.0 <5.0.6": ">=5.0.6",
       "js-yaml@>=4.0.0 <4.2.0": ">=4.2.0 <5.0.0"
     }
+  },
+  "barkpark": {
+    "vitestConfigNodeFloor": 22
   }
 }

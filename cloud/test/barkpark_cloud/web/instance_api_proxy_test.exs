@@ -515,7 +515,8 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
   # (charter D673). Isolation withholds the platform's maintenance attention, so
   # a `:mutate` relayed with the stored admin credential is refused BEFORE the
   # ciphertext is decrypted; a `:read` grants nothing durable and still relays.
-  # The caller is a plain "member" — the actually-reachable, non-admin path.
+  # The :read arm is driven by a plain "member" (the actually-reachable non-admin
+  # path); every :mutate arm is driven by an "admin" since task-8ccc571ab4d4e713.
   describe "a SUSPENDED box — :mutate is refused, :read still relays" do
     test "a :read still relays and still answers 200 (the grant is NOT withdrawn)" do
       {user, team} = user_with_team("member")
@@ -532,7 +533,11 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
     end
 
     test "a :mutate (create) → 409 suspended with ZERO upstream requests" do
-      {user, team} = user_with_team("member")
+      # task-8ccc571ab4d4e713 (ARM B EXTENDED): `create` now gates at team ADMIN
+      # in front of the funnel, so a plain member is refused 403 there and never
+      # reaches the suspension arm this test is about. The member-side 403 has
+      # its own test in instance_api_proxy_admin_verbs_test.exs.
+      {user, team} = user_with_team("admin")
       bp = suspended_barkpark(team)
       # Programmed to SUCCEED: if the guard is missing this relays a 201 and the
       # recorded request carries the plaintext admin token.
@@ -550,7 +555,19 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       assert conn.status == 409
       assert json_body(conn) == %{"ok" => false, "error" => %{"code" => "suspended"}}
       refute conn.resp_body =~ @instance_admin_token
-      assert Accounts.list_audit_events(team) == []
+
+      # cch-w59-bl CHANGED WHAT THIS LINE MEANS, so it is restated rather than
+      # deleted. It used to read `list_audit_events(team) == []` — "a refusal
+      # writes nothing", which WAS the shipped behaviour and was the defect: an
+      # operator could not tell a member probing a suspended box from an idle
+      # account. The invariant that actually mattered here is that the refused
+      # MUTATION is never recorded as having happened; the refusal itself now
+      # is. Both halves are asserted.
+      assert [row] = Accounts.list_audit_events(team)
+      assert row.action == "barkpark.suspended_refused"
+      assert row.target_id == bp.id
+      assert row.metadata["route"] == "instance-api:webhook.create"
+      refute row.action in ["webhook.created", "webhook.updated", "webhook.deleted"]
     end
 
     test "every other :mutate verb is refused the same way, upstream untouched" do
@@ -585,7 +602,21 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       end
 
       assert Fake.requests() == []
-      assert Accounts.list_audit_events(team) == []
+
+      # cch-w59-bl — see the restatement above: five refused mutations now leave
+      # five REFUSAL rows and still zero mutation rows. The `route` field is what
+      # makes one verb enough for all five.
+      rows = Accounts.list_audit_events(team)
+      assert length(rows) == 5
+      assert Enum.uniq(Enum.map(rows, & &1.action)) == ["barkpark.suspended_refused"]
+
+      assert rows |> Enum.map(& &1.metadata["route"]) |> Enum.sort() == [
+               "instance-api:webhook.delete",
+               "instance-api:webhook.replay",
+               "instance-api:webhook.rotate",
+               "instance-api:webhook.test_send",
+               "instance-api:webhook.update"
+             ]
     end
 
     # The sweep above enumerates its verbs BY HAND, which is only as complete as

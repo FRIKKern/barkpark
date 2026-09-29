@@ -6,7 +6,7 @@ defmodule Barkpark.Content.FieldBlockOpsTest do
   projected body shape `%{"blocks", "html"}`; the document-level
   `content["blocks"]` partition is never touched.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.DraftId

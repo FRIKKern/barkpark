@@ -1,0 +1,167 @@
+{
+  "what": "spd-scrim-guard-real-but-wrong-selector-untested \u2014 the wrong-but-real mutation record.",
+  "why": "The non-vacuity guard was mutation-proven only against a selector matching NOTHING. These runs test the other direction: SCRIM_SELECTOR replaced with the b29 scrim SUPPRESSOR copied verbatim from root.html.heex \u2014 a real, same-host, same-pseudo selector one qualifier away from the constant it replaced.",
+  "instrument": "scripts/studio-desk-measure.mjs",
+  "invocation": "node scripts/studio-desk-measure.mjs --no-round-trip --positive-control --out <path>",
+  "host_note": "Deployed guerrilla, READ-ONLY. The script has no local-server mode: it reads the guerrilla https base + admin token from ~/.config/barkpark/config.json and reads the served sha over ssh. The box was under load (~3.7) during these runs; the instrument measures GEOMETRY, not latency, so load does not move any figure quoted here.",
+  "sabotage_selector": ".editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after",
+  "sabotage_selector_source": "api/lib/barkpark_web/layouts/root.html.heex \u2014 the b29 scrim suppressor",
+  "runs": [
+    {
+      "run": "BEFORE-FIX baseline (clean selector)",
+      "exit_code": 0,
+      "served_sha": "4889e3321f2f143eb3bd89d8c3b21ac49880da0e",
+      "slot": [
+        "green"
+      ],
+      "artifact_bytes": 795921,
+      "rows": 54,
+      "scrim_selector_used": ".editor-with-preview:has(.bp-doc-sidebar.is-open)::after { pointer-events: auto !important; }",
+      "guard_applies_in_rows": 0,
+      "guard_passed_in_rows": 0,
+      "scrim_renders_in_rows": 0,
+      "vacuous": true,
+      "zero_cause": "DESK-FIXED (proven). The positive control forced a scrim to render in this same run and the guard FIRED on it, so the machinery demonstrably works. Zero real rows therefore means the deployed desk rendered no scrim \u2014 which is this wave's intended outcome, not a broken check.",
+      "positive_control": {
+        "ran": true,
+        "scrim_rendered": true,
+        "guard_applies": true,
+        "guard_passed": true,
+        "natural_occluded_px_by_line": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "forced_occluded_px_by_line": [
+          580,
+          580,
+          580,
+          580,
+          580
+        ],
+        "dimmed_content_px": 580
+      },
+      "pointer_events_forced_census": {
+        "default natural=auto forced=auto": 6,
+        "default natural=none forced=auto": 21,
+        "user-opened natural=auto forced=auto": 9,
+        "user-opened natural=none forced=auto": 18
+      }
+    },
+    {
+      "run": "BEFORE-FIX sabotage (wrong-but-real selector) \u2014 NOT CAUGHT",
+      "exit_code": 0,
+      "served_sha": "4889e3321f2f143eb3bd89d8c3b21ac49880da0e",
+      "slot": [
+        "green"
+      ],
+      "artifact_bytes": 798522,
+      "rows": 54,
+      "scrim_selector_used": ".editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after { pointer-events: auto !important; }",
+      "guard_applies_in_rows": 0,
+      "guard_passed_in_rows": 0,
+      "scrim_renders_in_rows": 0,
+      "vacuous": true,
+      "zero_cause": "DESK-FIXED (proven). The positive control forced a scrim to render in this same run and the guard FIRED on it, so the machinery demonstrably works. Zero real rows therefore means the deployed desk rendered no scrim \u2014 which is this wave's intended outcome, not a broken check.",
+      "positive_control": {
+        "ran": true,
+        "scrim_rendered": true,
+        "guard_applies": true,
+        "guard_passed": true,
+        "natural_occluded_px_by_line": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "forced_occluded_px_by_line": [
+          580,
+          580,
+          580,
+          580,
+          580
+        ],
+        "dimmed_content_px": 580
+      },
+      "pointer_events_forced_census": {
+        "default natural=auto forced=auto": 6,
+        "default natural=none forced=auto": 21,
+        "user-opened natural=auto forced=auto": 9,
+        "user-opened natural=none forced=none": 18
+      }
+    },
+    {
+      "run": "AFTER-FIX baseline (clean selector)",
+      "exit_code": 0,
+      "served_sha": "4f6f63a92a3e1b0b68c60ec683163ca0451fb014",
+      "slot": [
+        "blue"
+      ],
+      "artifact_bytes": 923980,
+      "rows": 54,
+      "scrim_selector_used": ".editor-with-preview:has(.bp-doc-sidebar.is-open)::after { pointer-events: auto !important; }",
+      "guard_applies_in_rows": 0,
+      "guard_passed_in_rows": 0,
+      "scrim_renders_in_rows": 0,
+      "vacuous": true,
+      "zero_cause": "DESK-FIXED (proven). The positive control forced a scrim to render in this same run and the guard FIRED on it, so the machinery demonstrably works. Zero real rows therefore means the deployed desk rendered no scrim \u2014 which is this wave's intended outcome, not a broken check.",
+      "positive_control": {
+        "ran": true,
+        "scrim_rendered": true,
+        "guard_applies": true,
+        "guard_passed": true,
+        "natural_occluded_px_by_line": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "forced_occluded_px_by_line": [
+          580,
+          580,
+          580,
+          580,
+          580
+        ],
+        "dimmed_content_px": 580
+      },
+      "pointer_events_forced_census": {
+        "default natural=auto forced=auto": 6,
+        "default natural=none forced=auto": 21,
+        "user-opened natural=auto forced=auto": 9,
+        "user-opened natural=none forced=auto": 18
+      }
+    },
+    {
+      "run": "AFTER-FIX sabotage (wrong-but-real selector) \u2014 CAUGHT",
+      "exit_code": 1,
+      "artifact_bytes": 0,
+      "stdout_bytes": 0,
+      "artifact_written": false,
+      "stderr_headline": "SCRIM SELECTOR IDENTITY FAILED at viewport 1440px, state \"default\", face native \u2014 verdict absent.",
+      "stderr_reason": "8 readable stylesheet(s) were scanned and NOT ONE rule has the selector .editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after."
+    }
+  ],
+  "verdict": "BEFORE THE FIX THE GUARD DID NOT CATCH IT. The sabotaged run exited 0, wrote a 798,522-byte 54-row artifact, and the positive control still reported guard_applies/guard_passed true with byte-identical figures to the clean baseline \u2014 while restore.pointer_events_forced shows the injection silently MISSED the pseudo in 18 of 54 rows (auto in the baseline, none in the sabotage). The guard certifies EFFECT, never IDENTITY. AFTER THE FIX the same mutation dies: exit 1, zero bytes of stdout, no artifact, naming the drifted selector.",
+  "coverage": {
+    "hit_tested_rows": 54,
+    "default_state_rows": 27,
+    "default_state_rows_where_guard_applies": 0,
+    "rows_where_guard_applies": 0,
+    "statement": "The guard applied in 0 of 54 hit-tested rows and in 0 of 27 default-state rows. A default row has no scrim to detect, so the guard is structurally incapable of covering it \u2014 the default half of the matrix is uncovered BY CONSTRUCTION. Whatever this run's pass count is, it does NOT validate D136(ii)'s three failing Georgia cells, which are default-state cells.",
+    "history": "The task that added this block quotes an earlier sweep at 21 of 54 rows covered and ZERO default-state rows. On served sha 4889e332 (2026-09-10) the measured figure was 0 of 54: D170/D175 suppressed the scrim in every remaining bucket, so no real row renders one at all and only --positive-control can exercise the guard. Both numbers make the same point \u2014 the covered fraction is a MINORITY of the matrix and never includes a default row."
+  },
+  "element_occluder_hole": {
+    "status": "formally accepted, with a census instead of silence",
+    "corrected_premise": "the instrument's comment claimed no pointer-events:none ELEMENT occluder had been written yet; root.html.heex ships .bp-ae-toast (position:fixed, z-index:200, bottom 24px centred, over the column's lowest scanline), .presence-tooltip and .presence-dots",
+    "census_in_this_run": {
+      "elements_scanned": 4267,
+      "count": 0,
+      "truncated": false
+    }
+  }
+}

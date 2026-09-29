@@ -3,7 +3,7 @@ defmodule Barkpark.Content.SchemaDeskBlockTest do
   Gyldendal parity stage E3.1 — the schema-level `desk` block (`orderings`)
   and the map-valued desk node filter.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.SchemaDefinition

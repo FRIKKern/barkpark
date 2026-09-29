@@ -35,12 +35,14 @@ defmodule Barkpark.Content.Papers do
     DraftId,
     Envelope,
     Labels,
+    PaperTaskResolver,
     SchemaDefinition
   }
 
   alias Barkpark.Content.Papers.{BlockOps, Hollow}
   alias Barkpark.PortableDoc.{BodyWalk, HtmlSanitizer, Projection, Render, Synthesis}
   alias Barkpark.Repo
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   @paper_type "paper"
   @paper_default_dataset "production"
@@ -122,9 +124,17 @@ defmodule Barkpark.Content.Papers do
   end
 
   @doc "Return one visibility-safe canonical source for any historical Paper shape."
-  def reader_source(paper, dataset, scope_opts \\ [])
+  def reader_source(paper, dataset, scope_opts \\ []) do
+    case classify_reader_source(paper, dataset, scope_opts) do
+      {:blocks, blocks, _provenance_render} -> {:blocks, blocks}
+      other -> other
+    end
+  end
 
-  def reader_source(%Document{} = paper, dataset, scope_opts) do
+  # `reader_source/3`'s body. A `:blocks` verdict also carries the render
+  # `cache_provenance/4` already paid for (or nil when it rendered nothing),
+  # so `reader_html/3` can serve it instead of rendering the same blocks twice.
+  defp classify_reader_source(%Document{} = paper, dataset, scope_opts) do
     scope_opts = reader_schema_scope(paper, scope_opts || [])
     had_structured_source? = is_list(Projection.read_blocks(paper.content || %{}))
 
@@ -164,7 +174,64 @@ defmodule Barkpark.Content.Papers do
     end
   end
 
-  def reader_source(_, _dataset, _scope_opts), do: {:error, :not_found}
+  defp classify_reader_source(_, _dataset, _scope_opts), do: {:error, :not_found}
+
+  @doc """
+  The reader HTML for `paper`, rendered from its blocks on this read.
+
+  A paper with blocks is rendered through `Render.render_blocks/2`; the stored
+  `content["body_html"]` cache is never served for it. A legacy paper with no
+  blocks has nothing to render from, so its sanitized `body_html` is the
+  source. Every refusal from `reader_source/3` (`:redacted_source`,
+  `:semantic_empty`, `:ambiguous_source`, `:invalid_blocks`, `:not_found`)
+  passes through unchanged, so a caller cannot fall back to the cache.
+
+  Reference and codelist labels resolve in `scope_opts` — the caller's scope,
+  not the paper's — so a share link keeps resolving inside the link scope.
+  """
+  @spec reader_html(term(), String.t(), keyword()) :: {:ok, String.t()} | {:error, atom()}
+  def reader_html(paper, dataset, scope_opts \\ []) do
+    case classify_reader_source(paper, dataset, scope_opts) do
+      {:blocks, blocks, provenance_render} ->
+        {:ok, reader_render(paper, blocks, dataset, scope_opts, provenance_render)}
+
+      {:html, sanitized} ->
+        {:ok, sanitized}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Serve the render `cache_provenance/4` already made when it is the render
+  # this read would make. Both use `Labels.paper_render_opts/3` with the same
+  # dataset and style; they differ only in the scope the ref resolver runs in —
+  # provenance binds the PAPER's scope, the reader the CALLER's (a share link
+  # resolves inside the link scope). That scope reaches the bytes only through
+  # a resolver-dependent block, so the earlier render is reused when no block
+  # resolves an external referent, or when the two scopes are the same list.
+  defp reader_render(paper, blocks, dataset, scope_opts, provenance_render) do
+    reusable? =
+      is_binary(provenance_render) and
+        (not resolver_dependent?(blocks) or
+           resolver_scope(scope_opts) == resolver_scope(provenance_scope(paper)))
+
+    if reusable? do
+      provenance_render
+    else
+      style = Map.get(paper.content || %{}, "style")
+      Render.render_blocks(blocks, Labels.paper_render_opts(dataset, style, scope_opts))
+    end
+  end
+
+  # The scope `Labels.render_opts/2` hands the ref resolver, order-normalised.
+  defp resolver_scope(scope) when is_list(scope),
+    do: scope |> Keyword.put_new(:published_only, true) |> Enum.sort()
+
+  defp resolver_scope(_scope), do: nil
+
+  defp provenance_scope(paper),
+    do: [workspace_id: paper.workspace_id, project_id: paper.project_id]
 
   defp classify_reader_blocks(paper, blocks, envelope, dataset) do
     cond do
@@ -176,12 +243,13 @@ defmodule Barkpark.Content.Papers do
 
       true ->
         case cache_provenance(paper, blocks, envelope["body_html"], dataset) do
-          :coherent ->
-            {:blocks, blocks}
+          {:coherent, rendered} ->
+            {:blocks, blocks, rendered}
 
           {:stale, rendered} ->
-            refresh_html_cache(paper, blocks, rendered)
-            {:blocks, blocks}
+            # A held managed instance serves the derived HTML without persisting it (C083).
+            Door.admit_or_skip(fn -> refresh_html_cache(paper, blocks, rendered) end, :ok)
+            {:blocks, blocks, rendered}
 
           :divergent ->
             {:error, :ambiguous_source}
@@ -201,7 +269,8 @@ defmodule Barkpark.Content.Papers do
   # conflates two populations with OPPOSITE correct handling, and answering
   # "ambiguous" to both is what made honest drift a hard 422.
   #
-  #   :coherent        — no cache, or the cache IS this render. Serve blocks.
+  #   {:coherent, nil} — no cache; nothing was rendered. Serve blocks.
+  #   {:coherent, html} — the cache IS this render. Serve blocks.
   #   {:stale, html}   — the cache was rendered from THESE blocks by a renderer
   #                      that is no longer ours (or its resolved externals have
   #                      since moved). Blocks are canonical, so serve them and
@@ -220,17 +289,17 @@ defmodule Barkpark.Content.Papers do
   # the honest pre-digest integer, or nothing — is a LAGGING stamp, i.e. stale.
   defp cache_provenance(_paper, _blocks, html, _dataset)
        when not is_binary(html) or html == "",
-       do: :coherent
+       do: {:coherent, nil}
 
   defp cache_provenance(paper, blocks, html, dataset) do
     content = paper.content || %{}
     style = get_in(content, ["style"])
-    scope = [workspace_id: paper.workspace_id, project_id: paper.project_id]
+    scope = provenance_scope(paper)
     rendered = Render.render_blocks(blocks, Labels.paper_render_opts(dataset, style, scope))
 
     cond do
       rendered == html ->
-        :coherent
+        {:coherent, rendered}
 
       # EXTERNAL REFERENT DRIFT — a third class the drift/divergence split does
       # not name, and the rule above is UNSOUND without it. `paper_render_opts`
@@ -714,18 +783,25 @@ defmodule Barkpark.Content.Papers do
         )
       end
 
+    # The chip criteria resolver, resolved ONCE per palette (an enablement
+    # read touches the workspace row) and only when a task row resolved. Keyed
+    # by the tenant scope's workspace — every render site threads the rendered
+    # paper's own `workspace_id` there (task-857c9f987268a75a).
+    task_resolver =
+      if task_rows == [], do: nil, else: PaperTaskResolver.get(scope_workspace_id(opts))
+
     by_target =
       Enum.reduce(targets, %{}, fn target, acc ->
         case pick_row_for_target(target, paper_rows) || pick_row_for_target(target, task_rows) do
           nil -> acc
-          row -> Map.put(acc, target, wikilink_hit(row))
+          row -> Map.put(acc, target, wikilink_hit(row, task_resolver))
         end
       end)
 
     Enum.reduce(pinned_ids, by_target, fn id, acc ->
       case pick_row_for_id(id, paper_rows) || pick_row_for_id(id, task_rows) do
         nil -> acc
-        row -> Map.put(acc, {:id, id}, wikilink_hit(row))
+        row -> Map.put(acc, {:id, id}, wikilink_hit(row, task_resolver))
       end
     end)
   end
@@ -762,7 +838,7 @@ defmodule Barkpark.Content.Papers do
   # id is normalized to the published spelling (chips are not /papers/ links —
   # the id only feeds data-* attrs), `status`/`priority` are read nil-tolerant,
   # and `criteria` is the `%{met, total}` count or nil when absent.
-  defp wikilink_hit(%Document{type: "task"} = doc) do
+  defp wikilink_hit(%Document{type: "task"} = doc, task_resolver) do
     content = doc.content || %{}
 
     %{
@@ -770,15 +846,18 @@ defmodule Barkpark.Content.Papers do
       title: doc.title,
       kind: "task",
       status: task_chip_status(content),
-      # {met,total} semantics owned by Barkpark.Tasks.Criteria (lvw-t6; the
-      # canonical task-criteria-progress impl): met === true only,
-      # garbage-tolerant, nil when absent → renderers omit the segment.
+      # {met,total} semantics owned by the Tasks plugin's resolver, read
+      # through the content-owned PaperTaskResolver seam (task-9c59aa555e1e015e):
+      # met === true only, garbage-tolerant, nil when absent → renderers omit
+      # the segment; `:unavailable` when no resolver is loaded, or Tasks is
+      # switched off for the paper's workspace → renderers show an explicit
+      # placeholder segment.
       priority: task_chip_priority(content),
-      criteria: Barkpark.Tasks.criteria_progress(content)
+      criteria: task_chip_criteria(content, task_resolver)
     }
   end
 
-  defp wikilink_hit(%Document{doc_id: id, title: title}),
+  defp wikilink_hit(%Document{doc_id: id, title: title}, _task_resolver),
     do: %{id: id, title: title, kind: "paper"}
 
   defp task_chip_status(content) do
@@ -787,6 +866,15 @@ defmodule Barkpark.Content.Papers do
       _ -> nil
     end
   end
+
+  defp task_chip_criteria(_content, nil), do: :unavailable
+  defp task_chip_criteria(content, resolver), do: resolver.criteria_progress(content)
+
+  # The workspace a paper render is scoped to. Render sites pass a keyword
+  # scope; tolerate a map so a non-keyword caller never crashes the render.
+  defp scope_workspace_id(scope) when is_list(scope), do: Keyword.get(scope, :workspace_id)
+  defp scope_workspace_id(%{workspace_id: ws}), do: ws
+  defp scope_workspace_id(_), do: nil
 
   defp task_chip_priority(content) do
     case Map.get(content, "priority") do
@@ -907,8 +995,10 @@ defmodule Barkpark.Content.Papers do
       simply does not resolve.
     * RENDER-THEN-READ: each resolved doc is passed through
       `Envelope.render(doc, schema, caller_context)` and the field is read off
-      the REDACTED envelope — never `field_readable?` alone (a caller-less call
-      returns true by design; that would be an active bypass). A redacted /
+      the REDACTED envelope — never `field_readable?` alone. Since ctx-s3 a
+      caller-less call fails CLOSED, so the hazard is no longer a bypass, but
+      `field_readable?` gates the field NAME for filter/order and does not read
+      the VALUE: render-then-read is still the rule here. A redacted /
       undeclared-invisible field is simply absent → fallback.
     * `:caller_context` DEFAULTS to the anonymous principal `%CallerContext{}`
       (fail closed). Any palette feeding body_html or broadcast delta frames
@@ -1261,19 +1351,33 @@ defmodule Barkpark.Content.Papers do
     # come from. The schema is loaded lazily inside `agg_for_query` and ONLY for
     # a non-count (sum/avg/min/max) block, so a count-only / rows-only paper pays
     # no schema query.
-    Barkpark.PortableDoc.TaskResolver.resolve(
-      blocks,
-      fn query ->
-        query
-        |> task_query_dataset(dataset)
-        |> Barkpark.Tasks.Query.rows_for_query(scope, dataset: dataset)
-      end,
-      fn query ->
-        query
-        |> task_query_dataset(dataset)
-        |> Barkpark.Tasks.Query.agg_for_query(scope, dataset: dataset)
-      end
-    )
+    #
+    # The rows and aggregates come from the resolver a plugin declares through
+    # the content-owned PaperTaskResolver seam (task-9c59aa555e1e015e). With
+    # none loaded — or Tasks switched off for the paper's workspace, which
+    # every render site threads as `scope[:workspace_id]`
+    # (task-857c9f987268a75a) — every query-carrying task block is marked
+    # `unavailable` so each renderer shows an explicit placeholder, never an
+    # empty board and never another workspace's enablement answer.
+    case PaperTaskResolver.get(scope_workspace_id(scope)) do
+      nil ->
+        Barkpark.PortableDoc.TaskResolver.mark_unavailable(blocks)
+
+      resolver ->
+        Barkpark.PortableDoc.TaskResolver.resolve(
+          blocks,
+          fn query ->
+            query
+            |> task_query_dataset(dataset)
+            |> resolver.rows_for_query(scope, dataset: dataset)
+          end,
+          fn query ->
+            query
+            |> task_query_dataset(dataset)
+            |> resolver.agg_for_query(scope, dataset: dataset)
+          end
+        )
+    end
   end
 
   def resolve_tasks_in_blocks(blocks, _scope, _dataset), do: blocks

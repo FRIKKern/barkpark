@@ -148,6 +148,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # neither) keeps the quiet, unhalted footer.
   attr(:save_status, :string, default: "")
   attr(:paper_halt, :string, default: nil)
+  # Paper masters (task-3b6e562e916c8ce4). A LIST (possibly empty) turns the
+  # masters affordances on: the `[data-paper-masters]` carrier the canvas slash
+  # menu reads its Masters group from, the canvas block menu's "Save as
+  # master", and the boundary toolbar's save button. `nil` (the default — the
+  # public reader, the Beta document editor, a pane that may not write) renders
+  # none of them, so those surfaces are byte-unchanged.
+  attr(:masters, :any, default: nil)
+  # The masters implementation (`PaperMastersSeam.impl/1`), or nil when the
+  # plugin providing masters is off — then no Save action renders.
+  attr(:masters_impl, :any, default: nil)
+  # Linked master instances (task-59f078a2fd248698): the open paper's
+  # `%{key => prerendered_html}` render map, resolved per read in the paper's
+  # tenant, or nil (then an instance shows the neutral placeholder).
+  attr(:master_render, :any, default: nil)
 
   def paper_block_editor(assigns) do
     if assigns.canvas_resume_halt do
@@ -318,6 +332,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         hidden
       ></div>
 
+      <%!-- Paper masters carrier (task-3b6e562e916c8ce4). Same contract as the
+            expected-fields carrier above: LiveView-driven, outside every
+            phx-update="ignore" wrapper, read fresh by the canvas slash menu on
+            each open, so a master saved a moment ago is offered at once. Lists
+            only masters in THIS paper's workspace, project and dataset
+            (`list_for_paper/1`). Absent unless the pane may write,
+            and on the canvas path only (the BARKPARK_PAPER_CANVAS=0 opt-out
+            stays byte-identical to legacy). --%>
+      <div
+        :if={is_list(@masters) and @canvas_on?}
+        id="bp-paper-masters"
+        data-paper-masters={Jason.encode!(@masters)}
+        data-test-id="bp-paper-masters"
+        hidden
+      ></div>
+
       <%!-- Right-click block context-menu host. A zero-layout hidden carrier for
             the BarkparkPaperContextMenu hook (defined in root.html.heex). It is a
             SEPARATE hook because BarkparkPaperSortable already owns this editor
@@ -417,6 +447,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 tree_identity_safe={@tree_identity_safe}
                 table_editor_target_ids={@table_editor_target_ids}
                 canvas_retained={@canvas_retained}
+                masters_impl={is_list(@masters) && @masters_impl}
+                master_render={@master_render}
               />
             <% {:ghosts, ghosts, anchor_id} -> %>
               <.ghost_slots_group ghosts={ghosts} anchor_id={anchor_id} />
@@ -519,6 +551,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             tree_identity_safe={@tree_identity_safe}
             table_editor_target_ids={@table_editor_target_ids}
             canvas_retained={@canvas_retained}
+            master_render={@master_render}
           />
         </div>
       <% end %>
@@ -614,6 +647,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"blockquote", "Blockquote"},
          {"divider", "Divider"},
          {"section", "Section"},
+         {"expandable", "Expandable"},
          {"steps", "Steps"},
          {"tabs", "Tabs"}
        ]},
@@ -631,13 +665,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"table", "Table"},
          {"terminal", "Terminal"},
          {"stage", "Stage"},
+         {"note", "Note"},
          {"diagram", "Diagram"},
          {"figure", "Figure"},
          {"equation", "Equation"},
          {"route", "Route"},
          {"toc", "Table of contents"},
          {"criteria-progress", "Criteria progress"},
-         {"gauge-list", "Gauge list"}
+         {"gauge-list", "Gauge list"},
+         {"bar-chart", "Bar chart"}
        ]},
       {"Technical",
        [
@@ -667,6 +703,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
        [
          {"field-image", "Image"},
          {"field-reference", "Reference"},
+         {"paper-links", "Paper links"},
          {"video", "Video"}
        ]},
       {"Structured",
@@ -998,6 +1035,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:tree_identity_safe, :boolean, default: true)
   attr(:table_editor_target_ids, :any, default: nil)
   attr(:canvas_retained, :any, default: nil)
+  attr(:masters_impl, :any, default: nil)
+  attr(:master_render, :any, default: nil)
 
   def edit_block(assigns) do
     ~H"""
@@ -1056,6 +1095,47 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             disabled={@index == @last_index}
             data-test-id="paper-move-down"
           >▼</button>
+          <%!-- Paper masters (task-3b6e562e916c8ce4): save this element,
+                widget or section as a master. Offered only where the pane may
+                write and masters are available (masters_impl) and the block is
+                masterable — the same refusal set `save_master/4` enforces. --%>
+          <button
+            :if={@masters_impl && @masters_impl.masterable?(@block)}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            title="Save as master"
+            aria-label="Save block as master"
+            phx-click="paper-save-master"
+            phx-value-block_id={Map.get(@block, "id")}
+            data-test-id="paper-save-master"
+          >☆</button>
+          <%!-- Linked master instance (task-59f078a2fd248698): Pin freezes it
+                to the master's latest PUBLISHED revision, the one the public
+                reader shows (task-881d4b6e857b1b65; Unpin follows latest again);
+                Detach copies in the PUBLISHED version readers see, never the
+                master's draft (task-01c812041613a8d3). Offered only
+                where masters are available and the pane may write. --%>
+          <button
+            :if={@masters_impl && @masters_impl.linked?(@block)}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            title={if linked_pinned?(@block), do: "Unpin: follow the master's latest", else: "Pin to the master's published version"}
+            phx-click="paper-pin-master"
+            phx-value-block_id={Map.get(@block, "id")}
+            phx-value-pin={if linked_pinned?(@block), do: "false", else: "true"}
+            phx-value-if_rev={@paper_rev}
+            data-test-id="paper-pin-master"
+          >{if linked_pinned?(@block), do: "Unpin", else: "Pin"}</button>
+          <button
+            :if={@masters_impl && @masters_impl.linked?(@block)}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            title="Detach: copy the published version readers see in as plain blocks"
+            phx-click="paper-detach-master"
+            phx-value-block_id={Map.get(@block, "id")}
+            phx-value-if_rev={@paper_rev}
+            data-test-id="paper-detach-master"
+          >Detach</button>
           <button
             :if={Map.get(@block, "locked") != true}
             type="button"
@@ -1094,6 +1174,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         tree_identity_safe={@tree_identity_safe}
         table_editor_target_ids={@table_editor_target_ids}
         canvas_retained={@canvas_retained}
+        master_render={@master_render}
       />
     </div>
     """
@@ -1512,6 +1593,89 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   defp card_action_label_dom_id(block_id),
     do: "card-action-label-" <> Base.url_encode64(block_id, padding: false)
+
+  defp card_title_dom_id(block_id),
+    do: "card-title-" <> Base.url_encode64(block_id, padding: false)
+
+  defp card_title_direct_state(%{"slots" => %{"title" => [%{} = title]}}) do
+    with false <- is_struct(title),
+         "heading" <- title["type"],
+         true <- Map.has_key?(title, "text") and is_binary(title["text"]),
+         true <- card_title_plain_content?(title),
+         {:ok, level} <- card_title_direct_level(title) do
+      {:ok, %{text: title["text"], level: level}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp card_title_direct_state(_block), do: :error
+
+  defp card_title_content_readonly?(%{"slots" => %{"title" => [%{"type" => "heading"} = title]}}) do
+    Map.has_key?(title, "content") and title["content"] not in [nil, []]
+  end
+
+  defp card_title_content_readonly?(_block), do: false
+
+  defp card_title_plain_content?(title) do
+    not Map.has_key?(title, "content") or title["content"] in [nil, []]
+  end
+
+  defp card_title_direct_level(title) do
+    case Map.fetch(title, "level") do
+      :error -> {:ok, 2}
+      {:ok, nil} -> {:ok, 2}
+      {:ok, level} when level in [1, 2, 3] -> {:ok, level}
+      {:ok, "1"} -> {:ok, 1}
+      {:ok, "2"} -> {:ok, 2}
+      {:ok, "3"} -> {:ok, 3}
+      _ -> :error
+    end
+  end
+
+  attr(:block, :map, required: true)
+  attr(:title, :map, required: true)
+
+  defp card_title_editor(assigns) do
+    assigns = assign(assigns, :dom_id, card_title_dom_id(assigns.block["id"]))
+
+    ~H"""
+    <form
+      id={@dom_id <> "-form"}
+      class="bp-paper-edit-form bp-paper-card-title-form"
+      phx-submit="paper-edit-block"
+      phx-change="paper-block-autosave"
+      phx-debounce="500"
+      data-test-id="paper-card-title-form"
+    >
+      <input type="hidden" name="block_id" value={@block["id"]} />
+      <.dynamic_tag
+        tag_name={"h#{@title.level}"}
+        class="bp-paper-card-title-heading bp-paper-card-title-owner"
+        data-paper-card-title-owner
+        data-paper-card-title-empty={@title.text == "" && "true"}
+      >
+        <button
+          type="button"
+          class="bp-paper-card-title-paint"
+          phx-click={JS.focus(to: "#" <> @dom_id)}
+          aria-label={if @title.text == "", do: "Edit card title", else: "Edit card title: " <> @title.text}
+          aria-controls={@dom_id}
+          data-paper-card-title-paint
+        ><%= @title.text %></button>
+        <textarea
+          id={@dom_id}
+          name="card-title"
+          rows="1"
+          class="bp-paper-inline-text bp-paper-card-title-input"
+          aria-label="Card title"
+          placeholder="Card title"
+          phx-hook="BarkparkPaperAutoSize"
+        ><%= @title.text %></textarea>
+      </.dynamic_tag>
+    </form>
+    """
+  end
 
   attr(:block, :map, required: true)
   attr(:state, :map, required: true)
@@ -2020,6 +2184,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:tree_identity_safe, :boolean, default: nil)
   attr(:table_editor_target_ids, :any, default: nil)
   attr(:canvas_retained, :any, default: nil)
+  # Linked master instances (task-59f078a2fd248698): the open paper's
+  # `%{key => html}` render map. Threaded through every nested
+  # `paper_block_fields` call, so a `master-ref` inside a section or a column
+  # previews its master too (task-59be65118320fa0e item 2); nil shows the
+  # neutral "Linked master" placeholder.
+  attr(:master_render, :any, default: nil)
 
   def paper_block_fields(assigns) do
     tree_identity_safe =
@@ -2110,28 +2280,111 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           />
         </form>
         <.rich_body_editor block={@block} />
+      <%!-- code (task-33af97d6c80cbe72): the body textarea PLUS the LINE-EMPHASIS
+            range inspector, and a live preview above them.
+
+            THE PREVIEW is the View<->Edit parity mechanism. A `<textarea>` has no
+            per-line DOM, so the edit control itself can never paint the spans; the
+            preview instead runs the block through `Render.render_block/2` — the
+            SAME producer the /papers reader uses — and the Studio shell is a
+            `.bp-paper-surface` sink (components.ex `bp-paper-shell bp-paper-surface`),
+            so the `.bp-code-em--<tone>` rules in the ONE canonical stylesheet paint
+            it with the reader's own bytes. Parity is by CONSTRUCTION (one producer,
+            one stylesheet), not by a mirrored `.bp-paper-editor-body` rule — minting
+            a twin rule would CREATE the cross-file drift surface view_edit_parity_test
+            exists to catch.
+
+            THE RANGE ROWS, not per-line gutter toggles: the stored model is a RANGE
+            list ({from,to,tone}, 1-based inclusive), so a per-line toggle would have
+            to split and re-merge the author's ranges on every click. The repeated-row
+            fieldset is the idiom toc / criteria-progress / gauge-list already use, and
+            it rides `put_editor_collection/7` unchanged. --%>
       <% "code" -> %>
-        <form
-          class="bp-paper-edit-form"
-          phx-submit="paper-edit-block"
-          phx-change="paper-block-autosave"
-          phx-debounce="500"
-        >
-          <input type="hidden" name="block_id" value={@id} />
-          <input
-            type="text"
-            name="lang"
-            class="bp-paper-edit-text"
-            placeholder="lang"
-            value={Map.get(@block, "lang", "")}
-          />
-          <textarea
-            name="value"
-            class="bp-paper-edit-textarea bp-paper-edit-code"
-            rows="5"
-            data-test-id="paper-field-value"
-          ><%= Map.get(@block, "value", "") %></textarea>
-        </form>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-code-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-code-preview">
+            <%= raw(Render.render_block(@block, %{style: :article})) %>
+          </div>
+          <form
+            id={"code-form-" <> @id}
+            class="bp-paper-edit-form"
+            phx-submit="paper-edit-block"
+            phx-change="paper-block-autosave"
+            phx-debounce="500"
+          >
+            <input type="hidden" name="block_id" value={@id} />
+            <input
+              type="text"
+              name="lang"
+              class="bp-paper-edit-text"
+              placeholder="lang"
+              value={Map.get(@block, "lang", "")}
+            />
+            <textarea
+              name="value"
+              class="bp-paper-edit-textarea bp-paper-edit-code"
+              rows="5"
+              data-test-id="paper-field-value"
+            ><%= Map.get(@block, "value", "") %></textarea>
+            <%!-- The emphasis rows live in THIS form, not a second one: the block
+                  patch is a shallow merge, so a separate form would have to re-send
+                  `value` or clobber it with "". --%>
+            <details
+              id={"code-emphasis-controls-" <> @id}
+              class="bp-paper-contextual-controls"
+              phx-mounted={JS.ignore_attributes("open")}
+            >
+              <summary class="bp-paper-contextual-toggle">Emphasised lines</summary>
+              <div class="bp-paper-contextual-panel" data-test-id="paper-code-emphasis-editor">
+                <input
+                  type="hidden"
+                  name="emphasis-count"
+                  value={length(Blocks.code_emphasis_ranges(@block))}
+                />
+                <fieldset
+                  :for={{range, index} <- Enum.with_index(Blocks.code_emphasis_ranges(@block))}
+                  class="bp-paper-edit-form"
+                  data-test-id="paper-code-emphasis-row"
+                  data-emphasis-index={index}
+                >
+                  <legend>Range <%= index + 1 %></legend>
+                  <%= if is_map(range) do %>
+                    <label class="bp-paper-edit-fieldlabel" for={"emphasis-#{index}-from-#{@id}"}>First line</label>
+                    <input id={"emphasis-#{index}-from-#{@id}"} type="text" inputmode="numeric"
+                           name={"emphasis-#{index}-from"} class="bp-paper-edit-text"
+                           value={Blocks.form_value(Map.get(range, "from"))} />
+                    <label class="bp-paper-edit-fieldlabel" for={"emphasis-#{index}-to-#{@id}"}>Last line</label>
+                    <input id={"emphasis-#{index}-to-#{@id}"} type="text" inputmode="numeric"
+                           name={"emphasis-#{index}-to"} class="bp-paper-edit-text"
+                           value={Blocks.form_value(Map.get(range, "to"))} />
+                    <label class="bp-paper-edit-fieldlabel" for={"emphasis-#{index}-tone-#{@id}"}>Tone</label>
+                    <select id={"emphasis-#{index}-tone-#{@id}"} name={"emphasis-#{index}-tone"}
+                            class="bp-paper-edit-tone">
+                      <option :for={tone <- Blocks.code_emphasis_tones()} value={tone}
+                              selected={Map.get(range, "tone") == tone}><%= tone %></option>
+                    </select>
+                  <% else %>
+                    <p class="bp-paper-edit-readonly" data-test-id="paper-code-emphasis-legacy-row">
+                      Legacy range retained until explicitly removed.
+                    </p>
+                  <% end %>
+                  <div class="bp-paper-edit-actions">
+                    <button type="submit" name="emphasis-action" value={"up:#{index}"}
+                            class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                    <button type="submit" name="emphasis-action" value={"down:#{index}"}
+                            class="btn btn-ghost btn-sm"
+                            disabled={index == length(Blocks.code_emphasis_ranges(@block)) - 1}>Move down</button>
+                    <button type="submit" name="emphasis-action" value={"remove:#{index}"}
+                            class="btn btn-destructive btn-sm"
+                            data-test-id="paper-code-emphasis-remove">Remove range</button>
+                  </div>
+                </fieldset>
+
+                <button type="submit" name="emphasis-action" value="add" class="btn btn-ghost btn-sm"
+                        data-test-id="paper-code-emphasis-add">Add range</button>
+              </div>
+            </details>
+          </form>
+        </div>
       <%!-- diagram (barkpark-woxx): a Mermaid `source` textarea (mirrors the code
             block's value textarea, monospace) + an optional caption input. Both
             are flat strings on the block — build_block_patch reads them verbatim. --%>
@@ -2207,6 +2460,77 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               <p class="bp-paper-edit-readonly">
                 This Action's authored fields are malformed and cannot be edited here; original content is preserved.
               </p>
+          <% end %>
+        </div>
+      <% "notes" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-notes-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-notes-preview">
+            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+          </div>
+          <%= case Blocks.notes_form_state(@block) do %>
+            <% {:ok, state} -> %>
+              <details id={"notes-controls-" <> @id} class="bp-paper-contextual-controls"
+                phx-mounted={JS.ignore_attributes("open")}>
+                <summary class="bp-paper-contextual-toggle">Edit notes</summary>
+                <div class="bp-paper-contextual-panel">
+                  <form id={"notes-form-" <> @id} class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block" phx-change="paper-block-autosave"
+                    phx-debounce="500" data-test-id="paper-notes-editor">
+                    <input type="hidden" name="block_id" value={@id} />
+                    <input type="hidden" name="notes-count" value={length(state.items)} />
+                    <%= for {item, index} <- Enum.with_index(state.items) do %>
+                      <%= for {field, label, value} <- [{"label", "Label", item.label}, {"lead", "Lead (optional)", item.lead}, {"body", "Body", item.body}] do %>
+                        <label class="bp-paper-edit-fieldlabel" for={"notes-#{index}-#{field}-#{@id}"}><%= "Note #{index + 1} #{label}" %></label>
+                        <textarea id={"notes-#{index}-#{field}-#{@id}"} name={"notes-#{index}-" <> field}
+                          rows={if field == "body", do: 3, else: 1}
+                          class="bp-paper-edit-text" phx-hook="BarkparkPaperAutoSize"><%= value %></textarea>
+                      <% end %>
+                    <% end %>
+                  </form>
+                </div>
+              </details>
+            <% {:error, _} -> %>
+              <details id={"notes-controls-" <> @id} class="bp-paper-contextual-controls"
+                phx-mounted={JS.ignore_attributes("open")}>
+                <summary class="bp-paper-contextual-toggle">Read-only notes</summary>
+                <div class="bp-paper-contextual-panel">
+                  <p class="bp-paper-edit-readonly">These notes have content that cannot be edited safely here. Their original content is preserved.</p>
+                </div>
+              </details>
+          <% end %>
+        </div>
+      <% "note" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-note-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-note-preview">
+            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+          </div>
+          <%= case Blocks.note_form_state(@block) do %>
+            <% {:ok, state} -> %>
+              <details id={"note-controls-" <> @id} class="bp-paper-contextual-controls"
+                phx-mounted={JS.ignore_attributes("open")}>
+                <summary class="bp-paper-contextual-toggle">Edit note</summary>
+                <div class="bp-paper-contextual-panel">
+                  <form id={"note-form-" <> @id} class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block" phx-change="paper-block-autosave"
+                    phx-debounce="500" data-test-id="paper-note-editor">
+                    <input type="hidden" name="block_id" value={@id} />
+                    <%= for {field, label, value} <- [{"label", "Label", state.label}, {"lead", "Lead (optional)", state.lead}, {"body", "Body", state.body}] do %>
+                      <label class="bp-paper-edit-fieldlabel" for={"note-#{field}-#{@id}"}><%= label %></label>
+                      <textarea id={"note-#{field}-#{@id}"} name={"note-" <> field}
+                        rows={if field == "body", do: 3, else: 1}
+                        class="bp-paper-edit-text" phx-hook="BarkparkPaperAutoSize"><%= value %></textarea>
+                    <% end %>
+                  </form>
+                </div>
+              </details>
+            <% {:error, _} -> %>
+              <details id={"note-controls-" <> @id} class="bp-paper-contextual-controls"
+                phx-mounted={JS.ignore_attributes("open")}>
+                <summary class="bp-paper-contextual-toggle">Read-only note</summary>
+                <div class="bp-paper-contextual-panel">
+                  <p class="bp-paper-edit-readonly">This note has content that cannot be edited safely here. Its original content is preserved.</p>
+                </div>
+              </details>
           <% end %>
         </div>
       <% "stage" -> %>
@@ -2318,6 +2642,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
                           canvas_retained={@canvas_retained}
+                          master_render={@master_render}
                         />
                     <% end %>
                   <% end %>
@@ -2390,6 +2715,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             <% {:ok, state} -> %>
               <% parts = RenderComponents.card_article_parts(@block) %>
               <% direct_image = @picker_browse && card_image_direct?(@block) %>
+              <% direct_title = card_title_direct_state(@block) %>
+              <% title_content_readonly = card_title_content_readonly?(@block) %>
               <div class="bp-paper-contextual-preview" data-test-id="paper-card-preview">
                 <div class={parts.class}>
                   <%= if direct_image do %>
@@ -2433,7 +2760,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <% else %>
                     <%= raw(parts.media_html) %>
                   <% end %>
-                  <%= raw(parts.title_html) %>
+                  <%= case direct_title do %>
+                    <% {:ok, title} -> %>
+                      <.card_title_editor block={@block} title={title} />
+                    <% :error -> %>
+                      <%= raw(parts.title_html) %>
+                  <% end %>
                   <.card_body_editor block={@block} />
                   <%= if card_action_present?(@block) do %>
                     <.card_action_label_editor block={@block} state={state} />
@@ -2466,8 +2798,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         selected={value == state.tone}
                       ><%= label %></option>
                     </select>
-                    <label class="bp-paper-edit-fieldlabel" for={"card-title-" <> @id}>Title</label>
-                    <input id={"card-title-" <> @id} type="text" name="card-title" class="bp-paper-edit-text" value={state.title} />
+                    <%= case direct_title do %>
+                      <% {:ok, _title} -> %>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm"
+                          data-test-id="paper-card-title-focus"
+                          aria-controls={card_title_dom_id(@id)}
+                          phx-click={contextual_panel_focus(card_title_dom_id(@id))}
+                        >Edit title</button>
+                      <% :error -> %>
+                        <%= if title_content_readonly do %>
+                          <p class="bp-paper-edit-readonly" data-test-id="paper-card-title-readonly">
+                            This Card title uses rich content and remains reader-only here.
+                          </p>
+                        <% else %>
+                          <label class="bp-paper-edit-fieldlabel" for={"card-title-" <> @id}>Title</label>
+                          <input id={"card-title-" <> @id} type="text" name="card-title" class="bp-paper-edit-text" value={state.title} />
+                        <% end %>
+                    <% end %>
                     <%= if direct_image do %>
                       <button
                         type="button"
@@ -2604,6 +2953,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
                         canvas_retained={@canvas_retained}
+                        master_render={@master_render}
                       />
                   <% end %>
                 <% end %>
@@ -3054,6 +3404,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       tree_identity_safe={@tree_identity_safe}
                       table_editor_target_ids={@table_editor_target_ids}
                       canvas_retained={@canvas_retained}
+                      master_render={@master_render}
                     />
                   </div>
                 </div>
@@ -3083,6 +3434,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
                         canvas_retained={@canvas_retained}
+                        master_render={@master_render}
                       />
                   <% end %>
                 <% end %>
@@ -3120,7 +3472,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </div>
             </details>
           <% else %>
-            <div :if={section_renderable?(@block)} class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article})) %></div>
+            <div :if={section_renderable?(@block)} class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article, masters: @master_render})) %></div>
             <p class="bp-paper-edit-readonly">This Section's child structure needs stable identities before editing; original content is preserved.</p>
           <% end %>
         </div>
@@ -3153,6 +3505,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
                         canvas_retained={@canvas_retained}
+                        master_render={@master_render}
                       />
                   <% end %>
                 <% end %>
@@ -3194,7 +3547,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </div>
             </details>
           <% else %>
-            <div class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article})) %></div>
+            <div class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article, masters: @master_render})) %></div>
             <p class="bp-paper-edit-readonly">This Columns block has malformed column data; original content is preserved.</p>
           <% end %>
         </div>
@@ -3238,7 +3591,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 <label class="bp-paper-edit-fieldlabel">
                   Layout
                   <input type="text" name="layout" class="bp-paper-edit-text"
-                         value={Map.get(@block, "layout", "")} />
+                         value={Blocks.contextual_optional_value(@block, "layout")} />
                 </label>
 
                 <fieldset
@@ -3614,6 +3967,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
                           canvas_retained={@canvas_retained}
+                          master_render={@master_render}
                         />
                     <% end %>
                   <% end %>
@@ -3727,6 +4081,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
                         canvas_retained={@canvas_retained}
+                        master_render={@master_render}
                       />
                   <% end %>
                 <% end %>
@@ -3838,6 +4193,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
                           canvas_retained={@canvas_retained}
+                          master_render={@master_render}
                         />
                       </div>
                   <% end %>
@@ -3865,6 +4221,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     tree_identity_safe={@tree_identity_safe}
                     table_editor_target_ids={@table_editor_target_ids}
                     canvas_retained={@canvas_retained}
+                    master_render={@master_render}
                   />
                 </div>
               <% end %>
@@ -3990,17 +4347,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <input type="hidden" name="block_id" value={@id} />
           <input type="hidden" name="bar-count" value={length(Map.get(@block, "bars", []))} />
           <label class="bp-paper-edit-fieldlabel">
-            Title
-            <input type="text" name="title" class="bp-paper-edit-text"
-                   value={Map.get(@block, "title", "")} />
-          </label>
-          <label class="bp-paper-edit-fieldlabel">
             Maximum
             <input type="number" name="max" class="bp-paper-edit-text" step="any"
-                   value={Map.get(@block, "max", "")} />
+                   value={Blocks.contextual_optional_value(@block, "max")} />
           </label>
           <label class="bp-paper-edit-check">
-            <input type="checkbox" name="values" value="true" checked={Map.get(@block, "values") == true} />
+            <input type="hidden" name="values" value="false" />
+            <input type="checkbox" name="values" value="true" checked={Blocks.strict_boolean_field?(@block, "values")} />
             Show values
           </label>
           <div :for={{bar, index} <- Enum.with_index(Map.get(@block, "bars", []))}
@@ -4325,6 +4678,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           if_rev={if(@doc_type == "paper", do: @paper_rev, else: @document_rev)}
         />
 
+      <% "master-ref" -> %>
+        <%!-- Linked master instance (task-59f078a2fd248698): the master's
+              current (or pinned) content, rendered by the reader's own
+              producer from the per-read render map — never stored in this
+              paper. Here, not in `edit_block`, so a nested instance gets it
+              too (task-59be65118320fa0e item 2). --%>
+        <div
+          class="bp-paper-surface bp-paper-master-ref-preview"
+          data-test-id="paper-master-ref-preview"
+          data-master-ref-id={Map.get(@block, "id")}
+        >
+          {raw(Render.render_block(@block, %{style: :article, masters: @master_render}))}
+        </div>
+        <p class="bp-paper-edit-readonly" data-test-id="paper-master-ref-note">
+          <%= if linked_pinned?(@block) do %>
+            Pinned to a published version of the master — readers see exactly this. Unpin to follow the master, or Detach to edit it here.
+          <% else %>
+            Linked master — it shows the master's content. Edit the master, or Detach to edit it here.
+          <% end %>
+        </p>
       <% _ -> %>
         <%!-- Genuinely-unhandled types are read-only in the MVP (view/delete/reorder).
              `table` (editable-table) and `action` (editable-action, the CTA button) are
@@ -4336,6 +4709,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     <% end %>
     """
   end
+
+  # A linked master instance pinned to a revision (task-59f078a2fd248698).
+  defp linked_pinned?(block), do: Barkpark.PortableDoc.MasterRef.version(block) != nil
 
   defp editable_step_rows(%{"steps" => rows}) when is_list(rows),
     do: Enum.filter(rows, &(is_map(&1) and is_binary(&1["id"]) and &1["id"] != ""))

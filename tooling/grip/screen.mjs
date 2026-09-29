@@ -126,6 +126,10 @@
 
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// Used ONLY inside the isMain block below, and only against stderr (D78). The
+// screen's stdout carries the classification table, and `--census` output is
+// read by eye and by pipe; a banner there would corrupt the answer it labels.
+import { emitProvenance } from "./provenance.mjs";
 
 export const HOST_BOUND = [
   [/\bssh\b/i, "names ssh (remote execution)"],
@@ -445,6 +449,32 @@ function dropValueGlobals(argv, valueGlobals) {
   return out;
 }
 
+/**
+ * Index of the first token that is the SUB-VERB — i.e. where the pre-verb global
+ * region ends. Walks exactly as `dropValueGlobals` does (same `eatsNextToken`,
+ * same "first bare token wins" rule) so a caller that needs to inspect the
+ * globals BEFORE they are eaten can never disagree with the normaliser about
+ * where they stop. Returns `argv.length` when there is no sub-verb at all.
+ *
+ * @param {string[]} argv
+ * @param {Set<string>} valueGlobals
+ * @returns {number}
+ */
+function gitSubVerbIndex(argv, valueGlobals) {
+  const letters = shortValueLetters(valueGlobals);
+  let i = 1;
+  for (; i < argv.length; i++) {
+    const t = argv[i];
+    if (eatsNextToken(t, valueGlobals, letters)) {
+      i++;
+      continue;
+    }
+    if (t.startsWith("-")) continue;
+    return i;
+  }
+  return argv.length;
+}
+
 const EMPTY_VALUE_GLOBALS = new Set();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -639,10 +669,32 @@ const gitRule = {
     // BEFORE the normaliser eats them: `-c` and `--config-env` carry the pair,
     // and the config-SOURCE flags carry a path. Both spellings for each, because
     // comparing tokens exactly is how `--server=` walked past the loopback bound.
+    // …and the `-c` half of that scan STOPS AT THE SUB-VERB. `-c` is a git GLOBAL
+    // only in the pre-verb region; after the sub-verb it belongs to the sub-verb
+    // and means something else entirely — `git grep -c <pattern>` is `--count`,
+    // `git log -c` / `git show -c` is combined-diff format. Scanning the whole
+    // argv read those as a global and refused the read with
+    // "git -c <pattern> is not a key=value pair", which is the same class of
+    // false refusal as the two above: a GLOBAL-OPTION parse that failed to stop
+    // where git's own parser stops. (Measured: this is what refuses
+    // `git grep -c completeness origin/main -- internal/cli/export_cmd.go`,
+    // reddening seven checks in tooling/pds/rerun-adjudicate.test.mjs.)
+    //
+    // The bound is SOUND, not merely convenient: git accepts its global options
+    // only BEFORE the sub-verb, so a real `-c` config injection can never appear
+    // after it. `gitSubVerbIndex` walks the pre-verb region exactly as
+    // dropValueGlobals does, so the two can never disagree about where it ends.
+    //
+    // GIT_CONFIG_SOURCE_FLAGS stays UNBOUNDED on purpose: `--git-dir` /
+    // `--exec-path` are never a sub-verb's own flag under any read verb, so
+    // there is no honest read to give back, and refusing them anywhere is the
+    // fail-closed side of the trade.
+    const verbAt = gitSubVerbIndex(rawArgv, GIT_VALUE_GLOBALS);
     for (let i = 1; i < rawArgv.length; i++) {
       const t = rawArgv[i];
       const name = t.split("=")[0];
       if (GIT_CONFIG_SOURCE_FLAGS.has(name)) return `git ${name} ${GIT_CONFIG_SOURCE_FLAGS.get(name)}`;
+      if (i >= verbAt) continue; // past the sub-verb: `-c` is the SUB-VERB's flag, not git's global
       const pair = t === "-c" || t === "--config-env" ? arg(rawArgv, i + 1) : /^--config-env=/.test(t) ? t.slice("--config-env=".length) : null;
       if (pair === null) continue;
       const why = gitConfigPairReason(pair);
@@ -2259,10 +2311,35 @@ export const WRITE_SHAPES = [
   [headWritesFile("tree", outputFlagRule("tree", TREE_VALUE_LETTERS)), "tree -o/--output writes a file"],
   [headWritesFile("uniq", uniqRule), "uniq's second positional is an output file"],
   [/\b(rm|mv|dd|trash|shred|truncate|install)\s/, "destructive filesystem verb"],
-  [/\b(mkdir|touch|chmod|chown|chgrp|ln)\s/, "filesystem mutation"],
+  // `(?<![-\w])` NOT `\b` — `\b` matches between the `-` and the `l` of `-ln`,
+  // so `grep -ln foo x.mjs` and `git grep -ln foo` (a standard, extremely common
+  // read idiom: list matching filenames, no output) were refused as a SYMLINK
+  // WRITE. A word boundary is the wrong boundary for a rule about COMMAND HEADS:
+  // every entry here names a program, and a program name is never preceded by a
+  // `-`. The lookbehind keeps `/usr/bin/ln x y` and `ln -s a b` matching (a `/`
+  // or a space is not excluded) while no flag CLUSTER can reach it — the same
+  // hazard sits on `-chmod`, `-touch`, `-mkdir`, so it is fixed for the whole
+  // alternation, not just for `ln`.
+  [/(?<![-\w])(mkdir|touch|chmod|chown|chgrp|ln)\s/, "filesystem mutation"],
   [/\btee\b/, "tee"],
   [/\bsed\s+-[a-z]*i\b/, "sed -i"],
-  [/\bgit\s+(push|commit|checkout|switch|reset|rebase|merge|clean|apply|am|fetch|pull|cherry-pick|restore|worktree\s+(add|remove|prune))\b/, "git write verb"],
+  // `mergetool|merge(?!-base)` — PORTED VERBATIM FROM rerun.mjs:99, whose comment
+  // block carries the full derivation. `\bmerge\b` matched inside `merge-base`,
+  // so `git merge-base --is-ancestor A B` — a pure ancestry READ that prints a
+  // commit id and writes no ref, no index and no working tree, and which sits on
+  // GIT_READ_VERBS one layer up (so layer (b) is INNOCENT here) — was refused as
+  // a git write. The lookahead is anchored to the exact five characters that
+  // follow, so `git merge`, `git merge --abort` and `git merge origin/main` all
+  // stay refused; the protective fence test in screen.test.mjs enumerates every
+  // real `git merge` spelling and reds if the lookahead ever widens.
+  //
+  // `mergetool` is listed EXPLICITLY and it is a TIGHTENING, not part of the
+  // carve-out: the pre-change `\bmerge\b` never matched it either (no word
+  // boundary between "merge" and "tool"), so this backstop would have let an
+  // interactive tree-rewriting session through. Ordered before `merge` so the
+  // alternation reaches it. Same finding as rerun.mjs's, found the same way —
+  // by writing the protective test for the carve-out.
+  [/\bgit\s+(push|commit|checkout|switch|reset|rebase|mergetool|merge(?!-base)|clean|apply|am|fetch|pull|cherry-pick|restore|worktree\s+(add|remove|prune))\b/, "git write verb"],
   [/\bmix\s+(ecto\.(drop|create|migrate|rollback|reset)|deps\.get|release|run)\b/, "mix write task"],
   [/\b(npm|pnpm|yarn)\s+(publish|install|add|remove|link|unlink)\b/, "package mutation"],
   [/\bsystemctl\s+(start|stop|restart|reload|enable|disable|mask|unmask|kill|daemon-reload)\b/, "systemctl mutating verb"],
@@ -2827,6 +2904,12 @@ function selftest() {
 // a new one.
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
+  // FIRST ACT (D78) — before a single classification is printed, say which tree
+  // did the classifying. "DANGER SET 134/134 refused" reads identically from a
+  // 200-commit-stale checkout whose allowlist predates the commands it is
+  // screening, and that is the one reading a safety verdict must never allow.
+  // STDERR only: stdout is the report.
+  emitProvenance();
   const mode = process.argv[2] || "--verify";
   // NO process.exit IN ANY ARM BELOW (charter D92). Every one of these arms has
   // already written to stdout by the time it decides the status: selftest()

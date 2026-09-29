@@ -1,6 +1,9 @@
 // bp-reference-picker — Studio reference Web Component (Task #12 WI2 v1).
 //
-// Typeahead reference picker. Reads `value` (doc id) and `ref-type`
+// Typeahead reference picker. Reads `value` (doc id) and `ref-type` — ONE
+// type, or several comma-joined (Sanity's `to: [{type}, …]`, Gyldendal parity
+// E1.6): a multi-type picker searches across the set (`types=`) and shows the
+// type on every hit and on the selected pill.
 // (target schema) attributes; optional `dataset` (default "production").
 // Search uses `/v1/data/search/:dataset` with optional `type=` filter and
 // feeds Barkpark core search intelligence via X-BP-Search-* headers.
@@ -53,8 +56,20 @@ class BpReferencePicker extends HTMLElement {
   connectedCallback() {
     if (this._mounted) return;
     this._mounted = true;
+    // Gyldendal parity E7: workspace-locale strings stamped by the server as
+    // `data-strings` (JSON); each key falls back to the English literal.
+    try {
+      this._strings = this.dataset.strings ? JSON.parse(this.dataset.strings) : {};
+    } catch (_e) {
+      this._strings = {};
+    }
     this._value = this.getAttribute("value") || "";
     this._refType = this.getAttribute("ref-type") || "";
+    this._refTypes = this._refType
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    this._selectedType = "";
     this._dataset = this.getAttribute("dataset") || "production";
     // Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2). "" on
     // the flat surface keeps every fetch byte-identical.
@@ -62,6 +77,11 @@ class BpReferencePicker extends HTMLElement {
     this._searchIntel.clientId = BpSearchIntel.clientId("documents", this._dataset);
     this._render();
     if (this._value) this._loadSelectedTitle();
+  }
+
+  _t(key, fallback) {
+    const strings = this._strings || {};
+    return typeof strings[key] === "string" ? strings[key] : fallback;
   }
 
   disconnectedCallback() {
@@ -95,7 +115,10 @@ class BpReferencePicker extends HTMLElement {
 
     const typeSpan = document.createElement("span");
     typeSpan.className = "ref-selected-type";
-    typeSpan.textContent = this._refType;
+    // One declared type reads as before; several read as the PICKED type
+    // (resolved with the title) until it is known, then the declared set.
+    typeSpan.textContent =
+      this._refTypes.length > 1 ? this._selectedType || this._refTypes.join(" · ") : this._refType;
     info.appendChild(typeSpan);
 
     pill.appendChild(info);
@@ -106,14 +129,14 @@ class BpReferencePicker extends HTMLElement {
     const change = document.createElement("button");
     change.type = "button";
     change.className = "btn btn-sm";
-    change.textContent = "Change";
+    change.textContent = this._t("change", "Change");
     change.addEventListener("click", () => this._switchToSearch());
     actions.appendChild(change);
 
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "btn btn-destructive btn-sm";
-    remove.textContent = "Remove";
+    remove.textContent = this._t("remove", "Remove");
     remove.addEventListener("click", () => this._clear());
     actions.appendChild(remove);
 
@@ -130,7 +153,7 @@ class BpReferencePicker extends HTMLElement {
     const input = document.createElement("input");
     input.type = "text";
     input.className = "form-input bp-ref-search-input";
-    input.placeholder = `Search ${this._refType || "documents"}…`;
+    input.placeholder = this._t("search", "Search %{types}…").replace("%{types}", this._refTypes.length ? this._refTypes.join(", ") : this._t("documents", "documents"));
     input.autocomplete = "off";
     input.setAttribute("aria-expanded", "false");
     input.setAttribute("aria-controls", this._listId);
@@ -177,6 +200,7 @@ class BpReferencePicker extends HTMLElement {
       ? doc.id.slice("drafts.".length)
       : doc.id;
     this._selectedTitle = doc.title || doc.id;
+    this._selectedType = doc.type || "";
     this._hideDropdown();
     this._render();
     this._emit(this._value);
@@ -237,7 +261,8 @@ class BpReferencePicker extends HTMLElement {
       perspective: "raw",
       limit: "50"
     });
-    if (this._refType) params.set("type", this._refType);
+    if (this._refTypes.length === 1) params.set("type", this._refTypes[0]);
+    else if (this._refTypes.length > 1) params.set("types", this._refTypes.join(","));
     return (
       (this._scopePrefix || "") +
       "/v1/data/search/" +
@@ -270,6 +295,7 @@ class BpReferencePicker extends HTMLElement {
         byCanonical.set(canonical, {
           id: canonical,
           title: d.title || rawId,
+          type: d._type || d.type || "",
           draft: draft
         });
       }
@@ -400,7 +426,7 @@ class BpReferencePicker extends HTMLElement {
     if (!matches.length) {
       const empty = document.createElement("div");
       empty.className = "bp-ref-dropdown-empty";
-      empty.textContent = "No matches";
+      empty.textContent = this._t("no_matches", "No matches");
       this._dropdown.appendChild(empty);
       this._dropdown.hidden = false;
       if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "true");
@@ -413,11 +439,18 @@ class BpReferencePicker extends HTMLElement {
       btn.className = "bp-ref-dropdown-item";
       btn.setAttribute("role", "option");
       btn.textContent = doc.title || doc.id;
+      if (this._refTypes.length > 1 && doc.type) {
+        // Sanity shows the hit's type when a reference may point at several.
+        const type = document.createElement("span");
+        type.className = "bp-ref-suggest-meta bp-ref-hit-type";
+        type.textContent = doc.type;
+        btn.appendChild(type);
+      }
       if (doc.draft) {
         // Sanity-style draft indicator on unpublished candidates.
         const badge = document.createElement("span");
         badge.className = "bp-ref-suggest-meta";
-        badge.textContent = "draft";
+        badge.textContent = this._t("draft", "draft");
         btn.appendChild(badge);
       }
       btn.addEventListener("mousedown", (e) => {
@@ -439,7 +472,7 @@ class BpReferencePicker extends HTMLElement {
   }
 
   async _loadSelectedTitle() {
-    if (!this._refType) {
+    if (!this._refType || this._refTypes.length > 1) {
       await this._loadSelectedTitleViaSearch();
       return;
     }
@@ -492,6 +525,7 @@ class BpReferencePicker extends HTMLElement {
       const title = match && (match.title || match._id || match.id);
       if (title && this._value) {
         this._selectedTitle = title;
+        this._selectedType = (match && (match._type || match.type)) || "";
         if (this._mounted && this._value) this._render();
       }
     } catch (_e) {

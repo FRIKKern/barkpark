@@ -99,6 +99,7 @@ export const PROSE_GOLDEN: Record<string, string> = {
  * state, NOT reading-flow body prose, so `toPlainText` deliberately omits them.
  */
 export const TEXTLESS_SKIP: Record<string, string> = {
+  'pre-gate-badge': 'reader-synthesised provenance chrome (#17199) — minted by PreGateRegister.annotate/3, never authored and never stored, so its one-line label is surface furniture rather than reading-flow prose (same textless family as byline/eyebrow chrome)',
   // scaffy:add-block-type CodeTabs MARK:plaintext-skip-code-tabs
   'code-tabs': 'per-language code snippets behind a tab switcher — chrome/UI, no reading-flow prose (same textless family as code/terminal)',
   // scaffy:add-block-type ApiEndpoint MARK:plaintext-skip-api-endpoint

@@ -467,6 +467,232 @@ defmodule Barkpark.Tasks.FleetTest do
              Fleet.beat(%{"worker" => uniq("w"), "ttl" => -5}, @dataset, scope)
   end
 
+  # ── 7b. read-time decorations (pdf-bl-roster-enrichment) ────────────────
+
+  describe "contradiction + feed decorations (read-time, never stored)" do
+    defp open_task!(scope) do
+      task_id = uniq("enrich-task")
+
+      {:ok, task} =
+        Content.create_document(
+          "task",
+          %{
+            "doc_id" => task_id,
+            "title" => task_id,
+            "content" => %{
+              "kind" => "task",
+              "acceptance_criteria" => [
+                %{
+                  "criterion" => "the fixture states its bar",
+                  "met" => true,
+                  "evidence" => "fixture"
+                }
+              ],
+              "lifecycle_status" => "open"
+            }
+          },
+          @dataset,
+          scope
+        )
+
+      task
+    end
+
+    # Rewrite a task row's content in place — pins lifecycle/claim shapes the
+    # engines write (reap/close receipts) at an exact age.
+    defp put_task_content!(doc_uuid, fun) do
+      fresh = Repo.get!(Document, doc_uuid)
+
+      {1, _} =
+        from(d in Document, where: d.id == ^doc_uuid)
+        |> Repo.update_all(set: [content: fun.(fresh.content)])
+
+      :ok
+    end
+
+    defp lease_ttl_s, do: Barkpark.Tasks.QueueGate.lease_ttl_seconds()
+
+    test "an idle declaration beside a LIVE claim under the same worker is flagged", %{
+      scope: scope
+    } do
+      worker = uniq("contra")
+      task = open_task!(scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, worker, scope)
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker, "status" => "idle"}, @dataset, scope)
+
+      row = roster_row(@dataset, worker, now: DateTime.utc_now())
+
+      assert row["status"] == "idle"
+
+      assert row["contradiction"] == %{
+               "kind" => "idle_with_live_claim",
+               "task" => Content.published_id(task.doc_id),
+               "claim_ts_iso" => claimed.content["claim"]["ts_iso"]
+             }
+
+      # Derived, never stored: the listener row carries no such key.
+      [listener] = listener_rows(worker)
+      refute Map.has_key?(listener.content, "contradiction")
+    end
+
+    test "working beside a live claim, and idle with no claim at all, are NOT contradictions",
+         %{scope: scope} do
+      busy = uniq("contra-working")
+      task = open_task!(scope)
+      {:ok, _} = Tasks.claim_by_id(task.doc_id, busy, scope)
+      assert {:ok, _} = Fleet.beat(%{"worker" => busy, "status" => "working"}, @dataset, scope)
+      assert roster_row(@dataset, busy)["contradiction"] == nil
+
+      quiet = uniq("contra-quiet")
+      assert {:ok, _} = Fleet.beat(%{"worker" => quiet}, @dataset, scope)
+      assert roster_row(@dataset, quiet)["contradiction"] == nil
+    end
+
+    test "a claim whose lease lapsed (still in_progress, sweeper not yet run) is NO evidence",
+         %{scope: scope} do
+      worker = uniq("contra-expired")
+      task = open_task!(scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, worker, scope)
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker}, @dataset, scope)
+      now = DateTime.utc_now()
+
+      put_task_content!(claimed.id, fn c ->
+        put_in(c, ["claim", "ts_iso"], iso_ago(now, lease_ttl_s() + 60))
+      end)
+
+      row = roster_row(@dataset, worker, now: now)
+      assert Repo.get!(Document, claimed.id).content["lifecycle_status"] == "in_progress"
+      assert row["contradiction"] == nil
+
+      # CONTROL: the same row one minute INSIDE the window is flagged — the
+      # boundary, not the fixture, is what said no above.
+      put_task_content!(claimed.id, fn c ->
+        put_in(c, ["claim", "ts_iso"], iso_ago(now, lease_ttl_s() - 60))
+      end)
+
+      assert %{"kind" => "idle_with_live_claim"} =
+               roster_row(@dataset, worker, now: now)["contradiction"]
+    end
+
+    test "a RELEASED claim (object left behind, worker nil) is NO evidence", %{scope: scope} do
+      worker = uniq("contra-released")
+      task = open_task!(scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, worker, scope)
+
+      {:ok, _} =
+        Tasks.release(claimed.id, worker, observed_epoch: claimed.content["claim"]["epoch"])
+
+      released = Repo.get!(Document, claimed.id).content
+      assert is_map(released["claim"]) and released["claim"]["worker"] == nil
+      assert released["claim"]["released_by"] == worker
+
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker}, @dataset, scope)
+      assert roster_row(@dataset, worker)["contradiction"] == nil
+
+      # Precision against a released claim that somehow still reads
+      # in_progress: the nulled worker alone must keep it out.
+      put_task_content!(claimed.id, &Map.put(&1, "lifecycle_status", "in_progress"))
+      assert roster_row(@dataset, worker)["contradiction"] == nil
+    end
+
+    test "a CLOSED row's claim receipt (worker kept, closed_at stamped) is NO evidence", %{
+      scope: scope
+    } do
+      worker = uniq("contra-closed")
+      task = open_task!(scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, worker, scope)
+      now_iso = DateTime.utc_now() |> DateTime.to_iso8601()
+
+      # The shape `Tasks.Close` leaves: terminal lifecycle, claim kept as a
+      # receipt with the holder still named and a fresh ts.
+      put_task_content!(claimed.id, fn c ->
+        c
+        |> Map.put("lifecycle_status", "done")
+        |> Map.update!("claim", fn cl ->
+          cl |> Map.put("closed_by", worker) |> Map.put("closed_at", now_iso)
+        end)
+      end)
+
+      assert Repo.get!(Document, claimed.id).content["claim"]["worker"] == worker
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker}, @dataset, scope)
+      assert roster_row(@dataset, worker)["contradiction"] == nil
+    end
+
+    test "a live claim under a DIFFERENT worker, or an assignee-only row, is NO evidence", %{
+      scope: scope
+    } do
+      worker = uniq("contra-mine")
+      other = uniq("contra-foreign")
+      task = open_task!(scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, other, scope)
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker}, @dataset, scope)
+      assert roster_row(@dataset, worker)["contradiction"] == nil
+
+      # Assignee names this worker, claim.worker names nobody: the `task`
+      # column's fallback joins it, the contradiction join must not.
+      put_task_content!(claimed.id, fn c ->
+        c |> Map.put("assignee", worker) |> Map.update!("claim", &Map.put(&1, "worker", nil))
+      end)
+
+      row = roster_row(@dataset, worker)
+      assert row["task"] == Content.published_id(task.doc_id)
+      assert row["contradiction"] == nil
+    end
+
+    test "an OFFLINE row is not a current declaration and is never flagged", %{scope: scope} do
+      worker = uniq("contra-offline")
+      now = DateTime.utc_now()
+      mk_listener!(worker, %{"status" => "idle", "last_seen" => iso_ago(now, 600)}, scope)
+      task = open_task!(scope)
+      {:ok, _} = Tasks.claim_by_id(task.doc_id, worker, scope)
+
+      row = roster_row(@dataset, worker, now: now)
+      assert row["status"] == "offline"
+      assert row["contradiction"] == nil
+    end
+
+    test "feed round-trips through a beat, survives an omitting beat, and renders", %{
+      scope: scope
+    } do
+      worker = uniq("feed")
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker, "feed" => "sse"}, @dataset, scope)
+      assert roster_row(@dataset, worker)["feed"] == "sse"
+
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker, "status" => "working"}, @dataset, scope)
+      assert roster_row(@dataset, worker)["feed"] == "sse"
+
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker, "feed" => "poll"}, @dataset, scope)
+      assert roster_row(@dataset, worker)["feed"] == "poll"
+    end
+
+    test "absent feed renders unknown and is not stored; off-vocab feed is refused", %{
+      scope: scope
+    } do
+      worker = uniq("feed-absent")
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker}, @dataset, scope)
+      assert roster_row(@dataset, worker)["feed"] == "unknown"
+      [listener] = listener_rows(worker)
+      refute Map.has_key?(listener.content, "feed")
+
+      # A stored off-vocab value (not beat-writable) still reads unknown.
+      legacy = uniq("feed-legacy")
+
+      mk_listener!(
+        legacy,
+        %{"feed" => "websocket", "last_seen" => iso_ago(DateTime.utc_now(), 0)},
+        scope
+      )
+
+      assert roster_row(@dataset, legacy)["feed"] == "unknown"
+
+      assert {:error, :invalid_feed} =
+               Fleet.beat(%{"worker" => uniq("w"), "feed" => "websocket"}, @dataset, scope)
+
+      assert {:error, :invalid_feed} =
+               Fleet.beat(%{"worker" => uniq("w"), "feed" => "unknown"}, @dataset, scope)
+    end
+  end
+
   # ── 8. manifest wiring (zero Go — PDF-D21) ───────────────────────────────
 
   test "plugin mounts /v1/fleet routes and mints fleet.roster + fleet.beat verbs" do
@@ -498,6 +724,262 @@ defmodule Barkpark.Tasks.FleetTest do
       |> Jason.decode!()
 
     assert manifest["nouns"] == ["task", "fleet"]
+  end
+
+  # ── 9. twin collapse at all THREE fleet call sites (task-f7d389c21c68839f) ──
+
+  describe "twin collapse (Tasks.TwinCollapse — published wins, unpaired draft is the row of record)" do
+    # NAMED FAILURE MODE. Until this row, `Tasks.Fleet` held THREE verbatim
+    # copies of
+    #
+    #     Enum.find(twins, hd(twins), fn d -> d.status == "published" end)
+    #
+    # — in `load_listeners/2`, in `current_tasks_by_worker/2`, and in the
+    # by-ids `canonical_row/3`. The `hd(twins)` DEFAULT, taken whenever a
+    # bucket holds no published row, read Postgres STORAGE ORDER off an
+    # `ORDER BY`-less `Repo.all`. The Go mirror of this shape was measured
+    # live: over 400 builds the draft twin won the slot 349 times and the
+    # published row 51.
+    #
+    # Each arm below is written to red under ONE rule's mutation in isolation:
+    #
+    #   * "rule 1 …" arms are the only ones that red when the
+    #     `status == "published"` clause is deleted. They use the one bucket
+    #     shape where rules 1 and 2 DISAGREE — the PUBLISHED row carries the
+    #     `drafts.` spelling and the unpublished twin is the bare id. In every
+    #     bucket a normal corpus produces, rule 2 agrees with rule 1 and hides
+    #     it.
+    #   * "rule 2 …" arms seed two UNPUBLISHED twins in OPPOSITE insertion
+    #     orders, so only a total rule can answer both the same way; they red
+    #     on the `hd(twins)` default and on dropping the `DraftId.draft?/1`
+    #     term.
+    #   * "an UNPAIRED drafts. listener survives" is the QUIET arm: it passes
+    #     through both mutations above (a one-member bucket has no preference
+    #     to express) and reds only on a BLANKET `drafts.` drop, which would
+    #     make the whole mutate-created listener population unreadable.
+    #
+    # No arm names a line number.
+
+    defp twin_listener!(doc_id, content, status, scope) do
+      Repo.insert!(%Document{
+        doc_id: doc_id,
+        type: "listener",
+        dataset: @dataset,
+        status: status,
+        title: doc_id,
+        rev: "rev-#{doc_id}",
+        workspace_id: Keyword.fetch!(scope, :workspace_id),
+        project_id: Keyword.get(scope, :project_id),
+        content: content
+      })
+    end
+
+    defp listener_content(worker, agent, now) do
+      %{
+        "worker" => worker,
+        "agent" => agent,
+        "status" => "idle",
+        "ttl_s" => Fleet.default_ttl_s(),
+        "last_seen" => DateTime.to_iso8601(now)
+      }
+    end
+
+    defp twin_task!(doc_id, worker, status, scope) do
+      Repo.insert!(%Document{
+        doc_id: doc_id,
+        type: "task",
+        dataset: @dataset,
+        status: status,
+        title: doc_id,
+        rev: "rev-#{doc_id}",
+        workspace_id: Keyword.fetch!(scope, :workspace_id),
+        project_id: Keyword.get(scope, :project_id),
+        content: %{
+          "kind" => "task",
+          "lifecycle_status" => "in_progress",
+          "claim" => %{"worker" => worker}
+        }
+      })
+    end
+
+    # ── call site 1: load_listeners/2 ─────────────────────────────────────
+
+    test "rule 1: the drafts.-spelled PUBLISHED listener wins the roster slot", %{scope: scope} do
+      now = DateTime.utc_now()
+      worker = uniq("ls-r1")
+      logical = "listener-" <> worker
+
+      # Bare id FIRST on purpose: with the published preference deleted, rule 2
+      # takes it and the assertion below flips.
+      twin_listener!(logical, listener_content(worker, "bare-unpublished", now), "draft", scope)
+
+      twin_listener!(
+        "drafts." <> logical,
+        listener_content(worker, "draft-spelled-published", now),
+        "published",
+        scope
+      )
+
+      row = roster_row(@dataset, worker, now: now)
+
+      assert row["agent"] == "draft-spelled-published",
+             "status == published must outrank the bare-id tie-break"
+    end
+
+    test "rule 2: with NO published listener the winner is the RULE, not the storage order",
+         %{scope: scope} do
+      now = DateTime.utc_now()
+      a = uniq("ls-a")
+      b = uniq("ls-b")
+
+      # Two buckets, seeded in OPPOSITE orders. Rule 2 (bare beats `drafts.`)
+      # decides both, so the answer cannot depend on the row order Postgres
+      # hands back.
+      twin_listener!("drafts.listener-" <> a, listener_content(a, "draft-a", now), "draft", scope)
+      twin_listener!("listener-" <> a, listener_content(a, "bare-a", now), "draft", scope)
+
+      twin_listener!("listener-" <> b, listener_content(b, "bare-b", now), "draft", scope)
+      twin_listener!("drafts.listener-" <> b, listener_content(b, "draft-b", now), "draft", scope)
+
+      assert roster_row(@dataset, a, now: now)["agent"] == "bare-a"
+      assert roster_row(@dataset, b, now: now)["agent"] == "bare-b"
+
+      # The pair COLLAPSES: one roster row per worker, not two.
+      rows = Fleet.roster(@dataset, workspace_id: default_workspace_id(), now: now)
+      assert Enum.count(rows, &(&1["worker"] == a)) == 1
+      assert Enum.count(rows, &(&1["worker"] == b)) == 1
+    end
+
+    test "an UNPAIRED drafts. listener survives the collapse as ITSELF", %{scope: scope} do
+      now = DateTime.utc_now()
+      worker = uniq("ls-solo")
+
+      twin_listener!(
+        "drafts.listener-" <> worker,
+        listener_content(worker, "solo-draft", now),
+        "draft",
+        scope
+      )
+
+      row = roster_row(@dataset, worker, now: now)
+
+      assert row != nil, "an unpaired drafts. listener must survive the collapse"
+      assert row["agent"] == "solo-draft"
+    end
+
+    # ── call site 2: current_tasks_by_worker/2 ────────────────────────────
+
+    test "rule 1: the drafts.-spelled PUBLISHED task decides who holds the claim",
+         %{scope: scope} do
+      now = DateTime.utc_now()
+      holder = uniq("jt-pub")
+      other = uniq("jt-draft")
+      task_id = uniq("jt-task")
+
+      # The twins name DIFFERENT claim holders, so which row wins the bucket is
+      # observable in the roster's task join. Bare id inserted FIRST.
+      twin_task!(task_id, other, "draft", scope)
+      twin_task!("drafts." <> task_id, holder, "published", scope)
+
+      twin_listener!(
+        "listener-" <> holder,
+        listener_content(holder, "h", now),
+        "published",
+        scope
+      )
+
+      twin_listener!("listener-" <> other, listener_content(other, "o", now), "published", scope)
+
+      assert roster_row(@dataset, holder, now: now)["task"] == task_id,
+             "the published twin's claim.worker must own the join"
+
+      assert roster_row(@dataset, other, now: now)["task"] == nil,
+             "the draft twin's claim.worker must not also hold the task"
+    end
+
+    test "rule 2: with NO published task twin the bare id's claim holder wins", %{scope: scope} do
+      now = DateTime.utc_now()
+      bare_holder = uniq("jt2-bare")
+      draft_holder = uniq("jt2-draft")
+      task_id = uniq("jt2-task")
+
+      # drafts. row FIRST: under `hd(twins)` on storage order it takes the slot.
+      twin_task!("drafts." <> task_id, draft_holder, "draft", scope)
+      twin_task!(task_id, bare_holder, "draft", scope)
+
+      twin_listener!(
+        "listener-" <> bare_holder,
+        listener_content(bare_holder, "b", now),
+        "published",
+        scope
+      )
+
+      twin_listener!(
+        "listener-" <> draft_holder,
+        listener_content(draft_holder, "d", now),
+        "published",
+        scope
+      )
+
+      assert roster_row(@dataset, bare_holder, now: now)["task"] == task_id
+      assert roster_row(@dataset, draft_holder, now: now)["task"] == nil
+    end
+
+    # ── call site 3: canonical_row/3 (register-vs-touch) ──────────────────
+
+    test "rule 1: a beat touches the drafts.-spelled PUBLISHED listener row", %{scope: scope} do
+      now = DateTime.utc_now()
+      worker = uniq("cr-r1")
+      logical = "listener-" <> worker
+      stale = now |> DateTime.add(-3600, :second)
+
+      bare = twin_listener!(logical, listener_content(worker, "bare", stale), "draft", scope)
+
+      published =
+        twin_listener!(
+          "drafts." <> logical,
+          listener_content(worker, "pub", stale),
+          "published",
+          scope
+        )
+
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker, "status" => "working"}, @dataset, scope)
+
+      assert Repo.get!(Document, published.id).content["status"] == "working",
+             "the beat must land on the published twin"
+
+      assert Repo.get!(Document, bare.id).content["status"] == "idle",
+             "the unpublished bare twin must be left alone"
+
+      # And no THIRD row was registered: the beat resolved, it did not create.
+      assert length(listener_rows(worker)) == 2
+    end
+
+    test "rule 2: with NO published twin a beat touches the BARE row, not the drafts. one",
+         %{scope: scope} do
+      worker = uniq("cr-r2")
+      logical = "listener-" <> worker
+      stale = DateTime.utc_now() |> DateTime.add(-3600, :second)
+
+      # drafts. row FIRST — the one `hd(twins)` would take.
+      draft =
+        twin_listener!(
+          "drafts." <> logical,
+          listener_content(worker, "draft", stale),
+          "draft",
+          scope
+        )
+
+      bare = twin_listener!(logical, listener_content(worker, "bare", stale), "draft", scope)
+
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker, "status" => "working"}, @dataset, scope)
+
+      assert Repo.get!(Document, bare.id).content["status"] == "working",
+             "a bare id must beat a drafts.-prefixed twin"
+
+      assert Repo.get!(Document, draft.id).content["status"] == "idle"
+      assert length(listener_rows(worker)) == 2
+    end
   end
 end
 
@@ -653,6 +1135,38 @@ defmodule BarkparkWeb.FleetControllerTest do
       |> json_response(422)
 
     assert %{"ok" => false, "reason" => "invalid_capacity"} = body
+  end
+
+  test "POST /v1/fleet/beat carries feed onto the roster row; off-vocab feed is a 422", %{
+    conn: conn
+  } do
+    worker = uniq("http-feed")
+
+    _ =
+      conn
+      |> authed()
+      |> post("/v1/fleet/beat", %{"worker" => worker, "feed" => "sse"})
+      |> json_response(200)
+
+    documents =
+      scoped_conn()
+      |> authed()
+      |> get("/v1/fleet/roster")
+      |> json_response(200)
+      |> Map.fetch!("documents")
+
+    row = Enum.find(documents, &(&1["worker"] == worker))
+    assert row["feed"] == "sse"
+    assert Map.has_key?(row, "contradiction")
+    assert row["contradiction"] == nil
+
+    body =
+      scoped_conn()
+      |> authed()
+      |> post("/v1/fleet/beat", %{"worker" => worker, "feed" => "carrier-pigeon"})
+      |> json_response(422)
+
+    assert %{"ok" => false, "reason" => "invalid_feed"} = body
   end
 
   test "fleet endpoints refuse an anonymous caller", %{conn: conn} do

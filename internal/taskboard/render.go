@@ -459,6 +459,32 @@ func flashTitle(t Task, st UIState, now time.Time) Task {
 	return t
 }
 
+// draftMark prefixes a DRAFT row's title with the amber DRAFT chip, returning a
+// COPY (the spine loop's value is already a copy, so the board is untouched) —
+// the same decorator shape as flashTitle directly above, and it composes with
+// it. THE DRAFT LABEL CONTRACT (#18961): the marker rides any Task whose Draft
+// is true, and Draft is the `drafts.` spelling of the row's own stored doc_id,
+// never its status — a drafts.-spelled row stored status:"published" still
+// wears the chip.
+//
+// It rides the TITLE rather than the right-meta on purpose. The right-meta
+// SHEDS: fitRowMeta drops tokens right→left on a tight row and taskRowWithOutline
+// drops the meta wholesale below dropMetaBelow columns, so a marker parked there
+// would silently vanish at exactly the widths where a reader most needs to know
+// the row is not real yet. A marker that sheds is a marker that lies. The title
+// path is ansi-aware end to end (disp/truncate measure VISIBLE width, the
+// wave-1 styled-truncation contract flashTitle documents), so the chip clips on
+// its visible columns and every downstream budget stays correct.
+//
+// A non-draft task is returned VERBATIM, so a board with no drafts renders
+// byte-identical to the pre-marker board (golden_60/80/100 are the control).
+func draftMark(t Task) Task {
+	if chip := draftChip(t); chip != "" {
+		t.Title = chip + " " + t.Title
+	}
+	return t
+}
+
 // ── Hover paint (pointer-hover row highlight) ────────────────────────────────
 
 // hoverPaint restyles one selectable spine row as the pointer-hover highlight,
@@ -543,7 +569,7 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		case spineTask:
 			selected, idx := markSel()
 			tgt := LineTarget{Kind: LineSpineRow, CursorIndex: idx}
-			for _, ln := range taskRowWithOutline(flashTitle(sr.task, st, now), selected, st.OpenTasks[sr.Ref], sr.Outline, width, st.Frame, now) {
+			for _, ln := range taskRowWithOutline(draftMark(flashTitle(sr.task, st, now)), selected, st.OpenTasks[sr.Ref], sr.Outline, width, st.Frame, now) {
 				emit(paint(ln), tgt)
 			}
 		case spineMore:
@@ -706,8 +732,12 @@ func windowSpine(lines []string, top, avail, width int) []string {
 //	                              line dim, and an explicit "stale" before the
 //	                              age
 //
-// The grading is claimRole — the same lease arithmetic the claim glyph burns
-// through, so the pulse and its row can never disagree about freshness. The
+// The grading is pulseRole — the same three-band arithmetic the claim glyph
+// burns through, but against pulseTTL (5 min), NOT the claim lease (2700s).
+// task-f30dab8c54c605e6 split the two: a pulse is a statement about NOW, so it
+// must stop spinning minutes after the worker goes quiet; the CLAIM behind it
+// is still live for the rest of the server's 45-minute lease and must not be
+// painted red for it. The
 // spinner rides the board heartbeat frame (0 at rest / reduced-motion / cold
 // paints, so goldens stay deterministic); every glyph is existing vocabulary.
 func pulseLine(t Task, p *ClaimPulse, frame, width int, now time.Time) string {
@@ -716,7 +746,7 @@ func pulseLine(t Task, p *ClaimPulse, frame, width int, now time.Time) string {
 		worker = t.Claim.Worker
 	}
 	age := AgeBadge(p.At, now)
-	role := claimRole(p.At, now)
+	role := pulseRole(p.At, now)
 
 	if role == RoleDanger { // past the lease TTL: visibly stale, never fresh
 		s := "· "

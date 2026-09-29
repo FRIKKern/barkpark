@@ -87,3 +87,76 @@ test("rethrow: a non-404 Barkpark-shaped error is NOT swallowed", async () => {
     /401 unauthorized/,
   );
 });
+
+/* ══ THE BINDING ARM — what makes the arms above non-vacuous ══════════════════
+ *
+ * Everything above runs against `fetchOrNull`, a LOCAL copy of the swallow. It
+ * proves the SHAPE is correct; it proves nothing about the two files that ship.
+ *
+ * MEASURED, not argued: deleting the line
+ *
+ *     if (err instanceof BarkparkNotFoundError) return null
+ *
+ * from BOTH `blog-starter/lib/barkpark.ts` (getDocById) and
+ * `website-starter/lib/barkpark.ts` (getDoc) — i.e. restoring the exact 500-on-
+ * every-by-id-miss defect this file was written to prevent — left `pnpm test`
+ * at "ran 560 tests from 69 files (pass 560, fail 0)", byte-identical to the
+ * unmutated run, and left `pnpm --filter create-barkpark-app test` at the same
+ * "2 failed | 141 passed | 1 skipped" it already reports on a clean tree (those
+ * two are a pre-existing offline-install failure, confirmed by a clean-tree
+ * control run). No suite anywhere in the repo noticed.
+ *
+ * The templates cannot be IMPORTED here: they open with `import 'server-only'`
+ * and pull `@barkpark/nextjs/server` plus two sibling modules that do not exist
+ * outside a scaffolded project. So the binding is to the bytes, in the same
+ * style as `template-webhook-lazy.test.ts` in this directory — a behavioural
+ * proof on a mirror, plus a pin that the mirror is still what ships.
+ *
+ * `readFileSync` throws on a missing path, so a moved or renamed template reds
+ * here loudly rather than passing vacuously. */
+
+import { readFileSync } from "node:fs";
+
+const TEMPLATE_ROOT = new URL(
+  "../../js/packages/create-barkpark-app/templates/",
+  import.meta.url,
+);
+
+const SHIPPED: Array<{ rel: string; fn: string }> = [
+  { rel: "blog-starter/lib/barkpark.ts", fn: "getDocById" },
+  { rel: "website-starter/lib/barkpark.ts", fn: "getDoc" },
+];
+
+for (const { rel, fn } of SHIPPED) {
+  test(`BINDING: ${rel} — ${fn} still swallows BarkparkNotFoundError to null`, () => {
+    const src = readFileSync(new URL(rel, TEMPLATE_ROOT), "utf8");
+    assert.ok(
+      src.length > 0,
+      `${rel} is empty — nothing was actually scanned.`,
+    );
+
+    // The corpus self-check: if the function this pin is about is not in the
+    // file at all, the pin below would be asserting over the wrong module.
+    assert.match(
+      src,
+      new RegExp(`export async function ${fn}\\b`),
+      `${rel} no longer exports ${fn}() — this pin lost its subject; re-point it.`,
+    );
+
+    // The pin itself: the 404 -> null branch, and the rethrow that keeps it
+    // from becoming a blanket swallow.
+    assert.match(
+      src,
+      /if \(err instanceof BarkparkNotFoundError\) return null/,
+      `${rel}: the BarkparkNotFoundError -> null branch is GONE. Every by-id ` +
+        `miss now renders error.tsx (500) instead of not-found.tsx (404), and ` +
+        `every downstream \`if (!doc) notFound()\` is dead code again.`,
+    );
+    assert.match(
+      src,
+      /if \(err instanceof BarkparkNotFoundError\) return null\s*\n\s*throw err/,
+      `${rel}: the 404 branch is no longer followed by \`throw err\` — a ` +
+        `catch that does not rethrow turns every 500 into a silent 404.`,
+    );
+  });
+}

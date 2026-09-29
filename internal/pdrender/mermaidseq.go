@@ -76,12 +76,13 @@ func renderSequence(s *mmSequence, ctx RenderCtx) []string {
 		if label == "" {
 			label = actor
 		}
-		if s.isActor[actor] {
-			label = "○ " + label
-		}
-		label = sanitizeText(label)
-		if !singleCellRunes(label) || lipgloss.Width(label) > actorInner {
-			return nil
+		for i, seg := range mermaidLabelSegments(label) {
+			if i == 0 && s.isActor[actor] {
+				seg = "○ " + seg
+			}
+			if !singleCellRunes(seg) || lipgloss.Width(seg) > actorInner {
+				return nil
+			}
 		}
 	}
 	for _, message := range s.messages {
@@ -100,7 +101,7 @@ func renderSequence(s *mmSequence, ctx RenderCtx) []string {
 			}
 			available--
 		}
-		text := sanitizeText(message.text)
+		text := mermaidLabelFlat(message.text)
 		if fi == ti {
 			text = "↺ " + text
 		}
@@ -149,12 +150,28 @@ func renderActorHeads(s *mmSequence, cellW, gutter, leftPad, W int, ctx RenderCt
 	n := len(s.actors)
 	boxes := make([][]string, n)
 	widths := make([]int, n)
+	// A participant label may carry break tags, so a head is 1..N text rows. All
+	// heads are drawn at the SAME text height: the bottom border carries the ┬
+	// lifeline root, and a short head that ended early would drop its tick onto a
+	// higher row than its neighbours' and tear the ladder apart.
+	labels := make([][]string, n)
+	textH := 1
 	for i, a := range s.actors {
 		label := s.label[a]
 		if label == "" {
 			label = a
 		}
-		boxes[i] = actorBox(sanitizeText(label), cellW, s.isActor[a], ctx)
+		segs := mermaidLabelSegments(label)
+		if s.isActor[a] {
+			segs = append([]string{"○ " + segs[0]}, segs[1:]...)
+		}
+		labels[i] = segs
+		if len(segs) > textH {
+			textH = len(segs)
+		}
+	}
+	for i := range s.actors {
+		boxes[i] = actorBox(labels[i], cellW, textH, ctx)
 		widths[i] = cellW
 	}
 	joined := joinColumns(boxes, widths, gutter)
@@ -166,14 +183,16 @@ func renderActorHeads(s *mmSequence, cellW, gutter, leftPad, W int, ctx RenderCt
 }
 
 // actorBox is one participant header: a centered, bordered box exactly cellW wide
-// whose bottom border carries a ┬ at the centre column (the lifeline root). An
-// `actor` (vs `participant`) is marked with a small ○ before its name.
-func actorBox(label string, cellW int, isActor bool, ctx RenderCtx) []string {
+// whose bottom border carries a ┬ at the centre column (the lifeline root). The
+// `○ ` actor mark is already on lines[0] when the participant is an `actor` (vs
+// a `participant`). `textH` is the common text height every head in the ladder
+// is drawn at — a head with fewer lines is padded with blank rows at the BOTTOM
+// so its ┬ stays on the same row as its neighbours'.
+func actorBox(lines []string, cellW, textH int, ctx RenderCtx) []string {
 	inner := cellW - 2 // border columns
-	if isActor {
-		label = "○ " + label
+	if len(lines) == 0 {
+		lines = []string{""}
 	}
-	label = padOrTruncate(centerText(label, inner), inner)
 
 	top := "┌" + strings.Repeat("─", inner) + "┐"
 	// Bottom border with the lifeline tick at the centre.
@@ -181,11 +200,19 @@ func actorBox(label string, cellW int, isActor bool, ctx RenderCtx) []string {
 	bottomRunes := []rune("└" + strings.Repeat("─", inner) + "┘")
 	bottomRunes[1+c] = '┬'
 	dim := ctx.Theme.Dim
-	return []string{
-		dim.Render(top),
-		dim.Render("│") + ctx.Theme.Body.Render(label) + dim.Render("│"),
-		dim.Render(string(bottomRunes)),
+
+	out := make([]string, 0, textH+2)
+	out = append(out, dim.Render(top))
+	for i := 0; i < textH; i++ {
+		text := ""
+		if i < len(lines) {
+			text = lines[i]
+		}
+		text = padOrTruncate(centerText(text, inner), inner)
+		out = append(out, dim.Render("│")+ctx.Theme.Body.Render(text)+dim.Render("│"))
 	}
+	out = append(out, dim.Render(string(bottomRunes)))
+	return out
 }
 
 // lifelineRow is a single row showing every lifeline (│) at its column, with an
@@ -213,7 +240,7 @@ func renderMessage(m mmMessage, fi, ti int, xOf []int, cellW, W int, ctx RenderC
 	if fi == ti {
 		row := blankRow(W)
 		stampLifelines(row, xOf)
-		txt := []rune("↺ " + sanitizeText(m.text))
+		txt := []rune("↺ " + mermaidLabelFlat(m.text))
 		start := xf + 1
 		writeRunes(row, start, txt, W)
 		return []string{ctx.Theme.Dim.Render(strings.TrimRight(string(row), " "))}
@@ -229,7 +256,7 @@ func renderMessage(m mmMessage, fi, ti int, xOf []int, cellW, W int, ctx RenderC
 	labelRow := blankRow(W)
 	stampLifelines(labelRow, xOf)
 	if m.text != "" {
-		txt := []rune(sanitizeText(m.text))
+		txt := []rune(mermaidLabelFlat(m.text))
 		center := (lo + hi) / 2
 		start := center - len(txt)/2
 		if start <= lo {

@@ -319,7 +319,7 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
   end
 
   describe "dedup refusal — no outsider gets silence (D6/D7)" do
-    test "a look-alike issue is REFUSED: comment + dead-letter row + {:refused, id}, no task",
+    test "a look-alike issue is REFUSED: comment + dead-letter row + {:refused, :dedup_recorded, id}, no task",
          %{scope: scope} do
       # An existing task the outsider issue looks like — so the Dedup seam
       # (Tasks.Dedup, through Content.Writer) refuses the birth.
@@ -329,7 +329,7 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
         opts(scope)
         |> Keyword.put(:conflict_fun, recording_conflict_fun())
 
-      assert {:refused, "gh-50"} = Intake.ingest(opened_payload(50), o)
+      assert {:refused, :dedup_recorded, "gh-50"} = Intake.ingest(opened_payload(50), o)
 
       # No task born for the refused issue — every re-delivery would re-refuse,
       # so the refusal MUST be visible instead of silent.
@@ -362,7 +362,7 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
         opts(scope)
         |> Keyword.put(:conflict_fun, recording_conflict_fun())
 
-      assert {:refused, "gh-51"} = Intake.ingest(opened_payload(51), o)
+      assert {:refused, :dedup_recorded, "gh-51"} = Intake.ingest(opened_payload(51), o)
       assert_receive {:comment, _, 51, _}
       assert_receive {:conflict, %{kind: "dedup_refused"}}
 
@@ -370,7 +370,7 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
       # the open {repo, issue, kind} row at the DB layer (tested in slice 1);
       # the controller's 2xx keeps GitHub from redelivering on its own, so the
       # comment posts exactly once per genuine delivery.
-      assert {:refused, "gh-51"} = Intake.ingest(opened_payload(51), o)
+      assert {:refused, :dedup_recorded, "gh-51"} = Intake.ingest(opened_payload(51), o)
       assert task_rows(51) == []
       assert_receive {:conflict, %{kind: "dedup_refused"}}
     end
@@ -385,8 +385,10 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
         opts(scope)
         |> Keyword.put(:conflict_fun, raising)
 
-      # Even though the recorder blew up, the refusal outcome + comment stand.
-      assert {:refused, "gh-52"} = Intake.ingest(opened_payload(52), o)
+      # Even though the recorder blew up, the refusal outcome + comment stand —
+      # and the tag SAYS the row is missing. `:dedup_recorded` here would be the
+      # receipt asserting a dead-letter row a maintainer could never find.
+      assert {:refused, :dedup_unrecorded, "gh-52"} = Intake.ingest(opened_payload(52), o)
       assert_receive {:comment, _, 52, _}
       assert task_rows(52) == []
     end
@@ -411,7 +413,7 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
 
       log =
         capture_log(fn ->
-          assert {:refused, "gh-54"} = Intake.ingest(payload, opts(scope))
+          assert {:refused, :vetoed, "gh-54"} = Intake.ingest(payload, opts(scope))
         end)
 
       assert log =~ "github intake: lifecycle gate refused gh-54"

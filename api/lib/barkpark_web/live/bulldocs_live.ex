@@ -51,6 +51,7 @@ defmodule BarkparkWeb.BulldocsLive do
 
   alias Barkpark.Content
   alias Barkpark.Content.Labels
+  alias Barkpark.Content.Papers.PreGateRegister
   alias Barkpark.Plugins.Bulldocs.Events
   alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render
@@ -58,6 +59,7 @@ defmodule BarkparkWeb.BulldocsLive do
   alias BarkparkWeb.BulldocsLive.Edit
   alias BarkparkWeb.Presence
   alias BarkparkWeb.PaperActor
+  alias BarkparkWeb.PaperReaderStyle
   alias BarkparkWeb.PaperPresence
   alias BarkparkWeb.PaperViewer
   alias BarkparkWeb.Studio.StudioLive.Blocks
@@ -254,10 +256,11 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:found, not is_nil(paper))
       |> assign(:source_error, nil)
       |> assign(:rev, paper_rev(paper))
-      # `:article?` is the per-doc style marker (`content["style"] == "article"`).
-      # The root `:paper` layout reads it to switch on article page chrome; the
-      # block render path reads it to render each block in `:article` palette.
-      # Non-article papers leave it false → email default, chrome unchanged.
+      # `:article?` is the page-chrome decision (`BarkparkWeb.PaperReaderStyle`):
+      # true for `article`/`article-wide` AND for a paper with NO style (the web
+      # default, onb-residue-onb16); false only for an explicit non-article
+      # marker, which keeps the legacy chrome. Every block renders `:article`
+      # regardless (see `render_opts/1`).
       |> assign(:article?, paper_article?(paper))
       |> assign(:wide?, paper_wide?(paper))
       |> assign(:html, source_html(reader_source))
@@ -279,6 +282,13 @@ defmodule BarkparkWeb.BulldocsLive do
       # at all. `:last_action` acknowledges the most recent click inline.
       |> assign(:paper_actions, paper_actions(paper))
       |> assign(:last_action, nil)
+      # Ruling arpss-bulldocs-anon-paper-event-write-ruling (2026-09-10):
+      # anonymous visitors are READ ONLY on the public reader. `:can_act?` is
+      # the RENDER half of that — an anonymous visitor is not shown a control
+      # the server would refuse. The binding half is `Edit.attach_gate/1`,
+      # which halts the four `paper_events` writers for a principal-less
+      # socket whether or not a button was ever rendered.
+      |> assign(:can_act?, Edit.principal?(socket.assigns))
       # P6.U4 Simplify control. `:simplify?` gates the button (true only when the
       # paper carries a goal_id — Simplify applies to any goal-bearing paper).
       # `:pending_simplify` holds the in-flight `simplified-<n>` branch name once a
@@ -287,6 +297,12 @@ defmodule BarkparkWeb.BulldocsLive do
       # inline ack of the most recent simplify decision.
       |> assign(:simplify?, paper_goal_id(paper) != nil)
       |> assign(:pending_simplify, nil)
+      # task-cefcbf5b3a9b1665: the id of the `simplify-request` row this
+      # session opened. Accept/Reject carry it BACK to the server as
+      # `phx-value-request-id`, and the server re-derives the tie from the
+      # stored request rather than trusting the branch name — a client may say
+      # which request it means, never who made it.
+      |> assign(:pending_simplify_event_id, nil)
       |> assign(:last_simplify, nil)
       # Outbound `paper-links` refs are stored separately from rendered HTML so
       # workspace document broadcasts can refresh only readers whose related
@@ -690,7 +706,10 @@ defmodule BarkparkWeb.BulldocsLive do
     else
       branch = "simplified-#{next_simplify_index(slug, scope)}"
 
-      _ =
+      # The REQUESTER is stamped on the request row. Without it the decision
+      # has nothing to be tied to — `Events.record_decision/1` refuses a
+      # request whose actor it cannot read.
+      request =
         Events.create_event(
           %{
             "event_type" => "simplify-request",
@@ -700,12 +719,20 @@ defmodule BarkparkWeb.BulldocsLive do
             "branch" => branch
           }
           |> stamp_scope(scope)
+          |> stamp_actor(socket)
         )
 
-      {:noreply,
-       socket
-       |> assign(:pending_simplify, branch)
-       |> assign(:last_simplify, "Simplify requested — #{branch}")}
+      case request do
+        {:ok, event} ->
+          {:noreply,
+           socket
+           |> assign(:pending_simplify, branch)
+           |> assign(:pending_simplify_event_id, event.id)
+           |> assign(:last_simplify, "Simplify requested — #{branch}")}
+
+        {:error, _changeset} ->
+          {:noreply, assign(socket, :last_simplify, "Simplify could not be requested.")}
+      end
     end
   end
 
@@ -713,15 +740,15 @@ defmodule BarkparkWeb.BulldocsLive do
   # `simplify-accept` event on the pending branch. NOTE: this only records the
   # decision — the actual merge-to-source HTML write / branch-close is the
   # ORCHESTRATOR's job (out of scope here; a reader follow-on consumes this row).
-  def handle_event("simplify-accept", _params, socket) do
-    {:noreply, record_simplify_decision(socket, "simplify-accept", "Accepted")}
+  def handle_event("simplify-accept", params, socket) do
+    {:noreply, record_simplify_decision(socket, params, "simplify-accept", "Accepted")}
   end
 
   # Reject the pending simplify candidate. Records a `simplify-reject` decision
   # on the pending branch. As with accept, the branch-close itself is the
   # orchestrator's job (out of scope) — we only persist the user's intent.
-  def handle_event("simplify-reject", _params, socket) do
-    {:noreply, record_simplify_decision(socket, "simplify-reject", "Rejected")}
+  def handle_event("simplify-reject", params, socket) do
+    {:noreply, record_simplify_decision(socket, params, "simplify-reject", "Rejected")}
   end
 
   # ── Edit on the link, slice 2 (task-633d25cac4262afc) ─────────────────────
@@ -861,31 +888,83 @@ defmodule BarkparkWeb.BulldocsLive do
   # Shared body for accept/reject: record the decision event on the pending
   # branch (skip gracefully if there is no pending branch or no goal_id), ack
   # inline, then clear `:pending_simplify` so the controls retract.
-  defp record_simplify_decision(socket, event_type, verb) do
+  # task-cefcbf5b3a9b1665 — the requester<->accepter tie.
+  #
+  # The client names WHICH request it is deciding (`phx-value-request-id`,
+  # falling back to this session's own pending id). It names nothing else:
+  # `Events.record_decision/1` reads the stored request row and refuses unless
+  # the paper, the workspace/project scope, the actor, the freshness and the
+  # replay check ALL hold. Branch and goal_id come off the stored request too,
+  # so a forged branch name buys nothing.
+  #
+  # Every refusal returns the socket with the pending state INTACT and writes
+  # NO row — a denied decision leaves no trace in the event history and
+  # mutates no content.
+  defp record_simplify_decision(socket, params, event_type, verb) do
     slug = socket.assigns.slug
-    branch = socket.assigns.pending_simplify
 
-    {goal_id, scope} =
+    request_id =
+      case params do
+        %{"request-id" => id} when is_binary(id) and id != "" -> id
+        _ -> socket.assigns[:pending_simplify_event_id]
+      end
+
+    {_goal_id, scope} =
       paper_goal_and_scope(slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
 
-    if is_nil(branch) or is_nil(goal_id) do
+    if is_nil(request_id) do
       socket
     else
-      _ =
-        Events.create_event(
-          %{
-            "event_type" => event_type,
-            "goal_id" => goal_id,
-            "paper_slug" => slug,
-            "payload_html" => "<p>#{verb} #{branch} for /papers/#{slug}</p>",
-            "branch" => branch
-          }
-          |> stamp_scope(scope)
-        )
+      attrs =
+        %{
+          "event_type" => event_type,
+          "paper_slug" => slug,
+          "request_event_id" => request_id,
+          "payload_html" => "<p>#{verb} a simplify request for /papers/#{slug}</p>"
+        }
+        |> stamp_scope(scope)
+        |> stamp_actor(socket)
 
-      socket
-      |> assign(:pending_simplify, nil)
-      |> assign(:last_simplify, "#{verb} #{branch}")
+      case Events.record_decision(attrs) do
+        {:ok, event} ->
+          socket
+          |> assign(:pending_simplify, nil)
+          |> assign(:pending_simplify_event_id, nil)
+          |> assign(:last_simplify, "#{verb} #{event.branch}")
+
+        {:error, reason} ->
+          assign(socket, :last_simplify, decision_refusal(reason))
+      end
+    end
+  end
+
+  # One sentence per refusal. Deliberately does NOT leak whether the named
+  # request exists for somebody else — an unknown id and another person's id
+  # read the same to the client.
+  defp decision_refusal(reason) when is_atom(reason) do
+    case reason do
+      :already_decided -> "That simplify request has already been decided."
+      :expired_request -> "That simplify request has expired."
+      :anonymous -> "Sign in to act on this paper."
+      _ -> "That simplify request is not yours to decide."
+    end
+  end
+
+  defp decision_refusal(_), do: "That simplify request could not be decided."
+
+  # Stamp the authenticated principal behind this socket onto an event attr
+  # map. `Edit.principal?/1` already gated the event, so an anonymous socket
+  # never reaches here — but this stays fail-closed anyway and leaves both
+  # keys absent, which `Events.record_decision/1` reads as `:anonymous`.
+  defp stamp_actor(attrs, socket) do
+    case socket.assigns[:viewer] do
+      %{kind: kind, id: id} when kind in [:user, :token, :share] and is_binary(id) ->
+        attrs
+        |> Map.put("actor_kind", Atom.to_string(kind))
+        |> Map.put("actor_id", id)
+
+      _ ->
+        attrs
     end
   end
 
@@ -988,15 +1067,13 @@ defmodule BarkparkWeb.BulldocsLive do
   # does, and the 660px reading measure was shrinking its tables into
   # thumbnails. Prose inside a wide paper still keeps its measure (the shell
   # rule caps p/h/list at 72ch); only the evidence blocks fill the width.
-  defp paper_article?(%{content: content}),
-    do: Map.get(content || %{}, "style") in ["article", "article-wide"]
+  #
+  # The article/legacy decision itself lives in `BarkparkWeb.PaperReaderStyle`,
+  # shared with the `/s/:token` static fallback so the two reader doors cannot
+  # disagree on a paper's chrome.
+  defp paper_article?(paper), do: PaperReaderStyle.article?(paper)
 
-  defp paper_article?(_), do: false
-
-  defp paper_wide?(%{content: content}),
-    do: Map.get(content || %{}, "style") == "article-wide"
-
-  defp paper_wide?(_), do: false
+  defp paper_wide?(paper), do: PaperReaderStyle.wide?(paper)
 
   # Render opts threaded into every block render. BOTH clauses name
   # `style: :article`: this is a SCREEN — the public LiveView paper reader —
@@ -1027,7 +1104,14 @@ defmodule BarkparkWeb.BulldocsLive do
         |> assign(:paper_link_details, Map.get(resolvers, :paper_links, %{}))
         |> stream(
           :blocks,
-          to_stream_items(resolved, paper_article?(paper), resolvers)
+          to_stream_items(
+            # Grandfather badge (task-597ea451072da061): register membership AND
+            # the STORED blocks still refused by the gate → one synthesised block
+            # under the byline. Resolved blocks render; stored blocks decide.
+            PreGateRegister.annotate(resolved, paper.doc_id, blocks),
+            paper_article?(paper),
+            resolvers
+          )
         )
 
       _ ->
@@ -1081,7 +1165,15 @@ defmodule BarkparkWeb.BulldocsLive do
       %{
         wikilinks: Content.resolve_wikilinks_in_blocks(blocks, dataset, scope),
         values: Content.resolve_values_in_blocks(blocks, dataset, scope),
-        paper_links: resolve_paper_link_details(blocks, dataset, scope)
+        paper_links: resolve_paper_link_details(blocks, dataset, scope),
+        # Linked master instances (task-59f078a2fd248698): resolved per page
+        # load inside the paper's own tenant, PUBLISHED master rows only (the
+        # same D5 gate as the rest of this map); a paper with no instance
+        # costs nothing. Reached through the masters seam, never the plugin.
+        masters:
+          BarkparkWeb.Studio.StudioLive.PaperMastersSeam.render_map(paper, blocks,
+            published_only: true
+          )
       }
       |> Map.merge(Labels.render_opts(dataset, scope))
     end
@@ -1096,7 +1188,11 @@ defmodule BarkparkWeb.BulldocsLive do
   #
   # Visibility note: this surfaces the paper's-tenant task data (titles /
   # statuses) to whoever can read the paper — the author opts in by embedding a
-  # query. Cross-tenant leakage is impossible (workspace fail-closed).
+  # query. Cross-tenant leakage is impossible (workspace fail-closed), and the
+  # PUBLISHED PERSPECTIVE is enforced: `reader_task_scope/1` carries
+  # `published_only: true`, exactly as `reader_resolvers/3` does for
+  # wikilinks/values/labels. This is the same D5 gate — the reader is the
+  # anonymous surface, so an unpublished (`drafts.`-only) task must not reach it.
   defp with_live_tasks(blocks, paper, dataset) when is_list(blocks) do
     Barkpark.Content.Papers.resolve_tasks_in_blocks(blocks, reader_task_scope(paper), dataset)
   end
@@ -1111,7 +1207,17 @@ defmodule BarkparkWeb.BulldocsLive do
           _ -> nil
         end
 
-    [workspace_id: ws_id, project_id: paper && paper.project_id]
+    # `published_only: true` is HARD-CODED, not an opt (the same shape
+    # `reader_resolvers/3` uses): every mount of this LiveView is a READER mount
+    # — /papers/:slug and the share/membership-gated scoped twin — and neither is
+    # an authoring surface. The authorised author's draft-visible view of the
+    # SAME blocks is Studio's `paper_stream_items/4`, which threads its own
+    # session scope WITHOUT this key and is deliberately untouched.
+    # Without it a draft-only task (`drafts.<id>`, no published twin — i.e. every
+    # `bp task create` row) rendered into a PUBLISHED paper's task block for an
+    # anonymous reader (task-b10e10b944f6f55b). `Tasks.Query.docs_for_query/2`
+    # consumes the key.
+    [workspace_id: ws_id, project_id: paper && paper.project_id, published_only: true]
   end
 
   @task_block_types ~w(tasks task-list task-board roadmap task-detail)
@@ -1199,6 +1305,12 @@ defmodule BarkparkWeb.BulldocsLive do
 
   def handle_info({:paper_op, %{"op" => _} = op}, socket),
     do: {:noreply, Edit.apply_op(socket, op)}
+
+  # An atomic batch broadcasts one receipt for several blocks, without a
+  # per-block HTML fragment. Re-read the saved tree so connected readers keep
+  # every changed block and its unchanged siblings in the stream.
+  def handle_info({:paper_block, %{op_kind: :batch}}, socket),
+    do: {:noreply, refetch(socket)}
 
   def handle_info({:paper_block, frame}, socket) do
     cond do
@@ -1382,7 +1494,11 @@ defmodule BarkparkWeb.BulldocsLive do
             |> ensure_document_changes_subscription(paper, refs)
             |> stream(
               :blocks,
-              to_stream_items(resolved, article?, resolvers),
+              to_stream_items(
+                PreGateRegister.annotate(resolved, paper.doc_id, blocks),
+                article?,
+                resolvers
+              ),
               reset: true
             )
             |> assign(:rev, paper_rev(paper))
@@ -1454,10 +1570,10 @@ defmodule BarkparkWeb.BulldocsLive do
     ~H"""
     <%!-- `bp-paper-surface` makes the reader main a SINK of the canonical
           paper-surface source (bulldocs.html.heex embeds it) so View↔Edit
-          parity is by construction. It is gated on `@article?` on purpose: the
-          shared `.bp-paper-surface` element rules must NOT reach legacy
-          non-article papers (which keep the dark chrome above) — those emit
-          bare `<h1>/<p>/…` the surface rules would restyle. The parchment
+          parity is by construction. It is gated on `@article?`, which is true
+          for article papers AND for style-less ones (the web default,
+          `BarkparkWeb.PaperReaderStyle`); only a paper carrying an explicit
+          non-article style marker keeps the legacy dark chrome. The parchment
           reader skin re-skins the `--paper-*` tokens on this same element. --%>
     <main data-paper-palette={if @article?, do: "article", else: "legacy"} class={[
       "bp-paper-shell",
@@ -1537,8 +1653,15 @@ defmodule BarkparkWeb.BulldocsLive do
             empty set (no/unknown source_doc) renders no bar at all. Each click
             fires "paper-action" which records the intent as a paper_events
             row (routing Option B — orchestrator reads them; no daemon, no
-            nonce). `:last_action` shows a small inline confirmation. --%>
-      <div :if={@paper_actions != []} id="paper-action-bar" class="bp-paper-actions">
+            nonce). `:last_action` shows a small inline confirmation.
+            Rendered only for an identified viewer (`@can_act?`): the event
+            behind these buttons WRITES, and the ruling makes an anonymous
+            visitor read-only. The server gate is the real fence. --%>
+      <div
+        :if={@paper_actions != [] and @can_act?}
+        id="paper-action-bar"
+        class="bp-paper-actions"
+      >
         <button
           :for={action <- @paper_actions}
           type="button"
@@ -1562,7 +1685,7 @@ defmodule BarkparkWeb.BulldocsLive do
             of scope here). Once a request is pending (`@pending_simplify`),
             Accept/Reject render and record the user's decision on that branch.
             `:last_simplify` shows a small inline confirmation. --%>
-      <div :if={@simplify?} id="paper-simplify" class="bp-paper-simplify">
+      <div :if={@simplify? and @can_act?} id="paper-simplify" class="bp-paper-simplify">
         <button
           type="button"
           class="bp-paper-action"
@@ -1578,6 +1701,7 @@ defmodule BarkparkWeb.BulldocsLive do
             type="button"
             class="bp-paper-action bp-paper-action-accept"
             phx-click="simplify-accept"
+            phx-value-request-id={@pending_simplify_event_id}
           >
             Accept
           </button>
@@ -1585,6 +1709,7 @@ defmodule BarkparkWeb.BulldocsLive do
             type="button"
             class="bp-paper-action bp-paper-action-reject"
             phx-click="simplify-reject"
+            phx-value-request-id={@pending_simplify_event_id}
           >
             Reject
           </button>

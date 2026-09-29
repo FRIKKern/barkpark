@@ -32,6 +32,7 @@ defmodule Barkpark.Content.WriterConnectionFaultTest do
 
   `async: false`: the fault seam is `Application.put_env`, which is global.
   """
+  # sync: swaps node-global Application env (`:barkpark, :writer_fault`) — one value for the whole node
   use Barkpark.DataCase, async: false
 
   import ExUnit.CaptureLog, only: [with_log: 1]

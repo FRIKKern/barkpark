@@ -14,11 +14,21 @@
 import { scopePrefix } from './scope'
 import { buildQueryString, createDocsBuilder, type BuilderState } from './filter-builder'
 import { request } from './transport'
-import type { BarkparkClientConfig, BarkparkDocument, DocsBuilder, Perspective } from './types'
+import type {
+  BarkparkClientConfig,
+  BarkparkDocument,
+  DocsBuilder,
+  Perspective,
+  ResolveSpec,
+} from './types'
 
 export interface DocsOperationOptions {
   perspective?: Perspective
   signal?: AbortSignal
+  /** Server-side block resolution (`?resolve=`) for every page this builder
+   *  reads. `'tasks'` fills query-shaped PortableDoc task blocks with a live
+   *  snapshot; see {@link ResolveSpec}. */
+  resolve?: ResolveSpec
 }
 
 interface QueryResultBody<T> {
@@ -73,6 +83,7 @@ export function createDocsOperation<T = BarkparkDocument>(
     const parts: string[] = []
     if (qs.length > 0) parts.push(qs)
     if (perspective !== undefined) parts.push(`perspective=${encodeURIComponent(perspective)}`)
+    if (opts?.resolve !== undefined) parts.push(`resolve=${encodeURIComponent(opts.resolve)}`)
     parts.push(...extra)
     const query = parts.length > 0 ? `?${parts.join('&')}` : ''
     return `${scopePrefix(config)}/v1/data/query/${encodeURIComponent(config.dataset)}/${encodeURIComponent(type)}${query}`

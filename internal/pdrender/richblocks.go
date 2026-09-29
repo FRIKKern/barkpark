@@ -33,6 +33,37 @@ import (
 // lipgloss/table auto-sizer stays the sole width authority. `cols` ABSENT ⇒ every
 // column is text ⇒ the render is byte-identical to a table with no spec. The key
 // is `cols`, NOT `columns` (an overloaded layout block name + layout attr).
+//
+// CROSS-RUNTIME: the web projection of this same spec lives in
+// api/lib/barkpark/portable_doc/render/compose.ex (table_col_types /
+// table_delta_cell / table_spark_cell) + walk.ex table_col_class. The type set
+// and the delta glyphs below are recorded once, for both, in
+// api/test/support/fixtures/table-col-types.json. BOTH suites now read that file:
+// the Elixir suite directly, and the Go side via TestColTypeContractMatchesFixture
+// (richblocks_col_contract_test.go), which asserts colTypeNames /
+// colRightAlignNames / deltaGlyphs below are term-identical to the fixture. Change
+// a glyph or a type name in one place and the Go test reds until all three agree.
+// colTypeNames is the CLOSED set of `cols` column types, colRightAlignNames the
+// subset that right-aligns, and deltaGlyphs the direction glyphs deltaCell emits.
+// These three are the Go half of the cross-runtime contract recorded in
+// api/test/support/fixtures/table-col-types.json; richblocks_col_contract_test.go
+// holds them term-identical to that file.
+var (
+	colTypeNames       = []string{"text", "num", "delta", "spark"}
+	colRightAlignNames = []string{"num", "delta"}
+	deltaGlyphs        = map[string]string{"up": "▲", "down": "▼", "flat": "-"}
+)
+
+// hasColName reports whether name is in names.
+func hasColName(names []string, name string) bool {
+	for _, n := range names {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
 type tableRenderer struct{ ir InlineRenderer }
 
 func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
@@ -170,12 +201,12 @@ func (tr tableRenderer) deltaCell(cell any, ctx RenderCtx) string {
 	if !ok {
 		return tr.cellString(cell, ctx)
 	}
-	glyph := "-"
+	glyph := deltaGlyphs["flat"]
 	switch {
 	case f > 0:
-		glyph = "▲"
+		glyph = deltaGlyphs["up"]
 	case f < 0:
-		glyph = "▼"
+		glyph = deltaGlyphs["down"]
 	}
 	return glyph + " " + toStr(math.Abs(f))
 }
@@ -212,8 +243,7 @@ func parseColTypes(cols []any) []string {
 	for i, c := range cols {
 		typ := "text"
 		if m, ok := c.(map[string]any); ok {
-			switch t := attrStr(m, "type"); t {
-			case "num", "delta", "spark", "text":
+			if t := attrStr(m, "type"); hasColName(colTypeNames, t) {
 				typ = t
 			}
 		}
@@ -233,11 +263,7 @@ func colType(types []string, i int) string {
 // colRightAlign reports whether column col right-aligns (num + delta). Always
 // false when `cols` is absent, which is what keeps the legacy render byte-stable.
 func colRightAlign(types []string, col int) bool {
-	switch colType(types, col) {
-	case "num", "delta":
-		return true
-	}
-	return false
+	return hasColName(colRightAlignNames, colType(types, col))
 }
 
 // cellString renders one cell. A cell is an array of inline nodes; a bare
@@ -502,6 +528,19 @@ func (embedRenderer) Render(b Block, ctx RenderCtx) []string {
 	return []string{line}
 }
 
+// ── master-ref ──────────────────────────────────────────────────────────────
+// Mirrors the Elixir walker's PdMasterRef (compose_block("master-ref") → walk
+// PdMasterRef) for a caller that does not resolve masters: a linked master
+// instance is resolved at READ time by the web renderer from the master
+// document (task-59f078a2fd248698), and the terminal has no master palette, so
+// it shows the same neutral "Linked master" placeholder the Elixir walker
+// emits when no `:masters` map is supplied — never the "unknown block" box.
+type masterRefRenderer struct{}
+
+func (masterRefRenderer) Render(_ Block, ctx RenderCtx) []string {
+	return []string{ctx.Theme.Dim.Render("⧉ Linked master")}
+}
+
 // ── pullquote ──────────────────────────────────────────────────────────────
 // Mirrors compose_block(pullquote): italic + muted + a left terracotta bar (▌),
 // indented. Body is inline `content` wrapped to width-2 (bar + space).
@@ -617,4 +656,32 @@ func bylineText(m map[string]any) string {
 		return strings.Join(parts, " · ")
 	}
 	return attrStr(m, "text")
+}
+
+// ── pre-gate badge ─────────────────────────────────────────────────────────
+// Mirrors compose_block("pre-gate-badge") + walk.ex's `pre-gate` role: the
+// quiet mark a Paper wears when it is named in the 2026-09-02 grandfather
+// register AND its stored blocks are still refused by the block gate
+// (Barkpark.Content.Papers.PreGateRegister.annotate/3 synthesises it below the
+// masthead byline; it is never stored, so a fixture only carries it if it came
+// off the reader stream).
+//
+// The reader draws it in caps-mono at 0.72rem in the callout tone foreground,
+// under the byline rule. The terminal stand-in for that is the eyebrow
+// treatment — upper-cased, letter-spaced — in the DIM weight rather than the
+// accent, because the whole point of the mark is that it must not compete with
+// the title block. `title` (the register's reader_behaviour) has no terminal
+// home and is deliberately dropped: a hover explanation is a GUI affordance.
+type preGateBadgeRenderer struct{}
+
+func (preGateBadgeRenderer) Render(b Block, ctx RenderCtx) []string {
+	text := strings.ToUpper(sanitizeText(attrStr(b.Attrs, "label")))
+	if text == "" {
+		return nil
+	}
+	spaced := letterSpace(text)
+	if lipgloss.Width(spaced) > ctx.Width {
+		spaced = text
+	}
+	return wrapLines(ctx.Theme.Byline.Render(spaced), ctx.Width)
 }

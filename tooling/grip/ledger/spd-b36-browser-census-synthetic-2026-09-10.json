@@ -1,0 +1,1282 @@
+{
+  "base": "https://guerrilla.barkpark.cloud",
+  "started": "2026-09-10T11:17:00.977Z",
+  "doc_path": "/w/default/p/default/d/production/studio/paper/epic-paper-beauty-reference-wave-2026-07-31",
+  "steps": [
+    {
+      "label": "baseline",
+      "band": {
+        "contentLeft": 352,
+        "contentRight": 932,
+        "bandTop": 146,
+        "bandBottom": 899
+      },
+      "samples": {
+        "visible": 240,
+        "occluded": 0,
+        "offscreen": 0,
+        "total": 240
+      },
+      "occluder_names": [],
+      "census_count": 0,
+      "census": [],
+      "families": {
+        ".modal-backdrop": {
+          "present": false,
+          "painting": 0
+        },
+        ".modal-card": {
+          "present": false,
+          "painting": 0
+        },
+        ".image-picker-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ab-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".history-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".delete-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".profile-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-slash-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-paper-format": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-paper-context-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-toast": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-bulk-action-bar": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-press-answer": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-tooltip": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-dots": {
+          "present": false,
+          "painting": 0
+        }
+      }
+    },
+    {
+      "label": "right-click",
+      "band": {
+        "contentLeft": 352,
+        "contentRight": 932,
+        "bandTop": 146,
+        "bandBottom": 899
+      },
+      "samples": {
+        "visible": 240,
+        "occluded": 0,
+        "offscreen": 0,
+        "total": 240
+      },
+      "occluder_names": [],
+      "census_count": 0,
+      "census": [],
+      "families": {
+        ".modal-backdrop": {
+          "present": false,
+          "painting": 0
+        },
+        ".modal-card": {
+          "present": false,
+          "painting": 0
+        },
+        ".image-picker-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ab-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".history-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".delete-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".profile-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-slash-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-paper-format": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 438,
+            "left": 568,
+            "w": 115,
+            "h": 26
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 115.453,
+          "overlap_height_px": 26,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-paper-context-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-toast": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-bulk-action-bar": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-press-answer": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-tooltip": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-dots": {
+          "present": false,
+          "painting": 0
+        }
+      }
+    },
+    {
+      "label": "text-selection",
+      "band": {
+        "contentLeft": 352,
+        "contentRight": 932,
+        "bandTop": 146,
+        "bandBottom": 899
+      },
+      "samples": {
+        "visible": 240,
+        "occluded": 0,
+        "offscreen": 0,
+        "total": 240
+      },
+      "occluder_names": [],
+      "census_count": 0,
+      "census": [],
+      "families": {
+        ".modal-backdrop": {
+          "present": false,
+          "painting": 0
+        },
+        ".modal-card": {
+          "present": false,
+          "painting": 0
+        },
+        ".image-picker-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ab-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".history-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".delete-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".profile-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-slash-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-paper-format": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 129,
+            "left": 516,
+            "w": 115,
+            "h": 26
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 115.453,
+          "overlap_height_px": 9,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-paper-context-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-toast": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-bulk-action-bar": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-press-answer": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-tooltip": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-dots": {
+          "present": false,
+          "painting": 0
+        }
+      }
+    },
+    {
+      "label": "SYNTHETIC:.bp-ae-toast",
+      "band": {
+        "contentLeft": 352,
+        "contentRight": 932,
+        "bandTop": 146,
+        "bandBottom": 899
+      },
+      "samples": {
+        "visible": 240,
+        "occluded": 0,
+        "offscreen": 0,
+        "total": 240
+      },
+      "occluder_names": [],
+      "census_count": 1,
+      "census": [
+        {
+          "tag": "div",
+          "class_name": "bp-ae-toast",
+          "position": "fixed",
+          "z_index": "200",
+          "overlap_over_content_px": 153.781,
+          "overlap_height_px": 42.797
+        }
+      ],
+      "families": {
+        ".modal-backdrop": {
+          "present": false,
+          "painting": 0
+        },
+        ".modal-card": {
+          "present": false,
+          "painting": 0
+        },
+        ".image-picker-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ab-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".history-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".delete-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".profile-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-slash-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-paper-format": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 129,
+            "left": 516,
+            "w": 115,
+            "h": 26
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 115.453,
+          "overlap_height_px": 9,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-paper-context-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-toast": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "none",
+          "rect": {
+            "top": 833,
+            "left": 563,
+            "w": 154,
+            "h": 43
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 153.781,
+          "overlap_height_px": 42.797,
+          "hit_test_topmost_samples": 0,
+          "in_census": true
+        },
+        ".bp-bulk-action-bar": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-press-answer": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-tooltip": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-dots": {
+          "present": false,
+          "painting": 0
+        }
+      }
+    },
+    {
+      "label": "SYNTHETIC:.bp-ae-modal",
+      "band": {
+        "contentLeft": 352,
+        "contentRight": 932,
+        "bandTop": 146,
+        "bandBottom": 899
+      },
+      "samples": {
+        "visible": 0,
+        "occluded": 240,
+        "offscreen": 0,
+        "total": 240
+      },
+      "occluder_names": [
+        "div.bp-ae-modal-backdrop"
+      ],
+      "census_count": 0,
+      "census": [],
+      "families": {
+        ".modal-backdrop": {
+          "present": false,
+          "painting": 0
+        },
+        ".modal-card": {
+          "present": false,
+          "painting": 0
+        },
+        ".image-picker-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ab-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-modal": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "60",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 0,
+            "left": 0,
+            "w": 1280,
+            "h": 900
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 580,
+          "overlap_height_px": 753,
+          "hit_test_topmost_samples": 240,
+          "in_census": false
+        },
+        ".history-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".delete-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".profile-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-slash-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-paper-format": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 129,
+            "left": 516,
+            "w": 115,
+            "h": 26
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 115.453,
+          "overlap_height_px": 9,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-paper-context-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-toast": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-bulk-action-bar": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-press-answer": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-tooltip": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-dots": {
+          "present": false,
+          "painting": 0
+        }
+      }
+    },
+    {
+      "label": "SYNTHETIC:.bp-ab-overlay",
+      "band": {
+        "contentLeft": 352,
+        "contentRight": 932,
+        "bandTop": 146,
+        "bandBottom": 899
+      },
+      "samples": {
+        "visible": 0,
+        "occluded": 240,
+        "offscreen": 0,
+        "total": 240
+      },
+      "occluder_names": [
+        "div.bp-ab-overlay"
+      ],
+      "census_count": 0,
+      "census": [],
+      "families": {
+        ".modal-backdrop": {
+          "present": false,
+          "painting": 0
+        },
+        ".modal-card": {
+          "present": false,
+          "painting": 0
+        },
+        ".image-picker-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ab-overlay": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "60",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 0,
+            "left": 0,
+            "w": 1280,
+            "h": 900
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 580,
+          "overlap_height_px": 753,
+          "hit_test_topmost_samples": 240,
+          "in_census": false
+        },
+        ".bp-ae-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".history-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".delete-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".profile-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-slash-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-paper-format": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 129,
+            "left": 516,
+            "w": 115,
+            "h": 26
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 115.453,
+          "overlap_height_px": 9,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-paper-context-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-toast": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-bulk-action-bar": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-press-answer": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-tooltip": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-dots": {
+          "present": false,
+          "painting": 0
+        }
+      }
+    },
+    {
+      "label": "SYNTHETIC:.bp-bulk-action-bar",
+      "band": {
+        "contentLeft": 352,
+        "contentRight": 932,
+        "bandTop": 146,
+        "bandBottom": 899
+      },
+      "samples": {
+        "visible": 240,
+        "occluded": 0,
+        "offscreen": 0,
+        "total": 240
+      },
+      "occluder_names": [],
+      "census_count": 0,
+      "census": [],
+      "families": {
+        ".modal-backdrop": {
+          "present": false,
+          "painting": 0
+        },
+        ".modal-card": {
+          "present": false,
+          "painting": 0
+        },
+        ".image-picker-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ab-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".history-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".delete-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".profile-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-slash-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-paper-format": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 129,
+            "left": 516,
+            "w": 115,
+            "h": 26
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 115.453,
+          "overlap_height_px": 9,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-paper-context-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-toast": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-bulk-action-bar": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "50",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 837,
+            "left": 568,
+            "w": 144,
+            "h": 43
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 143.891,
+          "overlap_height_px": 42.797,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-press-answer": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-tooltip": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-dots": {
+          "present": false,
+          "painting": 0
+        }
+      }
+    },
+    {
+      "label": "SYNTHETIC:.modal-backdrop",
+      "band": {
+        "contentLeft": 352,
+        "contentRight": 932,
+        "bandTop": 146,
+        "bandBottom": 899
+      },
+      "samples": {
+        "visible": 0,
+        "occluded": 240,
+        "offscreen": 0,
+        "total": 240
+      },
+      "occluder_names": [
+        "div.modal-backdrop"
+      ],
+      "census_count": 0,
+      "census": [],
+      "families": {
+        ".modal-backdrop": {
+          "present": true,
+          "painting": 1,
+          "position": "absolute",
+          "z_index": "50",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 0,
+            "left": 0,
+            "w": 1280,
+            "h": 900
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 580,
+          "overlap_height_px": 753,
+          "hit_test_topmost_samples": 240,
+          "in_census": false
+        },
+        ".modal-card": {
+          "present": false,
+          "painting": 0
+        },
+        ".image-picker-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ab-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".history-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".delete-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".profile-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-slash-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-paper-format": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 129,
+            "left": 516,
+            "w": 115,
+            "h": 26
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 115.453,
+          "overlap_height_px": 9,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-paper-context-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-toast": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-bulk-action-bar": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-press-answer": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-tooltip": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-dots": {
+          "present": false,
+          "painting": 0
+        }
+      }
+    },
+    {
+      "label": "SYNTHETIC:.bp-slash-menu",
+      "band": {
+        "contentLeft": 352,
+        "contentRight": 932,
+        "bandTop": 146,
+        "bandBottom": 899
+      },
+      "samples": {
+        "visible": 240,
+        "occluded": 0,
+        "offscreen": 0,
+        "total": 240
+      },
+      "occluder_names": [],
+      "census_count": 0,
+      "census": [],
+      "families": {
+        ".modal-backdrop": {
+          "present": false,
+          "painting": 0
+        },
+        ".modal-card": {
+          "present": false,
+          "painting": 0
+        },
+        ".image-picker-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ab-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".history-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".delete-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".profile-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-slash-menu": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 900,
+            "left": 0,
+            "w": 280,
+            "h": 34
+          },
+          "overlaps_band": false,
+          "overlap_over_content_px": -72,
+          "overlap_height_px": -1,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-paper-format": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 129,
+            "left": 516,
+            "w": 115,
+            "h": 26
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 115.453,
+          "overlap_height_px": 9,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-paper-context-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-toast": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-bulk-action-bar": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-press-answer": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-tooltip": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-dots": {
+          "present": false,
+          "painting": 0
+        }
+      }
+    },
+    {
+      "label": "SYNTHETIC:.bp-paper-format",
+      "band": {
+        "contentLeft": 352,
+        "contentRight": 932,
+        "bandTop": 146,
+        "bandBottom": 899
+      },
+      "samples": {
+        "visible": 240,
+        "occluded": 0,
+        "offscreen": 0,
+        "total": 240
+      },
+      "occluder_names": [],
+      "census_count": 0,
+      "census": [],
+      "families": {
+        ".modal-backdrop": {
+          "present": false,
+          "painting": 0
+        },
+        ".modal-card": {
+          "present": false,
+          "painting": 0
+        },
+        ".image-picker-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ab-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".history-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".delete-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".profile-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-slash-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-paper-format": {
+          "present": true,
+          "painting": 2,
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 129,
+            "left": 516,
+            "w": 115,
+            "h": 26
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 115.453,
+          "overlap_height_px": 9,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-paper-context-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-toast": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-bulk-action-bar": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-press-answer": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-tooltip": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-dots": {
+          "present": false,
+          "painting": 0
+        }
+      }
+    },
+    {
+      "label": "SYNTHETIC:.bp-paper-context-menu",
+      "band": {
+        "contentLeft": 352,
+        "contentRight": 932,
+        "bandTop": 146,
+        "bandBottom": 899
+      },
+      "samples": {
+        "visible": 240,
+        "occluded": 0,
+        "offscreen": 0,
+        "total": 240
+      },
+      "occluder_names": [],
+      "census_count": 0,
+      "census": [],
+      "families": {
+        ".modal-backdrop": {
+          "present": false,
+          "painting": 0
+        },
+        ".modal-card": {
+          "present": false,
+          "painting": 0
+        },
+        ".image-picker-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ab-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".history-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".delete-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".profile-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-slash-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-paper-format": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 129,
+            "left": 516,
+            "w": 115,
+            "h": 26
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 115.453,
+          "overlap_height_px": 9,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-paper-context-menu": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "1000",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 0,
+            "left": 0,
+            "w": 148,
+            "h": 24
+          },
+          "overlaps_band": false,
+          "overlap_over_content_px": -204,
+          "overlap_height_px": -122.406,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-ae-toast": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-bulk-action-bar": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-press-answer": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-tooltip": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-dots": {
+          "present": false,
+          "painting": 0
+        }
+      }
+    },
+    {
+      "label": "cleanup",
+      "band": {
+        "contentLeft": 352,
+        "contentRight": 932,
+        "bandTop": 146,
+        "bandBottom": 899
+      },
+      "samples": {
+        "visible": 240,
+        "occluded": 0,
+        "offscreen": 0,
+        "total": 240
+      },
+      "occluder_names": [],
+      "census_count": 0,
+      "census": [],
+      "families": {
+        ".modal-backdrop": {
+          "present": false,
+          "painting": 0
+        },
+        ".modal-card": {
+          "present": false,
+          "painting": 0
+        },
+        ".image-picker-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ab-overlay": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".history-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".delete-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".profile-modal": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-slash-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-paper-format": {
+          "present": true,
+          "painting": 1,
+          "position": "fixed",
+          "z_index": "200",
+          "pointer_events": "auto",
+          "rect": {
+            "top": 129,
+            "left": 516,
+            "w": 115,
+            "h": 26
+          },
+          "overlaps_band": true,
+          "overlap_over_content_px": 115.453,
+          "overlap_height_px": 9,
+          "hit_test_topmost_samples": 0,
+          "in_census": false
+        },
+        ".bp-paper-context-menu": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-ae-toast": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-bulk-action-bar": {
+          "present": false,
+          "painting": 0
+        },
+        ".bp-press-answer": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-tooltip": {
+          "present": true,
+          "painting": 0
+        },
+        ".presence-dots": {
+          "present": false,
+          "painting": 0
+        }
+      }
+    }
+  ]
+}

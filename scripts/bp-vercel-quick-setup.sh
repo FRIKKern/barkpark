@@ -16,6 +16,8 @@
 # publish are idempotent, so a half-finished run is safe to repeat.
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff for the BP calls below, shared (task-ca8fffa7ca885413)
 
 # ── defaults ────────────────────────────────────────────────────────────────
 SERVER="barkpark"                 # bp saved-server name or full URL
@@ -212,7 +214,7 @@ ok "workspace id $WS_ID  (project=$PROJECT_SLUG dataset=$DATASET)"
 if [ -n "$SCHEMA" ]; then
   [ -f "$SCHEMA" ] || die "schema file not found: $SCHEMA"
   log "2/6  Apply schema $(basename "$SCHEMA")"
-  code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SCOPED/v1/schemas/$DATASET" \
+  code="$(bp_curl_code -s -o /dev/null -X POST "$SCOPED/v1/schemas/$DATASET" \
     -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
     --data-binary @"$SCHEMA")"
   case "$code" in 200|201) ok "schema applied (HTTP $code)";; *) die "schema apply failed (HTTP $code)";; esac
@@ -224,7 +226,7 @@ fi
 if [ -n "$SEED" ]; then
   [ -f "$SEED" ] || die "seed file not found: $SEED"
   log "3/6  Seed content from $(basename "$SEED")"
-  code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SCOPED/v1/data/mutate/$DATASET" \
+  code="$(bp_curl_code -s -o /dev/null -X POST "$SCOPED/v1/data/mutate/$DATASET" \
     -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
     --data-binary @"$SEED")"
   [ "$code" = "200" ] || die "seed mutate failed (HTTP $code)"
@@ -235,7 +237,7 @@ if [ -n "$SEED" ]; then
     PUB="$(jq -c --arg t "$PUBLISH_TYPE" '{mutations: [
       .mutations[] | (.createOrReplace._id // .create._id) | select(.) | {publish:{id:., type:$t}}
     ]}' "$SEED")"
-    code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SCOPED/v1/data/mutate/$DATASET" \
+    code="$(bp_curl_code -s -o /dev/null -X POST "$SCOPED/v1/data/mutate/$DATASET" \
       -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' --data "$PUB")"
     [ "$code" = "200" ] || die "publish failed (HTTP $code)"
     n="$(echo "$PUB" | jq '.mutations | length')"
@@ -274,8 +276,9 @@ else
 fi
 
 # verify: reads work, writes are refused
-rc="$(curl -s -H "Authorization: Bearer $READ_TOKEN" "$SCOPED/v1/data/query/$DATASET/${PUBLISH_TYPE:-place}?filter[status]=published" | jq -r '.result.count // 0')"
-wc="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SCOPED/v1/data/mutate/$DATASET" \
+# Status captured first (bp_curl_body); a non-2xx read is an EMPTY body here, not a silent 0 with the status thrown away.
+rc="$( { bp_curl_body -s -H "Authorization: Bearer $READ_TOKEN" "$SCOPED/v1/data/query/$DATASET/${PUBLISH_TYPE:-place}?filter[status]=published" || true; } | jq -r '.result.count // 0')"
+wc="$(bp_curl_code -s -o /dev/null -X POST "$SCOPED/v1/data/mutate/$DATASET" \
   -H "Authorization: Bearer $READ_TOKEN" -H 'Content-Type: application/json' --data '{"mutations":[]}')"
 ok "read token sees $rc published doc(s); write returns HTTP $wc (want 403)"
 

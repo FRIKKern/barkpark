@@ -16,12 +16,13 @@
     "queued_stall_seconds",
     "recorded_at",
     "serving_since",
+    "serving_since_basis",
     "sha",
     "target",
     "transition"
   ],
 
-  "live_key_set_source": "PlatformDelivery.to_json/1 on origin/main at 48a200aa7 — exactly FIFTEEN keys, RE-DERIVED off the serializer itself (`git show origin/main:cloud/lib/barkpark_cloud/platform_delivery.ex`, the map literal at to_json/1), and every scenario row below carries all fifteen. A row missing a key is a reader deciding for itself what a NULL means; a row carrying an extra one is a serializer that shipped without this fixture following it. The set was TEN until #10942 (the three queue-split columns) and THIRTEEN until #11078 merged at 5f2eeb76f, which added `previous_sha` and `transition` — the rollback verdict. This file went on claiming '0239dd4ee — exactly THIRTEEN keys' for a day after that, and the claim was FALSE while both key-count pins stayed green: the Elixir one counts to_json/1 against a hand-written literal, the Go one counts THIS file, and neither crosses the wire. That gap is now closed from the other side by the census pair in cloud/test/barkpark_cloud/payload_key_set_census_test.exs, which reads the serializer AST and internal/cloudclient's json tags in one assertion. THE TWO NEW KEYS ARE DELIBERATELY NOT IN `null_clocks.keys`, which stays at EXACTLY SEVEN (a Go test pins that count, and the seven are what UNMETERED means): both are nullable, but they are a VERDICT about the move this row records rather than a measurement of an interval, so their null says 'no verdict was ever attempted' — not 'this clock went unread'. They sit beside `carried` in that respect and, like it, are kept OUT of `not_null` so the unrecorded state stays renderable.",
+  "live_key_set_source": "PlatformDelivery.to_json/1 — SIXTEEN keys since dr-w29-bl added `serving_since_basis`, the word for WHICH CLOCK produced `serving_since`: process_start on the cp leg (/health's value is the BEAM's own start instant, an UPPER BOUND a bare restart moves FORWARD) and deploy_flip_mtime on the instance leg (the mtime of /opt/barkpark/.instance-deploy-last, the actual flip instant). It is deliberately NOT in `null_clocks.keys`, which stays at EXACTLY SEVEN: it is a statement ABOUT a clock rather than a clock, so its null says 'no basis was recorded' — true of every row older than the column — and never 'this interval went unmetered'. It sits beside `carried`, `previous_sha` and `transition` in that respect and is kept OUT of `not_null` so the unrecorded state stays renderable. The set was FIFTEEN at 48a200aa7 — exactly FIFTEEN keys, RE-DERIVED off the serializer itself (`git show origin/main:cloud/lib/barkpark_cloud/platform_delivery.ex`, the map literal at to_json/1), and every scenario row below carries all fifteen. A row missing a key is a reader deciding for itself what a NULL means; a row carrying an extra one is a serializer that shipped without this fixture following it. The set was TEN until #10942 (the three queue-split columns) and THIRTEEN until #11078 merged at 5f2eeb76f, which added `previous_sha` and `transition` — the rollback verdict. This file went on claiming '0239dd4ee — exactly THIRTEEN keys' for a day after that, and the claim was FALSE while both key-count pins stayed green: the Elixir one counts to_json/1 against a hand-written literal, the Go one counts THIS file, and neither crosses the wire. That gap is now closed from the other side by the census pair in cloud/test/barkpark_cloud/payload_key_set_census_test.exs, which reads the serializer AST and internal/cloudclient's json tags in one assertion. THE TWO NEW KEYS ARE DELIBERATELY NOT IN `null_clocks.keys`, which stays at EXACTLY SEVEN (a Go test pins that count, and the seven are what UNMETERED means): both are nullable, but they are a VERDICT about the move this row records rather than a measurement of an interval, so their null says 'no verdict was ever attempted' — not 'this clock went unread'. They sit beside `carried` in that respect and, like it, are kept OUT of `not_null` so the unrecorded state stays renderable.",
 
   "retired_key_sets": "`pending_key_set_after_10942` used to sit here, declaring the shape the wire WOULD take once #10942 landed, with a Go test asserting the delta was exactly the three queued_* columns. #10942 IS MERGED — the prediction came true, so the prediction is deleted rather than kept as a second, permanently-satisfied copy of live_key_set that no future change can ever red. A prediction that has landed is not evidence; it is a decoy that greens.",
 
@@ -57,6 +58,7 @@
       "queued_self_seconds",
       "recorded_at",
       "serving_since",
+      "serving_since_basis",
       "sha",
       "target",
       "transition"
@@ -94,6 +96,7 @@
             "queued_stall_seconds": 5,
             "build_seconds": 216,
             "serving_since": "2026-08-08T11:55:11.517221Z",
+            "serving_since_basis": "process_start",
             "target": "cp",
             "carried": false,
             "previous_sha": "b976637309f4a0f2c1d8e5a6b7c8d9e0f1a2b3c4",
@@ -125,6 +128,7 @@
             "queued_stall_seconds": null,
             "build_seconds": 106,
             "serving_since": "2026-08-24T11:15:02.794875Z",
+            "serving_since_basis": "process_start",
             "target": "cp",
             "carried": false,
             "previous_sha": "e965c06958d7105abc97e3fca097013af55e3ce4",
@@ -156,6 +160,7 @@
             "queued_stall_seconds": null,
             "build_seconds": null,
             "serving_since": null,
+            "serving_since_basis": null,
             "target": "instance",
             "carried": false,
             "previous_sha": null,
@@ -187,6 +192,7 @@
             "queued_stall_seconds": 5,
             "build_seconds": 216,
             "serving_since": "2026-08-08T11:55:11.517221Z",
+            "serving_since_basis": "process_start",
             "target": "cp",
             "carried": true,
             "previous_sha": "b976637309f4a0f2c1d8e5a6b7c8d9e0f1a2b3c4",
@@ -218,6 +224,7 @@
             "queued_stall_seconds": 5,
             "build_seconds": 216,
             "serving_since": "2026-08-08T11:55:11.517221Z",
+            "serving_since_basis": "process_start",
             "target": "cp",
             "carried": null,
             "previous_sha": null,
@@ -262,6 +269,7 @@
             "queued_stall_seconds": 5,
             "build_seconds": 216,
             "serving_since": "2026-08-08T11:55:11.517221Z",
+            "serving_since_basis": "process_start",
             "target": "cp",
             "carried": false,
             "previous_sha": "b976637309f4a0f2c1d8e5a6b7c8d9e0f1a2b3c4",
@@ -279,6 +287,7 @@
             "queued_stall_seconds": null,
             "build_seconds": 940,
             "serving_since": null,
+            "serving_since_basis": null,
             "target": "instance",
             "carried": true,
             "previous_sha": "c0e43440b1a2938475d6c7b8a9e0f1d2c3b4a596",
@@ -288,6 +297,56 @@
         ],
         "count": 2,
         "sha": "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c",
+        "limit": 50,
+        "scope": "platform"
+      }
+    },
+
+    "two_targets_two_bases": {
+      "why": "THE CROSS-TARGET COMPARISON, WITH ITS BASES SAID OUT LOUD (dr-w29-bl). One sha, both legs, and a serving instant on EACH — the shape a reader subtracts without thinking. The two instants come from DIFFERENT CLOCKS: the cp row's is process_start (the control plane's BEAM start, which a bare restart moves FORWARD, so any lag measured against it is an UPPER BOUND that reads SMALLER than the truth) and the instance row's is deploy_flip_mtime (the mtime of /opt/barkpark/.instance-deploy-last, the flip instant itself). Note the instants: the instance flipped at 11:54:58 and the cp BEAM start reads 11:55:11, so the naive subtraction says the cp leg trailed by 13s — a number that means nothing, because one end is not a serving timestamp at all. THIS IS THE MUTATION ROW for the mixed-basis refusal: make the renderer drop deliveriesMixedBasisLine, or make it stop reading serving_since_basis, and this scenario is the one that reds. two_rows_one_sha cannot do that job — its instance row carries a NULL serving_since, so there is only one instant on that page and nothing to mix.",
+      "synthetic": "YES — fabricated, and it MUST be until a post-merge delivery lands: the column did not exist when any row now in the table was written, so every live row carries serving_since_basis null. The clocks and shas are modelled on the live cp row of 2026-08-08 (2e38228…); the instance row's flip instant is set 13s BEFORE the cp instant on purpose, so a reader who does the arithmetic anyway gets a plausible-looking positive number out of two incomparable clocks. The queue split is the PRODUCER shape (self measured, pickup and stall hard-coded null — `producer_reachability` above), so this scenario teaches nothing the wire cannot carry except the bases themselves.",
+      "status": 200,
+      "body": {
+        "deliveries": [
+          {
+            "sha": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
+            "delivering_run_id": "32720126732",
+            "first_seen_at": "2026-08-08T11:55:11.517221Z",
+            "merged_at": "2026-08-08T11:51:21Z",
+            "queued_seconds": 14,
+            "queued_self_seconds": 6,
+            "queued_pickup_seconds": null,
+            "queued_stall_seconds": null,
+            "build_seconds": 216,
+            "serving_since": "2026-08-08T11:55:11.517221Z",
+            "serving_since_basis": "process_start",
+            "target": "cp",
+            "carried": false,
+            "previous_sha": "b976637309f4a0f2c1d8e5a6b7c8d9e0f1a2b3c4",
+            "transition": "forward",
+            "recorded_at": "2026-08-08T12:23:21.862544Z"
+          },
+          {
+            "sha": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
+            "delivering_run_id": "32720126732",
+            "first_seen_at": "2026-08-08T11:55:11.517221Z",
+            "merged_at": "2026-08-08T11:51:21Z",
+            "queued_seconds": 14,
+            "queued_self_seconds": 6,
+            "queued_pickup_seconds": null,
+            "queued_stall_seconds": null,
+            "build_seconds": 301,
+            "serving_since": "2026-08-08T11:54:58.000000Z",
+            "serving_since_basis": "deploy_flip_mtime",
+            "target": "instance",
+            "carried": false,
+            "previous_sha": "b976637309f4a0f2c1d8e5a6b7c8d9e0f1a2b3c4",
+            "transition": "forward",
+            "recorded_at": "2026-08-08T12:23:21.862544Z"
+          }
+        ],
+        "count": 2,
+        "sha": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
         "limit": 50,
         "scope": "platform"
       }
@@ -310,6 +369,7 @@
             "queued_stall_seconds": 5,
             "build_seconds": 216,
             "serving_since": "2026-08-08T13:10:00.000000Z",
+            "serving_since_basis": "process_start",
             "target": "cp",
             "carried": false,
             "previous_sha": "b976637309f4a0f2c1d8e5a6b7c8d9e0f1a2b3c4",

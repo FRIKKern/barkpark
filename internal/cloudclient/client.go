@@ -12,9 +12,13 @@
 // but it shares no code and no types: the two clients answer to different
 // services and must be free to drift.
 //
-// YAGNI by design (cloud-12b): no retries, no pagination, no websocket, no warm-
-// pool poll. The 25 methods below are exactly the surface the user-facing `bp`
-// Cloud commands drive; the real provisioning happens server-side and is
+// YAGNI by design (cloud-12b): no pagination, no websocket, no warm-pool poll.
+// The ONE exception is backpressure: the control plane answers 429 with the
+// number of seconds to wait, and treating that as a hard failure reports a
+// one-second throttle as a broken service. Every lazily-built client here comes
+// from newHTTPClient (retry.go), which installs a 429-ONLY retry — no 500 is
+// ever repeated. The 25 methods below are exactly the surface the user-facing
+// `bp` Cloud commands drive; the real provisioning happens server-side and is
 // reflected back in the returned Barkpark row.
 package cloudclient
 
@@ -117,15 +121,74 @@ type Barkpark struct {
 	// IDENTITY only — the fleet table paints it through GenProviderMark, never as
 	// a status voice. Empty on a pre-migration row → the PROVIDER cell blanks.
 	Provider string `json:"provider"`
+	// Region / ServerType are the launch PLACEMENT and SIZE the control plane
+	// pinned for this box (charter Decision 9; `barkpark_json` has emitted both
+	// beside `provider` since the provider-neutral hosting slice, and the
+	// console's fleet rail renders them). IDENTITY only, never a status axis, and
+	// NOT observed truth: `server_type` is a nullable launch pin, wrong or empty
+	// on an adopted box — which is exactly why the strained fence reads
+	// `pressure.cpu_cores` off the beat instead. Empty means the plane recorded
+	// no pin (an adopted or pre-migration row, or an older plane); a renderer
+	// shows it as absent, never as a guessed default.
+	Region     string `json:"region"`
+	ServerType string `json:"server_type"`
+
+	// REACHABILITY EVIDENCE (dr-w11-payload-divergence-close). `health_status`
+	// is the VERDICT; these two are the counters it was computed from, and until
+	// this struct named them `bp` could print "degraded" and never say why.
+	//
+	//   - UnreachableCount is the StalenessWorker's consecutive-missed-check
+	//     counter (`Registry` bumps it once per sweep tick the box misses;
+	//     `record_agent_report/2` zeroes it on the next agent report). A POINTER on purpose: nil is "this control plane
+	//     predates the key", which is not the same sentence as a measured 0
+	//     ("answering every check"). The console renders it as EVIDENCE ONLY
+	//     (`missedChecksText`: silence for absent-or-zero), and so does `bp`.
+	//   - UnreachableNotificationSent is the once-per-outage alert latch: true
+	//     means the one unreachable notification for THIS outage has gone out,
+	//     and the same agent report that zeroes the counter clears it. An older
+	//     plane omits it and it decodes false — "no alert recorded", which is the
+	//     truthful reading of an absent latch.
+	UnreachableCount            *int `json:"unreachable_count"`
+	UnreachableNotificationSent bool `json:"unreachable_notification_sent"`
+
+	// CustomHost is the customer-owned FQDN attached to this instance
+	// (POST /v1/barkparks/:id/domain persists it; nil until a team attaches
+	// one). Empty is "no custom domain" — the instance answers on Host/URL only.
+	CustomHost string `json:"custom_host"`
 
 	// Additive (charter decision 15) — the triage-status axes.
-	Suspended         bool   `json:"suspended"`
-	SuspendedReason   string `json:"suspended_reason"`
-	UpdateState       string `json:"update_state"`
-	ProvisionStatus   string `json:"provision_status"`
-	ProvisionError    string `json:"provision_error"`
-	DeprovisionStatus string `json:"deprovision_status"`
-	DeprovisionError  string `json:"deprovision_error"`
+	Suspended       bool   `json:"suspended"`
+	SuspendedReason string `json:"suspended_reason"`
+	// SINCE WHEN the box has been suspended (task-85c531c2adbf0dff, producer
+	// cch-w54-bl / PR #14694). `Suspended` and `SuspendedReason` above said THAT
+	// and WHY and stopped there, so every `bp cloud` reader could name a
+	// suspension and its cause but never its day — the exact gap cch-w54-bl
+	// closed for the console and left open for the CLI. The payload census caught
+	// it the moment the key landed and carried a KNOWN OPEN :unread allowlist row
+	// naming this task as its tracker; this field is what deletes that row.
+	//
+	// POINTER ON PURPOSE, the same reason `SiteDeployment.RefusalPhase` is one
+	// (PR #18566). NULL MEANS NOT SUSPENDED, never "suspended at an unknown
+	// time": `Registry.unsuspend_barkpark/1` and the bulk resume clear
+	// suspended/suspended_reason/suspended_at together, so a live box never
+	// carries a stale stamp. A plain `string` would collapse that null and a real
+	// RFC3339 stamp into the same `""`, and an older control plane that omits the
+	// key entirely would be indistinguishable from a plane that answered "no
+	// suspension". The pointer keeps the three apart at decode.
+	//
+	// AND THE ABSENCE MUST NOT BE PAPERED OVER. The console's own bug here was
+	// exactly that: `suspendedCardBannerHtml` fell through to a helper computed
+	// off `sub.current_period_end` — the NEXT renewal day — and painted a FUTURE
+	// date as a past-tense suspension day. No reader of this field may substitute
+	// a billing date, a beat time, or a zero-value date for a nil. `bp cloud
+	// status` renders a nil as an explicit em dash (`suspendedSinceMark`) and
+	// `-o json` emits NO KEY at all.
+	SuspendedAt       *string `json:"suspended_at"`
+	UpdateState       string  `json:"update_state"`
+	ProvisionStatus   string  `json:"provision_status"`
+	ProvisionError    string  `json:"provision_error"`
+	DeprovisionStatus string  `json:"deprovision_status"`
+	DeprovisionError  string  `json:"deprovision_error"`
 
 	// Self-update TRUTH (isu-w5) — the full version + policy the control plane
 	// mirrors from each instance's own update verdict and the team's autoupdate
@@ -140,7 +203,24 @@ type Barkpark struct {
 	//     paints, with a behind marker when they differ). Empty until the CP
 	//     emits them.
 	//   - UpdateCheckedAt — when the CP last refreshed this instance's verdict
-	//     (RFC3339). Empty on an older CP.
+	//     (RFC3339). A POINTER for the same reason AutoupdateEnabled below is
+	//     one: nil means THE PLANE RECORDED NO CHECK, which is not a time and
+	//     must never be handed to a consumer as one.
+	//
+	//     cch-w65-s2 made this column honest on the control plane — `@unclocked_reasons`
+	//     in registry.ex (`:no_admin_token`, `:decrypt_failed`, `:not_live`) omits
+	//     the stamp on exactly the three of nine unknown rungs that return before
+	//     a single byte leaves the plane, so those rows serve an explicit
+	//     `"update_checked_at": null`. As a plain `string` that null and an older
+	//     CP's omitted key BOTH decoded to `""`, the projection emitted
+	//     `"update_checked_at": ""` for both, and no script could tell "we never
+	//     spoke to this box" from "this CLI's plane predates the field" — nor
+	//     from a value it could try to parse. As a `*string` both read nil, the
+	//     projection omits the key (cli.rankedBarkparkRow), and a consumer is
+	//     forced to branch instead of parsing an empty timestamp.
+	//
+	//     UpdateCheckedAtMissing below keeps the wire-level half of that
+	//     distinction that the pointer alone cannot carry.
 	//   - UpdateUnavailableReason — WHY the verdict is unknown, measured by the
 	//     control plane at probe time ("identity_refused" when the box rejected
 	//     our credential, a transport failure, an unparseable reply). Empty
@@ -153,14 +233,25 @@ type Barkpark struct {
 	//     box at a version (empty → unpinned).
 	//   - Channel — the release channel the box rides ("prod" / "staging").
 	//     Empty until the CP emits it.
-	UpdateRunningRelease    string `json:"update_running_release"`
-	UpdateLatestRelease     string `json:"update_latest_release"`
-	UpdateCheckedAt         string `json:"update_checked_at"`
-	UpdateUnavailableReason string `json:"update_unavailable_reason"`
-	AutoupdateEnabled       *bool  `json:"autoupdate_enabled"`
-	AutoupdatePaused        bool   `json:"autoupdate_paused"`
-	PinnedRelease           string `json:"pinned_release"`
-	Channel                 string `json:"channel"`
+	UpdateRunningRelease    string  `json:"update_running_release"`
+	UpdateLatestRelease     string  `json:"update_latest_release"`
+	UpdateCheckedAt         *string `json:"update_checked_at"`
+	UpdateUnavailableReason string  `json:"update_unavailable_reason"`
+	AutoupdateEnabled       *bool   `json:"autoupdate_enabled"`
+	AutoupdatePaused        bool    `json:"autoupdate_paused"`
+	PinnedRelease           string  `json:"pinned_release"`
+	Channel                 string  `json:"channel"`
+	// AutoupdateTriggeredAt is the IN-FLIGHT ROLLOUT MARKER (isu-w5.2): the
+	// instant the rollout worker triggered this box's self-update
+	// (`Registry.mark_autoupdate_triggered/1`), cleared by
+	// `Registry.clear_autoupdate_triggered/1` when the instance settles or the
+	// wave is reaped. While it is set, `UpdateState` above is a
+	// CACHED verdict from BEFORE the trigger — the console's "Updating"/SETTLE
+	// pill outranks it for exactly that reason, and a CLI that ignored this key
+	// printed the stale `behind` over a rollout that was actively landing.
+	// A POINTER: nil is "no rollout in flight" (and what an older plane decodes
+	// to), never a zero time.
+	AutoupdateTriggeredAt *string `json:"autoupdate_triggered_at"`
 
 	// COMMIT DISTANCE (dr-w24-s2) — the control plane's own measurement of the
 	// commit the box actually serves, which is a DIFFERENT question from
@@ -224,6 +315,14 @@ type Barkpark struct {
 	// read as "measured, and it is fine".
 	Pressure *Pressure `json:"pressure"`
 
+	// SiteDeploy is "can this box deploy sites" (dr-w15-s5), read by the control
+	// plane's merge_capability/2 off the same latest health beat Pressure comes
+	// from. A POINTER for Pressure's reason: nil means the control plane never
+	// sent the key (it predates dr-w15-s5), which is a different fact from a
+	// plane that sent the block with both booleans null (the box's agent, or its
+	// instance, predates the capability probe). Neither is ever "false".
+	SiteDeploy *SiteDeployCapability `json:"site_deploy"`
+
 	// QueuedDeployAgeSeconds is the age of the OLDEST `queued` container-site
 	// deployment on this box (jpf-w1-queue-age-alarm, charter D6) — the raw
 	// number `barkpark_json` serves so the CLIENT can own the stalled
@@ -234,6 +333,20 @@ type Barkpark struct {
 	// omitted key means the control plane is too old or its contract drifted.
 	QueuedDeployAgeSeconds        *float64 `json:"queued_deploy_age_seconds"`
 	QueuedDeployAgeSecondsMissing bool     `json:"-"`
+
+	// UpdateCheckedAtMissing is the wire-level half of the UpdateCheckedAt
+	// distinction, recorded by the SAME idiom QueuedDeployAgeSecondsMissing uses
+	// and for the same reason: a `*string` collapses an omitted key and an
+	// explicit null into one nil, and those are two different facts about the
+	// control plane. true = the plane never emitted the key (it predates
+	// cch-w65 / isu-w5); false with a nil pointer = the plane emitted an
+	// explicit null, i.e. it MEASURED that no check has ever been made on one of
+	// the three unclocked rungs. Nothing in `bp cloud status -o json` projects
+	// this today — the projection follows the AutoupdateEnabled house rule and
+	// simply omits the key for both — but the decode no longer DESTROYS the
+	// distinction, so a future reader does not have to re-fetch the wire to get
+	// it back.
+	UpdateCheckedAtMissing bool `json:"-"`
 }
 
 // UnmarshalJSON preserves whether the control plane emitted
@@ -256,7 +369,26 @@ func (b *Barkpark) UnmarshalJSON(data []byte) error {
 	*b = Barkpark(decoded)
 	_, present := fields["queued_deploy_age_seconds"]
 	b.QueuedDeployAgeSecondsMissing = !present
+	_, clockPresent := fields["update_checked_at"]
+	b.UpdateCheckedAtMissing = !clockPresent
 	return nil
+}
+
+// SiteDeployCapability is the `site_deploy` block a fleet row carries
+// (router.ex merge_capability/2). BOTH verdict fields are POINTERS and the
+// three states stay three states: nil is UNMEASURED (an agent or instance that
+// predates the probe, a failed probe, a box that never beat); a real false is
+// the box's OWN refusal — Configured false is exactly the expression its deploy
+// trigger branches on to answer feature_not_configured, RunnerAlive false is a
+// CRASHED DeployRunner (it is supervised unconditionally, so false never means
+// "feature off"). Nothing may read nil as false.
+//
+// The census pair "barkpark_json/6 site_deploy" holds these tags to the keys
+// merge_capability/2 emits.
+type SiteDeployCapability struct {
+	Configured  *bool   `json:"configured"`
+	RunnerAlive *bool   `json:"runner_alive"`
+	ReportedAt  *string `json:"reported_at"`
 }
 
 // Pressure is the host-pressure block a fleet row carries (`pressure` in
@@ -266,12 +398,14 @@ func (b *Barkpark) UnmarshalJSON(data []byte) error {
 // because a fabricated 0 reads as a perfectly idle machine. So nil here means
 // exactly one thing: WE DID NOT MEASURE. A consumer branches on the values.
 //
-// The JSON tags are router.ex's `@unmetered_pressure` keys VERBATIM. Two of them
-// — Load15 and Err5xxPerS — are landed by the sibling dr-w5-s2 slice and are
-// absent from the payload until it merges; they decode to nil, which is already
-// the correct reading (UNKNOWN), so this struct is forward-compatible with that
-// merge and needs no change when it lands. That is a WIRE relationship, not a
-// code dependency.
+// The JSON tags are the keys router.ex's `merge_pressure/2` emits, and the
+// payload census (cloud/test/barkpark_cloud/payload_key_set_census_test.exs,
+// pair "barkpark_json/6 pressure") is what holds that true — this comment used
+// to claim the tags were `@unmetered_pressure` VERBATIM, and it stayed false for
+// as long as ReqPerS and P95Ms were missing, which is the reason the claim now
+// names its instrument instead of asserting itself. A key the plane has not
+// sent (an older plane, or an agent predating the vital) decodes to nil, which
+// is already the correct reading (UNKNOWN).
 //
 // Numeric fields are float64 across the board, including the byte counts and
 // the core count: the control plane emits JSON numbers off agent-shaped jsonb,
@@ -298,6 +432,18 @@ type Pressure struct {
 	BeamPID    *string  `json:"beam_pid"`
 	BeamSlot   *string  `json:"beam_slot"`
 	Err5xxPerS *float64 `json:"err_5xx_per_s"`
+	// ReqPerS is Err5xxPerS's DENOMINATOR (charter D103): the request rate off
+	// the same 60s per-slot ring. A 5xx rate cannot be graded without it —
+	// 0.22 5xx/s is 14.4% of traffic at the median observed volume and 2.0% at
+	// the max — so a consumer that prints the error rate prints this beside it.
+	// nil is UNMEASURED; a measured 0.0 is a genuinely idle box.
+	ReqPerS *float64 `json:"req_per_s"`
+	// P95Ms is the p95 request latency off that same ring — a VITAL, colour for
+	// a reason string, and REFUSED as a fence (charter D131): the ring dies on
+	// every blue/green flip, so it is a small-sample reading, and most agents in
+	// the field still send the -1 "unwired" sentinel, which the plane relays as
+	// null. nil is UNMEASURED, never "0 ms".
+	P95Ms *float64 `json:"p95_ms"`
 	// RunawayProcs names the box's long-running ORPHANED processes — the only
 	// field in this block that answers WHO rather than HOW MUCH. Every scalar
 	// above is an aggregate: they can say a box is at load 6.3 and can never say
@@ -446,7 +592,7 @@ func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: DefaultTimeout}
+	return newHTTPClient(DefaultTimeout)
 }
 
 // url joins the (trimmed) BaseURL with a leading-slash path segment. It is the
@@ -546,7 +692,26 @@ type CloudRefusal struct {
 	// fingerprint, never a Go map that would alphabetize the keys. Empty when the
 	// body sent no usable menu.
 	ReadableTypesRaw json.RawMessage
-	msg              string
+	// CLIHint is the TERMINAL's half of a refusal, and the reason this field
+	// exists at all is that it used to be welded into Detail.
+	//
+	// cch-w69-bl: POST /v1/sites wrote ONE `detail` for two surfaces and ended it
+	// with a `bp cloud site create … --doc-type <type>` line. Both consumers then
+	// had to separate the halves BY MATCHING THE PROSE — the console cut at the
+	// literal "Re-run naming a type" (app.js siteDetailWithoutCliReRun, deleted)
+	// and this package's caller searched for the same sentence
+	// (cloud_site_cmd.go, siteRefusalMessage). Two string matches on one server
+	// sentence: reword it and the console leaks a terminal incantation into a
+	// modal while the CLI silently loses the line, with no test on any side
+	// failing, because each side tests against its own fixture copy of the prose.
+	//
+	// The control plane now sends the facts in `detail` and the incantation in
+	// `cli_hint`. THE TAG IS NOT OPTIONAL AND IT RIDES THE SAME COMMIT as the
+	// server change: without it `json.Unmarshal` drops the key, `detail` no
+	// longer carries the re-run, and `bp cloud site create` would print a refusal
+	// with no fix in it — the key LAUNDERED, exactly the failure #18607 named.
+	CLIHint string
+	msg     string
 }
 
 // ReadableType is one row of the readable-types menu a `content_binding_empty`
@@ -628,6 +793,15 @@ func cloudError(status int, body []byte) error {
 		// raw array bytes are kept for the machine envelope (order-preserving) and
 		// the decoded rows drive the human menu; a row with an empty `type` is
 		// dropped, so a partly-malformed list still yields whatever is usable.
+		// The terminal hint, in its OWN isolated Unmarshal for the same reason
+		// every field above is. See CLIHint's doc for why the server stopped
+		// welding this into `detail`.
+		var hnt struct {
+			CLIHint string `json:"cli_hint"`
+		}
+		if json.Unmarshal(body, &hnt) == nil {
+			ref.CLIHint = strings.TrimSpace(hnt.CLIHint)
+		}
 		var rtm struct {
 			ReadableTypes json.RawMessage `json:"readable_types"`
 		}
@@ -1015,18 +1189,19 @@ type Credentials struct {
 	Host       string `json:"host"`
 }
 
-// GetCredentials fetches a Barkpark's stored admin token via
-// GET /v1/barkparks/:id/credentials (Bearer). The route is team-admin-gated and
-// team-scoped: a non-admin gets 403 and an instance in another team (or no such
-// id) is the SAME 404 (no existence leak) — both surface verbatim via cloudError.
-// A 404 "no_admin_token" means the instance never had one captured (e.g. an
-// ip-only/legacy provision).
-func (c *Client) GetCredentials(ctx context.Context, id string) (Credentials, error) {
-	return c.getCredentials(ctx, id, "")
-}
-
-// GetCredentialsForTeam fetches credentials using an explicit team membership
-// context. An empty teamID is intentionally identical to GetCredentials.
+// GetCredentialsForTeam fetches a Barkpark's stored admin token via
+// GET /v1/barkparks/:id/credentials (Bearer), in an explicit team membership
+// context. The route is team-admin-gated and team-scoped: a non-admin gets 403
+// and an instance in another team (or no such id) is the SAME 404 (no existence
+// leak) — both surface verbatim via cloudError. A 404 "no_admin_token" means the
+// instance never had one captured (e.g. an ip-only/legacy provision).
+//
+// An empty (or whitespace-only) teamID sends NO X-Barkpark-Team header, which is
+// the caller's way of saying "use my default team context" — that is the ONLY
+// entry point now. A bare GetCredentials(ctx, id) wrapper existed for exactly
+// that case and was deleted (2026-09-16, wbqs-go-dead-exports): it had zero
+// callers outside its own test, so it advertised a choice no running path made.
+// The empty-teamID branch is still covered — see TestGetCredentialsWithoutTeam.
 func (c *Client) GetCredentialsForTeam(ctx context.Context, id, teamID string) (Credentials, error) {
 	return c.getCredentials(ctx, id, strings.TrimSpace(teamID))
 }
@@ -1065,6 +1240,11 @@ type VerifyProbe struct {
 	Status    *int   `json:"status"`
 	LatencyMS int    `json:"latency_ms"`
 	Evidence  string `json:"evidence"`
+	// Skipped is true when a CONDITIONAL probe did not apply to this box
+	// (verify.siteplane on a box that hosts no sites). It still passes — OK is
+	// true — but a renderer must say "skipped", never paint it as a proof.
+	// Absent on every other probe, so it decodes false.
+	Skipped bool `json:"skipped,omitempty"`
 }
 
 // VerifyResult is a COMPLETED verify run: the suite executed and every probe
@@ -1184,7 +1364,7 @@ func (c *Client) DomainStatus(ctx context.Context, id string) (DomainStatusResul
 	// only the lazily-built fallback is widened, and only for this call.
 	dc := *c
 	if dc.HTTP == nil {
-		dc.HTTP = &http.Client{Timeout: DomainStatusTimeout}
+		dc.HTTP = newHTTPClient(DomainStatusTimeout)
 	}
 	status, raw, err := dc.do(ctx, "GET", "/v1/barkparks/"+esc(id)+"/domain-status", true, nil)
 	if err != nil {
@@ -1521,7 +1701,7 @@ func (c *Client) VerifyInstance(ctx context.Context, id string) (VerifyResult, e
 	// only the lazily-built fallback is widened, and only for this call.
 	vc := *c
 	if vc.HTTP == nil {
-		vc.HTTP = &http.Client{Timeout: VerifyTimeout}
+		vc.HTTP = newHTTPClient(VerifyTimeout)
 	}
 	status, raw, err := vc.do(ctx, "POST", "/v1/barkparks/"+esc(id)+"/verify", true, nil)
 	if err != nil {
@@ -2023,6 +2203,32 @@ func (c *Client) SetEnv(ctx context.Context, siteID string, env map[string]strin
 // nothing but a test fixture noticed. `Bytes` is the only field any caller reads.
 type ArtifactUpload struct {
 	Bytes int64 `json:"bytes"`
+	// ssw9-cli-prebuilt-followups, the wire recheck against the MERGED control
+	// plane. Both keys are emitted by `upload_deployment_artifact/3` on main and
+	// neither was declared here, so json.Unmarshal dropped them in silence — the
+	// same failure SpawnSite.PrebuiltEnabled and SiteDeployment.SourceDigest
+	// record one wave earlier.
+	//
+	// SHA256 is the digest the control plane computed over the bytes IT received.
+	// The client already sends its own in X-Artifact-Sha256 and the CP 422s a
+	// mismatch, so this is the end-to-end CONFIRMATION rather than the check — and
+	// reading it back is what makes the round trip verifiable from the client side
+	// instead of trusted.
+	//
+	// Status is "already_uploaded" on the 200 retry arm and ABSENT on the fresh
+	// 201. That distinction is load-bearing: on `already_uploaded` the control
+	// plane deliberately does NOT re-start the driver, so a receipt claiming these
+	// bytes are about to be staged would be describing a deploy that started on an
+	// earlier request.
+	SHA256 string `json:"artifact_sha256,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+// AlreadyUploaded reports whether the control plane answered the 200 retry arm —
+// the bytes were already stored under this deployment and NO driver was started
+// by this request.
+func (a ArtifactUpload) AlreadyUploaded() bool {
+	return strings.TrimSpace(strings.ToLower(a.Status)) == "already_uploaded"
 }
 
 // AddDomain appends a hostname to the site's domains array via
@@ -2173,7 +2379,21 @@ type SpawnSite struct {
 	// side by intent of the render: an EMPTY string means the control plane
 	// predates the field, which the renderer treats as "say nothing", never as
 	// "absent" — a fabricated absence would be its own silent lie.
-	PublishTrigger      string          `json:"publish_trigger,omitempty"`
+	PublishTrigger string `json:"publish_trigger,omitempty"`
+	// site-spawner W10 (ssw10-bl-prebuilt-enabled-no-read-path): the per-site
+	// opt-in to accepting builds produced somewhere other than the box. The
+	// control plane has serialized it on EVERY site-shaped route since W9 (one
+	// serializer, router.ex `prebuilt_enabled: s.prebuilt_enabled`), and
+	// `bp cloud site settings --prebuilt-enabled` has been able to PATCH it —
+	// but this struct did not declare it, so json.Unmarshal dropped it in
+	// silence and the settings receipt echoed a flag it had never decoded. The
+	// same failure PublishTrigger and DocType record above.
+	//
+	// NOT omitempty, and NOT guarded on "" the way DocType/PublishTrigger are:
+	// this is a bool, so a false here is an ANSWER ("this site builds on its
+	// box"), not an absence. cloudclient.Site declares it with the same
+	// reasoning.
+	PrebuiltEnabled     bool            `json:"prebuilt_enabled"`
 	Port                int             `json:"port,omitempty"`
 	PortBase            int             `json:"port_base,omitempty"`
 	CurrentDeploymentID string          `json:"current_deployment_id"`
@@ -2214,25 +2434,34 @@ type SiteStage struct {
 // path) and SourceDigest is the sha256 of the uploaded artifact, which the box
 // re-verifies before it stages anything.
 //
-// RuntimeTarget / Port mirror the SpawnSite node-slot fields at the deployment
-// grain (charter D62): a node deployment carries the runtime_target it ran on and
-// the slot Port its process bound — omitempty and threaded explicitly for the same
-// json.Unmarshal-drops-unknown-keys reason as SpawnSite. A static deployment omits
-// both.
+// Port mirrors the SpawnSite node-slot field at the deployment grain (charter
+// D62): the slot port a node deployment's process bound — omitempty and threaded
+// explicitly for the same json.Unmarshal-drops-unknown-keys reason as SpawnSite.
+// A static deployment omits it.
+//
+// THERE IS NO RuntimeTarget HERE, deliberately (dr-w11-payload-divergence-close).
+// This struct declared a RuntimeTarget field (tag runtime_target) from #3976
+// until that task, and no deployment serializer ever emitted the key: the
+// control plane derives runtime_target from the site's kind inside
+// `Sites.Deploy` and puts it on the payloads it sends the BOX (deploy and
+// rollback) — never on a deployment row. So the field decoded to "" on every
+// real response and its one reader (the `-o json` deployment envelope) never
+// fired. (The site row does not carry it either: `site_json/2` emits no
+// runtime_target, so `SpawnSite.RuntimeTarget` is the same phantom one payload
+// over; the census has no site_json pair to see it.)
 type SiteDeployment struct {
-	ID            string      `json:"id"`
-	SiteID        string      `json:"site_id"`
-	Status        string      `json:"status"`
-	Stage         string      `json:"stage"`
-	Stages        []SiteStage `json:"stages"`
-	BuildID       string      `json:"build_id"`
-	ContentRev    string      `json:"content_rev,omitempty"`
-	Source        string      `json:"source,omitempty"`
-	SourceDigest  string      `json:"artifact_sha256,omitempty"`
-	URL           string      `json:"url"`
-	Trigger       string      `json:"trigger,omitempty"`
-	RuntimeTarget string      `json:"runtime_target,omitempty"`
-	Port          int         `json:"port,omitempty"`
+	ID           string      `json:"id"`
+	SiteID       string      `json:"site_id"`
+	Status       string      `json:"status"`
+	Stage        string      `json:"stage"`
+	Stages       []SiteStage `json:"stages"`
+	BuildID      string      `json:"build_id"`
+	ContentRev   string      `json:"content_rev,omitempty"`
+	Source       string      `json:"source,omitempty"`
+	SourceDigest string      `json:"artifact_sha256,omitempty"`
+	URL          string      `json:"url"`
+	Trigger      string      `json:"trigger,omitempty"`
+	Port         int         `json:"port,omitempty"`
 	// site-spawner (node slot truth): THE SERVED SLOT AND WHETHER THE HEALTH GATE
 	// ACTUALLY RAN. `deployment_json/1` has emitted `slot`, `port` and
 	// `health_exit_code` since #15095 (migration 20260902091000 added the three
@@ -2281,6 +2510,38 @@ type SiteDeployment struct {
 	//     server-side), for when FailureReason is the humanizer's generic arm.
 	FailureClass     string `json:"failure_class,omitempty"`
 	FailureReasonRaw string `json:"failure_reason_raw,omitempty"`
+	// deploy-reliability W15 S3 follow-up (dr-w15-s3-followup-decode-refusal-phase):
+	// WHICH PHASE the box refused in. `deployment_json/1` has emitted this key
+	// since the W15 S3 producer slice and this struct declared no tag for it, so
+	// `json.Unmarshal` dropped it in silence — the third instance of the exact
+	// shape the FailureClass/FailureReasonRaw and FailureCode/FailureMessage
+	// blocks either side of it record: a decoder that never names a key cannot
+	// report it, and nothing reds.
+	//
+	//   * "start" — the TRIGGER was refused; no build ever began.
+	//   * "poll"  — a beat of a build ALREADY RUNNING was refused; a build died
+	//               mid-flight.
+	//
+	// Same failure class, very different blast radius, and the taxonomy
+	// deliberately does NOT split on it — this key is the only way the phase
+	// reaches a reader at all.
+	//
+	// A POINTER, for the reason FailureCode/FailureMessage below are pointers.
+	// The producer sends null on every row that is NOT a box refusal and never
+	// coerces it to "start", because "this was not a refusal" and "this was
+	// refused at trigger time" are different sentences. A plain string would
+	// decode that null to "" and the render would have to guess which it meant;
+	// worse, a `string` plus the usual `!= ""` emit guard reads identically to a
+	// row the producer never wrote. Keep it *string.
+	//
+	// HONEST LIMIT, carried from the producer verbatim so no reader downstream
+	// infers more than it says: this is a TRIPWIRE, not a live discriminator.
+	// cloud-db-1 holds ZERO poll-phase rows all-time against 14,848 start-phase
+	// ones, so in production today this field reads "start" or nil and nothing
+	// else. It is decoded so the FIRST poll refusal is legible the day it lands.
+	// Do NOT split any taxonomy on it and do NOT let a render imply it
+	// discriminates anything in the corpus we have.
+	RefusalPhase *string `json:"refusal_phase"`
 	// THE REFUSAL, UNFUSED (task-f156b5e43bfbfe91, producer PR #16511).
 	// FailureReason above is ONE prose line with the box's typed code and its
 	// human sentence fused into it, so every reader took it apart again by
@@ -2324,8 +2585,17 @@ type SiteDeployment struct {
 	DeferralCause *string `json:"deferral_cause"`
 	// gh-6 identity: "production" | "preview", and the branch a preview was built
 	// from. Declared for the same drops-unknown-keys reason as the pair above.
-	Environment  string `json:"environment,omitempty"`
-	Branch       string `json:"branch,omitempty"`
+	Environment string `json:"environment,omitempty"`
+	Branch      string `json:"branch,omitempty"`
+	// PreviewHost / PreviewURL name the PREVIEW SURFACE a preview deployment
+	// built (gh-6): the preview host and its https click-through. Both are null
+	// on every production row, so "" means "not a preview", never "a preview
+	// with no host". Until dr-w11-payload-divergence-close this struct decoded
+	// Environment and Branch but neither of these, so `bp` could say a
+	// deployment was a preview of branch X and never where it lives — and the
+	// deployment's own `url` is the SITE's production URL, not the preview's.
+	PreviewHost  string `json:"preview_host,omitempty"`
+	PreviewURL   string `json:"preview_url,omitempty"`
 	BuildLogURL  string `json:"build_log_url,omitempty"`
 	BecameLiveAt string `json:"became_live_at"`
 	InsertedAt   string `json:"inserted_at"`
@@ -2635,7 +2905,7 @@ func (c *Client) UploadDeploymentArtifact(ctx context.Context, siteID, deploymen
 
 	client := c.HTTP
 	if client == nil {
-		client = &http.Client{}
+		client = newHTTPClient(0)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -2710,6 +2980,136 @@ func (c *Client) ListSpawnSiteDeployments(ctx context.Context, siteID string, li
 		return SiteDeploymentPage{}, fmt.Errorf("decode deployments response: %w", err)
 	}
 	return page, nil
+}
+
+// SiteDeploymentPageMax is the server's hard per-window cap on
+// GET /v1/sites/:id/deployments: `limit` above this is clamped by the control
+// plane, not honoured. It is a WIRE FACT, declared here so a walk's round-trip
+// budget is derived from the real page size rather than from a number the caller
+// hoped for — a budget computed against 500 would promise a quarter of the trips
+// it actually spends.
+const SiteDeploymentPageMax = 200
+
+// SiteDeploymentWalkBudget is a bounded keyset walk's PLAN, stated before the
+// first request rather than discovered after the last.
+//
+// WHY A PLAN AND NOT TWO INTS. A site accrues one deployment row per push, and
+// the route hands out at most SiteDeploymentPageMax rows per round trip — so
+// "read this site's cost" is a request for Rows/PageSize round trips, and a
+// caller that does not state that number up front has not decided how much of
+// someone's rate limit it is going to spend. `bp sites` already pays extra round
+// trips per site; a cost walk added on top of that is an N+1 unless the N is
+// bounded HERE and printed by whoever renders the result.
+//
+//	Rows     — how many rows the caller wants, at most.
+//	PageSize — rows per request; clamped into [1, SiteDeploymentPageMax].
+//	MaxPages — the round-trip ceiling, derived from the two above.
+type SiteDeploymentWalkBudget struct {
+	Rows     int
+	PageSize int
+	MaxPages int
+}
+
+// NewSiteDeploymentWalkBudget derives the round-trip budget from a row target.
+// pageSize <= 0 means "ask for the biggest window the server will give", which
+// is the fewest round trips for a given row count.
+func NewSiteDeploymentWalkBudget(rows, pageSize int) SiteDeploymentWalkBudget {
+	if rows < 1 {
+		rows = 1
+	}
+	if pageSize <= 0 || pageSize > SiteDeploymentPageMax {
+		pageSize = SiteDeploymentPageMax
+	}
+	if pageSize > rows {
+		pageSize = rows
+	}
+	pages := rows / pageSize
+	if rows%pageSize != 0 {
+		pages++
+	}
+	return SiteDeploymentWalkBudget{Rows: rows, PageSize: pageSize, MaxPages: pages}
+}
+
+// SiteDeploymentWalk is what a bounded walk actually read, and — the half that
+// makes it quotable — WHERE IT STOPPED.
+//
+// ListSpawnSiteDeployments returns one page and a cursor; a caller that follows
+// the cursor and then reports `len(rows)` has produced a number that is either a
+// site total or a floor, and NOTHING in the return value says which. That is the
+// defect this type exists to close: `Truncated` is true exactly when the server
+// still had a cursor to give when the walk stopped, so a renderer can never quote
+// a bounded read as a site's whole history.
+//
+// StoppedBy names the bound in the walk's own vocabulary — "rows" (the row target
+// was reached), "pages" (the round-trip budget was spent), "exhausted" (the server
+// stopped sending a cursor: this IS the whole ledger) — so the rendered line can
+// say which bound bit rather than a generic "there may be more".
+type SiteDeploymentWalk struct {
+	Deployments []SiteDeployment
+	Budget      SiteDeploymentWalkBudget
+	Pages       int
+	Truncated   bool
+	StoppedBy   string
+}
+
+// WalkSpawnSiteDeployments follows `next_cursor` across GET /v1/sites/:id/deployments
+// until the budget is spent or the server stops sending a cursor, newest-first.
+//
+// It is the WIDE twin of ListDeploymentsAll, and it differs in the one way that
+// matters to anything that quotes a number off it: ListDeploymentsAll truncates
+// at maxRows and returns a plain slice, so its caller cannot tell a complete
+// ledger from a floor. This returns the bound it stopped on.
+//
+// A repeated cursor is an error, never an infinite request stream — a server bug
+// must not become an unbounded client loop.
+func (c *Client) WalkSpawnSiteDeployments(ctx context.Context, siteID string, budget SiteDeploymentWalkBudget) (SiteDeploymentWalk, error) {
+	if budget.PageSize <= 0 || budget.MaxPages <= 0 || budget.Rows <= 0 {
+		budget = NewSiteDeploymentWalkBudget(budget.Rows, budget.PageSize)
+	}
+	walk := SiteDeploymentWalk{Budget: budget, StoppedBy: "exhausted"}
+	seen := map[string]bool{}
+	before := ""
+	for walk.Pages < budget.MaxPages {
+		want := budget.PageSize
+		if left := budget.Rows - len(walk.Deployments); left < want {
+			want = left
+		}
+		if want <= 0 {
+			break
+		}
+		page, err := c.ListSpawnSiteDeployments(ctx, siteID, want, before)
+		if err != nil {
+			return SiteDeploymentWalk{}, err
+		}
+		walk.Pages++
+		walk.Deployments = append(walk.Deployments, page.Deployments...)
+		cursor := strings.TrimSpace(page.NextCursor)
+		if cursor == "" || len(page.Deployments) == 0 {
+			// The server has nothing behind this window: what we hold IS the ledger.
+			walk.StoppedBy = "exhausted"
+			walk.Truncated = false
+			return walk, nil
+		}
+		if seen[cursor] {
+			return SiteDeploymentWalk{}, fmt.Errorf("deployments walk: server repeated cursor %q — refusing to loop", cursor)
+		}
+		seen[cursor] = true
+		before = cursor
+		if len(walk.Deployments) >= budget.Rows {
+			walk.Deployments = walk.Deployments[:budget.Rows]
+			walk.Truncated = true
+			walk.StoppedBy = "rows"
+			return walk, nil
+		}
+	}
+	// Fell out of the loop with a live cursor in hand: the round-trip budget, not
+	// the ledger, is what ended this read.
+	walk.Truncated = true
+	walk.StoppedBy = "pages"
+	if len(walk.Deployments) > budget.Rows {
+		walk.Deployments = walk.Deployments[:budget.Rows]
+	}
+	return walk, nil
 }
 
 // DeployRate is one rate NODE from the fleet deploy census: a percentage that
@@ -2792,7 +3192,19 @@ type DeployCensusSite struct {
 	// json.Unmarshal would drop the per-site key on the floor while every
 	// name-based guard stayed green.
 	TerminalFailureRate *DeployRate `json:"terminal_failure_rate"`
-	TopClass            *string     `json:"top_class"`
+	// LiveRate is per-site LIVE-PER-ATTEMPT (`live / volume`), the number
+	// dr-w16-bl-live-per-attempt-reaches-the-site-owner put on the owner's own
+	// read. It is declared HERE and not left to ride the file-global tag union
+	// on DeployCensus's identically-named field for the same reason
+	// TerminalFailureRate is (charter D260): json.Unmarshal would drop the
+	// per-site key on the floor while every name-based guard stayed green, and
+	// cloud's OFF-STRUCT census reds by name when it does.
+	//
+	// A POINTER, like its neighbours: a control plane predating this slice
+	// sends no per-site live rate, and an absence must not decode into a site
+	// whose live rate is 0% of 0 rows.
+	LiveRate *DeployRate `json:"live_rate"`
+	TopClass *string     `json:"top_class"`
 }
 
 // DeployCensusWindow is the PINNED window the census was taken over, echoed back
@@ -2880,12 +3292,18 @@ type DeployCensus struct {
 	// nil = this control plane does not count abandonments; 0 with 0 unreadable =
 	// none happened; 0 with N unreadable = nothing legible said so, and 0 is a
 	// LOWER BOUND. That is the whole reason these are pointers.
-	DeferredTotal       *int                `json:"deferred_total"`
-	Abandoned           *int                `json:"abandoned"`
-	AbandonedUnreadable *int                `json:"abandoned_unreadable"`
-	NotAttempted        []DeployCensusClass `json:"not_attempted"`
-	Sites               []DeployCensusSite  `json:"sites"`
-	MinSample           int                 `json:"min_sample"`
+	DeferredTotal       *int `json:"deferred_total"`
+	Abandoned           *int `json:"abandoned"`
+	AbandonedUnreadable *int `json:"abandoned_unreadable"`
+	// AbandonedBasis carries the three labels the integer above cannot: WHICH
+	// BASIS measured it (prose, not the chain columns — the census fold carries
+	// none), how much of it is HISTORICAL, and how much of it the BACKFILL wrote
+	// rather than the live writer. Absent on a control plane that predates it,
+	// and the renderer then says nothing rather than inventing a label.
+	AbandonedBasis *string             `json:"abandoned_basis"`
+	NotAttempted   []DeployCensusClass `json:"not_attempted"`
+	Sites          []DeployCensusSite  `json:"sites"`
+	MinSample      int                 `json:"min_sample"`
 	// Delivery is the dr-w11-s4 addition: the time-to-web census. A POINTER
 	// because today's control plane sends no `delivery` key at all, and "the
 	// control plane does not measure delivery yet" must not decode to "delivery
@@ -2924,6 +3342,16 @@ type DeployCensus struct {
 	// `-o json` re-emits Raw verbatim — no Go struct in this package named it,
 	// so no human render could.
 	CoalescedAttempts *DeployCoalescedAttempts `json:"coalesced_attempts"`
+	// BoxDoor is the dr-w22-s5 addition: the door's own denominator, keyed on the
+	// capacity-409 PROSE MARKER in failure_reason across ALL statuses, rather than
+	// on `deferral_cause` — which is written in exactly one code path, so a
+	// capacity refusal that settled `failed` carries a NULL cause and is invisible
+	// to every cause-keyed reader.
+	//
+	// A POINTER, and not for style: a control plane older than this term sends no
+	// key, and a zero-valued struct would render "the door refused 0 times" over a
+	// window in which it refused thousands. nil MUST render as NOT MEASURED.
+	BoxDoor *DeployBoxDoor `json:"box_door"`
 	// TotalSites and Truncated are the dr-w24 server-side cut markers.
 	// `DeployLedger.census/3` clamps `sites` at 50 rows and has always cut
 	// SILENTLY on this wire: before these two fields the CLI's own "… and N
@@ -2949,7 +3377,39 @@ type DeployCensus struct {
 	// A nil slice is a control plane that sent none; the render layer already
 	// treats "no boundary rows" as "no provenance to offer", never as an error.
 	Boundaries []DeployCensusBoundary `json:"boundaries"`
-	Raw        []byte                 `json:"-"`
+	// Vocabulary is the class enum the ledger can EVER return, as distinct from
+	// Classes, which is what this WINDOW observed
+	// (dr-w16-s3-followup-class-vocabulary-unreachable). The difference is the
+	// whole point: a class absent from Classes means "no rows in this window",
+	// never "no such class", so a legend built from Classes changes shape with
+	// the window and a CLI that wants a stable one has to hard-code the enum on
+	// this side of the wire — the second drifting definition
+	// deployCensusDeferredTotal already cost this census once.
+	//
+	// A POINTER, for the same reason every neighbour above is one: a control
+	// plane older than this key sends nothing, and a zero-valued struct would
+	// render an EMPTY legend — "the ledger names no failure classes" — which is
+	// the most flattering possible reading of an absence. nil MUST render as
+	// NOT SENT.
+	Vocabulary *DeployVocabulary `json:"vocabulary"`
+	Raw        []byte            `json:"-"`
+}
+
+// DeployVocabulary is the three closed enums `DeployLedger.classify/2` can
+// return: the failure classes, the deferral classes (counted in volume, never
+// in a failure numerator) and the never-attempted classes (never in a rate
+// DENOMINATOR at all). Three lists and not one, because the three are
+// arithmetically different and a legend that flattens them invites a reader to
+// sum across them.
+//
+// Every field is a plain []string: the class NAMES are data, not wire keys, so
+// a class added to the ledger's enum changes no shape here and reds no key-set
+// register. A nil slice is a control plane that sent that enum empty; the
+// render says so rather than printing a blank section.
+type DeployVocabulary struct {
+	Classes             []string `json:"classes"`
+	DeferredClasses     []string `json:"deferred_classes"`
+	NotAttemptedClasses []string `json:"not_attempted_classes"`
 }
 
 // DeployCensusCompleteness is the envelope's own audit of itself: a SECOND,
@@ -2998,6 +3458,35 @@ type DeployCoalescedAttempts struct {
 	Reason  string `json:"reason"`
 	Since   string `json:"since"`
 	Basis   string `json:"basis"`
+}
+
+// DeployBoxDoor is the box door's REFUSAL count beside the door's RE-QUEUE
+// count, with the rows the second one cannot see carried as its own scalar.
+//
+// Refusals counts every row in the window whose failure_reason carries the
+// capacity-409 marker, in WHATEVER status it settled. CauseKeyed counts what the
+// old predicate saw — status='deferred' AND deferral_cause=BOX_AT_CAPACITY_DEFERRED.
+// Unkeyed is the producer's DIRECT count of the marked rows the cause-keyed
+// predicate misses; it is deliberately not derived here as Refusals-CauseKeyed,
+// because that subtraction is signed and this reader must not be able to print a
+// negative count of missing rows.
+//
+// ByStatus is the marked population split by the status it settled in — the
+// evidence for the gap, on the same line as the gap.
+type DeployBoxDoor struct {
+	Refusals       int                   `json:"refusals"`
+	CauseKeyed     int                   `json:"cause_keyed"`
+	Unkeyed        int                   `json:"unkeyed"`
+	ByStatus       []DeployBoxDoorStatus `json:"by_status"`
+	Predicate      string                `json:"predicate"`
+	CausePredicate string                `json:"cause_predicate"`
+	Basis          string                `json:"basis"`
+}
+
+// DeployBoxDoorStatus is ONE status bucket of the marked door population.
+type DeployBoxDoorStatus struct {
+	Status string `json:"status"`
+	Count  int    `json:"count"`
 }
 
 // DeployDeliveryWindow is the delivery census's PINNED window WITH its width —
@@ -3055,8 +3544,14 @@ type DeployDeliveryCensored struct {
 // A site can appear here with Sample 0 and Cancelled > 0 — every row it filed in
 // the window was stopped by hand. That is a real, reportable state, and it is
 // NOT still waiting.
+//
+// Name and Slug are the SAME identity pair DeployCoverageSite carries, resolved
+// server-side by the same helper; both are null when the site row is gone, and
+// the renderer then prints the id marked "(no site row)", never a blank.
 type DeployDeliverySite struct {
 	SiteID               string   `json:"site_id"`
+	Name                 string   `json:"name"`
+	Slug                 string   `json:"slug"`
 	Sample               int      `json:"sample"`
 	Delivered            int      `json:"delivered"`
 	Censored             int      `json:"censored"`
@@ -3156,9 +3651,16 @@ type DeployDeferralWaitQuantile struct {
 //
 // OldestPendingSeconds is a LOWER BOUND on a wait still running, and it is a
 // pointer: no pending rows means there is no bound to state, which is not zero.
+//
+// CoveringBound is the SAME token DeployCoverageCohorts carries, for the same
+// reason and off the same fold: both nodes are computed against one covering
+// query (DeployLedger's live_marks/1) that is bounded on the LEFT only, so a
+// live build minted AFTER the window's `to` still resolves a row here. The
+// basis paragraph says it in English; this is the form a reader can branch on.
 type DeployDeferralWait struct {
 	Clock                string                       `json:"clock"`
 	Basis                string                       `json:"basis"`
+	CoveringBound        string                       `json:"covering_bound"`
 	AsOf                 string                       `json:"as_of"`
 	Population           DeployDeferralWaitPopulation `json:"population"`
 	Outcomes             []DeployDeferralWaitOutcome  `json:"outcomes"`
@@ -3325,7 +3827,7 @@ func (c *Client) FleetDeployCensus(ctx context.Context, from, to time.Time) (Dep
 	// untouched; only the lazily-built fallback is widened, and only for this call.
 	cc := *c
 	if cc.HTTP == nil {
-		cc.HTTP = &http.Client{Timeout: FleetDeployCensusTimeout}
+		cc.HTTP = newHTTPClient(FleetDeployCensusTimeout)
 	}
 	status, body, err := cc.do(ctx, "GET", "/v1/deploy-ledger/census?"+q.Encode(), true, nil)
 	if err != nil {
@@ -3534,6 +4036,18 @@ func (c *Client) WebhookRotate(ctx context.Context, id, dataset, webhookID strin
 // .../webhooks/:webhook_id/deliveries?dataset= (webhook.deliveries, :read).
 func (c *Client) WebhookDeliveries(ctx context.Context, id, dataset, webhookID string) (WebhookProxyResult, error) {
 	return c.webhookProxy(ctx, "GET", withDataset(webhookBase(id)+"/"+esc(webhookID)+"/deliveries", dataset), nil)
+}
+
+// WebhookTestSend fires ONE synthetic `webhook.test` envelope at the endpoint —
+// POST .../webhooks/:webhook_id/test-send?dataset= (webhook.test_send,
+// :mutate). It is the same route the console's "Send test" button calls (GR45):
+// the instance delivers in a SINGLE synchronous attempt and answers with the
+// resulting delivery row, so the reply carries the endpoint's real verdict
+// (status + latency). The delivery is written with a NULL endpoint_id, so a
+// failing probe never perturbs the endpoint's auto-disable streak.
+func (c *Client) WebhookTestSend(ctx context.Context, id, dataset, webhookID string) (WebhookProxyResult, error) {
+	path := webhookBase(id) + "/" + esc(webhookID) + "/test-send"
+	return c.webhookProxy(ctx, "POST", withDataset(path, dataset), nil)
 }
 
 // WebhookReplay re-delivers one stored event to the webhook — POST
@@ -4095,7 +4609,7 @@ func (c *Client) Rollback(ctx context.Context, id string) (RollbackResult, error
 	// (tests) is honored untouched; only the lazily-built fallback is widened.
 	rc := *c
 	if rc.HTTP == nil {
-		rc.HTTP = &http.Client{Timeout: VerifyTimeout}
+		rc.HTTP = newHTTPClient(VerifyTimeout)
 	}
 	status, raw, err := rc.do(ctx, "POST", "/v1/barkparks/"+esc(id)+"/rollback", true, nil)
 	if err != nil {

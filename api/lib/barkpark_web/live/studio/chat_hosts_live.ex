@@ -8,7 +8,16 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, page_title: "Chat hosts", hosts: [], enrollment: nil)}
+    if Barkpark.Capability.enabled?(:studio_chat) do
+      {:ok, assign(socket, page_title: "Chat hosts", hosts: [], enrollment: nil)}
+    else
+      # Studio Chat is switched off on this instance (`Barkpark.Capability`);
+      # its host routes answer 404, so there is nothing to manage here.
+      {:ok,
+       socket
+       |> put_flash(:error, "Studio Chat is not enabled on this instance.")
+       |> redirect(to: "/studio")}
+    end
   end
 
   @impl true

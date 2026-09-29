@@ -1,0 +1,121 @@
+{
+  "_readme": [
+    "PDF-D11 group-view corpus (pdf-bl-fleet-group-view). ONE entry per state in",
+    "app.js's GROUP_VIEW_STATES — the catalogue is the key set, and",
+    "__preview__/group-view-scenarios.mjs REFUSES (throws) if this file's keys and",
+    "that array disagree in either direction, or if a scenario stops producing the",
+    "state it is filed under when run through the SHIPPED groupViewState.",
+    "",
+    "`supports` are /v1/barkparks rows as the fleet payload serializes them",
+    "(fleet_role/fleet_parent_id ride every row). `roster` is the `documents`",
+    "array of GET {main.url}/v1/fleet/roster, whose row shape is fixed by",
+    "Barkpark.Tasks.Fleet roster/2: worker, agent, scope, status, capacity,",
+    "last_seen, ttl_s, task. `roster: null` means the READ ITSELF never landed.",
+    "",
+    "`now` is the injected clock every scenario is derived against, so the",
+    "rendered beat ages are deterministic. It is deliberately LATER than several",
+    "rows' last_seen by more than their ttl_s: those rows still carry the status",
+    "the SERVER computed, because this console never re-derives offline from an",
+    "age. The `working-stale-beat` arm below exists to pin exactly that."
+  ],
+  "now": "2026-07-24T12:00:00Z",
+  "main": {
+    "id": "main-1",
+    "name": "Production",
+    "slug": "production",
+    "host": "production.barkpark.cloud",
+    "url": "https://production.barkpark.cloud",
+    "provision_status": "succeeded"
+  },
+  "scenarios": {
+    "empty": {
+      "why": "A main with no supports at all — the group surface's precondition, not a failure.",
+      "supports": [],
+      "roster": []
+    },
+    "roster-conflict": {
+      "why": "Two supports resolve to the SAME roster row: sup-1's slug and sup-9's NAME are both \"muscle-1\", so the listener identity collides and neither box's status or capacity is attributable.",
+      "supports": [
+        { "id": "sup-1", "name": "muscle-1", "slug": "muscle-1", "host": "muscle-1.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" },
+        { "id": "sup-9", "name": "muscle-1", "slug": null, "host": "muscle-9.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" }
+      ],
+      "roster": [
+        { "worker": "muscle-1", "agent": "fleet-listener", "scope": "production", "status": "working", "capacity": { "size_class": "standard", "slots_free": 1, "slots_total": 2 }, "last_seen": "2026-07-24T11:59:50Z", "ttl_s": 120, "task": { "title": "Rebuild the search index" } }
+      ]
+    },
+    "blocked": {
+      "why": "One support reports the stored `blocked` status. Blocked outranks every healthy signal in the group — a box that needs attention is the thing the operator came for.",
+      "supports": [
+        { "id": "sup-1", "name": "muscle-1", "slug": "muscle-1", "host": "muscle-1.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" },
+        { "id": "sup-2", "name": "muscle-2", "slug": "muscle-2", "host": "muscle-2.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" }
+      ],
+      "roster": [
+        { "worker": "muscle-1", "agent": "fleet-listener", "scope": "production", "status": "blocked", "capacity": { "size_class": "standard", "slots_free": 0, "slots_total": 2 }, "last_seen": "2026-07-24T11:59:55Z", "ttl_s": 120, "task": { "title": "Migrate the ONIX exporter" } },
+        { "worker": "muscle-2", "agent": "fleet-listener", "scope": "production", "status": "idle", "capacity": "1 task", "last_seen": "2026-07-24T11:59:58Z", "ttl_s": 120, "task": null }
+      ]
+    },
+    "offline": {
+      "why": "Both live supports carry the server-computed `offline` status — the STALENESS verdict, made by Barkpark.Tasks.Fleet roster/2 against each row's own ttl_s, not by this page. An order filed now would sit unclaimed.",
+      "supports": [
+        { "id": "sup-1", "name": "muscle-1", "slug": "muscle-1", "host": "muscle-1.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" },
+        { "id": "sup-2", "name": "muscle-2", "slug": "muscle-2", "host": "muscle-2.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" }
+      ],
+      "roster": [
+        { "worker": "muscle-1", "agent": "fleet-listener", "scope": "production", "status": "offline", "capacity": { "size_class": "standard", "slots_free": 2, "slots_total": 2 }, "last_seen": "2026-07-24T11:40:00Z", "ttl_s": 120, "task": null },
+        { "worker": "muscle-2", "agent": "fleet-listener", "scope": "production", "status": "offline", "capacity": "1 task", "last_seen": "2026-07-24T09:15:00Z", "ttl_s": 60, "task": null }
+      ]
+    },
+    "provisioning": {
+      "why": "No support has reached live yet — both are still coming up, so there is nothing that OUGHT to be beating and calling the group offline would be a slander on a box that was never asked to answer.",
+      "supports": [
+        { "id": "sup-2", "name": "muscle-2", "slug": "muscle-2", "host": null, "fleet_role": "support", "fleet_parent_id": "main-1", "provision_steps": [ { "step": "create", "status": "done", "at": "2026-07-24T11:58:00Z" }, { "step": "configure", "status": "started", "at": "2026-07-24T11:58:20Z" } ] },
+        { "id": "sup-3", "name": "muscle-3", "slug": "muscle-3", "host": null, "fleet_role": "support", "fleet_parent_id": "main-1", "provision_steps": [ { "step": "create", "status": "started", "at": "2026-07-24T11:59:30Z" } ] }
+      ],
+      "roster": []
+    },
+    "cap-hit": {
+      "why": "Every ONLINE support reports slots_free: 0 in the validated capacity object. A legacy free-text capacity carries no number and therefore answers null, never 0 — so a legacy box can never be counted into this state, which is why muscle-3 below is the one that keeps the group out of it in the `working` arm and is absent here.",
+      "supports": [
+        { "id": "sup-1", "name": "muscle-1", "slug": "muscle-1", "host": "muscle-1.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" },
+        { "id": "sup-2", "name": "muscle-2", "slug": "muscle-2", "host": "muscle-2.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" }
+      ],
+      "roster": [
+        { "worker": "muscle-1", "agent": "fleet-listener", "scope": "production", "status": "working", "capacity": { "size_class": "heavy", "slots_free": 0, "slots_total": 4, "budget": 20 }, "last_seen": "2026-07-24T11:59:52Z", "ttl_s": 120, "task": { "title": "Reindex 400k ONIX records" } },
+        { "worker": "muscle-2", "agent": "fleet-listener", "scope": "production", "status": "working", "capacity": { "size_class": "light", "slots_free": 0, "slots_total": 1 }, "last_seen": "2026-07-24T11:59:59Z", "ttl_s": 120, "task": { "title": "Rebuild the sitemap" } }
+      ]
+    },
+    "working": {
+      "why": "The steady state: live supports beating, at least one with room. muscle-3 carries the LEGACY free-text capacity (\"1 task\") to prove both stored shapes render side by side, and its null slot count keeps it out of the cap-hit tally rather than being read as a fabricated 0.",
+      "supports": [
+        { "id": "sup-1", "name": "muscle-1", "slug": "muscle-1", "host": "muscle-1.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" },
+        { "id": "sup-3", "name": "muscle-3", "slug": "muscle-3", "host": "muscle-3.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" }
+      ],
+      "roster": [
+        { "worker": "muscle-1", "agent": "fleet-listener", "scope": "production", "status": "working", "capacity": { "size_class": "heavy", "slots_free": 2, "slots_total": 4, "budget": 20 }, "last_seen": "2026-07-24T11:59:54Z", "ttl_s": 120, "task": { "title": "Reindex 400k ONIX records" } },
+        { "worker": "muscle-3", "agent": "fleet-listener", "scope": "production", "status": "idle", "capacity": "1 task", "last_seen": "2026-07-24T11:59:57Z", "ttl_s": 120, "task": null }
+      ]
+    }
+  },
+  "controls": {
+    "working-stale-beat": {
+      "why": "THE CRITERION-[1] CONTROL. Byte-for-byte the `working` arm's roster, except muscle-1's last_seen is 47 MINUTES old against its own 120s ttl_s — far past the budget by which roster/2 would have written `offline`. The stored status still says `working`, so a surface that renders the SERVER's staleness verdict says working, and a surface that grew a second deriver off last_seen says offline. The pin asserts working.",
+      "state": "working",
+      "supports": [
+        { "id": "sup-1", "name": "muscle-1", "slug": "muscle-1", "host": "muscle-1.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" },
+        { "id": "sup-3", "name": "muscle-3", "slug": "muscle-3", "host": "muscle-3.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" }
+      ],
+      "roster": [
+        { "worker": "muscle-1", "agent": "fleet-listener", "scope": "production", "status": "working", "capacity": { "size_class": "heavy", "slots_free": 2, "slots_total": 4, "budget": 20 }, "last_seen": "2026-07-24T11:13:00Z", "ttl_s": 120, "task": { "title": "Reindex 400k ONIX records" } },
+        { "worker": "muscle-3", "agent": "fleet-listener", "scope": "production", "status": "idle", "capacity": "1 task", "last_seen": "2026-07-24T11:59:57Z", "ttl_s": 120, "task": null }
+      ]
+    },
+    "roster-unreachable": {
+      "why": "The roster READ never landed (roster: null). presenceChip answers the honest \"No heartbeat yet\" for every support rather than a fabricated Offline, and because unknown is not online the group reads offline — an operator is told the truth about what can be claimed, not about the boxes.",
+      "state": "offline",
+      "supports": [
+        { "id": "sup-1", "name": "muscle-1", "slug": "muscle-1", "host": "muscle-1.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" }
+      ],
+      "roster": null
+    }
+  }
+}

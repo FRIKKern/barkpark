@@ -146,23 +146,95 @@ EOF
 # One row per (workflow, primitive, set), scraped from the very lines the
 # dispatchers run. Whole-line comments are dropped: a workflow that DISCUSSES a
 # primitive is not a workflow that dispatches on it.
+#
+# MENTION IS NOT EXECUTION — and a `#` comment is not the only way to mention.
+# Measured on origin/main 2026-09-10 (task-1cea7edd271d588b). PR #17141 gave
+# console-harness.yml's dispatcher a verdict wrapper whose refusal prose NAMES
+# the primitive and its flag inside an `echo`:
+#
+#     echo "::error::dispatcher ${v}: scripts/console-path-escape-check.sh --match console exited ${rc}. …"
+#
+# That line is not a comment, so the old scan counted it as a SECOND call site
+# for the same (primitive, set). Two consequences, both silent: the Console gate
+# printed TWICE, and — because the label disambiguator keys on "this primitive
+# has more than one call site" (the elixir compile/test case) — both rows came
+# out as `Console gate [console]`. Every reader and every assertion looking for
+# a `Console gate` row found none. The instrument that exists to tell a builder
+# a REQUIRED gate will run had stopped naming that gate, in an advisory job.
+#
+# So a call site must sit at COMMAND POSITION: at the start of a `run:` scalar,
+# after a shell separator (`|`, `;`, `&`, `(`), or behind an invoking verb
+# (`bash`/`sh`/`exec`/`source`). Prose that quotes the command reads as prose.
+# Every real dispatcher call site in this repo is `… | bash scripts/<x> --match
+# <set>` (cloud.yml, console-harness.yml, elixir.yml x2), so this is a
+# tightening that keeps all four and drops the quote.
 if [ ! -d "$WORKFLOW_DIR" ]; then
   cannot_read "$WORKFLOW_DIR — no workflow directory, so no dispatch call site can be discovered."
   exit 1
 fi
 
-call_sites="$(
-  grep -hE 'scripts/[A-Za-z0-9_-]*path-escape-check\.sh[[:space:]]+--match' "$WORKFLOW_DIR"/*.yml 2>/dev/null |
-    grep -vE '^[[:space:]]*#' |
-    sed -nE 's|.*(scripts/[A-Za-z0-9_-]*path-escape-check\.sh)[[:space:]]+--match[[:space:]]*([A-Za-z0-9_-]*).*|\1 \2|p'
+# ── THE PINNED SHAPE (task-3a81e68f7027ca98) ────────────────────────────────
+# Since cloud.yml, console-harness.yml and elixir.yml pin their path-set script
+# to the MERGE REF, the literal primitive name no longer sits at the call site:
+# the dispatchers shell `bash "$pin_script" --match <set>` (cloud.yml through a
+# `match_set --match <set>` wrapper over the same line), and the literal lives
+# in the step's `pin_script="scripts/<x>-path-escape-check.sh"` assignment.
+#
+# Measured 2026-09-11 on the branch that landed the pin: with only the literal
+# pattern below, this scan found ZERO call sites repo-wide and the script
+# printed its CANNOT READ and exited 1. That is the guard working — and it is
+# also the whole roster gone, so the pattern has to learn the new shape rather
+# than the guard be loosened.
+#
+# The primitive for a pinned site is resolved PER FILE from that assignment. A
+# file with a pinned call site and no assignment resolves to nothing and the
+# row is dropped by the emptiness guard below — never guessed at.
+PIN_ASSIGN_RE='^[[:space:]]*pin_script="(scripts/[A-Za-z0-9_-]*path-escape-check\.sh)"'
+PINNED_SITE_RE='(^|[|;&(]|[[:space:]])(bash|sh|exec|source|match_set)[[:space:]]+("?\$\{?pin_script\}?"?[[:space:]]+)?--match[[:space:]]+[A-Za-z0-9_-]'
+
+CALL_SITE_RE='(^|[|;&(]|[[:space:]](bash|sh|exec|source)|^[[:space:]]*(-[[:space:]]+)?run:)[[:space:]]*scripts/[A-Za-z0-9_-]*path-escape-check\.sh[[:space:]]+--match'
+
+# ONE scan, so the two lists below cannot drift out of index with each other.
+# (They previously used two DIFFERENT comment filters — `^[[:space:]]*#` against
+# `:[[:space:]]*#` — which is a misalignment waiting for its first comment.)
+call_site_raw="$(
+  grep -HE "$CALL_SITE_RE" "$WORKFLOW_DIR"/*.yml 2>/dev/null |
+    grep -vE '^[^:]+:[[:space:]]*#'
 )"
 
-# Which workflow each call site came from — grep -H, same filter, same order.
+call_sites="$(
+  printf '%s\n' "$call_site_raw" |
+    sed -nE 's|^[^:]+:.*(scripts/[A-Za-z0-9_-]*path-escape-check\.sh)[[:space:]]+--match[[:space:]]*([A-Za-z0-9_-]*).*|\1 \2|p'
+)"
+
+# Which workflow each call site came from — same scan, same filter, same order.
 call_site_files="$(
-  grep -HE 'scripts/[A-Za-z0-9_-]*path-escape-check\.sh[[:space:]]+--match' "$WORKFLOW_DIR"/*.yml 2>/dev/null |
-    grep -vE ':[[:space:]]*#' |
+  printf '%s\n' "$call_site_raw" |
     sed -E 's|:.*||'
 )"
+
+# The pinned sites, appended so the two lists stay index-aligned. One pass per
+# workflow file, because the primitive is a property of the FILE (its
+# `pin_script=` assignment), not of the line.
+for _wf in "$WORKFLOW_DIR"/*.yml; do
+  [ -r "$_wf" ] || continue
+  _prim="$(sed -nE "s|${PIN_ASSIGN_RE}.*|\\1|p" "$_wf" | sed -n 1p)"
+  [ -n "$_prim" ] || continue
+  _sets="$(
+    grep -E "$PINNED_SITE_RE" "$_wf" 2>/dev/null |
+      grep -vE '^[[:space:]]*#' |
+      sed -nE 's|.*--match[[:space:]]+([A-Za-z0-9_-]+).*|\1|p'
+  )"
+  while IFS= read -r _set; do
+    [ -n "$_set" ] || continue
+    call_sites="${call_sites:+$call_sites
+}$_prim $_set"
+    call_site_files="${call_site_files:+$call_site_files
+}$_wf"
+  done <<EOF
+$_sets
+EOF
+done
 
 if [ -z "$call_sites" ]; then
   cannot_read "$WORKFLOW_DIR/*.yml — found ZERO '--match' dispatch call sites. Either every dispatcher was rewritten or this scan is broken; either way an empty roster would print as 'no gates dispatched'."
@@ -401,15 +473,14 @@ INNER_EOF
           fi
           pins="$(grep -nE '^[[:space:]]*@[a-z_]+[[:space:]]+-?[0-9]+[[:space:]]*$' "$ROOT_ABS/$cfile" | sed -E 's|^([0-9]+):[[:space:]]*|\1 |')"
           regs="$(grep -nE '^[[:space:]]*@[a-z_]+ %\{[[:space:]]*$' "$ROOT_ABS/$cfile" | sed -E 's|^([0-9]+):[[:space:]]*@([a-z_]+).*|\1 \2|')"
-          if [ -z "$pins" ]; then
-            cannot_read "$crel — reads $croot, but carries no '@name <integer>' pin line, by the census's own definition of a pin. The pin symbols were renamed or deleted, and naming a coupling whose pins cannot be found is theatre."
-            continue
-          fi
           echo "  $croot"
           echo "    is read at test time by $crel (@$cattr)"
           echo "    which dispatches: $(gates_for_path "$crel")"
           echo "    its committed pins, read out of that file just now — never copied into this script:"
           printf '%s\n' "$pins" | while IFS=' ' read -r ln rest; do
+            # `printf '%s\n' ""` still emits ONE line, so an unpinned census
+            # would otherwise print a blank pin row naming no attribute.
+            [ -n "$ln" ] || continue
             echo "      $rest    ($crel:$ln)"
           done
           printf '%s\n' "$regs" | while IFS=' ' read -r ln rname; do
@@ -417,6 +488,29 @@ INNER_EOF
             rows="$(awk -v s="$ln" 'NR>s{ if ($0 ~ /^  \}/) exit; if ($0 ~ /=>/) n++ } END{print n+0}' "$ROOT_ABS/$cfile")"
             echo "      @$rname    a ${rows}-row register    ($crel:$ln)"
           done
+          if [ -z "$pins" ] && [ -z "$regs" ]; then
+            # NO ATTRIBUTE PIN IS A SHAPE, NOT A FAILED READ (2026-09-10,
+            # task-1cea7edd271d588b). This branch used to `cannot_read` and exit
+            # 1 on the reasoning that "the pin symbols were renamed or deleted,
+            # and naming a coupling whose pins cannot be found is theatre".
+            # metrics_envelope_reader_census_test.exs (#17169, 2026-09-10) is
+            # the counter-example that reached main: it reads the cloudclient
+            # package's `MetricsResult` json tags — paths deliberately NOT
+            # written here, see case 3 of the harness — and asserts over them
+            # with SET comparisons inside the test bodies:
+            # a legitimate coupling that never had an `@name <integer>` to lose.
+            # Refusing it turned the whole deriver non-zero for every Go diff.
+            #
+            # A file's content cannot distinguish "pins were deleted" from
+            # "pins were never written", so this reports the shape it measured
+            # instead of guessing at history. The coupling itself — the reason
+            # a required Elixir gate reds over a Go-only change — is announced
+            # either way, which is what the note exists to say. Nothing is
+            # invented: with no pin line read, no pin value is printed.
+            echo "      NO ATTRIBUTE PIN — this census carries no '@name <integer>' line and no"
+            echo "      '@name %{' register. It asserts over the Go source INSIDE its test bodies,"
+            echo "      so there is no committed number to name here. It reds on a tag move anyway."
+          fi
         done <<PRINT_EOF
 $hit
 PRINT_EOF

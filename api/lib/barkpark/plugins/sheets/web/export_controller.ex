@@ -43,6 +43,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
 
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.{Csv, Html, Markdown, XlsxExport}
+  alias BarkparkWeb.ErrorResponse
 
   @default_dataset "production"
   @xlsx_mime "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -203,13 +204,11 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
   defp error_json(conn, {:error, :service_unavailable, code, message}) do
     conn
     |> put_resp_header("retry-after", "2")
-    |> put_status(:service_unavailable)
-    |> json(%{error: %{code: code, message: message}})
+    |> ErrorResponse.emit_fields(:service_unavailable, %{code: code, message: message})
   end
 
   defp error_json(conn, {:error, status, code, message}) do
     conn
-    |> put_status(status)
-    |> json(%{error: %{code: code, message: message}})
+    |> ErrorResponse.emit_fields(status, %{code: code, message: message})
   end
 end

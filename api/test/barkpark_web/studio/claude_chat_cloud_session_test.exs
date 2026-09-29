@@ -431,15 +431,30 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
     path
   end
 
-  # Poll until the Recorder for `sid` is gone (its Session died and it
-  # {:stop, :normal}ed). 200 × 10ms = 2s ceiling; the happy path returns fast.
+  # Poll until the WHOLE turn is gone: the Recorder for `sid` AND the provider
+  # Session it drove. 200 × 10ms = 2s ceiling; the happy path returns fast.
+  #
+  # The Recorder alone is not enough (task-f68536c6c37a2ece). The Session sends
+  # `{:claude_chat_exit, …}` to its sink and only THEN stops — its `terminate/2`
+  # still forks `kill -0` (`cleanup_stderr`) and revokes the MCP token
+  # (`cleanup_mcp`) while it holds its `SessionRegistry` name under the same
+  # `sid`. The Recorder, meanwhile, clears the binding and stops, so
+  # `Recorder.whereis/1` can read nil while the old Session is still
+  # registered. A next-turn `Recorder.ensure` in that window hits
+  # `{:error, {:already_started, dying}}` in `Recorder.init/1`, ADOPTS the dying
+  # Session, gets its `:DOWN` and stops — the next shim never spawns
+  # (CI: counter held `create\nreuse-fail\n`, argv3 never written).
   defp assert_recorder_gone(sid, tries \\ 200) do
     cond do
-      Recorder.whereis(sid) == nil -> :ok
-      tries <= 0 -> flunk("recorder for #{sid} never terminated")
+      Recorder.whereis(sid) == nil and session_gone?(sid) -> :ok
+      tries <= 0 -> flunk("recorder or provider session for #{sid} never terminated")
       true -> Process.sleep(10) && assert_recorder_gone(sid, tries - 1)
     end
   end
+
+  # The single-writer Session name (provider/claude.ex `@registry`) is released
+  # only once the Session process has exited and the Registry has reaped it.
+  defp session_gone?(sid), do: Registry.lookup(Barkpark.StudioChat.SessionRegistry, sid) == []
 
   # Non-blocking drain of every chat event already delivered to this (subscribed)
   # process. The Recorder has stopped by call time (assert_recorder_gone), so a
@@ -504,11 +519,51 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
 
   # 400 × 20ms = 8s: under suite load the OS can take past 3s to schedule the
   # fake shell and flush its first write. The happy path returns on poll one.
+  #
+  # The deadline is DELIBERATELY not raised (#17605 measured that on the sibling
+  # file: "moving the clock buys silence, not signal"). What is raised is what a
+  # blown deadline SAYS — see `contention_report/1`.
   defp wait_for_file(file, tries \\ 400) do
     cond do
       File.exists?(file) and File.read!(file) != "" -> File.read!(file)
-      tries <= 0 -> flunk("capture file never written: #{file}")
+      tries <= 0 -> flunk(contention_report(file))
       true -> Process.sleep(20) && wait_for_file(file, tries - 1)
     end
+  end
+
+  # What a blown capture deadline prints. Row task-9ffbd1b42bcf189f
+  # classified this file's `capture file never written` red as host contention
+  # on the fork/exec'd `sh` stub. Row task-f68536c6c37a2ece CORRECTED that: the
+  # reds were a within-test race between turns. The previous turn's provider
+  # Session still held its `SessionRegistry` name (inside `terminate/2`) after
+  # its Recorder had stopped, so the next turn adopted it and never spawned
+  # the stub. The tell was in this very report: the counter's size (18B =
+  # `create`+`reuse-fail`) covered only the turns that RAN, so the missing turn
+  # never executed at all; it was not slow.
+  # `assert_recorder_gone/1` now waits for both names.
+  #
+  # The report prints the facts that separate "the stub never ran" from "the
+  # stub ran and was slow": the sibling captures that DID land, including the
+  # invocation counter. Read the counter before calling it contention.
+  defp contention_report(file) do
+    siblings =
+      file
+      |> Path.dirname()
+      |> Path.join("claude_chat_cloud_*_#{System.pid()}_*")
+      |> Path.wildcard()
+      |> Enum.map(&"#{Path.basename(&1)} (#{byte_size(File.read!(&1))}B)")
+
+    """
+    capture file never written: #{file}
+
+    The `sh` stub did not flush this capture within 8s. Every stub run appends
+    one line to the counter, so a counter (size below) that covers only the
+    EARLIER turns means this turn's stub NEVER RAN: a turn-handoff race (row
+    task-f68536c6c37a2ece, the previous turn's Session still registered), not
+    host contention. Only a counter that includes this turn means it ran slow.
+
+    captures this BEAM (#{System.pid()}) DID write:
+    #{Enum.map_join(siblings, "\n", &("  " <> &1))}
+    """
   end
 end

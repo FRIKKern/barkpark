@@ -62,6 +62,20 @@ defmodule BarkparkCloud.TerminalWriteCensus.EpochThiefRelay do
     {:ok, 200, %{"slug" => slug, "build_id" => build_id, "log_state" => "never_recorded"}}
   end
 
+  # The recorder BYTES read (`dr-bl-recorder-http-read-path` c1). Same honest
+  # stub as `build_record/3` above: this census never reads a build log.
+  @impl true
+  def build_log_bytes(_bp, slug, build_id) do
+    {:ok, 200,
+     %{
+       "slug" => slug,
+       "build_id" => build_id,
+       "log_state" => "never_recorded",
+       "log_scrub" => nil,
+       "tail" => nil
+     }}
+  end
+
   @impl true
   def start_deploy(_bp, _payload) do
     state = state()

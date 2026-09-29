@@ -41,6 +41,7 @@ package cloudclient
 // finds every one of them and cannot go stale.
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -58,12 +59,17 @@ import (
 // Adding a tag here is a deliberate act that needs a reason. Removing one
 // happens when the producer learns to send it, or the field is deleted.
 //
-//	port           — task-4f91a03ea23aaba7 will make the CP emit it (node slot port)
-//	runtime_target — same row; today it reaches the BOX payload only, never the
-//	                 deployment JSON the CLI reads
-var dormantTags = map[string]string{
-	"runtime_target": "#3976 added the decoder; it rides the box payload, not the CLI-facing deployment JSON. Same producer row.",
-}
+// EMPTY, AND THAT IS THE GOAL STATE, not a gap. History:
+//
+//	port           — CLOSED by the producer (#15095): deployment_json/1 emits it.
+//	runtime_target — CLOSED by DELETING the field (dr-w11-payload-divergence-close).
+//	                 The plane derives it from site.kind and sends it only on the
+//	                 box's deploy/rollback payloads, never on a deployment row,
+//	                 so SiteDeployment stopped declaring it.
+//
+// The positive control below no longer leans on a live dormant field to prove
+// the guard can see one; it plants a synthetic tag instead.
+var dormantTags = map[string]string{}
 
 // repoRoot walks up from the test's working directory to the module root.
 func repoRoot(t *testing.T) string {
@@ -167,18 +173,27 @@ func declaredTags(typ reflect.Type) []string {
 	return out
 }
 
-// THE GUARD. Every tag SiteDeployment decodes must be a key the producer can
-// send — except the waived ones, which must be EXACTLY the waiver.
-func TestSiteDeploymentDecoderMatchesProducer(t *testing.T) {
-	producer := producerKeys(t)
-
-	var unsent []string
-	for _, tag := range declaredTags(reflect.TypeOf(SiteDeployment{})) {
+// unsentTags is the guard's one computation: the declared tags the producer
+// cannot emit, sorted, and never nil (so an empty result compares equal to an
+// empty waiver under reflect.DeepEqual — a nil-vs-empty mismatch would red the
+// guard on the one state it exists to reach).
+func unsentTags(producer map[string]bool, declared []string) []string {
+	unsent := []string{}
+	for _, tag := range declared {
 		if !producer[tag] {
 			unsent = append(unsent, tag)
 		}
 	}
 	sort.Strings(unsent)
+	return unsent
+}
+
+// THE GUARD. Every tag SiteDeployment decodes must be a key the producer can
+// send — except the waived ones, which must be EXACTLY the waiver.
+func TestSiteDeploymentDecoderMatchesProducer(t *testing.T) {
+	producer := producerKeys(t)
+
+	unsent := unsentTags(producer, declaredTags(reflect.TypeOf(SiteDeployment{})))
 
 	want := make([]string, 0, len(dormantTags))
 	for k := range dormantTags {
@@ -208,10 +223,17 @@ func TestSiteDeploymentDecoderMatchesProducer(t *testing.T) {
 }
 
 // POSITIVE CONTROL. A guard that finds nothing validates everything. This
-// pins that the machinery can still SEE the known defect: if the extractor
+// pins that the machinery can still SEE a dormant field: if the extractor
 // breaks open (returns every identifier, or the tag walk stops finding
 // fields), `unsent` empties and the guard above would pass over a real
-// regression. Measured on origin/main 2026-08-24: exactly port + runtime_target.
+// regression.
+//
+// It used to lean on the LIVE defect (port + runtime_target, measured on
+// origin/main 2026-08-24) and Fatal on an empty waiver. Both specimens are now
+// closed, so the control plants its own: SiteDeployment's REAL declared tags
+// plus one synthetic name no serializer emits, fed through the SAME
+// unsentTags the guard uses. It must report exactly the plant — a wide
+// extractor misses it, a blind one reports real tags beside it.
 func TestGuardStillDetectsTheKnownDormantFields(t *testing.T) {
 	producer := producerKeys(t)
 
@@ -221,9 +243,19 @@ func TestGuardStillDetectsTheKnownDormantFields(t *testing.T) {
 				"is genuinely live, remove it from dormantTags", tag)
 		}
 	}
-	if len(dormantTags) == 0 {
-		t.Fatal("dormantTags is empty — with nothing to detect, the guard cannot be " +
-			"shown to work at all")
+
+	const plant = "dr_w11_planted_dormant_tag"
+	declared := append(declaredTags(reflect.TypeOf(SiteDeployment{})), plant)
+	got := unsentTags(producer, declared)
+	want := make([]string, 0, len(dormantTags)+1)
+	for k := range dormantTags {
+		want = append(want, k)
+	}
+	want = append(want, plant)
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("planted a tag no serializer emits; the guard computation reported %v, "+
+			"want exactly %v — the extractor or the tag walk has stopped discriminating", got, want)
 	}
 }
 
@@ -289,6 +321,12 @@ func TestProducerExtractorIsNotBlind(t *testing.T) {
 	//            reddened main's Go gate from 3d238fdd8 (2026-09-06 17:21Z) until
 	//            the count moved (#16547); this arm would have printed the two
 	//            names instead.
+	//   36 -> 38 (#17640, task dr-w21-bl-route-decision-reaches-no-plane):
+	//            +route_status, +route_detail — the box's Caddy ARM decision
+	//            (charter D608's SIBLING channel, never a stage). This arm did
+	//            print both names, which is how the addition was found; neither
+	//            is decoded by cloudclient yet, and the cloud-side census carries
+	//            two matching `:unread` rows naming that follow-up.
 	if missing, extra := producerKeySetDiff(producer); len(missing)+len(extra) > 0 {
 		if len(missing) > 0 {
 			t.Errorf("the extractor no longer finds %v, which deployment_json/1 (+ "+
@@ -312,7 +350,8 @@ func TestProducerExtractorIsNotBlind(t *testing.T) {
 // serializer's own order, so a diff of this literal reads like a diff of the
 // serializer) followed by site_deployment_json/3's two Map.put additions.
 // Pinned 2026-09-06 against origin/main 4e7dd109f: 34 + 2 = 36 keys, the same
-// population the retired producerKeyCount named.
+// population the retired producerKeyCount named. Re-measured 2026-09-11 against
+// origin/main f707ef829 with #17640's serializer hunk applied: 36 + 2 = 38.
 var expectedProducerKeys = []string{
 	// deployment_json/1
 	"id", "site_id", "status", "git_ref", "artifact_url", "image_tag",
@@ -321,7 +360,13 @@ var expectedProducerKeys = []string{
 	"deferral_bound", "deferral_cause", "became_live_at", "environment", "branch",
 	"preview_host", "preview_url", "trigger", "source", "artifact_sha256",
 	"console", "detail", "build_id", "content_rev", "stage", "slot", "port",
-	"health_exit_code", "inserted_at", "updated_at",
+	"health_exit_code",
+	// #17640 (task dr-w21-bl-route-decision-reaches-no-plane, charter D608): the
+	// box's Caddy ARM decision. Emitted immediately after `health_exit_code` in
+	// deployment_json/1, and listed here in that same position so a diff of this
+	// literal keeps reading like a diff of the serializer.
+	"route_status", "route_detail",
+	"inserted_at", "updated_at",
 	// site_deployment_json/3
 	"stages", "url",
 }
@@ -370,4 +415,371 @@ func contains(hay []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// THE SECOND PRODUCER: `BarkparkCloud.Sites.BuildLogBytes` -> SiteBuildLogBytes.
+//
+// Same defect, different pair. #17752 landed the build-log BYTES sub-route and
+// said in its own body that this file was correctly untouched, "no Go decoder
+// learns a key in this PR (c3 is the cli lane and is only REQUESTED below), and
+// when the cli lane builds c3 and declares a struct for this payload, its tags
+// belong in that file's expected-key set in serializer order." This is that.
+//
+// The producer here is NOT the cloud router: `BuildLogBytes` keeps an EXPLICIT
+// field allowlist, `@bytes_keys`, precisely so a box that grows a field cannot
+// have it relayed. That sigil plus the envelope keys the module merges around it
+// is the complete set of keys this route can put on the wire, and it is read
+// from source for the same reason deployment_json/1 is: a hand-typed second copy
+// drifts silently.
+
+// buildLogBytesProducerPath is the module that owns the wire shape.
+func buildLogBytesProducerPath(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(repoRoot(t), "cloud", "lib", "barkpark_cloud", "sites", "build_log_bytes.ex")
+}
+
+// reBytesKeysSigil captures the body of `@bytes_keys ~w( … )`, which may span
+// several lines.
+var reBytesKeysSigil = regexp.MustCompile(`(?s)@bytes_keys\s+~w\(([^)]*)\)`)
+
+// buildLogBytesAllowlist returns the words of `@bytes_keys`, i.e. every record
+// field `BuildLogBytes.record/1` can copy off the box's answer.
+func buildLogBytesAllowlist(t *testing.T) map[string]bool {
+	t.Helper()
+	path := buildLogBytesProducerPath(t)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		// Fatal, never skipped: a guard that stands down when it cannot see the
+		// producer is the dark-gate failure this whole file exists to prevent.
+		t.Fatalf("cannot read the bytes producer at %s: %v", path, err)
+	}
+	m := reBytesKeysSigil.FindStringSubmatch(string(raw))
+	if m == nil {
+		t.Fatalf("@bytes_keys ~w(…) not found in %s — the allowlist this guard reads "+
+			"has moved or changed shape; re-establish the pairing before editing this test", path)
+	}
+	keys := map[string]bool{}
+	for _, w := range strings.Fields(m[1]) {
+		keys[w] = true
+	}
+	return keys
+}
+
+// buildLogBytesEnvelopeKeys are the keys `BuildLogBytes` merges AROUND the
+// allowlist — the base every answer carries and the refusal shape the non-200s
+// use. They are not in `@bytes_keys` (that sigil is the box-record allowlist
+// only), so each is anchored individually against the source below rather than
+// taken on trust.
+var buildLogBytesEnvelopeKeys = []string{
+	"deployment_id", "build_id", "available",
+	"error", "detail", "reason", "box_log_state",
+	// The 502 arm's own two keys. Added 2026-09-18 with task-3468f99ad5a4e9b8:
+	// the producer has merged them since the route was written, and the Go
+	// struct simply never declared them.
+	"box_status", "box_error",
+	// The reducer's other two keys. `box_error` is NOT written literally in
+	// BuildLogBytes any more — #19341 moved all three spellings into
+	// `BoxErrorEnvelope.fields/1` — so these are anchored by FOLLOWING the
+	// call, not by matching a literal. See boxErrorEnvelopeKeys below.
+	"box_error_message", "box_error_request_id",
+}
+
+// expectedBuildLogBytesTags is the pinned json tag list of SiteBuildLogBytes, IN
+// THE SERIALIZER'S ORDER: `wire/3`'s base (`deployment_id`, `build_id`), then
+// `available`, then `@bytes_keys` in its own declared order, then the refusal
+// envelope. Pinned 2026-09-11 against origin/main 843c22742.
+//
+// A diff of this literal reads like a diff of `BuildLogBytes`. Renaming a struct
+// tag without renaming it here reds TestSiteBuildLogBytesTagsAreLockedInOrder.
+var expectedBuildLogBytesTags = []string{
+	// wire/3 base + the served/withheld flag
+	"deployment_id", "build_id", "available",
+	// @bytes_keys, in its declared order
+	"slug", "record", "log_state", "log_scrub", "log_path", "log_bytes",
+	"tail_bytes", "truncated", "tail", "evicted_at",
+	// the refusal envelope, then the box_error reducer's three keys in the
+	// order `BoxErrorEnvelope.wire/3` writes them
+	"error", "detail", "reason", "box_log_state", "box_status", "box_error",
+	"box_error_message", "box_error_request_id",
+}
+
+// THE ORDER LOCK. Not merely a set: the row asks for serializer ORDER, and order
+// is what makes the literal above readable as a diff of the producer.
+func TestSiteBuildLogBytesTagsAreLockedInOrder(t *testing.T) {
+	got := declaredTags(reflect.TypeOf(SiteBuildLogBytes{}))
+	if !reflect.DeepEqual(got, expectedBuildLogBytesTags) {
+		t.Errorf("SiteBuildLogBytes json tags = %v\nwant (serializer order)             = %v\n"+
+			"Either the struct gained/lost/renamed a tag, or the field order moved. If "+
+			"BuildLogBytes really changed, update expectedBuildLogBytesTags in the "+
+			"producer's order and cite the PR; otherwise the decoder just went silently "+
+			"deaf to a key json.Unmarshal will now drop.", got, expectedBuildLogBytesTags)
+	}
+}
+
+// THE PRODUCER LOCK. Every tag the Go struct decodes must be a key
+// `BuildLogBytes` can actually put on the wire — the allowlist sigil for the
+// record fields, an anchored source match for the envelope ones.
+func TestSiteBuildLogBytesDecoderMatchesProducer(t *testing.T) {
+	allowlist := buildLogBytesAllowlist(t)
+	raw, err := os.ReadFile(buildLogBytesProducerPath(t))
+	if err != nil {
+		t.Fatalf("cannot read the bytes producer: %v", err)
+	}
+	src := string(raw)
+
+	// THE INDIRECTION IS PART OF THE PRODUCER. A key this module emits through
+	// a shared reducer it CALLS is written just as surely as one spelled out
+	// here; only the spelling moved modules. Reading the literal alone made
+	// this guard red on #19341, a refactor with an UNCHANGED wire shape — and a
+	// guard that reds on a no-op refactor teaches the edit-the-test reflex.
+	indirect := producerIndirectKeys(t, src)
+
+	envelope := map[string]bool{}
+	for _, k := range buildLogBytesEnvelopeKeys {
+		if !strings.Contains(src, k+":") && !indirect[k] {
+			t.Errorf("the envelope key %q is written neither literally in BuildLogBytes "+
+				"nor by any reducer it calls — either the producer dropped it (the Go "+
+				"field will read as its zero value forever) or this anchor is stale.", k)
+			continue
+		}
+		envelope[k] = true
+	}
+
+	for _, tag := range declaredTags(reflect.TypeOf(SiteBuildLogBytes{})) {
+		if !allowlist[tag] && !envelope[tag] {
+			t.Errorf("SiteBuildLogBytes declares json:%q but BuildLogBytes neither lists "+
+				"it in @bytes_keys nor writes it into an envelope. json.Unmarshal drops "+
+				"unmodelled keys silently, so this field would read as its zero value "+
+				"forever while looking like a shipped feature.", tag)
+		}
+	}
+}
+
+// NOT-BLIND CONTROL. An extractor that returns an empty (or a wildly wide) set
+// makes the guard above vacuous in one direction and noisy in the other, so the
+// allowlist is pinned as a SET — the same lesson expectedProducerKeys records
+// above, where a cardinality pin fired on every honest addition and named a
+// number instead of a key.
+func TestBuildLogBytesAllowlistExtractorIsNotBlind(t *testing.T) {
+	allowlist := buildLogBytesAllowlist(t)
+
+	want := []string{
+		"slug", "build_id", "record", "log_state", "log_scrub", "log_path",
+		"log_bytes", "tail_bytes", "truncated", "tail", "evicted_at",
+	}
+	for _, k := range want {
+		if !allowlist[k] {
+			t.Errorf("the extractor did not find %q in @bytes_keys, which BuildLogBytes "+
+				"demonstrably lists — the parse is blind and every finding it reports is "+
+				"untrustworthy", k)
+		}
+	}
+	for k := range allowlist {
+		if !contains(want, k) {
+			t.Errorf("the extractor found %q, which this control does not pin. Either the "+
+				"parse went WIDE (matching past the sigil's closing paren) or BuildLogBytes "+
+				"genuinely gained a relayed field — if the latter, add it here AND to "+
+				"expectedBuildLogBytesTags in the serializer's order, and teach the Go "+
+				"struct to decode it.", k)
+		}
+	}
+}
+
+// ─── THE REDUCER, AND EVERY DECODER THAT MUST KEEP UP WITH IT ────────────────
+//
+// THE DEFECT THIS SECTION EXISTS FOR (task-bb5b44bcc5e233af). The guard above
+// anchored each envelope key with strings.Contains(src, k+":") against ONE
+// producer file. #19341 moved `box_error:` out of BuildLogBytes and into the
+// shared reducer `BoxErrorEnvelope.fields/1`. The wire shape did not change by
+// one byte; the guard went red anyway — a FALSE red, and the kind that gets
+// silenced by editing the test.
+//
+// And underneath it, the real drift the guard could not see: fields/1 has
+// ALWAYS returned THREE keys (box_error, box_error_message,
+// box_error_request_id) and the Go structs declared one. json.Unmarshal drops
+// unmodelled keys in silence, so the box's own message and request_id — the two
+// facts that route an incident to the box instead of to this client — read as
+// "" forever while looking shipped. The guard was blind to it because its key
+// list was a SECOND HAND-TYPED COPY of the producer's: the stale set asserted
+// against the stale set.
+//
+// So the reducer's key set is now READ FROM THE REDUCER, and the set of modules
+// subject to it is DERIVED by walking cloud/lib for callers — never a list
+// typed here, which is a snapshot of what someone checked rather than a rule
+// about what exists.
+
+// boxErrorEnvelopePath is the reducer that owns the box_error* wire keys.
+func boxErrorEnvelopePath(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(repoRoot(t), "cloud", "lib", "barkpark_cloud", "sites", "box_error_envelope.ex")
+}
+
+// reBoxErrorWireMap captures the map literal `wire/3` builds — the ONE place
+// the reducer names its wire keys.
+var reBoxErrorWireMap = regexp.MustCompile("(?s)defp wire\\([^)]*\\) do\\s*%\\{(.*?)\\n\\s*\\}")
+
+// reWireKey pulls `some_key:` out of that map literal.
+var reWireKey = regexp.MustCompile(`(?m)^\s*([a-z_][a-z0-9_]*):`)
+
+// boxErrorEnvelopeKeys returns every key BoxErrorEnvelope.fields/1 can put on
+// the wire, read from the reducer's own source.
+//
+// NOT-BLIND, LOUDLY: an unreadable file, an unmatched shape and an empty key
+// set are each t.Fatalf, never a pass and never a skip. An extractor that
+// returns nothing makes every assertion built on it vacuously true, which is
+// the dark-gate failure this whole file exists to prevent.
+func boxErrorEnvelopeKeys(t *testing.T) []string {
+	t.Helper()
+	path := boxErrorEnvelopePath(t)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read the box_error reducer at %s: %v", path, err)
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		t.Fatalf("the box_error reducer at %s is EMPTY — every key assertion built on "+
+			"it would pass vacuously", path)
+	}
+	m := reBoxErrorWireMap.FindStringSubmatch(string(raw))
+	if m == nil {
+		t.Fatalf("`defp wire(…) do %%{…}` not found in %s — the reducer this guard reads "+
+			"has moved or changed shape; re-establish the pairing before editing this test", path)
+	}
+	var keys []string
+	for _, sub := range reWireKey.FindAllStringSubmatch(m[1], -1) {
+		keys = append(keys, sub[1])
+	}
+	if len(keys) == 0 {
+		t.Fatalf("the wire map in %s parsed to ZERO keys — the extractor is blind and "+
+			"every finding it reports is untrustworthy", path)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// producerIndirectKeys returns the wire keys a producer module emits through
+// reducers it CALLS, derived by reading each reducer's source. Keyed on the
+// call site, so a module that stops calling the reducer stops inheriting its
+// keys — the guard follows the code, not a note about the code.
+func producerIndirectKeys(t *testing.T, src string) map[string]bool {
+	t.Helper()
+	keys := map[string]bool{}
+	if strings.Contains(src, "BoxErrorEnvelope.fields(") {
+		for _, k := range boxErrorEnvelopeKeys(t) {
+			keys[k] = true
+		}
+	}
+	return keys
+}
+
+// boxErrorEnvelopeCallers walks cloud/lib and returns the repo-relative path of
+// every module that calls BoxErrorEnvelope.fields/1. DERIVED — a new route that
+// adopts the reducer appears here without anyone remembering to add it.
+func boxErrorEnvelopeCallers(t *testing.T) []string {
+	t.Helper()
+	root := filepath.Join(repoRoot(t), "cloud", "lib")
+	var found []string
+	seen := 0
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".ex") {
+			return nil
+		}
+		seen++
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if strings.Contains(string(raw), "BoxErrorEnvelope.fields(") {
+			rel, relErr := filepath.Rel(repoRoot(t), path)
+			if relErr != nil {
+				return relErr
+			}
+			found = append(found, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("cannot walk the cloud producers under %s: %v", root, err)
+	}
+	if seen == 0 {
+		t.Fatalf("the walk of %s read ZERO .ex files — an empty caller set would make "+
+			"every pairing assertion below vacuously true", root)
+	}
+	sort.Strings(found)
+	return found
+}
+
+// boxErrorEnvelopeDecoders pairs each CALLER of the reducer with the Go struct
+// that decodes that route's body. The pairing is the judgement a parser cannot
+// make; the caller SET it is checked against is derived, so a route that adopts
+// the reducer without a paired decoder reds here instead of going quiet.
+var boxErrorEnvelopeDecoders = map[string]reflect.Type{
+	"cloud/lib/barkpark_cloud/sites/build_log.ex":       reflect.TypeOf(SiteBuildLogRecord{}),
+	"cloud/lib/barkpark_cloud/sites/build_log_bytes.ex": reflect.TypeOf(SiteBuildLogBytes{}),
+}
+
+// THE SIBLING LOCK. Every key the reducer can emit is declared by EVERY Go
+// struct that decodes a body it was merged into — not just the two files the
+// filing happened to name.
+func TestBoxErrorEnvelopeKeysAreDeclaredByEveryDecoder(t *testing.T) {
+	keys := boxErrorEnvelopeKeys(t)
+	callers := boxErrorEnvelopeCallers(t)
+
+	for _, caller := range callers {
+		typ, ok := boxErrorEnvelopeDecoders[caller]
+		if !ok {
+			t.Errorf("%s calls BoxErrorEnvelope.fields/1 but no Go struct is paired with "+
+				"it here. Either its body is decoded by a struct that must declare %v, or "+
+				"nothing in this client reads that route — say which, in the pairing map.",
+				caller, keys)
+			continue
+		}
+		tags := declaredTags(typ)
+		for _, k := range keys {
+			if !contains(tags, k) {
+				t.Errorf("%s merges BoxErrorEnvelope.fields/1, which emits %q, but %s does "+
+					"not declare it. json.Unmarshal drops unmodelled keys silently, so that "+
+					"field reads as its zero value forever while looking shipped.",
+					caller, k, typ.Name())
+			}
+		}
+	}
+
+	for paired := range boxErrorEnvelopeDecoders {
+		if !contains(callers, paired) {
+			t.Errorf("the pairing map lists %q, which no longer calls "+
+				"BoxErrorEnvelope.fields/1 — a stale pairing pins a decoder to a producer "+
+				"that stopped speaking.", paired)
+		}
+	}
+}
+
+// NOT-BLIND CONTROL for both extractors above. The reducer's key set is pinned
+// as a SET, and the caller walk is pinned to find AT LEAST the two routes that
+// demonstrably call it. Without this, an extractor that silently matched
+// nothing would turn the whole section green and say nothing.
+func TestBoxErrorEnvelopeExtractorsAreNotBlind(t *testing.T) {
+	keys := boxErrorEnvelopeKeys(t)
+	want := []string{"box_error", "box_error_message", "box_error_request_id"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Errorf("BoxErrorEnvelope.wire/3 parsed to %v, want %v. Either the parse went "+
+			"blind/wide, or the reducer genuinely changed its wire keys — if the latter, "+
+			"pin the new set HERE and teach every decoder in the pairing map to declare it.",
+			keys, want)
+	}
+
+	callers := boxErrorEnvelopeCallers(t)
+	for _, demonstrated := range []string{
+		"cloud/lib/barkpark_cloud/sites/build_log.ex",
+		"cloud/lib/barkpark_cloud/sites/build_log_bytes.ex",
+	} {
+		if !contains(callers, demonstrated) {
+			t.Errorf("the caller walk did not find %q, which demonstrably calls "+
+				"BoxErrorEnvelope.fields/1 — the walk is blind and every pairing verdict "+
+				"it produced is untrustworthy", demonstrated)
+		}
+	}
 }

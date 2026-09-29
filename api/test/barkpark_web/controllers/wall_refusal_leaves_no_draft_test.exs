@@ -38,7 +38,14 @@ defmodule BarkparkWeb.WallRefusalLeavesNoDraftTest do
   @title "Backfill the denormalized main tag column onto every published document row"
 
   setup do
-    Barkpark.Auth.create_token("barkpark-dev-token", "dev", @dataset, ["read", "write", "admin"])
+    Barkpark.Auth.create_token(
+      "barkpark-dev-token",
+      "dev",
+      @dataset,
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
+
     register_task_schemas!()
     LabelFixtures.register_tags!(@dataset)
     :ok
@@ -139,6 +146,7 @@ defmodule BarkparkWeb.WallRefusalLeavesNoDraftTest do
       insert_draft!("task-no-spine", "A task with no label spine at all",
         content: %{
           "kind" => "task",
+          "brief" => Barkpark.TaskBriefFixtures.brief(),
           "lifecycle_status" => "open",
           "priority" => 1,
           "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
@@ -165,6 +173,7 @@ defmodule BarkparkWeb.WallRefusalLeavesNoDraftTest do
   defp task_content(extra) do
     %{
       "kind" => "task",
+      "brief" => Barkpark.TaskBriefFixtures.brief(),
       "lifecycle_status" => "open",
       "priority" => 1,
       "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]

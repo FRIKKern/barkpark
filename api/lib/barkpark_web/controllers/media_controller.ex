@@ -307,13 +307,16 @@ defmodule BarkparkWeb.MediaController do
       # answered 200 with the first one's bytes. The `%MediaFile{}` head resolves
       # THIS row's `object_key` (`Media.Storage.ObjectKey`). `file.path` remains
       # the published reference and is still what the JSON and URL builders emit.
+      visibility = Access.visibility(doc)
+
       case Blobstore.serve_strategy(file,
              response_content_type: MediaFile.serve_content_type(mime),
-             response_content_disposition: disposition(mime)
+             response_content_disposition: disposition(mime),
+             response_cache_control: Delivery.file_cache_control(visibility)
            ) do
         {:file, full_path} ->
           conn
-          |> Delivery.put_file_cache_headers(full_path, Access.visibility(doc))
+          |> Delivery.put_file_cache_headers(full_path, visibility)
           |> maybe_send_file(full_path, mime)
 
         {:redirect, url} ->
@@ -382,6 +385,14 @@ defmodule BarkparkWeb.MediaController do
       # valid names (`Renditions.presets/0`), never 404.
       {:error, :unknown_preset} ->
         unknown_preset(conn, preset)
+
+      # C083: a held instance cannot write the rendition; 503 transient, never 404.
+      {:error, {:write_admission, _}} = refused ->
+        env = Errors.to_envelope(refused, conn)
+
+        conn
+        |> put_status(env.status)
+        |> json(%{error: Map.delete(env, :status)})
 
       {:error, _} ->
         not_found(conn, "rendition unavailable")
@@ -514,8 +525,12 @@ defmodule BarkparkWeb.MediaController do
 
   # 302 to a presigned object-storage URL. `cache-control: private` — the
   # redirect embeds a time-limited signature and may be access-gated, so a
-  # shared cache must never serve it to another principal; the blob response
-  # itself carries the bucket/CDN cache policy.
+  # shared cache must never serve it to another principal.
+  #
+  # The BYTES the bucket then serves are inside D12 (decision: bake it in,
+  # not scope it out): `serve_file/2` signs `Delivery.file_cache_control/1`
+  # for the asset's visibility into the URL as `response-cache-control`, so
+  # the bucket answers with the same policy the local-file arm sends.
   defp redirect_to_blob(conn, url) do
     conn
     |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")
@@ -806,6 +821,16 @@ defmodule BarkparkWeb.MediaController do
   end
 
   @doc "Delete a media file."
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, %{"id" => id} = params) do
     # WHERE-USED GUARD (pe-w2-bl-media-delete-where-used): papers embed media as
     # RAW `/media/files/...` URL STRINGS, invisible to every reference graph, so

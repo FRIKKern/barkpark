@@ -91,7 +91,7 @@ defmodule Barkpark.Search.SurfaceConfigs do
     # workspace-agnostic global config — so it collapses to nil.
     #
     # This function is a RAW consumer: it puts the value straight into a
-    # `:binary_id` query, so an untranslated atom is an Ecto CastError (a 500),
+    # `:binary_id` query, so an untranslated atom is an Ecto.Query.CastError (a 400),
     # not a scope. Translating here is the finding, not a tax — a consumer
     # reading `Keyword.get(opts, :workspace_id)` outside `Content.Scope` is the
     # same "the interpreter decides, not the producer" defect one layer out.

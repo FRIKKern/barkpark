@@ -5,7 +5,7 @@ defmodule Barkpark.StudioChat.Runtime.Claude do
 
   alias Barkpark.StudioChat.Probe
   alias Barkpark.StudioChat.Runtime.Capabilities
-  alias BarkparkWeb.Studio.ClaudeChat
+  alias Barkpark.StudioChat.Provider.Claude, as: ClaudeChat
 
   @impl true
   def start(opts), do: start_session(opts, false)

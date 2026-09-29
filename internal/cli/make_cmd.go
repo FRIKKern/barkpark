@@ -25,7 +25,16 @@ func runMakeSchema(out *writer, g globals, args []string) int {
 		usageMake(out, true)
 		return exitOK
 	}
-	if len(args) == 0 || args[0] != "schema" {
+	if len(args) == 0 {
+		usageMake(out, false)
+		return exitUsage
+	}
+	// `make` has TWO sub-nouns and both are pure local emitters. The dispatch is
+	// here rather than in cli.go so the whole `make` surface stays one door.
+	if args[0] == "workflow" {
+		return runMakeWorkflow(out, args)
+	}
+	if args[0] != "schema" {
 		usageMake(out, false)
 		return exitUsage
 	}
@@ -269,8 +278,18 @@ func usageMake(out *writer, toStdout bool) {
 	p("usage: bp make schema <name> [--out <file>]")
 	p("  emit a schema v2 JSON skeleton (fill-the-blanks) to stdout or a file")
 	p("")
+	p("usage: bp make workflow <site> [--dist <dir>] [--branch <name>] [--out <file>]")
+	p("  emit a curl-only GitHub Actions workflow that builds this repo and ships")
+	p("  the output to <site> through the prebuilt deploy lane (mint -> build ->")
+	p("  upload -> follow). ONE repo secret: BARKPARK_CLOUD_TOKEN, a PAT with the")
+	p("  deploy ability — mint it with an EXPLICIT --expires-days, because the")
+	p("  default validity is 30 days and an unattended workflow just starts 401ing.")
+	p("")
 	p("flags:")
-	p("  --out <file>   write the skeleton to <file> instead of stdout")
+	p("  --out <file>     write the output to <file> instead of stdout")
+	p("  --dist <dir>     build-output directory to ship (workflow only; default dist)")
+	p("  --branch <name>  branch the workflow triggers on (workflow only; default main)")
 	p("")
 	p("example: bp make schema post > post.schema.json")
+	p("example: bp make workflow my-site --out .github/workflows/barkpark-deploy.yml")
 }

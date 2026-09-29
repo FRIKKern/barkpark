@@ -19,6 +19,10 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   A private version-4 continuation supports only the source of an existing
   singleton canonical Card media element. It binds the media element's exact
   absent, null, or image type without storing its other fields.
+  A private version-5 continuation supports only the text of an existing
+  singleton canonical Card title heading. It binds the title's exact heading
+  type and absent, null, or empty content state without storing its other
+  fields.
   Unsupported or ambiguous edits remain valid edits without a continuation.
   Values are exact JSON values; absent and present-with-null are distinct.
   Continuations are capped at 16 KiB encoded and never truncated.
@@ -30,11 +34,13 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   @reference_version 2
   @card_action_version 3
   @card_media_version 4
+  @card_title_version 5
   @max_encoded_bytes 16 * 1024
   @continuation_keys ~w(action expect field replace target version)
   @target_keys ~w(id type)
   @reference_continuation_keys ~w(action expect field identity replace target version)
   @card_media_identity_keys ~w(type)
+  @card_title_identity_keys ~w(content type)
   @reference_target_keys ~w(id ref_index ref_slug type)
   @reference_fields ~w(title description)
   @allowed_fields MapSet.new([
@@ -69,8 +75,14 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
 
           {:ok, nil} ->
             case capture_card_media_src(before_blocks, after_blocks, ops) do
-              {:ok, %{} = continuation} -> {:ok, continuation}
-              {:ok, nil} -> capture_block_field(before_blocks, after_blocks, ops)
+              {:ok, %{} = continuation} ->
+                {:ok, continuation}
+
+              {:ok, nil} ->
+                case capture_card_title_text(before_blocks, after_blocks, ops) do
+                  {:ok, %{} = continuation} -> {:ok, continuation}
+                  {:ok, nil} -> capture_block_field(before_blocks, after_blocks, ops)
+                end
             end
         end
     end
@@ -191,6 +203,30 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
          true <- valid_card_media_identity?(identity),
          true <- valid_card_media_src_state?(expect),
          true <- valid_card_media_src_state?(replace),
+         false <- expect === replace,
+         true <- encoded_within_cap?(continuation) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_history}
+    end
+  end
+
+  def validate(%{"version" => @card_title_version} = continuation)
+      when is_map(continuation) and not is_struct(continuation) do
+    with true <- exact_keys?(continuation, @reference_continuation_keys),
+         %{
+           "action" => action,
+           "target" => target,
+           "field" => "title.text",
+           "identity" => identity,
+           "expect" => expect,
+           "replace" => replace
+         } <- continuation,
+         true <- action in ["undo", "redo"],
+         true <- valid_card_action_target?(target),
+         true <- valid_card_title_identity?(identity),
+         true <- valid_card_title_text_state?(expect),
+         true <- valid_card_title_text_state?(replace),
          false <- expect === replace,
          true <- encoded_within_cap?(continuation) do
       :ok
@@ -347,6 +383,34 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
     end
   end
 
+  defp apply_validated(blocks, %{"version" => @card_title_version} = continuation) do
+    with %{
+           "action" => action,
+           "target" => %{"id" => id, "type" => "card"},
+           "field" => "title.text",
+           "identity" => identity,
+           "expect" => expect,
+           "replace" => replace
+         } <- continuation,
+         {:ok, current} <- unique_target_for_apply(blocks, id),
+         true <- Map.get(current, "type") === "card" || {:error, :history_conflict},
+         {:ok, _current_title, current_identity, current_state} <- card_title_text(current),
+         true <- current_identity === identity || {:error, :history_conflict},
+         true <- current_state === expect || {:error, :history_conflict},
+         {:ok, next_blocks} <- replace_card_title_text(blocks, id, replace),
+         next <- card_title_continuation(toggle(action), id, identity, replace, expect),
+         :ok <- validate(next) do
+      {:ok, next_blocks, next}
+    else
+      {:error, reason}
+      when reason in [:invalid_history, :history_conflict, :block_not_found, :duplicate_id] ->
+        {:error, reason}
+
+      _changed_or_malformed ->
+        {:error, :history_conflict}
+    end
+  end
+
   defp eligible_op([
          %{"op" => "patch-block", "id" => id, "patch" => patch}
        ])
@@ -470,6 +534,35 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
 
   defp eligible_card_media_op(_ops), do: {:error, :unsupported}
 
+  defp capture_card_title_text(before_blocks, after_blocks, ops) do
+    with {:ok, id} <- eligible_card_title_op(ops),
+         {:ok, before_target} <- unique_target(before_blocks, id),
+         {:ok, after_target} <- unique_target(after_blocks, id),
+         true <- Map.get(before_target, "type") === "card",
+         true <- Map.get(after_target, "type") === "card",
+         {:ok, _before_title, before_identity, before_state} <- card_title_text(before_target),
+         {:ok, _after_title, after_identity, after_state} <- card_title_text(after_target),
+         true <- before_identity === after_identity,
+         false <- before_state === after_state,
+         {:ok, projected_after} <- replace_card_title_text(before_blocks, id, after_state),
+         true <- projected_after === after_blocks,
+         continuation <-
+           card_title_continuation("undo", id, after_identity, after_state, before_state),
+         :ok <- validate(continuation) do
+      {:ok, continuation}
+    else
+      _unsupported_or_ambiguous -> {:ok, nil}
+    end
+  end
+
+  defp eligible_card_title_op([
+         %{"op" => "patch-block", "id" => id, "patch" => %{"slots" => _slots} = patch}
+       ])
+       when is_binary(id) and id != "" and map_size(patch) == 1,
+       do: {:ok, id}
+
+  defp eligible_card_title_op(_ops), do: {:error, :unsupported}
+
   defp reference_copy_change(before_refs, after_refs) do
     changed =
       before_refs
@@ -567,6 +660,18 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
     }
   end
 
+  defp card_title_continuation(action, id, identity, expect, replace) do
+    %{
+      "version" => @card_title_version,
+      "action" => action,
+      "target" => %{"id" => id, "type" => "card"},
+      "field" => "title.text",
+      "identity" => identity,
+      "expect" => expect,
+      "replace" => replace
+    }
+  end
+
   defp toggle("undo"), do: "redo"
   defp toggle("redo"), do: "undo"
 
@@ -599,6 +704,15 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   end
 
   defp valid_card_media_identity?(_identity), do: false
+
+  defp valid_card_title_identity?(identity)
+       when is_map(identity) and not is_struct(identity) do
+    exact_keys?(identity, @card_title_identity_keys) and
+      identity["type"] === %{"present" => true, "value" => "heading"} and
+      valid_card_title_content_state?(identity["content"])
+  end
+
+  defp valid_card_title_identity?(_identity), do: false
 
   defp valid_reference_identity?(identity, ref_slug)
        when is_map(identity) and not is_struct(identity) do
@@ -651,6 +765,19 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
     do: exact_keys?(state, ["present", "value"]) and (is_nil(value) or is_binary(value))
 
   defp valid_card_media_src_state?(_state), do: false
+
+  defp valid_card_title_content_state?(%{"present" => false} = state),
+    do: exact_keys?(state, ["present"])
+
+  defp valid_card_title_content_state?(%{"present" => true, "value" => value} = state),
+    do: exact_keys?(state, ["present", "value"]) and value in [nil, []]
+
+  defp valid_card_title_content_state?(_state), do: false
+
+  defp valid_card_title_text_state?(%{"present" => true, "value" => value} = state),
+    do: exact_keys?(state, ["present", "value"]) and is_binary(value)
+
+  defp valid_card_title_text_state?(_state), do: false
 
   defp field_state(block, field) do
     if Map.has_key?(block, field) do
@@ -815,6 +942,24 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
     _malformed -> {:error, :history_conflict}
   end
 
+  defp replace_card_title_text(blocks, id, state) do
+    case transform_blocks(blocks, id, fn block ->
+           {:ok, title, _identity, _current_state} = card_title_text(block)
+           slots = Map.fetch!(block, "slots")
+
+           Map.put(
+             block,
+             "slots",
+             Map.put(slots, "title", [put_field_state(title, "text", state)])
+           )
+         end) do
+      {next_blocks, 1} -> {:ok, next_blocks}
+      _missing_or_duplicate -> {:error, :invalid_history}
+    end
+  rescue
+    _malformed -> {:error, :history_conflict}
+  end
+
   defp card_action_label(%{"slots" => slots})
        when is_map(slots) and not is_struct(slots) do
     case Map.get(slots, "action") do
@@ -855,6 +1000,39 @@ defmodule Barkpark.Content.Papers.ContextualHistory do
   end
 
   defp card_media_src(_block), do: {:error, :history_conflict}
+
+  defp card_title_text(%{"slots" => slots})
+       when is_map(slots) and not is_struct(slots) do
+    case Map.get(slots, "title") do
+      [title] when is_map(title) and not is_struct(title) ->
+        identity = %{
+          "type" => field_state(title, "type"),
+          "content" => field_state(title, "content")
+        }
+
+        text_state = field_state(title, "text")
+
+        if valid_card_title_identity?(identity) and valid_card_title_text_state?(text_state) and
+             valid_card_title_level?(title) do
+          {:ok, title, identity, text_state}
+        else
+          {:error, :history_conflict}
+        end
+
+      _missing_or_malformed ->
+        {:error, :history_conflict}
+    end
+  end
+
+  defp card_title_text(_block), do: {:error, :history_conflict}
+
+  defp valid_card_title_level?(title) do
+    case Map.fetch(title, "level") do
+      :error -> true
+      {:ok, nil} -> true
+      {:ok, level} -> level in [1, 2, 3, "1", "2", "3"]
+    end
+  end
 
   defp optional_binary?(map, key) do
     not Map.has_key?(map, key) or is_nil(map[key]) or is_binary(map[key])

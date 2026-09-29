@@ -6,15 +6,16 @@ defmodule BarkparkWeb.Studio.WorkspaceReachabilityParityTest do
 
   `StudioChrome.can_reach?/2` and
   `StudioLive.Shared.can_reach_workspace?/2` were byte-identical bodies in two
-  files (token -> `Tenancy.Auth.member?/2`; anything else -> identity match on
-  the mounted `current_workspace`), with nothing pinning them together. Neither
+  files (token -> `Tenancy.Auth.member?/2`; account user -> the same asked of
+  the user's own kind; anything else -> identity match on the mounted
+  `current_workspace`), with nothing pinning them together. Neither
   is an admit-direction bug on its own — the destination mount re-gates — but an
   unpinned duplicate is the drift hazard: tighten the switcher in one file and
   the other keeps admitting, silently.
 
   Two halves, and BOTH are needed:
 
-    * `the rule` — the three principal shapes the predicate actually
+    * `the rule` — the four principal shapes the predicate actually
       discriminates, asserted against the owner. Tightening or loosening the
       owner reds here.
     * `the delegation` — `StudioChrome`'s arm is a ONE-LINE call to the owner,
@@ -70,7 +71,7 @@ defmodule BarkparkWeb.Studio.WorkspaceReachabilityParityTest do
     }
   end
 
-  describe "the rule — the three principal shapes" do
+  describe "the rule — the four principal shapes" do
     test "an ApiToken MEMBER of the workspace reaches it", %{ws: ws} do
       token = token!("reach-member")
       {:ok, _} = Tenancy.Auth.create_membership(ws.id, token.id, "member")
@@ -89,6 +90,27 @@ defmodule BarkparkWeb.Studio.WorkspaceReachabilityParityTest do
       refute Shared.can_reach_workspace?(
                socket(%{api_token: token, current_workspace: ws}),
                ws
+             )
+    end
+
+    test "a USER (account session) MEMBER reaches it; a user non-member does not, even mounted there",
+         %{ws: ws, other: other} do
+      {:ok, user} =
+        Barkpark.Accounts.register_user(%{
+          email: "reach-user-#{System.unique_integer([:positive])}@example.com",
+          password: "correct-horse-battery"
+        })
+
+      {:ok, _} = Tenancy.Auth.create_membership(ws.id, user.id, "member", "user")
+
+      assert Shared.can_reach_workspace?(socket(%{current_user: user}), ws)
+      refute Shared.can_reach_workspace?(socket(%{current_user: user}), other)
+
+      # The user arm RETURNS like the token arm: mounted-in does not rescue a
+      # non-member account (the identity fallback is the anonymous socket's).
+      refute Shared.can_reach_workspace?(
+               socket(%{current_user: user, current_workspace: other}),
+               other
              )
     end
 

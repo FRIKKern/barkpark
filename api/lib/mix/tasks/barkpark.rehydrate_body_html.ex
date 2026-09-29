@@ -90,7 +90,22 @@ defmodule Mix.Tasks.Barkpark.RehydrateBodyHtml do
 
   @impl Mix.Task
   def run(argv) do
-    Mix.Task.run("app.start")
+    # NOT `app.start` (task-12b07c13e3cc08b6, following #18596). `app.start`
+    # boots the FULL tree with whatever runtime env the shell carries: on
+    # guerrilla, 2026-09-02, `PHX_SERVER` was set and a one-shot's endpoint
+    # tried to bind the LIVE slot's port ("port 4001 already in use"),
+    # killing the run before the sweep started; the same boot put up a
+    # second Oban draining the live queues and the onixedit codelist
+    # seeders (`ERROR 57014 query_canceled`).
+    #
+    # MEASURED, not assumed (the edges precedent: dropping SchemaBootstrap
+    # took the projected edge count from 962 to ZERO while still exiting 0).
+    # The narrowed tree is correct for THIS task because the sweep is keyset `Repo.all` + `PortableDoc.Render` (pure) + a
+    # direct `Repo.update/1` persist_fun — no endpoint read, no Oban job.
+    # The dev-corpus dry run reports the identical tally under both boots —
+    # see the PR body.
+    Mix.Task.run("app.config")
+    Barkpark.OneShot.boot!()
 
     {parsed, _rest, _invalid} = OptionParser.parse(argv, strict: @switches)
 

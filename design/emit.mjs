@@ -73,6 +73,18 @@ export const repoRoot = join(here, "..");
 export const rawTokens = JSON.parse(readFileSync(join(here, "tokens.json"), "utf8"));
 const activeTheme = JSON.parse(readFileSync(join(here, "themes", "evergreen.json"), "utf8"));
 
+// ── the SECOND source: design/status-manifest.json (the white ladder) ─────────
+// tokens.json owns colour/type/motion; the STATUS VOCABULARY (roles, glyphs,
+// labels, meanings, and the stored-status→role map) has always lived next door in
+// design/status-manifest.json, which the Elixir side reads at COMPILE time and
+// the CSS tone block is generated from. The two JS/TS surfaces were the last
+// hand-typed copies of it (tlv-bl-js-vocab-generator): a comment, then a
+// byte-check, guarded them. They are emitted here instead, so drift is not
+// detected — it is impossible.
+export const statusManifest = JSON.parse(
+  readFileSync(join(here, "status-manifest.json"), "utf8"),
+);
+
 // structural deep-equality — used by the seam guard. Compares by shape and
 // primitive value (order-independent for objects), so a non-string leaf that
 // silently drifted (e.g. status.warn.strong flipping) is caught, not skipped.
@@ -202,13 +214,90 @@ export const PROVIDERS = ["hetzner", "azure"];
 export const INST_ROLE_CSS = { ok: "--ok", warn: "--warn", danger: "--danger", info: "--info", "": "--muted-text" };
 export const instRoleChannels = (role) =>
   role === "" ? tokens.color["muted-text"] : tokens.color.status[role];
+// ── the chrome type ladder, DERIVED (task-039d433a1bac63ab) ─────────────────
+// TYPE_STEPS used to be the hand-written literal
+//
+//     export const TYPE_STEPS = ["2xl","xl","lg","base","sm","xs","2xs","3xs"];
+//
+// under a comment saying it mirrored tokens.type.chrome. It was load-bearing in
+// BOTH directions at once: it GENERATES the consumer (chromeTypeVars below, the
+// web `chromeType` rows and `chromeTypeOrder`), and it is the list check.mjs
+// Part C2 ITERATES. A gate that walks a hand copy and finds each of ITS OWN
+// entries present in the source can only ever fail in one direction — a rung
+// added to tokens.json and not to the literal is invisible to the very gate
+// meant to hold the two in lockstep. PR #17942 added `2xs`/`3xs` and happened to
+// update the literal too; nothing would have caught it if it had not. (The same
+// defect one level out — a retyped expected side in
+// web/__tests__/type-ladder-emitted.test.ts — is what surfaced this one.)
+//
+// So the step list AND ITS ORDER now come out of tokens.json. ORDER IS NOT KEY
+// ORDER: tokens.json lists type.chrome smallest-first, while display order is
+// largest → smallest, so the derivation sorts by DESCENDING SIZE — the contract
+// the emitted comment already states — and REFUSES a tie, because two steps of
+// the same size do not name one order. And it refuses rather than going blind:
+// a missing family, a non-object family or a family yielding zero steps would
+// derive [] and every downstream assertion would pass vacuously, which is the
+// exact failure a ladder gate exists to prevent. check.mjs Part C2 drives all
+// of those arms in-process plus a positive control on the derived count.
+export const LADDER_REFUSE = "REFUSING TO MEASURE";
+export function typeLadderFrom(doc, family) {
+  const block = doc?.type?.[family];
+  if (!block || typeof block !== "object")
+    throw new Error(`${LADDER_REFUSE} — tokens.type.${family} is missing or is not an object`);
+  // `_note` prose and scalars like type.reading.headingWeight are not rungs: a
+  // rung is an entry carrying a finite positive `size`.
+  const steps = Object.entries(block)
+    .filter(([k]) => !k.startsWith("_"))
+    .map(([k, v]) => [k, v?.size])
+    .filter(([, size]) => typeof size === "number" && Number.isFinite(size) && size > 0);
+  if (steps.length === 0)
+    throw new Error(`${LADDER_REFUSE} — derived ZERO steps from tokens.type.${family}; every ladder assertion downstream would pass vacuously`);
+  if (new Set(steps.map(([, size]) => size)).size !== steps.length)
+    throw new Error(`${LADDER_REFUSE} — tokens.type.${family} has two steps of the same size, so "largest → smallest" does not name one order`);
+  return steps.slice().sort((a, b) => b[1] - a[1]).map(([k]) => k);
+}
 // Chrome type-scale steps, largest → smallest (display order for the Studio type
-// ladder). Mirrors tokens.type.chrome; the emitter and check.mjs both key off it.
-export const TYPE_STEPS = ["2xl", "xl", "lg", "base", "sm", "xs"];
+// ladder). DERIVED from tokens.type.chrome — never retype it here.
+export const TYPE_STEPS = typeLadderFrom(tokens, "chrome");
+// The READING ladder's steps, display order (largest → body). Mirrors
+// tokens.type.reading; the web TS emitter keys off it so the styleguide can show
+// the prose scale the /papers surface actually paints with.
+export const READING_STEPS = ["h1", "h2", "h3", "body"];
 // The reader AIR ladder (tokens.space.air), lightest opening → heaviest. Emission
 // order IS the ladder order design/validate.mjs asserts monotonic, and every step
 // here has a consumer in paper-surface.css — an entry with none is a dead token.
 export const AIR_STEPS = ["code", "table", "asciicast", "callout", "stats", "figure"];
+// ── THE TERMINAL COLLAPSE RULE (canonical home) ──────────────────────────────
+// This constant is where the six-rung air ladder's terminal behaviour is
+// RECORDED. The web surface can paint 24.2px, 29.9px, 31.9px, 34.1px, 36.1px and
+// 40.0px and a reader sees six distinct openings. A terminal cannot: its only
+// vertical unit is a ROW, and `space.air.beat` is 22px ≈ exactly one row. So the
+// whole ladder lives between 1.1 and 1.82 rows — six web rungs land on TWO honest
+// terminal values, and any Go table that spells six different row counts is
+// claiming a precision no terminal can render.
+//
+// AIR_ROW_SPLIT is where the SECOND row is earned. It is a PREDICATE over the
+// ratio, not a hand-written list of block kinds: retune a ratio in tokens.json
+// (or add a seventh rung) and the Go ladder re-derives instead of silently
+// disagreeing with the source. 1.6 sits in the ladder's widest interior gap —
+// callout 1.55 to stats 1.64 — so the split falls where the source itself is
+// least committed, and every rung is on the same side of it as the measured
+// benchmark (tooling/paper-excellence/evidence/erasure.html: code/table/
+// asciicast/callout open one row, stats/figure two).
+//
+// Emitted into internal/pdrender/tokens_gen.go as GenAirRowSplit and applied by
+// pdrender.AirRows (internal/pdrender/air.go); design/check.mjs Part P censuses
+// both arms so neither the ratios nor the split can land dead.
+export const AIR_ROW_SPLIT = 1.6;
+// airRows collapses one web air ratio to its honest terminal row count.
+export const airRows = (ratio) => (ratio >= AIR_ROW_SPLIT ? 2 : 1);
+// ruleGlyph collapses a px rule WEIGHT to the terminal's only means of drawing
+// one: the glyph. A terminal line is always one cell tall, so 2px vs 1px cannot
+// be a thickness — it is heavy box-drawing vs light. Derived from the px value
+// (>= the structural weight is heavy), so retuning space.section.rule or
+// space.rule.hairline in tokens.json moves the terminal ladder with it.
+export const RULE_HEAVY_PX = 2;
+export const ruleGlyph = (px) => (px >= RULE_HEAVY_PX ? "━" : "─");
 // The EVIDENCE BAND inputs (tokens.space.evidence), in emission order. Emitted as
 // `--tok-evidence-*`; paper-surface.css composes all five into ONE width
 // expression, so what ships is the law and not a resolved pixel. Every key here
@@ -333,6 +422,32 @@ const ACTION_LABELS_MARKER_BEGIN =
   "/* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */";
 const ACTION_LABELS_MARKER_END = "/* END GENERATED: audit action labels */";
 
+// The bp-graph.js Canvas palette (task au-r6). Canvas 2D `ctx.fillStyle` cannot
+// consume `var()`, so the force-graph renderer assigns CONCRETE colour strings at
+// paint time — which is exactly why it carried a hand-authored JS palette that no
+// design gate could reach, exempted-with-rationale in design/exemptions.json. The
+// fix is emit-time, not runtime: tokens.json's `color.graphCanvas.graph` is now the
+// sole source, and this marker splices the concrete values into the renderer as a
+// generated region. Emit-time (not an init-time computed-style probe) because
+// bp-graph.js ships as a STATIC asset on four surfaces — two of them starter
+// templates with no Barkpark stylesheet to probe — so a runtime resolver would have
+// no governed CSS to read and would need a hand-written fallback palette, i.e. the
+// very thing this removes. One artifact per copy keeps all four byte-identical.
+const GRAPH_PALETTE_MARKER_BEGIN =
+  "/* BEGIN GENERATED: bp-graph-palette (design/tokens.json color.graphCanvas.graph via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */";
+const GRAPH_PALETTE_MARKER_END = "/* END GENERATED: bp-graph-palette */";
+
+// Every bp-graph.js copy. scripts/check-bp-graph-drift.sh holds these four
+// byte-identical; emitting each one separately from the SAME build() is what keeps
+// that true through a token change (a single-copy artifact would red the drift
+// tripwire on the next --write).
+export const GRAPH_PALETTE_PATHS = [
+  "api/priv/static/assets/bp-graph.js",
+  "web/public/bp-graph.js",
+  "templates/search-starter/public/bp-graph.js",
+  "templates/astro-search-starter/public/bp-graph.js",
+];
+
 // ── color helpers ───────────────────────────────────────────────────────────
 const hsl = (ch) => `hsl(${ch})`;
 const alpha = (a) => String(a); // 0.15 -> "0.15", 0.2 -> "0.2"
@@ -386,6 +501,20 @@ function statusVars(theme, indent, t = tokens) {
       .join(" "),
   ];
   return lines.map((l) => indent + l).join("\n");
+}
+
+// The VERDICT pair (color.verdict) → `--bp-verdict-loss/-soft` +
+// `--bp-verdict-peace/-soft` on the PAPER reading surface. Emitted as resolved
+// hex, not as an hsl() channel triplet like the status roles: a verdict has no
+// alpha-derived `-soft` companion to compose — its soft ground is its OWN derived
+// leaf (AA-walked against, not faded out of, the ink), so there is nothing for a
+// channel split to buy. `--bp-` and not `--tok-` because the consumers read it
+// directly (the `--tok-*`→`--bp-*` bridge exists for the values paper-surface.css
+// recomposes; these are read as-is).
+const VERDICT_ROLES = ["loss", "loss-soft", "peace", "peace-soft"];
+function verdictVars(theme, indent, t = tokens) {
+  const v = t.color.verdict;
+  return indent + VERDICT_ROLES.map((r) => `--bp-verdict-${r}: ${v[r][theme]};`).join(" ");
 }
 
 function baseVars(theme, indent, t = tokens) {
@@ -718,10 +847,12 @@ const paperThemeBlock = (name, t) => [
   `html[data-bp-theme="${name}"] .bp-paper-surface, html[data-bp-theme="${name}"] .bp-paper-body {`,
   paperColorVars("light", "  ", t),
   statusVars("light", "  ", t),
+  verdictVars("light", "  ", t),
   "}",
   `html[data-bp-theme="${name}"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="${name}"][data-theme="dark"] .bp-paper-body {`,
   paperColorVars("dark", "  ", t),
   statusVars("dark", "  ", t),
+  verdictVars("dark", "  ", t),
   "}",
 ].join("\n");
 
@@ -828,17 +959,21 @@ function paperBlock(themes = loadThemes()) {
     ".bp-paper-surface, .bp-paper-body {",
     readingVars,
     statusVars("light", "  "),
+    verdictVars("light", "  "),
     "}",
     "@media (prefers-color-scheme: dark) {",
     "  .bp-paper-surface, .bp-paper-body {",
     statusVars("dark", "    "),
+    verdictVars("dark", "    "),
     "  }",
     "}",
     'html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body {',
     statusVars("light", "  "),
+    verdictVars("light", "  "),
     "}",
     'html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body {',
     statusVars("dark", "  "),
+    verdictVars("dark", "  "),
     "}",
     "/* lifecycle glyph tones — the CSS half of the §6 GUI/TUI parity assertion */",
     lifeClasses("light"),
@@ -1007,6 +1142,30 @@ function webBlock(themes = loadThemes()) {
   return lines.join("\n");
 }
 
+// ── surface: the starter templates' theme token region (stw-backlog-theme-matrix)
+// templates/search-starter/app/globals.css and its Astro twin carried a BYTE-COPY
+// of webBlock()'s output, and a copy cannot grow. Two defects followed, and both
+// are of the same shape — an ENUMERATION standing in for a RULE:
+//
+//   • design/themes/ ships FIVE skins; the copy enumerated FOUR. `iris` was
+//     silently absent from both starter templates, so a visitor selecting it got
+//     the evergreen fallback and no error anywhere.
+//   • 77 of 151 (selector, var) pairs had drifted from web/app/globals.css.
+//
+// Registering the region as an ARTIFACT built by webBlock() — the SAME builder the
+// web demo uses, not a template-specific near-copy — removes the class rather than
+// the instances: a SIXTH theme file reaches both templates on the next `--write`,
+// and no reviewer has to notice that it did not.
+//
+// It owns its OWN marker pair rather than the shared `BEGIN GENERATED: tokens`
+// one, because those files' outer BEGIN/END SNAPSHOT markers are read by
+// scripts/templates-literal-check.sh to exempt the block from the raw-palette
+// literal ban; a distinct inner pair leaves that script untouched and keeps the
+// generated region strictly narrower than the exemption it sits inside.
+export const TEMPLATE_TOKENS_MARKER_BEGIN =
+  "/* BEGIN GENERATED: template theme tokens (design/tokens.json + design/themes/*.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */";
+export const TEMPLATE_TOKENS_MARKER_END = "/* END GENERATED: template theme tokens */";
+
 // ── surface: web TS token artifact (web/lib/tokens.gen.ts) ────────────────────
 // A whole generated TS module (kind "ts", like the Go files). Exports the LIGHT
 // canvas colours listings-map.tsx paints with, so no hex literal lives in the
@@ -1037,6 +1196,22 @@ function webTokensTs() {
     (t) =>
       `  ${t}: { light: { bg: "${pc.light[t].bg}", fg: "${pc.light[t].fg}" }, dark: { bg: "${pc.dark[t].bg}", fg: "${pc.dark[t].fg}" } },`,
   );
+  // The TYPED type ladders. Both families ship as {size,lineHeight,weight} so a
+  // consumer never has to invent the missing third number — the hole that let
+  // styleguide.tsx hand-keep its own weight column beside tokens.json for months
+  // (au-r4-web-type-ladder). CHROME weights are authored per step; READING
+  // resolves the optional per-step `weight` against the shared headingWeight
+  // scalar (charter D29), and body falls back to the CSS normal 400.
+  const tc = tokens.type.chrome;
+  const tr = tokens.type.reading;
+  const key = (k) => (/^[A-Za-z_$][\w$]*$/.test(k) ? k : `"${k}"`);
+  const chromeRows = TYPE_STEPS.map(
+    (k) => `  ${key(k)}: { size: ${tc[k].size}, lineHeight: ${tc[k].lineHeight}, weight: ${tc[k].weight} },`,
+  );
+  const readingWeight = (k) => tr[k].weight ?? (k === "body" ? 400 : tr.headingWeight);
+  const readingRows = READING_STEPS.map(
+    (k) => `  ${key(k)}: { size: ${tr[k].size}, lineHeight: ${tr[k].lineHeight}, weight: ${readingWeight(k)} },`,
+  );
   return [
     "// Code generated by design/emit.mjs from design/tokens.json. DO NOT EDIT.",
     "// Regenerate: node design/emit.mjs --write",
@@ -1060,6 +1235,288 @@ function webTokensTs() {
     "export const paperCallout = {",
     ...calloutRows,
     "} as const;",
+    "",
+    "/** A typed typography step: px size, unitless line height, CSS font weight. */",
+    "export type TypeStep = { readonly size: number; readonly lineHeight: number; readonly weight: number };",
+    "",
+    "/** UI CHROME type ladder (Inter), largest → smallest, from design/tokens.json",
+    " *  `type.chrome`. This is the ONE web source for chrome type: styleguide.tsx",
+    " *  renders its specimens straight off these numbers. Never hand-keep a second",
+    " *  copy — retune tokens.json, re-emit, and the ladder moves here. */",
+    "export const chromeType = {",
+    ...chromeRows,
+    "} as const satisfies Record<string, TypeStep>;",
+    "",
+    "/** The step order the chrome ladder is displayed in (largest → smallest). */",
+    `export const chromeTypeOrder = [${TYPE_STEPS.map((s2) => `"${s2}"`).join(", ")}] as const;`,
+    "",
+    "/** READING type ladder (serif prose) from design/tokens.json `type.reading` —",
+    " *  the SAME leaves paper-surface.css emits as --tok-reading-*-size/-lh and the",
+    " *  `.bp-paper-surface` heading rules consume, so what the styleguide shows is",
+    " *  what @barkpark/react PortableDoc actually paints. `weight` resolves the",
+    " *  per-step override against the shared type.reading.headingWeight scalar. */",
+    "export const readingType = {",
+    ...readingRows,
+    "} as const satisfies Record<string, TypeStep>;",
+    "",
+    "/** The step order the reading ladder is displayed in (display → body). */",
+    `export const readingTypeOrder = [${READING_STEPS.map((s2) => `"${s2}"`).join(", ")}] as const;`,
+    "",
+  ].join("\n");
+}
+
+// ── surface: react status vocabulary (js/packages/react/src/status-vocab.gen.ts)
+// The white ladder, emitted from design/status-manifest.json. Until
+// tlv-bl-js-vocab-generator this table was TYPED BY HAND in inline.tsx with a
+// comment ("this comment IS the guard") and later a byte-check
+// (status-manifest-check.sh Part 5) standing in for generation. Neither is a
+// source of truth; this file is generated from one, so the react legend cannot
+// drift from the manifest by construction.
+//
+// What is NOT here, deliberately: the JS-only fail-open `unknown` sentinel (D11).
+// It is never a lifecycle state and appears in NO manifest, so it stays authored
+// in inline.tsx and is appended there. Everything the manifest owns — role order,
+// glyph, spinner, label, meaning, the stored-status→role map and the default role
+// — comes from here.
+//
+// Single quotes / no semicolons: the js package's prettier style, so the
+// generated file reads like its neighbours and passes `pnpm lint`.
+function tsq(s) {
+  return `'${String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
+export function reactStatusVocabTs() {
+  const m = statusManifest;
+  // Prettier's own printWidth=100 rule, applied HERE so the emitted file is
+  // prettier-clean the moment it is written (js-tests runs `prettier --check`
+  // over packages/*/src). A generated file that the formatter would rewrite is a
+  // standing diff nobody may fix, because fixing it by hand is the very thing
+  // design/check.mjs Part A reds — so the emitter formats, not the formatter.
+  const roleRows = m.roles.flatMap((r) => {
+    const fields = [
+      `role: ${tsq(r.role)}`,
+      `glyph: ${tsq(r.glyph)}`,
+      `spinner: ${r.spinner === true}`,
+      `label: ${tsq(r.label)}`,
+      `meaning: ${tsq(r.meaning)}`,
+    ];
+    const oneLine = `  { ${fields.join(", ")} },`;
+    if (oneLine.length <= 100) return [oneLine];
+    return ["  {", ...fields.map((f) => `    ${f},`), "  },"];
+  });
+  const statusRows = Object.entries(m.statuses).map(
+    ([status, role]) => `  ${/^[A-Za-z_$][\w$]*$/.test(status) ? status : tsq(status)}: ${tsq(role)},`,
+  );
+  return [
+    "// Code generated by design/emit.mjs from design/status-manifest.json. DO NOT EDIT.",
+    "// Regenerate: node design/emit.mjs --write",
+    "//",
+    "// The white ladder (D15) — the ONE task-status vocabulary, shared with the",
+    "// Elixir emitters (Render.StatusVocab reads the same manifest at compile time),",
+    "// the paper-surface --st-* tone tokens and the Go pdrender board. A manifest",
+    "// edit re-emits this file; hand-editing it is caught by design/check.mjs Part A.",
+    "//",
+    "// The JS-only fail-open `unknown` sentinel (D11) is NOT a manifest role and is",
+    "// appended by src/inline.tsx, which owns it.",
+    "",
+    "/** One rung of the status ladder. */",
+    "export interface StatusRole {",
+    "  role: string",
+    "  glyph: string",
+    "  spinner: boolean",
+    "  label: string",
+    "  meaning: string",
+    "}",
+    "",
+    "/** The manifest roles, in manifest order. */",
+    "export const MANIFEST_STATUS_ROLES: StatusRole[] = [",
+    ...roleRows,
+    "]",
+    "",
+    "/** Stored lifecycle status → ladder role (the manifest `statuses` map, aliases",
+    " *  and terminal states included). */",
+    "export const MANIFEST_STATUS_TO_ROLE: Record<string, string> = {",
+    ...statusRows,
+    "}",
+    "",
+    "/** The role an ABSENT/empty status falls back to (the manifest `default_role`). */",
+    `export const MANIFEST_DEFAULT_ROLE = ${tsq(m.default_role)}`,
+    "",
+  ].join("\n");
+}
+
+// ── surface: web status ladder (web/lib/status-ladder.gen.ts) ─────────────────
+// The web board's projection of the SAME ladder. Shape differs from the react
+// one (a `glyph_role` column, no `meaning`) because it byte-mirrors the Elixir
+// golden the cross-surface parity suite compares against — so it is a second
+// PROJECTION of the manifest, never a second copy of it. Double quotes and
+// semicolons: web/'s house style.
+export function webStatusLadderTs() {
+  const m = statusManifest;
+  const q = (s) => JSON.stringify(String(s));
+  const rows = m.roles.map(
+    (r) =>
+      `  { role: ${q(r.role)}, glyph_role: ${q(r.role)}, glyph: ${q(r.glyph)}, ` +
+      `spinner: ${r.spinner === true}, label: ${q(r.label)} },`,
+  );
+  const statusRows = Object.entries(m.statuses).map(
+    ([status, role]) => `  ${/^[A-Za-z_$][\w$]*$/.test(status) ? status : q(status)}: ${q(role)},`,
+  );
+  return [
+    "// Code generated by design/emit.mjs from design/status-manifest.json. DO NOT EDIT.",
+    "// Regenerate: node design/emit.mjs --write",
+    "//",
+    "// The white ladder (D15) as the web board projects it — the cross-surface",
+    "// parity KEY that __tests__/component-golden-parity.test.ts compares against the",
+    "// Elixir-emitted golden. Hand-editing this file is caught by design/check.mjs",
+    "// Part A; a manifest edit re-emits it.",
+    "",
+    "/** One projected ladder row (no `meaning` — the golden does not carry it). */",
+    "export interface LadderRow {",
+    "  role: string;",
+    "  glyph_role: string;",
+    "  glyph: string;",
+    "  spinner: boolean;",
+    "  label: string;",
+    "}",
+    "",
+    "/** The white ladder in manifest order. */",
+    "export const STATUS_LADDER: LadderRow[] = [",
+    ...rows,
+    "];",
+    "",
+    "/** The canonical manifest role names — the legend-projection scope. The JS-only",
+    " *  fail-open `unknown` sentinel is never a lifecycle state and is never here. */",
+    `export const MANIFEST_ROLE_NAMES: readonly string[] = [${m.roles.map((r) => q(r.role)).join(", ")}];`,
+    "",
+    "/** Stored lifecycle status → ladder role (the manifest `statuses` map). */",
+    "export const MANIFEST_STATUS_TO_ROLE: Record<string, string> = {",
+    ...statusRows,
+    "};",
+    "",
+    "/** The role an ABSENT/empty status falls back to (the manifest `default_role`). */",
+    `export const MANIFEST_DEFAULT_ROLE = ${q(m.default_role)};`,
+    "",
+  ].join("\n");
+}
+
+// ── surface: mobile status vocabulary ────────────────────────────────────────
+// (apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts)
+//
+// The THIRD JS/TS projection of the white ladder, and the last hand copy to go.
+// Until this artifact, apps/mobile's taskboard.tsx typed the WHOLE vocabulary out
+// by hand — four literals — and the only thing standing between it and the
+// manifest was a byte-check (scripts/status-manifest-check.sh Part 5b) plus a
+// jest parity suite. A byte-check is an ENUMERATION: it can only compare the
+// copy it was told about, so copy #4 arrives unguarded. Generation is the
+// PREDICATE: mobile now reads the manifest through this file and cannot hold a
+// value the manifest does not.
+//
+// MOBILE'S SHAPE, and why it is not react's. A React Native block renderer
+// resolves a status to a role and then looks up glyph and label SEPARATELY
+// (roleOf → glyphOf/labelOf), so mobile wants three flat Records, not one
+// array-of-objects. That is a third PROJECTION of the one manifest, exactly as
+// web's `glyph_role` column is — never a third copy of it.
+//
+// TWO MECHANICAL RELATIONS ARE APPLIED HERE, both previously asserted by the
+// gate and now simply true by construction:
+//   1. GLYPH — the manifest's, unless the manifest's OWN platform_overrides
+//      records an adjudicated divergence for the `apps/mobile` surface. The
+//      standing one is `progress`: the manifest gives it an EMPTY glyph with
+//      spinner:true because the web CSS-animates Braille frames through an empty
+//      span's ::before, and a mobile block renderer is pure by charter D50 — no
+//      hooks, no animation, and an empty glyph would paint a blank lane cell.
+//   2. LABEL — the manifest label sentence-cased, because mobile renders labels
+//      as column headings ("in progress" → "In progress").
+//
+// THE EMPTY-GLYPH REFUSAL. Relation 1 is why mobile needed an override in the
+// first place, and the hazard generalises: a manifest rung whose glyph is empty
+// and which carries NO apps/mobile override would silently emit a blank cell on
+// the board — the exact defect the override exists to prevent, arriving through
+// a role nobody adjudicated. The builder refuses to emit that file at all and
+// names the rung. It is a REFUSAL rather than a fallback because a fallback
+// glyph would be a fourth place the vocabulary is decided.
+//
+// Single quotes / no semicolons: apps/mobile's house style, so the generated
+// file reads like its neighbours and passes `pnpm --filter barkpark-mobile lint`.
+export const MOBILE_OVERRIDE_SURFACE = "apps/mobile";
+
+/** The adjudicated per-role divergences the manifest records for apps/mobile,
+ *  `$comment` keys stripped. Exported so design/check.mjs and the gate read ONE
+ *  reader of the override map rather than each re-deriving it. */
+export function mobileStatusOverrides() {
+  const raw = (statusManifest.platform_overrides || {})[MOBILE_OVERRIDE_SURFACE] || {};
+  return Object.fromEntries(Object.entries(raw).filter(([k]) => !k.startsWith("$")));
+}
+
+/** The glyph mobile ships for a role: the manifest's, or its recorded override. */
+export function mobileGlyphFor(role) {
+  const ov = mobileStatusOverrides()[role];
+  if (ov && typeof ov.glyph === "string") return ov.glyph;
+  const row = statusManifest.roles.find((r) => r.role === role);
+  return row ? row.glyph : "";
+}
+
+function sentenceCase(s) {
+  return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1);
+}
+
+export function mobileStatusVocabTs() {
+  const m = statusManifest;
+  const blank = m.roles.map((r) => r.role).filter((role) => mobileGlyphFor(role) === "");
+  if (blank.length > 0) {
+    throw new Error(
+      `design/emit.mjs: mobile status vocabulary — manifest rung(s) ${JSON.stringify(blank)} ` +
+        `resolve to an EMPTY glyph on apps/mobile. A mobile board lane paints the glyph ` +
+        `literally (charter D50: a pure renderer has no animation to run), so an empty one ` +
+        `is a blank cell. Record an adjudicated glyph in design/status-manifest.json under ` +
+        `platform_overrides["${MOBILE_OVERRIDE_SURFACE}"] with its reason — never a default here.`,
+    );
+  }
+  const rec = (rows) => rows.map(([k, v]) =>
+    `  ${/^[A-Za-z_$][\w$]*$/.test(k) ? k : tsq(k)}: ${tsq(v)},`);
+  const statusRows = rec(Object.entries(m.statuses));
+  const glyphRows = rec(m.roles.map((r) => [r.role, mobileGlyphFor(r.role)]));
+  const labelRows = rec(m.roles.map((r) => [r.role, sentenceCase(r.label)]));
+  const ovNames = Object.keys(mobileStatusOverrides()).sort();
+  return [
+    "// Code generated by design/emit.mjs from design/status-manifest.json. DO NOT EDIT.",
+    "// Regenerate: node design/emit.mjs --write",
+    "//",
+    "// The white ladder (D15) as apps/mobile projects it — three flat Records,",
+    "// because a React Native block renderer resolves a status to a role and then",
+    "// looks glyph and label up separately. Hand-editing this file is caught by",
+    "// design/check.mjs Part A; a manifest edit re-emits it.",
+    "//",
+    "// Glyphs are the manifest's EXCEPT where design/status-manifest.json's own",
+    `// platform_overrides["${MOBILE_OVERRIDE_SURFACE}"] records an adjudicated`,
+    `// divergence — currently ${ovNames.length === 0 ? "none" : ovNames.map((r) => `\`${r}\``).join(", ")}.`,
+    "// Labels are the manifest label sentence-cased (mobile renders them as column",
+    "// headings). Both relations are applied by the emitter, so they are true by",
+    "// construction rather than asserted after the fact.",
+    "//",
+    "// The JS-only fail-open `unknown` sentinel (D11) is NOT a manifest rung and is",
+    "// NOT here — blocks/taskboard.tsx owns it and appends it.",
+    "",
+    "/** Stored lifecycle status → ladder role (the manifest `statuses` map, aliases",
+    " *  and terminal states included). */",
+    "export const MANIFEST_STATUS_TO_ROLE: Record<string, string> = {",
+    ...statusRows,
+    "}",
+    "",
+    "/** Ladder role → the glyph mobile paints, in manifest ORDER (the key order IS",
+    " *  the lane order the board derives). */",
+    "export const MANIFEST_ROLE_GLYPH: Record<string, string> = {",
+    ...glyphRows,
+    "}",
+    "",
+    "/** Ladder role → its sentence-cased display label, in manifest ORDER. */",
+    "export const MANIFEST_ROLE_LABEL: Record<string, string> = {",
+    ...labelRows,
+    "}",
+    "",
+    "/** The role an ABSENT/empty status falls back to (the manifest `default_role`). */",
+    `export const MANIFEST_DEFAULT_ROLE = ${tsq(m.default_role)}`,
     "",
   ].join("\n");
 }
@@ -1218,6 +1675,9 @@ function pdrenderGo(themes = loadThemes()) {
   // muted-text reading family above (GenInk/GenDim are a DIFFERENT, warmer set).
   const cliChrome = (name, role) =>
     `\tGenChrome${name} = lipgloss.AdaptiveColor{Light: "${c.cliChrome[role].light}", Dark: "${c.cliChrome[role].dark}"}`;
+  // Terminal space ladder inputs (see the emitted block below for the doctrine).
+  const air = tokens.space.air;
+  const sec = tokens.space.section;
   // Neutral callout tone (color.cliCalloutNeutral → hex) — the neutral peer of
   // the four status tones, consumed by Theme.Callout's "neutral" arm.
   const neut = c.cliCalloutNeutral;
@@ -1307,6 +1767,53 @@ function pdrenderGo(themes = loadThemes()) {
     `\tGenReadingFontStack     = ${JSON.stringify(tokens.font.reading.stack)}`,
     `\tGenReadingHeadingWeight = ${r.headingWeight}`,
     `\tGenReadingBodySize      = ${r.body.size}`,
+    ")",
+    "",
+    // ── terminal space ladder (space.air / space.section / space.rule) ───────
+    "// Generated terminal space ladder (design/tokens.json space.air /",
+    "// space.section / space.rule). The web surface paints these as PIXELS; a",
+    "// terminal has one vertical unit, the ROW, and space.air.beat (22px) is ≈ one",
+    "// row — so the six-rung web air ladder collapses to TWO honest terminal",
+    "// values. Nothing below spells a per-kind row count: GenAirRatios carries the",
+    "// source ratios verbatim, GenAirRowSplit carries the documented collapse",
+    "// threshold (design/emit.mjs AIR_ROW_SPLIT), and pdrender.AirRows (air.go)",
+    "// applies one to the other. A hand-written six-step table is exactly the fake",
+    "// precision this arm exists to refuse.",
+    "var GenAirRatios = map[string]float64{",
+    ...alignMap(AIR_STEPS.map((k) => `\t"${k}": ${air[k]},`)),
+    "}",
+    "",
+    "// GenAirOrder is the emission order (lightest opening → heaviest), matching",
+    "// AIR_STEPS in design/emit.mjs.",
+    `var GenAirOrder = []string{${AIR_STEPS.map((k) => `"${k}"`).join(", ")}}`,
+    "",
+    "// GenRuleGlyph is the terminal's rendering of the TWO weights a paper draws",
+    "// horizontal lines at (space.section.rule = 2px structural, space.rule.hairline",
+    "// = 1px everything else). A terminal cannot vary a line's thickness, so the",
+    "// weight becomes the GLYPH: heavy for a section boundary, light for a table",
+    "// underline, a divider, a heading rule. Derived from the px values, not typed:",
+    "// a weight of 2px or more is the structural one.",
+    "var GenRuleGlyph = map[string]string{",
+    ...alignMap([
+      `\t"hairline": ${JSON.stringify(ruleGlyph(tokens.space.rule.hairline))},`,
+      `\t"section": ${JSON.stringify(ruleGlyph(sec.rule))},`,
+    ]),
+    "}",
+    "",
+    "// GenAirRowSplit is the collapse threshold (a ratio at or above it earns a",
+    "// SECOND blank row). GenAirRowsDefault is the air a block that is not on the",
+    "// ladder opens with. GenSectionGapRows is space.section.beat (4.18 air beats ≈",
+    "// 92px, the benchmark artifact's section margin) rounded to whole rows: the air",
+    "// that says one section ENDED, the half of the boundary device the rule glyph",
+    "// completes. GenSectionHeadGapRows is space.section.gap (the artifact's 16px",
+    "// .sec-head padding-top) in rows: the air between the rule and the words.",
+    "const (",
+    ...alignEq([
+      `\tGenAirRowSplit = ${AIR_ROW_SPLIT}`,
+      "\tGenAirRowsDefault = 1",
+      `\tGenSectionGapRows = ${Math.round(sec.beat)}`,
+      `\tGenSectionHeadGapRows = ${Math.round(sec.gap / air.beat)}`,
+    ]),
     ")",
     "",
     "// Generated categorical viz palettes (design/tokens.json color.pdrenderChart /",
@@ -1682,8 +2189,11 @@ function elixirTokensGen(themes = loadThemes()) {
     "  callout tone tints (callout/2 — util.ex tone_palette/1), the semantic",
     "  status tones, and the tokenized reading accent + reading type. The email",
     "  brand/rule are the verbatim email_* hex, NOT color.primary/border (those",
-    "  HSL-derived slots are drifted from the byte-locked email golden; w3",
-    "  reconciles the two).",
+    "  HSL-derived slots are drifted from the byte-locked email golden). That",
+    "  divergence is a RATIFIED decision dated 2026-09-11 in tokens.json",
+    "  paperEmail._note \u2014 read it there; it is not pending reconciliation, and",
+    "  moving these bytes is an approved visual migration that owns the email",
+    "  golden, never a token cleanup.",
     "",
     "  ## Theme-keying (charter D28)",
     "",
@@ -1744,7 +2254,8 @@ function elixirTokensGen(themes = loadThemes()) {
     // paperEmail). Verbatim hand values, NOT derived from color.primary/border:
     // those HSL-round-tripped brand/rule slots ABOVE (#1e5243/#e4e4e7) are drifted
     // from the live email hexes (#1e5347/#dde7e2), so palettes.ex / data_viz.ex
-    // consume THESE instead — zero email-golden retint. w3 reconciles the two.
+    // consume THESE instead — zero email-golden retint. RATIFIED 2026-09-11; the
+    // decision record is tokens.json paperEmail._note (do not restate it here).
     "  # Paper email surface — verbatim hand hex (light-only; email has no dark mode).",
     "  @email %{",
     ...themes.flatMap((t, i) => emailEntry(t, isLast(i))),
@@ -2420,6 +2931,105 @@ function bulldocsBlock(themes = loadThemes()) {
 // carries the newline). This kills the GR12 drift: the SPA's identity picker
 // reads BP_THEMES at runtime, so a new design/themes/<id>.json reaches the picker
 // the moment `emit --write` runs — no second hand-list to forget.
+// ── the bp-graph.js Canvas palette block (task au-r6) ────────────────────────
+// Emits the renderer's colour constants from tokens.json. Only COLOUR lives here:
+// alphas, radii, zoom-fade multipliers and the font stack stay hand-written in
+// bp-graph.js outside the marker, because they are not colour tokens and moving
+// them would put non-design geometry under the theme compiler.
+export function graphPaletteBlock(t = tokens) {
+  const g = t.color.graphCanvas.graph;
+  const q = (v) => JSON.stringify(v);
+  const L = [];
+  const line = (name, value) => L.push(`  var ${name} = ${q(value)};`);
+
+  L.push("  // Obsidian-faithful restyle: small flat dots, thin faint threads, near-");
+  L.push("  // monochrome, generous void. Beauty through restraint.");
+  line("ACCENT", g.accent);
+  // DERIVED from accent, never a second token: a hand-kept `accentRgb` sibling
+  // silently survives an `accent` edit (measured — the mutation proof for au-r6
+  // changed accent and ACCENT_RGB stayed on the old hue), which is the exact drift
+  // this task exists to remove.
+  const rgbOf = (hex) => {
+    let h = hex.replace("#", "");
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  };
+  L.push(`  var ACCENT_RGB = [${rgbOf(g.accent).join(", ")}];`);
+  line("A11Y_RING", g.a11yRing);
+  line("SLATE", g.slate);
+  line("AMBER", g.amber);
+  L.push("");
+  L.push("  // LIGHT-ground siblings for the four hues above — the only colours this");
+  L.push("  // renderer paints RAW on whichever ground is active. The dark values land at");
+  L.push("  // 2.53/2.31/2.33/1.52 on BG_LIGHT, all under the 3.0 WCAG non-text floor, and");
+  L.push("  // A11Y_RING is the keyboard focus ring. accent()/a11yRing()/slate()/amber()");
+  L.push("  // below pick between the pair; dark keeps its original vivid values.");
+  line("ACCENT_LIGHT", g.accentLight);
+  line("A11Y_RING_LIGHT", g.a11yRingLight);
+  line("SLATE_LIGHT", g.slateLight);
+  line("AMBER_LIGHT", g.amberLight);
+  L.push("");
+  L.push("  // Monochrome node tint — one muted desaturated lavender-grey for EVERY node");
+  L.push("  // on dark (the default look). Per-type colour is the opt-in \"Full color\" toggle.");
+  line("MONO_DARK", g.monoDark);
+  line("MONO_LIGHT", g.monoLight);
+  line("NODE_WHITE", g.nodeWhite);
+  line("NODE_INK_LIGHT", g.nodeInkLight);
+  L.push("");
+  L.push("  // Flat theme backgrounds (no gradient, no vignette).");
+  line("BG_DARK", g.bgDark);
+  line("BG_LIGHT", g.bgLight);
+  L.push("");
+  L.push("  // Link base colour channels — very faint thin threads (alphas stay outside).");
+  line("LINK_RGB_DARK", g.linkRgbDark);
+  line("LINK_RGB_LIGHT", g.linkRgbLight);
+  L.push("");
+  L.push("  // Label colours: resting, hovered, and the mix targets a matched label walks to.");
+  line("LABEL_COLOR_DARK", g.labelDark);
+  line("LABEL_COLOR_LIGHT", g.labelLight);
+  line("LABEL_HOT_DARK", g.labelHotDark);
+  line("LABEL_HOT_LIGHT", g.labelHotLight);
+  line("LABEL_MIX_DARK", g.labelMixDark);
+  line("LABEL_MIX_LIGHT", g.labelMixLight);
+  line("LABEL_HOV_DARK", g.labelHovDark);
+  line("LABEL_SHADOW_DARK", g.labelShadowDark);
+  line("LABEL_SHADOW_LIGHT", g.labelShadowLight);
+  L.push("");
+  L.push("  // Canvas toast pill + the hover tooltip's own glass.");
+  line("TOAST_BG_DARK", g.toastBgDark);
+  line("TOAST_BG_LIGHT", g.toastBgLight);
+  line("TOAST_BORDER", g.toastBorder);
+  line("TOOLTIP_TITLE_DARK", g.tooltipTitleDark);
+  line("TOOLTIP_TITLE_LIGHT", g.tooltipTitleLight);
+  line("TOOLTIP_META_DARK", g.tooltipMetaDark);
+  line("TOOLTIP_META_LIGHT", g.tooltipMetaLight);
+  line("TOOLTIP_BG_DARK", g.tooltipBgDark);
+  line("TOOLTIP_BG_LIGHT", g.tooltipBgLight);
+  line("TOOLTIP_BORDER_DARK", g.tooltipBorderDark);
+  line("TOOLTIP_BORDER_LIGHT", g.tooltipBorderLight);
+  L.push("");
+  L.push("  // Per-type hues — painted ONLY under the optional \"Full color\" toggle.");
+  L.push("  var TYPE_HEX = {");
+  const hues = Object.entries(g.typeHues).filter(([k]) => !k.startsWith("_"));
+  for (const [k, v] of hues) L.push(`    ${/^[A-Za-z_$][\w$]*$/.test(k) ? k : q(k)}: ${q(v)},`);
+  L.push(`    _unknown: ${q(g.slate)}`);
+  L.push("  };");
+  L.push("");
+  L.push("  // Overlay chrome (legend, zoom strip, toggles, search) — inline styles on the");
+  L.push("  // injected DOM, rebuilt by setTheme() so canvas and chrome flip together.");
+  L.push("  var CHROME_PALETTE = {");
+  for (const mode of ["light", "dark"]) {
+    const c = g.chrome[mode];
+    L.push(`    ${mode}: {`);
+    const keys = Object.keys(c).filter((k) => !k.startsWith("_"));
+    for (const k of keys) L.push(`      ${k}: ${q(c[k])},`);
+    L.push(`      mono: ${q(mode === "light" ? g.monoLight : g.monoDark)}`);
+    L.push(`    }${mode === "light" ? "," : ""}`);
+  }
+  L.push("  };");
+  return L.join("\n");
+}
+
 export function bpThemesList(themes = loadThemes()) {
   return "    " + themes.map(({ name }) => JSON.stringify(name)).join(", ");
 }
@@ -2556,6 +3166,10 @@ export const ARTIFACTS = [
   { name: "/papers reader skin", path: "api/lib/barkpark_web/layouts/bulldocs.html.heex", kind: "css", build: bulldocsBlock },
   { name: "web demo", path: "web/app/globals.css", kind: "css", build: webBlock },
   { name: "web TS tokens", path: "web/lib/tokens.gen.ts", kind: "ts", build: webTokensTs },
+  { name: "react status vocabulary", path: "js/packages/react/src/status-vocab.gen.ts", kind: "ts", build: reactStatusVocabTs },
+  { name: "web status ladder", path: "web/lib/status-ladder.gen.ts", kind: "ts", build: webStatusLadderTs },
+  { name: "mobile status vocabulary", path: "apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts",
+    kind: "ts", build: mobileStatusVocabTs },
   { name: "Go board", path: "internal/taskboard/tokens_gen.go", kind: "go", build: taskboardGo },
   { name: "Go pdrender", path: "internal/pdrender/tokens_gen.go", kind: "go", build: pdrenderGo },
   { name: "Go semrole", path: "internal/semrole/tokens_gen.go", kind: "go", build: semroleGo },
@@ -2567,6 +3181,18 @@ export const ARTIFACTS = [
   { name: "status page chrome", path: "api/lib/barkpark_web/controllers/status_controller.ex", kind: "css", build: statusChromeBlock },
   { name: "/sheets reader", path: "api/lib/barkpark_web/layouts/sheets.html.heex", kind: "css", build: sheetsBlock },
   { name: "living styleguide swatches", path: "cloud/priv/static/styleguide.html", kind: "html", build: styleguideSwatches },
+  { name: "search-starter theme tokens", path: "templates/search-starter/app/globals.css", kind: "css",
+    markerBegin: TEMPLATE_TOKENS_MARKER_BEGIN, markerEnd: TEMPLATE_TOKENS_MARKER_END, build: webBlock },
+  { name: "astro-search-starter theme tokens", path: "templates/astro-search-starter/src/styles/globals.css", kind: "css",
+    markerBegin: TEMPLATE_TOKENS_MARKER_BEGIN, markerEnd: TEMPLATE_TOKENS_MARKER_END, build: webBlock },
+  { name: "bp-graph palette (1/4)", path: "api/priv/static/assets/bp-graph.js", kind: "css",
+    markerBegin: GRAPH_PALETTE_MARKER_BEGIN, markerEnd: GRAPH_PALETTE_MARKER_END, build: graphPaletteBlock },
+  { name: "bp-graph palette (2/4)", path: "web/public/bp-graph.js", kind: "css",
+    markerBegin: GRAPH_PALETTE_MARKER_BEGIN, markerEnd: GRAPH_PALETTE_MARKER_END, build: graphPaletteBlock },
+  { name: "bp-graph palette (3/4)", path: "templates/search-starter/public/bp-graph.js", kind: "css",
+    markerBegin: GRAPH_PALETTE_MARKER_BEGIN, markerEnd: GRAPH_PALETTE_MARKER_END, build: graphPaletteBlock },
+  { name: "bp-graph palette (4/4)", path: "templates/astro-search-starter/public/bp-graph.js", kind: "css",
+    markerBegin: GRAPH_PALETTE_MARKER_BEGIN, markerEnd: GRAPH_PALETTE_MARKER_END, build: graphPaletteBlock },
 ];
 
 // Tolerant of leading indentation on the marker lines (Studio's markers sit
@@ -2750,6 +3376,18 @@ function run(mode, { force = false } = {}) {
     ...mr, currentRegion: mr.currentBlock, expectedRegion: mr.generatedBlock,
   };
 
+  // ── the orphan predicate (charter D21 hygiene) ──────────────────────────────
+  // A ledger slot is ORPHANED iff NO unit in this run claims its key. The claimed
+  // set is DERIVED from the units themselves — never from a path prefix, a name
+  // pattern, or a list — so a rename that leaves a same-path sibling behind prunes
+  // only the slot whose artifact actually went away (cloud/priv/static/app.js owns
+  // two slots; losing one must not cost the other). It deliberately INCLUDES units
+  // that ERRORED: `mr` is used here rather than `mirrorUnit` because
+  // evaluateMirror() always returns name+path, so the mirror keeps its slot even
+  // when its region failed to evaluate. Pruning is for ABSENCE, never for failure.
+  const claimedKeys = new Set([...results, mr].map(regionKey));
+  const orphanKeys = Object.keys(regions).filter((k) => !claimedKeys.has(k));
+
   // ── --adopt: bless what is on disk as this emitter's own output ─────────────
   // The one sanctioned escape from a refusal that is NOT a destructive write:
   // after relocating hand-written rules outside the marker (the fix 55d61ab4c
@@ -2764,8 +3402,17 @@ function run(mode, { force = false } = {}) {
       if (next[k] !== d) { next[k] = d; console.log(`  adopt ${u.name} (${u.path})`); adopted++; }
       else console.log(`  ok    ${u.name} (already blessed)`);
     }
+    // --adopt NAMES an orphan and KEEPS it. It cannot safely prune: it is the
+    // escape hatch used precisely when the tree is in an odd state (a merge, a
+    // half-relocated region), and a unit that errored above was skipped without
+    // its key ever reaching `next`. Dropping a slot here would delete the record
+    // of a surface that merely failed to read. --write, which enumerates the
+    // complete unit set, is the one mode allowed to remove a key.
+    for (const k of orphanKeys) {
+      console.error(`  ORPHAN ${k} — no artifact claims this slot (kept; remove it with: node design/emit.mjs --write)`);
+    }
     writeManifest(next);
-    console.log(`\nemit --adopt: ${adopted} region(s) newly blessed in ${MANIFEST_PATH}. Nothing was rewritten.`);
+    console.log(`\nemit --adopt: ${adopted} region(s) newly blessed in ${MANIFEST_PATH}${orphanKeys.length ? `, ${orphanKeys.length} orphan slot(s) named above and KEPT` : ""}. Nothing was rewritten.`);
     return;
   }
 
@@ -2808,7 +3455,16 @@ function run(mode, { force = false } = {}) {
     }
   }
 
-  const nextRegions = { ...regions };
+  // The ledger --write emits holds ONLY keys claimed in this run: spreading the old
+  // regions object (what this did before) meant a renamed or removed artifact left
+  // a dead digest behind forever, and a reader could not tell that slot from a live
+  // one. A claimed unit that could not be evaluated carries its EXISTING digest
+  // forward untouched — the loops below overwrite the ones they actually write.
+  const nextRegions = {};
+  for (const k of claimedKeys) if (k in regions) nextRegions[k] = regions[k];
+  if (mode === "write") {
+    for (const k of orphanKeys) console.log(`  PRUNE ${k} (no artifact claims this slot)`);
+  }
   for (const r of results) {
     if (r.error) { console.error(`  ERROR ${r.name}: ${r.error}`); errored++; continue; }
     if (mode === "write") {
@@ -2852,7 +3508,7 @@ function run(mode, { force = false } = {}) {
   }
   const total = results.length + 1; // + paper-editor mirror
   console.log(mode === "write"
-    ? `emit --write: ${changed} artifact(s) regenerated, ${total - changed} already current; ${MANIFEST_PATH} updated.`
+    ? `emit --write: ${changed} artifact(s) regenerated, ${total - changed} already current; ${MANIFEST_PATH} updated${orphanKeys.length ? ` (${orphanKeys.length} orphan slot(s) pruned)` : ""}.`
     : `emit --check: all ${total} artifacts in sync (${results.length} surfaces + paper-editor mirror), every generated region attributed.`);
 }
 

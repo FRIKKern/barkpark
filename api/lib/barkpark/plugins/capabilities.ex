@@ -18,6 +18,24 @@ defmodule Barkpark.Plugins.Capabilities do
   decisions in `docs/cli/m0-decisions.md` (Part C rules — esp. existence-hiding
   and the `scoped_admin` caveat).
 
+  ## THIS FILE HAS AN OUTPUT OUTSIDE api/ — IT MOVES IN YOUR COMMIT
+
+  Editing anything here (a description, a flag, a route) regenerates
+  `docs/openapi.json`, which lives OUTSIDE the api fence and is diffed inside
+  the REQUIRED `Elixir gate` (`.github/workflows/elixir.yml`, step "OpenAPI
+  drift check"). Regenerating it IS an allowed cross-fence edit for the lane
+  that caused it — a generated artifact is an OUTPUT of your change, and the
+  fence follows AUTHORSHIP, not directory — but ONLY `mix barkpark.openapi` may
+  write it; hand-editing it is itself the defect. Rebase onto `origin/main`
+  FIRST, then regenerate, then report `git diff --numstat docs/openapi.json`:
+  one line moved is a RE-PIN, many is a BURIAL.
+
+  `mix barkpark.coupled` prints the full derived coupling table and
+  `mix barkpark.coupled --check` reds before CI does. See
+  `Barkpark.CoupledArtifacts` for the predicate, the ruling, and why a file that
+  merely shares a string with a generated artifact (e.g.
+  `docs/cli/fixtures/full-manifest.json`) is NOT one and must be left alone.
+
   ## Auth-tier ladder
 
   The six closed tiers (`docs/cli/manifest.schema.json#/$defs/auth_tier`) split
@@ -577,6 +595,11 @@ defmodule Barkpark.Plugins.Capabilities do
 
   # ── Server identity ──────────────────────────────────────────────────────
 
+  # Advisory CLI floor (see `default_server/0`). `A.B.C` only — the shape
+  # `internal/cli/min_cli_gate.go` compares against a released cliVersion.
+  @default_min_cli "1.0.0"
+  @min_cli_re ~r/^\d+\.\d+\.\d+$/
+
   @doc """
   The boot-time `server` envelope: `name`, `version`, `base_url`, `api_version`,
   `min_cli`. `base_url` defaults to the frozen `:capabilities_base_url` app-env
@@ -587,6 +610,25 @@ defmodule Barkpark.Plugins.Capabilities do
   `manifest/2`'s existing `:server` option. The envelope KEYS are fixed
   (`manifest.schema.json` is `additionalProperties: false` and the Go client
   strict-decodes it): only the `base_url` VALUE may be swapped, never a new key.
+
+  `version` IS THE RUNNING RELEASE, from the same source `/status.json`
+  publishes (`Barkpark.BuildInfo.version/0`, `"A.B.C.D"` or `"unknown"`). It
+  used to be `Application.spec(:barkpark, :vsn)` — the mix.exs project version,
+  frozen at `0.1.0` and never bumped with a release — so the prod box answered
+  `server.version "0.1.0"` while its own `/status.json` said `"0.2.26.929"`
+  (measured 2026-09-16, task-ae75712d581fda87). Two public surfaces on one box
+  now agree on one number.
+
+  `min_cli` IS ADVISORY, not a refusal floor: the `:capabilities_min_cli`
+  app-env scalar (default `#{@default_min_cli}`), which MUST name a release
+  some published `bp` satisfies — the CLI ships from `cli-v*` tags (1.1.0
+  upward), a separate series from the server's `v0.2.x`. A released `bp`
+  reports it at `bp capabilities` and, via `serverFloorStaleness`, withholds
+  `up_to_date: true` at the whoami/doctor freshness leg when it is below the
+  floor; it never aborts a command. Because the envelope cannot gain a key,
+  this VALUE is the only channel by which a box can tell an already-installed
+  client it is not current. A configured value that is not `A.B.C` falls back
+  to the default rather than publishing a string no client can compare.
   """
   @spec default_server() :: %{optional(String.t()) => String.t()}
   def default_server do
@@ -595,14 +637,28 @@ defmodule Barkpark.Plugins.Capabilities do
       "version" => server_version(),
       "base_url" => app_env(:capabilities_base_url, "http://localhost:4000"),
       "api_version" => "1",
-      "min_cli" => "1.0.0"
+      "min_cli" => min_cli()
     }
   end
 
+  # The same resolver `Barkpark.Status.health/0` feeds into `/status.json`'s
+  # `version`, degraded the same way: BuildInfo is compile-time constants and
+  # cannot raise, but the envelope must never take the manifest down with it.
   defp server_version do
-    case Application.spec(:barkpark, :vsn) do
-      vsn when is_list(vsn) -> List.to_string(vsn)
-      _ -> "0.0.0"
+    Barkpark.BuildInfo.version()
+  rescue
+    _ -> "unknown"
+  catch
+    _, _ -> "unknown"
+  end
+
+  defp min_cli do
+    case app_env(:capabilities_min_cli, @default_min_cli) do
+      value when is_binary(value) ->
+        if Regex.match?(@min_cli_re, value), do: value, else: @default_min_cli
+
+      _ ->
+        @default_min_cli
     end
   end
 
@@ -954,8 +1010,22 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("type", true, "string", "Document type."),
           arg("doc_id", true, "string", "Document id.")
         ],
-        flags: [flag("limit", "int", "Max revisions to return.")],
+        flags: [
+          flag("limit", "int", "Max revisions to return (max 200).", default: 50),
+          flag(
+            "offset",
+            "int",
+            "Skip this many revisions — pages past the first. The response carries limit, offset and has_more."
+          )
+        ],
         writes: false,
+        # Declaring `offset` alongside `limit` makes this walkable, so it must
+        # say so: CapabilitiesPaginationFlagTest reds a read that offers both
+        # and stays `paginated: false`, because `bp doc history --all` would
+        # then silently return page one. The `--all` walker asks in
+        # `?limit=`/`?offset=` windows, which is exactly what
+        # HistoryController.index/2 reads.
+        paginated: true,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -1222,7 +1292,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "doc.patch",
         "doc",
         "patch",
-        "Patch a document: --set the fields to change (key:=json for typed values).",
+        "Patch a document: --set the fields to change (key:=json for typed values), or --file for a JSON object of fields.",
         "POST",
         "/v1/data/mutate/:dataset",
         "write",
@@ -1231,9 +1301,13 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("id", true, "string", "Document id.")
         ],
         flags: [
+          flag("file", "file", "Fields to change as a JSON object from a file or - for stdin."),
           flag("set", "string", "Field key=value to change (repeatable; key:=json for typed).",
             repeatable: true
-          )
+          ),
+          # scaffy-backlog-doc-patch-file-flag: the Go route for --file bodies
+          # landed in #18616/#19261; the manifest never declared the flag.
+          flag("file", "file", "Fields to change as a JSON object from a file or - for stdin.")
         ],
         writes: true,
         mutation_op: "patch",
@@ -1808,6 +1882,15 @@ defmodule Barkpark.Plugins.Capabilities do
             "perspective",
             "string",
             "published (default) | drafts | raw. Any other value is a 400, never a silent downgrade to published."
+          ),
+          flag(
+            "bodyChars",
+            "int",
+            "Bound each hit's projected prose to ~N characters: blocks/body are cut to the " <>
+              "smallest whole-block document prefix carrying that much text, and a cut hit " <>
+              "carries _bodyTruncated: true. Absent means unbounded (a limit=100 browse " <>
+              "projecting blocks answers ~14 MB). A malformed value is a 400, never an " <>
+              "unbounded 200."
           )
         ],
         paginated: true,
@@ -2079,6 +2162,35 @@ defmodule Barkpark.Plugins.Capabilities do
         writes: true,
         default_output: "minimal"
       ),
+      # Reversible archive / restore (task-55474a106554e65a). Tier `admin`, not
+      # `scoped_admin`: the route floor is `[:api, :require_admin]` (the GLOBAL
+      # admin bit) PLUS `TenancyAuth.workspace_admin?/2` in the action, so a
+      # caller without the global bit is refused before any workspace is read.
+      # The slug comes from the active --workspace, the workspace.project-create
+      # precedent; the Default workspace refuses archive (409
+      # default_workspace_not_archivable), so a fallback to it cannot archive it.
+      core_cmd(
+        "workspace.archive",
+        "workspace",
+        "archive",
+        "Archive a workspace reversibly (the active --workspace): content is kept, scoped reads/writes answer 409 workspace_archived until restored.",
+        "POST",
+        "/api/workspaces/:workspace_slug/archive",
+        "admin",
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "workspace.restore",
+        "workspace",
+        "restore",
+        "Restore an archived workspace (the active --workspace) to exactly its pre-archive state.",
+        "POST",
+        "/api/workspaces/:workspace_slug/restore",
+        "admin",
+        writes: true,
+        default_output: "minimal"
+      ),
       core_cmd(
         "workspace.project-ls",
         "workspace",
@@ -2151,6 +2263,19 @@ defmodule Barkpark.Plugins.Capabilities do
             default: "user"
           )
         ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "workspace.set-locale",
+        "workspace",
+        "set-locale",
+        "Set the Studio chrome language for the active --workspace (en | nb-NO). Schema titles and descriptions are never translated.",
+        "PATCH",
+        "/v1/workspace/locale",
+        "scoped_admin",
+        args: [arg("locale", true, "string", "en | nb-NO")],
         writes: true,
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
@@ -2229,6 +2354,27 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("id", true, "string", "Token id (from token ls).")],
         writes: true,
         default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "token.rotate",
+        "token",
+        "rotate",
+        "Mint a successor for a token seated here (same permissions and scope); the old one expires after the grace window.",
+        "POST",
+        "/v1/tokens/:id/rotate",
+        "scoped_admin",
+        args: [arg("id", true, "string", "Token id (from token ls).")],
+        flags: [
+          flag(
+            "grace_seconds",
+            "int",
+            "Seconds the old token keeps working (0 = revoke now; max 604800).",
+            default: 86_400
+          )
+        ],
+        writes: true,
+        default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
@@ -2560,6 +2706,31 @@ defmodule Barkpark.Plugins.Capabilities do
         flags: [flag("access", "string", "read | edit.", default: "read")],
         writes: true,
         default_output: "minimal"
+      ),
+      # THE AFFORDANCE (task-cbb112a9b4c600cc). ONE verb, and it creates the
+      # SHARE: after the task-8627e1a3f974693d ruling a `:media` `:read` share
+      # is the only thing that admits an anonymous read of a non-Default
+      # tenant's scoped media, so "my website cannot show its images" is one
+      # command. Deliberately NOT a visibility verb — flipping an asset's
+      # bp_visibility opens no door RequireShareScope asks about.
+      core_cmd(
+        "share.publish-media",
+        "share",
+        "publish-media",
+        "Publish this scope's media — add the :media :read share so anonymous <img> loads resolve (never flips asset visibility).",
+        "POST",
+        "/v1/shares/media",
+        "admin",
+        args: [
+          arg(
+            "scope",
+            true,
+            "string",
+            "ws[/project[/dataset]] — defaults project=default, dataset=production."
+          )
+        ],
+        writes: true,
+        default_output: "json"
       ),
       core_cmd(
         "share.rm",

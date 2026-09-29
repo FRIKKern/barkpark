@@ -244,6 +244,37 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
       refute_receive {:webhook_post, _, _, _}, 200
     end
 
+    # The R1 race at the ROUTE, which the unit case cannot measure: the unit
+    # test proves `replay_delivery/3` returns `{:error, :delivery_gone}`, this
+    # one proves the controller answers 404 for it instead of crashing on the
+    # bare `{:ok, delivery} = ...` match it used to do. A BEFORE INSERT trigger
+    # returning NULL makes the claim report `:already_delivered` while leaving
+    # nothing to re-fetch — the observable pair of "the row was deleted between
+    # the two statements". It rolls back with the sandbox transaction.
+    test "the delivery row vanishing mid-replay → 404, not a crash", %{conn: conn} do
+      wh = make_webhook(conn)
+      ev = make_event()
+
+      Repo.query!("""
+      CREATE FUNCTION pg_temp.bp_skip_delivery_insert() RETURNS trigger AS $$
+      BEGIN RETURN NULL; END;
+      $$ LANGUAGE plpgsql;
+      """)
+
+      Repo.query!("""
+      CREATE TRIGGER bp_skip_delivery_insert
+      BEFORE INSERT ON webhook_deliveries
+      FOR EACH ROW EXECUTE FUNCTION pg_temp.bp_skip_delivery_insert();
+      """)
+
+      resp =
+        conn |> authed() |> post("/v1/webhooks/test/#{wh.id}/deliveries/#{ev.id}/replay")
+
+      assert resp.status == 404
+      assert Jason.decode!(resp.resp_body)["error"]["message"] == "event not found"
+      refute_receive {:webhook_post, _, _, _}, 200
+    end
+
     test "non-integer event_id → 404", %{conn: conn} do
       wh = make_webhook(conn)
       resp = conn |> authed() |> post("/v1/webhooks/test/#{wh.id}/deliveries/abc/replay")

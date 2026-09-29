@@ -36,7 +36,13 @@ defmodule BarkparkWeb.MutateShapeMissingFieldTest do
   alias Barkpark.Content
 
   setup do
-    Barkpark.Auth.create_token("barkpark-shape-token", "shape", "test", ["read", "write"])
+    Barkpark.Auth.create_token(
+      "barkpark-shape-token",
+      "shape",
+      "test",
+      ["read", "write"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
 
     Content.upsert_schema(
       %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},

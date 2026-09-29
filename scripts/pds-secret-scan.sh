@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # pds-secret-scan.sh — the VALUE-based secret scan for bp-export-v1 bundles
-# (PDS wave 2; charter decisions PDS-D24/D25/D26 under the PDS-D20 anti-vacuity
+# (PDS wave 2; charter decisions PDS-D24/PDS-D25/PDS-D26 under the PDS-D20 anti-vacuity
 # doctrine).
 #
 # THE QUESTION IT ANSWERS: "is this bundle provably stripped?" — with an answer
@@ -30,13 +30,31 @@
 #     on the FULL bundle too — it silently stops being a control.
 #   * secrets / secrets_audit — one row DB-wide with workspace_id IS NULL,
 #     structurally excluded from every workspace-scoped export by the tenant wall.
-#   * api_tokens — hashed at rest. access_grants — 2 revoked synthetic rows
-#     (kept as a secondary PII signal, not as the discriminator).
+#   * api_tokens — RULED OUT as value ammo, PERMANENTLY (PDS-D737). The table
+#     stores `token_hash` and no plaintext bearer token, so the plaintext a
+#     reader imagines being searched for DOES NOT EXIST AT REST. A plaintext
+#     token scan therefore scores CLEAN on a full-fidelity bundle that carries
+#     the ENTIRE table — control step 8 runs exactly that counterfactual and
+#     shows the vacuous green. `api_tokens` is proven ABSENT structurally
+#     instead, by the member-presence check below, never by a value scan.
+#   * access_grants — 2 revoked synthetic rows (kept as a secondary PII signal,
+#     not as the discriminator).
 #
-#   THE ONE REAL DISCRIMINATOR is `webhooks.secret`: a plain Ecto :string, 8 rows
-#   on guerrilla, 8 distinct 43-char plaintext values, workspace-attributed, E1
-#   (guaranteed present in a FULL bundle) and `:deny` in the dev partition
-#   (guaranteed absent from a DEV bundle). The control is anchored there.
+#   THE ONE REAL *VALUE* DISCRIMINATOR is `webhooks.secret`: a plain Ecto :string,
+#   8 rows on guerrilla, 8 distinct 43-char plaintext values, workspace-attributed,
+#   E1 (guaranteed present in a FULL bundle) and `:deny` in the dev partition
+#   (guaranteed absent from a DEV bundle). The VALUE control is anchored there.
+#   `api_tokens` has a discriminator too, but a STRUCTURAL one, described next —
+#   the two are different KINDS of evidence and the output never conflates them.
+#
+# THE MEMBER-PRESENCE CHECK — a SECOND, STRUCTURAL discriminator (PDS-D737).
+# `--deny-member tables/api_tokens.copy` asks one question only: is this member
+# in the container? It fires (exit 1) on a bundle that carries the table and is
+# clean (exit 0) on one that does not — the same paired differential the webhook
+# value control passes, proven locally in control steps 6-7. It is NOT a value
+# scan and it makes NO claim about any token: a hash is not a credential, and
+# this script never searches for a plaintext token value because none is stored.
+# Every line it prints says so in its own words, and limit 3 restates the bound.
 #
 # HONEST MECHANISM LANGUAGE (PDS-D25). `@dev_scrub` is genuinely `%{}` — the dev
 # partition ships ZERO field-level scrubs. A clean dev scan proves the TABLE IS
@@ -46,13 +64,15 @@
 # Usage:
 #   scripts/pds-secret-scan.sh scan --bundle <tar> [--db <conninfo>] \
 #       [--value <v>]... [--ammo-file <f>] [--extra-patterns <f>] \
-#       [--ammo-from-db <conninfo>] [--profile full|dev|personal-local] [--reveal]
+#       [--ammo-from-db <conninfo>] [--deny-member <member path>]... \
+#       [--profile full|dev|personal-local] [--reveal]
 #   scripts/pds-secret-scan.sh control [--pg <maintenance conninfo>] [--keep]
 #   scripts/pds-secret-scan.sh --help
 #
 # Exit codes:
 #   0  scan clean (no ammo value found) / control PASSED
-#   1  HITS — at least one ammo value found in the bundle or the target DB
+#   1  HITS — at least one ammo value found in the bundle or the target DB, OR
+#      at least one --deny-member path present in the bundle
 #   2  usage or environment error, or REFUSED TO MEASURE (no ammo, missing
 #      psql/tar, unreadable/empty/table-less bundle, unreachable DB, zero-table
 #      schema) — an empty corpus never reads as 0 CLEAN
@@ -113,6 +133,16 @@ print_limits() {
   say "  2. ABSENCE-OF-GIVEN-VALUES ONLY. A clean result proves the target is free"
   say "     of the values you ENUMERATED — never that it is free of secrets nobody"
   say "     enumerated."
+  if [ -s "$DENY_MEMBERS_FILE" ]; then
+    say "  3. THE --deny-member CHECK IS STRUCTURAL, NOT A VALUE SCAN. It answers"
+    say "     \"is this member in the container?\" and nothing else. For api_tokens"
+    say "     that is the ONLY honest question available: the table stores"
+    say "     token_hash and no plaintext bearer token, so NO plaintext token value"
+    say "     was searched for here and none could be — there is nothing at rest to"
+    say "     search for. An absent member proves the table DENY held. A present"
+    say "     member proves the table travelled; it says nothing about whether any"
+    say "     credential in it is usable, because a hash is not a credential."
+  fi
 }
 
 # ── ammo ─────────────────────────────────────────────────────────────────────
@@ -161,10 +191,25 @@ ammo_add_from_db() { # conninfo — pull the live discriminators, read-only
 
 ammo_count() { [ -s "$AMMO_FILE" ] && wc -l < "$AMMO_FILE" | tr -d ' ' || echo 0; }
 
+# ── denied members (structural, PDS-D737) ────────────────────────────────────
+# One member path per line. These are paths that must be ABSENT from the
+# bundle; presence is a HIT in its own right, independent of any value.
+DENY_MEMBERS_FILE=""
+# THE ENUMERATION SIDE of the deny identity: how many non-blank rows the deny
+# list hands `check_deny_members`. `awk NF` and not `wc -l`, for two reasons
+# that both make a wc-based count refuse a COMPLETE check: the loop skips blank
+# rows BEFORE it tallies (`[ -n "$want" ] || continue`), and `wc -l` counts
+# newlines, so a final row with no trailing newline is invisible to it while
+# the loop (which carries `|| [ -n "$want" ]`) still examines it.
+#
+# This is NOT the number the ABSENT verdict prints. That number is the
+# ITERATION count — see the count identity in `report`.
+deny_member_rows() { [ -s "$DENY_MEMBERS_FILE" ] && awk 'NF' "$DENY_MEMBERS_FILE" | wc -l | tr -d ' ' || echo 0; }
+
 # ── the bundle scan: raw bytes, every member ────────────────────────────────
 # Returns the hit count via the global HITS; prints one line per hit.
 scan_bundle() { # tar-path
-  local bundle="$1" dir member label value n rel first table_members
+  local bundle="$1" dir member label value n rel first table_members mlist enumerated_members=0
   [ -r "$bundle" ] || die "cannot read bundle: $bundle"
   dir="$(mktemp -d "${TMPDIR:-/tmp}/pds-scan.XXXXXX")"
   TMP_DIRS="$TMP_DIRS $dir"
@@ -173,10 +218,33 @@ scan_bundle() { # tar-path
 
   local members=0
   table_members=0
+  MEMBER_LIST="$(mktemp "${TMPDIR:-/tmp}/pds-scan-members.XXXXXX")"
+  TMP_FILES="$TMP_FILES $MEMBER_LIST"
+
+  # MATERIALISE THE ENUMERATION, THEN COUNT IT, BEFORE READING A SINGLE MEMBER.
+  # `members` below counts ITERATIONS; this counts the paths `find | sort`
+  # actually produced. The two must be equal, and the check after the loop is
+  # the only thing that can tell "scanned 40 of 40" from "scanned 1 of 40".
+  # A file rather than the old `< <(find …)` process substitution so the two
+  # numbers are read off ONE enumeration — re-running find would compare a scan
+  # against a second, possibly different, listing. `awk`, not `grep -c`: a grep
+  # that matches nothing exits 1, and an empty bundle is a case that already has
+  # its own refusal below.
+  mlist="$(mktemp "${TMPDIR:-/tmp}/pds-scan-find.XXXXXX")"
+  TMP_FILES="$TMP_FILES $mlist"
+  find "$dir" -type f | sort > "$mlist"
+  enumerated_members="$(awk 'NF { n++ } END { print n+0 }' "$mlist")"
+
   say "bundle: $bundle"
-  while IFS= read -r member; do
+  # `|| [ -n "$member" ]` is not decoration: a plain `while read` DROPS a final
+  # line with no trailing newline, and the identity below would then refuse a
+  # complete bundle. (The sibling table loop learned this from its own control
+  # arm — see task-4121ac48f4e4f71e.)
+  while IFS= read -r member || [ -n "$member" ]; do
+    [ -n "$member" ] || continue
     members=$((members + 1))
     rel="${member#"$dir"/}"
+    printf '%s\n' "$rel" >> "$MEMBER_LIST"
     case "$rel" in tables/*) table_members=$((table_members + 1)) ;; esac
     while IFS="$(printf '\t')" read -r label value; do
       n="$(grep -a -c -F -e "$value" -- "$member" 2>/dev/null || true)"
@@ -187,7 +255,30 @@ scan_bundle() { # tar-path
         say "  HIT  member=$rel  ammo=$label  value=$(show "$value")  lines=$n  first_line=${first:-?}"
       fi
     done < "$AMMO_FILE"
-  done < <(find "$dir" -type f | sort)
+  done < "$mlist"
+
+  # ── THE COUNT IDENTITY ──────────────────────────────────────────
+  # FIRST, and ahead of BOTH anti-vacuity floors below, because a loop that died
+  # on its first iteration leaves members=0 over a NON-empty listing: the floor
+  # would then say "bundle contains ZERO members" about a tar holding 40. Two
+  # failures, two messages, and this one names BOTH numbers so a reader can see
+  # how much of the container was actually examined.
+  #
+  # WHY IT EXISTS (task-57fbebcb2d5339ff). The loop above reads the member list
+  # on fd 0. Any body child that reads stdin — a future `grep` with no file
+  # operand, a `read`, an `ssh`, a pager — swallows the remaining member paths
+  # and the loop ENDS EARLY with no error and no non-zero status. The scan then
+  # prints "RESULT: VALUE SCAN CLEAN" over one member of forty in the SAME WORDS
+  # it uses for forty of forty. The floors below cannot see that: `-eq 0`
+  # separates "nothing" from "something", never "some" from "all" — a scan that
+  # stopped after one member leaves members=1 and table_members=1 and clears
+  # both. No body child reads fd 0 today; the identity is for the one added
+  # next year, which is precisely the child no fd-discipline review can name.
+  # MUT-ANCHOR: bundle-count-identity
+  if [ "$members" -ne "$enumerated_members" ]; then
+    die "SHORT BUNDLE SCAN — examined $members of $enumerated_members member(s) enumerated from $bundle. The member loop ended before the listing did (a loop-body child that reads stdin consumes the remaining paths silently); a partial scan must never print CLEAN in the same words as a full one."
+  fi
+  # MUT-END: bundle-count-identity
 
   # PDS-D20 anti-vacuity, aimed at this scan's OWN blind spot: a value scan
   # over zero bytes is vacuously clean. An empty tar has no members; a
@@ -201,7 +292,59 @@ scan_bundle() { # tar-path
     die "bundle carries no tables/ member ($members member(s) total, e.g. manifest-only) — none of the bytes this scan exists to check are present; refusing to print CLEAN."
   fi
 
-  say "  members scanned: $members ($table_members under tables/)   ammo values: $(ammo_count)"
+  if [ "$(ammo_count)" -gt 0 ]; then
+    say "  members scanned: $members of $enumerated_members enumerated ($table_members under tables/)   ammo values: $(ammo_count)"
+  else
+    say "  members scanned: $members of $enumerated_members enumerated ($table_members under tables/)   ammo values: 0 — no value scan ran, member presence only"
+  fi
+
+  check_deny_members
+}
+
+# Structural member-presence check. Deliberately separate from the value loop
+# above: it reads the member NAMES, never the member BYTES, and every line it
+# prints states that bound in its own words rather than leaving a reader to
+# infer that a token value was searched for.
+check_deny_members() {
+  local want checked=0
+  [ -s "$DENY_MEMBERS_FILE" ] || return 0
+  say ""
+  say "  denied-member check (structural — member names only, no value is read):"
+  # `|| [ -n "$want" ]` is not decoration: a plain `while read` DROPS a final
+  # line with no trailing newline, and the count identity in `report` would then
+  # refuse a COMPLETE deny list. (Both sibling loops in this file learned this
+  # from their own control arms — see task-4121ac48f4e4f71e.)
+  while IFS= read -r want || [ -n "$want" ]; do
+    [ -n "$want" ] || continue
+    # THE WORK SIDE of the deny identity. Tallied here, one line below the
+    # blank-row skip so the two sides count the same population, and read by
+    # the ABSENT verdict in `report` — which prints THIS number.
+    checked=$((checked + 1))
+    DENY_CHECKED="$checked"
+    if grep -qxF -- "$want" "$MEMBER_LIST" 2>/dev/null; then
+      MEMBER_HITS=$((MEMBER_HITS + 1))
+      say "    PRESENT  member=$want — a member ruled :deny travelled in this bundle."
+      case "$want" in
+        *api_tokens*)
+          say "             This is a table-DENY failure. It is NOT a report that a"
+          say "             token value was found: api_tokens stores token_hash only,"
+          say "             so no plaintext token was searched for and none exists at"
+          say "             rest to search for."
+          ;;
+      esac
+    else
+      say "    absent   member=$want — the table DENY held for this member."
+      case "$want" in
+        *api_tokens*)
+          say "             Claim bound: this proves the MEMBER is not in the container."
+          say "             It does NOT prove any token value is absent, because no"
+          say "             token value was searched for — api_tokens is hashed at"
+          say "             rest, so a value scan over it would score exactly this"
+          say "             clean whether the table travelled or not (PDS-D737)."
+          ;;
+      esac
+    fi
+  done < "$DENY_MEMBERS_FILE"
 }
 
 # ── the target-DB scan: per-table `t::text ~ <alternation>` ──────────────────
@@ -211,7 +354,7 @@ regex_escape() { # POSIX-ERE-escape a literal value
 sql_quote() { printf '%s' "$1" | sed "s/'/''/g"; }
 
 scan_db() { # conninfo
-  local conn="$1" alt="" label value table count tables=0 errf reason
+  local conn="$1" alt="" label value table count tables=0 errf reason enumerated=0
   command -v psql >/dev/null 2>&1 || die "--db needs psql on PATH"
   errf="$(mktemp "${TMPDIR:-/tmp}/pds-scan-err.XXXXXX")"
   TMP_FILES="$TMP_FILES $errf"
@@ -239,11 +382,26 @@ scan_db() { # conninfo
     die "cannot enumerate schema public — psql failed: $(head -1 "$errf" 2>/dev/null | cut -c1-200). An unreachable or unqueryable DB is an empty corpus; refusing to print CLEAN."
   fi
 
-  while IFS= read -r table; do
+  # COUNT THE LIST BEFORE READING IT. `tables` below counts ITERATIONS; this
+  # counts the ROWS the enumeration actually produced. The two must be equal,
+  # and the check after the loop is the only thing that can tell "scanned 40 of
+  # 40" from "scanned 1 of 40". `awk`, not `grep -c`: under `set -e` a grep that
+  # matches nothing exits 1 and would kill the scan on an empty schema — the one
+  # case that already has its own refusal below.
+  enumerated="$(awk 'NF { n++ } END { print n+0 }' "$tlist")"
+
+  # `</dev/null` on the body's psql is fd HYGIENE, not the fix. The identity
+  # below is the fix: it notices a short scan whoever caused it, including a
+  # future body child nobody remembered reads fd 0.
+  # `|| [ -n "$table" ]` is not decoration: a plain `while read` DROPS a final
+  # line with no trailing newline, and the identity below would then refuse a
+  # perfectly good scan. Found by that identity's own control arm.
+  while IFS= read -r table || [ -n "$table" ]; do
     [ -n "$table" ] || continue
     tables=$((tables + 1))
     count="$(psql "$conn" -At -c \
-      "SELECT count(*) FROM public.\"$table\" t WHERE t::text ~ '$(sql_quote "$alt")'" 2>"$errf" || echo "")"
+      "SELECT count(*) FROM public.\"$table\" t WHERE t::text ~ '$(sql_quote "$alt")'" \
+      </dev/null 2>"$errf" || echo "")"
     if [ -z "$count" ]; then
       # Say WHY it was skipped — a permission-invisible table must be named as
       # such, never blamed on a missing text cast (that false reason is exactly
@@ -271,29 +429,61 @@ scan_db() { # conninfo
   # the database (run-proven with a REVOKE ALL role). pg_class names every
   # ordinary and partitioned table regardless of privilege; a table the role
   # cannot read then lands in the UNSCANNED branch above WITH its reason.
+  # ── THE COUNT IDENTITY ──────────────────────────────────────────────────
+  # FIRST, and before the zero-tables floor, because a loop that died on its
+  # first iteration leaves tables=0 over a NON-empty list: the floor below would
+  # then print "schema public holds ZERO base tables" about a schema holding 40.
+  # Two failures, two messages, and this one names BOTH numbers so the reader
+  # can see how much of the corpus was actually examined.
+  #
+  # WHY IT EXISTS (task-4121ac48f4e4f71e). The loop above reads `$tlist` on fd 0.
+  # Any body child that reads stdin — `psql` without -c/-f, a future `psql -f -`,
+  # an `ssh`, a `read` — swallows the remaining table names and the loop ENDS
+  # EARLY with no error and no non-zero status. The scan then reports a smaller
+  # clean scan IN THE SAME WORDS as a full one. The existing floor cannot see
+  # that: `-eq 0` distinguishes "nothing" from "something", never "some" from
+  # "all".
+  # MUT-ANCHOR: table-count-identity
+  if [ "$tables" -ne "$enumerated" ]; then
+    die "SHORT TABLE SCAN — examined $tables of $enumerated table(s) enumerated from schema public. The scan loop ended before the list did (a loop-body child that reads stdin consumes the remaining names silently); a partial scan must never print CLEAN in the same words as a full one."
+  fi
+  # MUT-END: table-count-identity
+
   if [ "$tables" -eq 0 ]; then
     die "schema public holds ZERO base tables — the DB answered but there is nothing to scan. A scan over nothing proves nothing; refusing to print CLEAN."
   fi
 
-  say "  tables scanned: $tables   ammo values: $(ammo_count)"
+  say "  tables scanned: $tables of $enumerated enumerated   ammo values: $(ammo_count)"
 }
 
 # ── mechanism sentence (PDS-D25 honesty) ────────────────────────────────────
 mechanism_line() { # profile clean?
   case "$1" in
     dev)
-      say "dev profile: $HITS hits — mechanism = table DENY (webhooks and access_grants"
-      say "  are :deny in the dev partition, so the members are ABSENT). No field-level"
-      say "  scrub is configured — @dev_scrub is empty — so nothing here was scrubbed."
+      say "dev profile: $HITS value hits — mechanism = table DENY (webhooks and"
+      say "  access_grants are :deny in the dev partition, so the members are ABSENT)."
+      say "  No field-level scrub is configured — @dev_scrub is empty — so nothing here"
+      say "  was scrubbed."
+      if [ -s "$DENY_MEMBERS_FILE" ]; then
+        say "  api_tokens is proven by MEMBER ABSENCE, not by this value scan (PDS-D737):"
+        say "  it is hashed at rest, so no plaintext token value was searched for."
+      fi
       ;;
     personal-local)
       say "personal-local profile: $HITS hits — this profile is FULL fidelity; a clean"
       say "  result here means only that the enumerated values were not present."
       ;;
     full)
-      say "full profile: $HITS hits — full fidelity carries every E1 table verbatim,"
-      say "  including webhooks.secret. Hits are EXPECTED here; zero hits means the"
-      say "  ammo was wrong, not that the bundle is clean."
+      if [ "$(ammo_count)" -eq 0 ]; then
+        # Saying "zero hits means the ammo was wrong" over an invocation that
+        # carried NO ammo would itself be a claim about a scan that never ran.
+        say "full profile: no value scan ran (0 ammo values) — full fidelity carries"
+        say "  every E1 table verbatim, so nothing here is a statement about values."
+      else
+        say "full profile: $HITS value hits — full fidelity carries every E1 table"
+        say "  verbatim, including webhooks.secret. Hits are EXPECTED here; zero hits"
+        say "  means the ammo was wrong, not that the bundle is clean."
+      fi
       ;;
     *) : ;;
   esac
@@ -301,9 +491,11 @@ mechanism_line() { # profile clean?
 
 # ── subcommand: scan ─────────────────────────────────────────────────────────
 cmd_scan() {
-  local bundle="" db="" profile="" from_db=""
+  local bundle="" db="" profile="" from_db="" deny_shown=""
   AMMO_FILE="$(mktemp "${TMPDIR:-/tmp}/pds-ammo.XXXXXX")"
   TMP_FILES="$TMP_FILES $AMMO_FILE"
+  DENY_MEMBERS_FILE="$(mktemp "${TMPDIR:-/tmp}/pds-deny-members.XXXXXX")"
+  TMP_FILES="$TMP_FILES $DENY_MEMBERS_FILE"
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -313,6 +505,7 @@ cmd_scan() {
       --ammo-file)       need_val "$@"; ammo_add_file "ammo" "$2"; shift 2 ;;
       --extra-patterns)  need_val "$@"; ammo_add_file "extra" "$2"; shift 2 ;;
       --ammo-from-db)    need_val "$@"; from_db="$2"; shift 2 ;;
+      --deny-member)     need_val "$@"; printf '%s\n' "$2" >> "$DENY_MEMBERS_FILE"; shift 2 ;;
       --profile)         need_val "$@"; profile="$2"; shift 2 ;;
       --reveal)          REVEAL=1; shift ;;
       -h|--help)         usage 0 ;;
@@ -322,7 +515,19 @@ cmd_scan() {
 
   [ -n "$from_db" ] && ammo_add_from_db "$from_db"
   [ -n "$bundle" ] || [ -n "$db" ] || die "scan needs --bundle and/or --db"
-  [ "$(ammo_count)" -gt 0 ] || die "no ammo — pass --value / --ammo-file / --ammo-from-db (a scan with no ammo is not a scan)"
+  if [ -s "$DENY_MEMBERS_FILE" ] && [ -z "$bundle" ]; then
+    die "--deny-member is a BUNDLE member check and needs --bundle (a DB has no members)"
+  fi
+  # A DB scan has no structural leg, so it still needs ammo or it is nothing.
+  if [ -n "$db" ] && [ "$(ammo_count)" -eq 0 ]; then
+    die "no ammo — a --db scan with no ammo is not a scan (pass --value / --ammo-file / --ammo-from-db)"
+  fi
+  # A bundle invocation may carry EITHER value ammo OR denied members; with
+  # neither it measures nothing at all, which is the vacuity this script exists
+  # to refuse.
+  if [ "$(ammo_count)" -eq 0 ] && [ ! -s "$DENY_MEMBERS_FILE" ]; then
+    die "no ammo and no --deny-member — this invocation would measure nothing (pass --value / --ammo-file / --ammo-from-db / --deny-member)"
+  fi
 
   rule
   say "PDS value-based secret scan — $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -331,14 +536,52 @@ cmd_scan() {
   [ -n "$db" ] && scan_db "$db"
   rule
   if [ "$HITS" -gt 0 ]; then
-    say "RESULT: $HITS HIT(S) — enumerated secret values are present in the target."
+    say "RESULT: $HITS VALUE HIT(S) — enumerated secret values are present in the target."
+  elif [ "$(ammo_count)" -gt 0 ]; then
+    say "RESULT: VALUE SCAN CLEAN — 0 hits for $(ammo_count) enumerated value(s)."
   else
-    say "RESULT: CLEAN — 0 hits for $(ammo_count) enumerated value(s)."
+    say "RESULT: NO VALUE SCAN RAN — this invocation carried no ammo; it checked member presence only."
+  fi
+  if [ -s "$DENY_MEMBERS_FILE" ]; then
+    deny_shown="$(deny_member_rows)"
+    # ── THE COUNT IDENTITY ────────────────────────────────────────────────────
+    # WHY IT EXISTS (task-068696cdce7db36b). `check_deny_members` reads the deny
+    # list on fd 0 (`done < "$DENY_MEMBERS_FILE"`). Any body child that reads
+    # stdin — a future `grep` with no file operand, a `read`, an `ssh`, a pager —
+    # swallows the remaining deny paths and the loop ENDS EARLY with no error
+    # and no non-zero status. Nothing downstream could see that, because the
+    # figure this verdict printed was `wc -l` of the INPUT FILE: a loop that
+    # stopped after 1 of 6 rows left MEMBER_HITS=0 and the verdict said
+    # "6 checked path(s), none present" in the SAME WORDS it uses for 6 of 6.
+    #
+    # "ABSENT" is the table-DENY assertion — the claim that an api_tokens dump
+    # did not travel in the bundle. A reassuring coverage number read off the
+    # enumeration rather than off the work is the exact false clear this whole
+    # script exists to prevent.
+    #
+    # Two statements, and the cut below removes BOTH on purpose: the refusal,
+    # and the substitution that makes the printed figure the ITERATION count.
+    # A guard that still printed the enumeration's number would be a guard over
+    # a line that remains a lie about coverage. Sited here rather than inside
+    # the loop so it also covers the case where the loop never ran at all.
+    # No body child reads fd 0 today; the identity is for the one added next
+    # year, which is precisely the child no fd-discipline review can name.
+    # MUT-ANCHOR: deny-count-identity
+    if [ "$DENY_CHECKED" -ne "$deny_shown" ]; then
+      die "SHORT DENIED-MEMBER CHECK — examined $DENY_CHECKED of $deny_shown denied path(s) enumerated from the deny list. The deny loop ended before the list did (a loop-body child that reads stdin consumes the remaining paths silently); a partial check must never print DENIED MEMBERS ABSENT in the same words as a full one."
+    fi
+    deny_shown="$DENY_CHECKED"
+    # MUT-END: deny-count-identity
+    if [ "$MEMBER_HITS" -gt 0 ]; then
+      say "RESULT: $MEMBER_HITS DENIED MEMBER(S) PRESENT — a table ruled :deny travelled in this bundle."
+    else
+      say "RESULT: DENIED MEMBERS ABSENT — $deny_shown checked path(s), none present in the container."
+    fi
   fi
   [ "$UNSCANNED" -gt 0 ] && say "NOTE: $UNSCANNED table(s) were UNSCANNED (see skip lines above) — not proven clean."
   mechanism_line "$profile"
   print_limits
-  [ "$HITS" -gt 0 ] && return 1
+  if [ "$HITS" -gt 0 ] || [ "$MEMBER_HITS" -gt 0 ]; then return 1; fi
   return 0
 }
 
@@ -348,6 +591,20 @@ cmd_scan() {
 # email), comes back CLEAN (the same bundle without the denied members), and
 # REFUSES on a corpus of zero (a manifest-only bundle and a dead conninfo must
 # both exit 2 — a green over nothing is not a green).
+#
+# Steps 6-8 are the api_tokens legs (PDS-D737). 6 and 7 are the paired
+# differential for the STRUCTURAL discriminator: --deny-member must FIRE on the
+# bundle that carries tables/api_tokens.copy and be CLEAN on the one that does
+# not. Step 8 is the counterfactual that justifies the ruling — it hands the
+# scan a PLAINTEXT bearer token as ammo and runs it against the FULL bundle that
+# carries the whole api_tokens table, and the scan comes back CLEAN, because
+# only the sha256 of that token was ever stored. That clean IS the vacuous green
+# PDS-D20 forbids, produced on purpose, once, so no future wave can re-derive a
+# value-based token control and believe it discriminates.
+#
+# NOTHING REAL IS SEEDED. The token, its hash and the webhook secret are
+# openssl-generated stubs for a throwaway local database; no credential from any
+# real system is read, printed or committed by this mode.
 #
 # PDS-D31 RAM LAW: this control is seeded LOCALLY and spends NO live guerrilla
 # export. A live full export peaks beam.smp at 1.83 GB RSS on a 3.8 GB box; two
@@ -391,9 +648,18 @@ cmd_control() {
 
   # Known ammo, generated fresh each run so a stale hard-coded value can never
   # be what makes this pass.
-  local secret email
+  local secret email token token_hash
   secret="$(openssl rand -base64 32 | tr -d '=+/' | cut -c1-43)"
   email="pds-control-$$@barkpark.invalid"
+  # The api_tokens leg: a stub bearer token that is HASHED before it is stored,
+  # exactly as the real table does it. The plaintext never enters the database
+  # and never enters the fixture bundle — that is the point of step 8.
+  token="bp_ctl_$(openssl rand -hex 24)"
+  if command -v shasum >/dev/null 2>&1; then
+    token_hash="$(printf '%s' "$token" | shasum -a 256 | cut -d' ' -f1)"
+  else
+    token_hash="$(printf '%s' "$token" | sha256sum | cut -d' ' -f1)"
+  fi
 
   psql "$db" -q <<SQL >/dev/null
 CREATE TABLE public.workspaces (id uuid PRIMARY KEY, slug text NOT NULL);
@@ -405,6 +671,12 @@ CREATE TABLE public.access_grants (
 );
 CREATE TABLE public.documents (
   id uuid PRIMARY KEY, workspace_id uuid NOT NULL, type text, content jsonb
+);
+-- api_tokens mirrors the real shape in the one respect that matters: the
+-- bearer token is NOT stored, only its sha256. This is what makes a value
+-- scan over this table vacuous, and step 8 proves it by running one.
+CREATE TABLE public.api_tokens (
+  id uuid PRIMARY KEY, workspace_id uuid NOT NULL, name text, token_hash text
 );
 INSERT INTO public.workspaces VALUES ('00000000-0000-0000-0000-000000000001'::uuid, 'control-ws');
 INSERT INTO public.webhooks VALUES
@@ -419,6 +691,10 @@ INSERT INTO public.documents VALUES
   ('00000000-0000-0000-0000-0000000000d1'::uuid,
    '00000000-0000-0000-0000-000000000001'::uuid,
    'post', '{"title":"a decoy document with no secret in it"}'::jsonb);
+INSERT INTO public.api_tokens VALUES
+  ('00000000-0000-0000-0000-0000000000f1'::uuid,
+   '00000000-0000-0000-0000-000000000001'::uuid,
+   'control token', '$(sql_quote "$token_hash")');
 SQL
 
   # Build the FULL-fidelity fixture bundle in the bp-export-v1 container shape.
@@ -432,13 +708,15 @@ SQL
 }
 JSON
   local t
-  for t in workspaces webhooks access_grants documents; do
+  for t in workspaces webhooks access_grants documents api_tokens; do
     psql "$db" -At -c "COPY (SELECT * FROM public.\"$t\") TO STDOUT" > "$full/tables/$t.copy"
   done
   ( cd "$full" && tar -cf "$work/full.tar" manifest.json tables )
 
   # The DENY-shaped bundle: the same export minus the tables the dev partition
-  # marks :deny. This is exactly what "mechanism = table DENY" looks like.
+  # marks :deny — webhooks, access_grants AND api_tokens. This is exactly what
+  # "mechanism = table DENY" looks like; api_tokens is in the deny set of
+  # PDS-D4 and is proven here by the ABSENCE of its member, not by a value.
   local dev="$work/dev"; mkdir -p "$dev/tables"
   cp "$full/manifest.json" "$dev/manifest.json"
   for t in workspaces documents; do cp "$full/tables/$t.copy" "$dev/tables/$t.copy"; done
@@ -448,14 +726,16 @@ JSON
   printf '%s\n%s\n' "$secret" "$email" > "$ammo"
 
   local rc_fire rc_clean rc_db_fire rc_empty rc_dead
+  local rc_member_fire rc_member_clean rc_hash_vacuous
   say ""
   local step1="$work/full.tar"
   if [ "$broken" -eq 1 ]; then
     step1="$work/dev.tar"
-    say "!! --simulate-broken-instrument: step 1 is handed the DENY-shaped bundle;"
-    say "   this run MUST end in exit 3."
+    say "!! --simulate-broken-instrument: steps 1 and 6 are handed the DENY-shaped"
+    say "   bundle, so neither the value leg nor the member leg can fire; this run"
+    say "   MUST end in exit 3."
   fi
-  say "STEP 1/5 — FULL-fidelity bundle must FIRE (webhooks.secret + grantee_email present)"
+  say "STEP 1/8 — FULL-fidelity bundle must FIRE (webhooks.secret + grantee_email present)"
   rule
   set +e
   "$0" scan --bundle "$step1" --ammo-file "$ammo" --profile full
@@ -463,7 +743,7 @@ JSON
   set -e
 
   say ""
-  say "STEP 2/5 — target DB must FIRE (per-table t::text ~ alternation)"
+  say "STEP 2/8 — target DB must FIRE (per-table t::text ~ alternation)"
   rule
   set +e
   "$0" scan --db "$db" --ammo-file "$ammo" --profile full
@@ -471,7 +751,7 @@ JSON
   set -e
 
   say ""
-  say "STEP 3/5 — DENY-shaped bundle (webhooks + access_grants members absent) must be CLEAN"
+  say "STEP 3/8 — DENY-shaped bundle (webhooks + access_grants members absent) must be CLEAN"
   rule
   set +e
   "$0" scan --bundle "$work/dev.tar" --ammo-file "$ammo" --profile dev
@@ -482,7 +762,7 @@ JSON
   # never read as CLEAN — and each refusal is matched on its MESSAGE too, so a
   # regression that exits 2 for some other reason cannot impersonate it.
   say ""
-  say "STEP 4/5 — manifest-only bundle (zero tables/ members) must REFUSE (exit 2)"
+  say "STEP 4/8 — manifest-only bundle (zero tables/ members) must REFUSE (exit 2)"
   rule
   local empty="$work/empty"; mkdir -p "$empty"
   cp "$full/manifest.json" "$empty/manifest.json"
@@ -494,7 +774,7 @@ JSON
   cat "$work/step4.out"
 
   say ""
-  say "STEP 5/5 — unreachable DB must REFUSE (exit 2), never scan an empty corpus as CLEAN"
+  say "STEP 5/8 — unreachable DB must REFUSE (exit 2), never scan an empty corpus as CLEAN"
   rule
   set +e
   "$0" scan --db "host=nowhere.invalid port=5432 dbname=pds_ctl_dead connect_timeout=3" \
@@ -502,6 +782,47 @@ JSON
   rc_dead=$?
   set -e
   cat "$work/step5.out"
+
+  # ── steps 6-8: the api_tokens legs (PDS-D737) ──────────────────────────────
+  # 6 and 7 are the paired differential for the STRUCTURAL discriminator. They
+  # carry NO value ammo on purpose: the only thing being measured is member
+  # presence, so a webhook hit cannot be what moves the exit code.
+  local step6="$work/full.tar"
+  [ "$broken" -eq 1 ] && step6="$work/dev.tar"
+  say ""
+  say "STEP 6/8 — api_tokens MEMBER PRESENT in the full bundle must FIRE (exit 1)"
+  say "  structural check only: no value ammo is passed, so only the member moves it"
+  rule
+  set +e
+  "$0" scan --bundle "$step6" --deny-member tables/api_tokens.copy --profile full
+  rc_member_fire=$?
+  set -e
+
+  say ""
+  say "STEP 7/8 — api_tokens MEMBER ABSENT from the deny-shaped bundle must be CLEAN (exit 0)"
+  rule
+  set +e
+  "$0" scan --bundle "$work/dev.tar" --deny-member tables/api_tokens.copy --profile dev
+  rc_member_clean=$?
+  set -e
+
+  # Step 8 is the counterfactual the ruling rests on. It is the ONLY place this
+  # script deliberately produces a vacuous green, and it labels it as one.
+  say ""
+  say "STEP 8/8 — COUNTERFACTUAL: a PLAINTEXT token as ammo must score CLEAN on the"
+  say "  FULL bundle that carries the ENTIRE api_tokens table (exit 0). This is the"
+  say "  vacuous green PDS-D20 forbids, produced on purpose: only sha256(token) was"
+  say "  ever stored, so the plaintext is nowhere in the bytes and a value scan over"
+  say "  api_tokens cannot discriminate a bundle that carries the table from one"
+  say "  that does not."
+  rule
+  local tokenammo="$work/token-ammo.txt"
+  printf '%s\n' "$token" > "$tokenammo"
+  set +e
+  "$0" scan --bundle "$work/full.tar" --ammo-file "$tokenammo" --profile full >"$work/step8.out" 2>&1
+  rc_hash_vacuous=$?
+  set -e
+  cat "$work/step8.out"
 
   rule
   local ok=1
@@ -535,12 +856,39 @@ JSON
   else
     say "unreachable DB REFUSES: exit 2 carried from psql's own failure, not laundered into an empty corpus"
   fi
+  if [ "$rc_member_fire" -ne 1 ]; then
+    say "CONTROL FAILED: api_tokens member check on the FULL bundle exited $rc_member_fire, expected 1 (member present)."
+    ok=0
+  else
+    say "api_tokens member check FIRES on the full bundle: exit 1, tables/api_tokens.copy named PRESENT"
+  fi
+  if [ "$rc_member_clean" -ne 0 ]; then
+    say "CONTROL FAILED: api_tokens member check on the DENY-shaped bundle exited $rc_member_clean, expected 0 (member absent)."
+    ok=0
+  else
+    say "api_tokens member check is CLEAN on the deny-shaped bundle: exit 0 — the paired differential holds"
+  fi
+  if [ "$rc_hash_vacuous" -ne 0 ] || ! grep -q "VALUE SCAN CLEAN" "$work/step8.out"; then
+    say "CONTROL FAILED: the plaintext-token counterfactual exited $rc_hash_vacuous, expected 0 with a CLEAN value verdict."
+    say "  If that scan FIRED, this fixture is storing a plaintext token and no longer models api_tokens."
+    ok=0
+  else
+    say "counterfactual confirmed: a plaintext-token value scan reads CLEAN on a bundle carrying the WHOLE"
+    say "  api_tokens table — which is exactly why api_tokens is proven by member absence, never by value (PDS-D737)"
+  fi
   rule
   if [ "$ok" -eq 1 ]; then
     say "CONTROL PASSED — the instrument fires on real secret bytes and comes back"
     say "clean when the denied members are absent. Both bundles were built from real"
     say "COPY (SELECT …) TO STDOUT bytes over local database $db; NO live guerrilla"
     say "export was spent (PDS-D31)."
+    say ""
+    say "api_tokens (PDS-D737): proven by MEMBER ABSENCE, in both directions —"
+    say "  step 6 fired on the bundle that carried tables/api_tokens.copy, step 7 came"
+    say "  back clean on the bundle that did not. No claim was made about any token"
+    say "  VALUE, and step 8 showed why one cannot be: a plaintext-token value scan"
+    say "  reads clean over the full bundle carrying the whole table."
+    say "  All seeded material is openssl-generated stub data for throwaway DB $db."
     return 0
   fi
   say "CONTROL DID NOT BEHAVE AS A CONTROL — treating as failure (exit 3)."
@@ -554,6 +902,9 @@ CONTROL_DB=""
 CONTROL_MAINT=""
 CONTROL_KEEP=0
 HITS=0
+MEMBER_HITS=0
+MEMBER_LIST=""
+DENY_CHECKED=0
 UNSCANNED=0
 REVEAL=0
 

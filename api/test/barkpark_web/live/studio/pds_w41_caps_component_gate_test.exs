@@ -49,8 +49,23 @@ defmodule BarkparkWeb.Studio.PdsW41CapsComponentGateTest do
     # workspace, so it IS a member — but its permission array is ["read"], so
     # the write arm of `Caps.derive/1` is false. This is the principal the
     # disclosure is about; it is authenticated, not anonymous.
-    {:ok, _} = Auth.create_token(@readonly, "pds w41 readonly", @dataset, ["read"])
-    {:ok, _} = Auth.create_token(@admin, "pds w41 admin", @dataset, ["read", "write", "admin"])
+    {:ok, _} =
+      Auth.create_token(
+        @readonly,
+        "pds w41 readonly",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
+    {:ok, _} =
+      Auth.create_token(
+        @admin,
+        "pds w41 admin",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, conn: conn}
   end

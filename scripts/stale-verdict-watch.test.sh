@@ -22,6 +22,12 @@
 #   (l) the two TRANSPORT silences are not the warning and not each
 #       other: the pull-request list unread                       → exit 6
 #       main's commit history unread                              → exit 7
+#   (t) THE AGING BOUND: a CONFLICTING row past 6h reds with its age, a
+#       younger one is printed and does not red, an unreadable age
+#       fails closed                                              → exit 10
+#   (u) a green check run names its rc: 0 and 2 carry DIFFERENT
+#       annotations, and the pin's healed arm is reachable and quiet
+#       exactly where it should be (task-87f845f92d7884c8)
 #
 # THE REQUIRED SET IS DERIVED, NEVER TYPED. Context names come out of
 # .github/required-checks.json at build time, so a renamed context rebuilds
@@ -34,6 +40,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WATCH="$REPO_ROOT/scripts/stale-verdict-watch.sh"
 WF="$REPO_ROOT/.github/workflows/stale-verdict-watch.yml"
+ROUTE="$REPO_ROOT/scripts/stale-verdict-watch-route.sh"
 CONTENDED="$REPO_ROOT/.github/workflows/main-gate-watch.yml"
 SPEC="$REPO_ROOT/.github/required-checks.json"
 DOC="$REPO_ROOT/docs/ops/merge-gates.md"
@@ -47,10 +54,24 @@ trap cleanup EXIT
 ok()      { PASS=$((PASS + 1)); echo "  ok   $*"; }
 bad()     { FAIL=$((FAIL + 1)); echo "  FAIL $*" >&2; }
 section() { echo; echo "── $* ──"; }
+# The rc->outcome arms live in scripts/stale-verdict-watch-route.sh since the
+# read faults were split onto their own check-run name (task-bc902e08cdfd2ee7).
+# These two helpers let the probes below assert the SAME facts they asserted
+# when the arms were a `case` inside the yml, by DRIVING the router rather than
+# grepping a `run:` block.
+route_exit() {  # role rc -> prints the exit code, never dies
+  local r=0
+  bash "$ROUTE" "$1" "$2" >/dev/null 2>&1 || r=$?
+  echo "$r"
+}
+route_say() {   # role rc -> prints what the router says
+  bash "$ROUTE" "$1" "$2" 2>&1 || true
+}
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 [ -f "$WATCH" ] || { echo "missing $WATCH" >&2; exit 2; }
 [ -f "$WF" ]    || { echo "missing $WF" >&2; exit 2; }
+[ -f "$ROUTE" ] || { echo "missing $ROUTE" >&2; exit 2; }
 
 # Plain array + `while read`, never `mapfile`: this harness must run on stock
 # macOS bash 3.2 as well as on CI's bash 5.
@@ -79,6 +100,12 @@ echo "2026-08-10T00:00:00Z" >> "$COMMITS"
 
 OLD="2026-07-01T00:00:00Z"    # predates every commit above  → stale
 FRESH="2026-08-11T00:00:00Z"  # postdates every commit above → not stale
+# THE CLOCK IS PINNED TOO. The aging bound reads "now"; a harness that read the
+# wall clock would move its verdicts with the calendar. One hour after FRESH:
+# a row whose only timestamp is FRESH is YOUNG (1h), one at OLD is AGED (41d).
+# Exported so every child — fixture runs, stubbed live runs, --selftest — reads
+# the same instant. Section (t) sets it per probe where the age is the subject.
+export SVW_NOW="2026-08-11T01:00:00Z"
 
 NOGH="$TMP/nogh"; mkdir -p "$NOGH"
 run_watch() { # <fixture> [extra args…]
@@ -250,14 +277,19 @@ out="$(run_watch "$TMP/d-blind-one.json")"; rc=$?
 [ "$rc" = "2" ] && ok "mutation: one classified row demotes BLIND to the exit-2 warning" \
   || bad "mutation: expected exit 2 once a row was classified, got $rc — 5 is not tracking coverage"
 
-# The workflow must ANSWER a 5, and it must fail the run. Without this arm the
-# `*)` fallthrough would call it "not a verdict it defines".
-grep -qE '^\s+5\) echo "::error::BLIND RUN' "$WF" \
-  && ok "the workflow has its own 5) arm and sentence for BLIND" \
-  || bad "the workflow has no 5) arm — a blind run would fall through to the undefined-verdict branch"
-grep -qE '^\s+5\) echo .*exit 1 ;;' "$WF" \
-  && ok "…and arm 5 exits 1, so a blind run can no longer conclude success" \
-  || bad "arm 5 does not exit 1 — the blind run still reports green"
+# The ROUTER must ANSWER a 5, and it must fail the run. Without this arm the
+# `*)` fallthrough would call it "not a verdict it defines". The arms moved out
+# of the yml and into scripts/stale-verdict-watch-route.sh when the read faults
+# were split onto their own check-run name (task-bc902e08cdfd2ee7); the sentences
+# are the SAME sentences, and this probe followed them rather than being deleted.
+grep -q '::error::BLIND RUN' "$ROUTE" \
+  && ok "the router has its own 5) arm and sentence for BLIND" \
+  || bad "the router has no BLIND arm — a blind run would fall through to the undefined-verdict branch"
+blind_rc=0
+bash "$ROUTE" fault 5 >/dev/null 2>&1 || blind_rc=$?
+[ "$blind_rc" != 0 ] \
+  && ok "…and the router exits $blind_rc on rc=5, so a blind run can no longer conclude success" \
+  || bad "the router passes on rc=5 — the blind run still reports green"
 grep -q "^#             5 = BLIND" "$WATCH" \
   && ok "the script's own EXIT CODES header documents 5 where the arms are defined" \
   || bad "EXIT CODES header does not document 5"
@@ -265,7 +297,7 @@ grep -q "^#             5 = BLIND" "$WATCH" \
 # Arm 5's copy is NOT arm 1's. An exit-1 stale green cannot clear itself and
 # says so; a blind read is transient and the next run re-reads it. Copying arm
 # 1's sentence here would teach the reader to ignore a self-clearing alarm.
-arm5="$(grep -E '^\s+5\) echo' "$WF")"
+arm5="$(grep -E '::error::BLIND RUN' "$ROUTE")"
 grep -q "keep failing every 30 minutes" <<<"$arm5" \
   && bad "arm 5 repeats arm 1's 'it will keep failing every 30 minutes' — a blind read self-clears on the next poll" \
   || ok "arm 5 does not repeat arm 1's 'keep failing every 30 minutes'"
@@ -374,10 +406,14 @@ grep -q "^#             4 = COMPUTE fault" "$WATCH" && ok "the script's own EXIT
   || bad "EXIT CODES header does not document 4"
 grep -q "^#             3 = CONFIGURATION fault" "$WATCH" && ok "…and still documents 3 as configuration" \
   || bad "EXIT CODES header lost its 3"
-grep -qE '^\s+4\) echo "::error::COMPUTE FAULT' "$WF" && ok "the workflow has its own arm and sentence for 4" \
-  || bad "the workflow has no 4) arm — an undefined-verdict fallthrough would call it 'not a verdict it defines'"
-grep -qE '^\s+3\) echo "::error::CONFIGURATION FAULT' "$WF" && ok "…and the 3 arm still speaks about the credential" \
-  || bad "the workflow lost its 3 arm"
+case "$(route_say fault 4)" in
+  *"::error::COMPUTE FAULT"*) ok "the router has its own arm and sentence for 4" ;;
+  *) bad "the router has no 4 arm — an undefined-verdict fallthrough would call it 'not a verdict it defines'" ;;
+esac
+case "$(route_say fault 3)" in
+  *"::error::CONFIGURATION FAULT"*credential*) ok "…and the 3 arm still speaks about the credential" ;;
+  *) bad "the router lost its 3 arm, or it stopped naming the credential: $(route_say fault 3)" ;;
+esac
 
 # ═══ (k) the payload is too big for argv, on BOTH kernels, and still computes ═
 section "(k) a payload above Linux MAX_ARG_STRLEN *and* macOS's total argv still computes"
@@ -515,7 +551,10 @@ grep -q "^ok — no CONFLICTING" <<<"$out" \
 # script an EMPTY commits fixture — the same state a fall-through would produce
 # — over the fixture that reds at exit 1 with a real history.
 : > "$TMP/l-empty-commits.txt"
-out="$(run_watch "$TMP/a.json" --commits "$TMP/l-empty-commits.txt")"; rc=$?
+# The AGE arm is held out of this one probe (a 100-year bound): the row is 41
+# days old and would red rc 10 on its own, which says nothing about the stale
+# arm's fall-through — the thing this probe measures.
+out="$(run_watch "$TMP/a.json" --commits "$TMP/l-empty-commits.txt" --max-conflict-age-hours 876000)"; rc=$?
 [ "$rc" = "0" ] \
   && ok "(l-f) an EMPTY commit window turns the same red fixture green (exit 0) — which is exactly why 7 returns early instead of continuing" \
   || bad "(l-f) expected exit 0 over an empty commit window (got $rc); if that is no longer the fall-through outcome, re-derive why 7 must return early"
@@ -537,18 +576,20 @@ out="$(env PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
 # (l-g) the workflow must ANSWER both codes, and both must FAIL the run. This
 # is the half of the defect the script alone cannot fix: rc=2 was mapped to
 # exit 0 under a sentence that itself reads "That is a SILENCE, not a green."
-grep -qE '^\s+6\) echo "::error::UNREACHABLE' "$WF" \
-  && ok "(l-g) the workflow has its own 6) arm for UNREACHABLE" \
-  || bad "(l-g) the workflow has no 6) arm — an unreachable run would fall through to the undefined-verdict branch"
-grep -qE '^\s+6\) echo .*exit 1 ;;' "$WF" && ok "(l-g) …and arm 6 exits 1" \
+arm6="$(route_say fault 6)"
+arm7="$(route_say fault 7)"
+case "$arm6" in
+  *"::error::UNREACHABLE"*) ok "(l-g) the router has its own 6 arm for UNREACHABLE" ;;
+  *) bad "(l-g) the router has no 6 arm — an unreachable run would fall through to the undefined-verdict branch" ;;
+esac
+[ "$(route_exit fault 6)" = 1 ] && ok "(l-g) …and arm 6 exits 1" \
   || bad "(l-g) arm 6 does not exit 1 — a run that read nothing still reports green"
-grep -qE '^\s+7\) echo "::error::DISTANCE UNREADABLE' "$WF" \
-  && ok "(l-g) the workflow has its own 7) arm for DISTANCE UNREADABLE" \
-  || bad "(l-g) the workflow has no 7) arm"
-grep -qE '^\s+7\) echo .*exit 1 ;;' "$WF" && ok "(l-g) …and arm 7 exits 1" \
+case "$arm7" in
+  *"::error::DISTANCE UNREADABLE"*) ok "(l-g) the router has its own 7 arm for DISTANCE UNREADABLE" ;;
+  *) bad "(l-g) the router has no 7 arm" ;;
+esac
+[ "$(route_exit fault 7)" = 1 ] && ok "(l-g) …and arm 7 exits 1" \
   || bad "(l-g) arm 7 does not exit 1"
-arm6="$(grep -E '^\s+6\) echo' "$WF")"
-arm7="$(grep -E '^\s+7\) echo' "$WF")"
 grep -qi "poll budget" <<<"$arm6" && grep -qi "commits api" <<<"$arm7" \
   && ok "(l-g) the two arms name DIFFERENT remedies (the poll budget vs the commits API) — which is why they are two codes" \
   || bad "(l-g) the 6 and 7 arms do not name distinct remedies: 6='$arm6' 7='$arm7'"
@@ -558,11 +599,11 @@ grep -qi "credential" <<<"$arm7" && grep -qi "that read worked" <<<"$arm7" \
 
 # Arm 2 keeps its exit 0 — it is the genuine partial-coverage warning — but it
 # must no longer claim to cover the read that never happened.
-arm2="$(grep -E '^\s+2\) echo' "$WF")"
+arm2="$(route_say verdict 2)"
 grep -q "could not be read" <<<"$arm2" \
   && bad "arm 2 still says the pull-request list could not be read — that condition is exit 6 now, and arm 2 concludes SUCCESS" \
   || ok "arm 2 no longer claims to cover an unread pull-request list"
-grep -q "exit 0 ;;" <<<"$arm2" && ok "…and arm 2 keeps exit 0: partial coverage really is a warning" \
+[ "$(route_exit verdict 2)" = 0 ] && ok "…and arm 2 keeps exit 0: partial coverage really is a warning" \
   || bad "arm 2 no longer exits 0: $arm2"
 
 # The codes must be documented where they are defined, or the header drifts off
@@ -839,6 +880,40 @@ fi
 # rollup request with a population page and the script correctly refuses it
 # ("did not come back as a pull request payload").
 if grep -q 'pullRequest(number:' <<<"\$*"; then cat "$TMP/gql-rollup.json"; exit 0; fi
+# `repoll-loses-page-2`: page 1 answers an UNKNOWN row (so the script re-polls),
+# page 2 answers ONCE and 502s on every later request. That is the live shape
+# measured on main 2026-09-16: poll 1 reads the whole population, the re-poll
+# cannot finish it.
+if [ "\$mode" = "repoll-loses-page-2" ]; then
+  if grep -q 'after=' <<<"\$*"; then
+    if [ -f "$TMP/page2-served-once" ]; then
+      echo "HTTP 502: Bad gateway (https://api.github.com/graphql)" >&2
+      exit 1
+    fi
+    touch "$TMP/page2-served-once"
+    cat "$TMP/gql-page2.json"; exit 0
+  fi
+  cat "$TMP/gql-page1-unknown.json"; exit 0
+fi
+# `repoll-goes-blind`: BOTH polls complete, and the LATER one sees LESS. Poll 1
+# answers page 1 UNKNOWN and page 2 CONFLICTING-with-a-stale-green (1 of 2
+# classified, so the re-poll fires); poll 2 answers BOTH pages UNKNOWN. That is
+# the live shape measured on main run 35121820618 (2026-09-16T16:25:41Z), where
+# poll 1 logged 28 UNKNOWN of 50 and poll 2 logged 50 of 50.
+if [ "\$mode" = "repoll-goes-blind" ]; then
+  if grep -q 'after=' <<<"\$*"; then
+    if [ -f "$TMP/page2-served-once" ]; then cat "$TMP/gql-page2-unknown.json"; exit 0; fi
+    touch "$TMP/page2-served-once"
+    cat "$TMP/gql-page2.json"; exit 0
+  fi
+  cat "$TMP/gql-page1-unknown.json"; exit 0
+fi
+# `always-unknown`: EVERY page of EVERY poll answers UNKNOWN. No pass ever
+# classified a row, so BLIND is the only honest verdict and must survive.
+if [ "\$mode" = "always-unknown" ]; then
+  if grep -q 'after=' <<<"\$*"; then cat "$TMP/gql-page2-unknown.json"; else cat "$TMP/gql-page1-unknown.json"; fi
+  exit 0
+fi
 if grep -q 'after=' <<<"\$*"; then cat "$TMP/gql-page2.json"; else cat "$TMP/gql-page1.json"; fi
 STUBEOF
   chmod +x "$STUB/gh"
@@ -876,11 +951,19 @@ gql_page() { # <path> <number> <hasNext> <cursor>
 gql_page "$TMP/gql-page1.json" 9101 true  "CURSOR_ONE"
 gql_page "$TMP/gql-page2.json" 9102 false null
 gql_rollup "$TMP/gql-rollup.json"
+# Page 1 with its row's mergeability still uncomputed — the trigger for the
+# re-poll loop, and GitHub's answer for every row for a while after main moves.
+jq '.data.repository.pullRequests.nodes[0].mergeable = "UNKNOWN"
+    | .data.repository.pullRequests.nodes[0].mergeStateStatus = "UNKNOWN"' \
+  "$TMP/gql-page1.json" > "$TMP/gql-page1-unknown.json"
+jq '.data.repository.pullRequests.nodes[0].mergeable = "UNKNOWN"
+    | .data.repository.pullRequests.nodes[0].mergeStateStatus = "UNKNOWN"' \
+  "$TMP/gql-page2.json" > "$TMP/gql-page2-unknown.json"
 
 STUB_PATH="$STUB:/usr/bin:/bin:/usr/sbin:/sbin"
 run_stubbed() { # <mode> [extra args…]
   local mode="$1"; shift
-  : > "$STUB_LOG"; rm -f "$TMP/page2-failed-once"
+  : > "$STUB_LOG"; rm -f "$TMP/page2-failed-once" "$TMP/page2-served-once"
   mk_stub "$mode"
   env PATH="$STUB_PATH" SVW_RETRY_SLEEP="0 0 0" SVW_PAGE_SLEEP="0 0 0 0" \
     bash "$WATCH" --spec "$SPEC" --repo FRIKKern/barkpark --commits "$COMMITS" \
@@ -964,6 +1047,241 @@ out="$(run_stubbed pages)"; rc=$?
 [ "$rc" = "0" ] \
   && ok "(p-5) disarm: a MERGEABLE, fresh row read through the SAME paged transport exits 0" \
   || bad "(p-5) the paged read reds no matter what it reads (exit $rc): $out"
+
+# (p-6) A COMPLETED POLL IS NOT THROWN AWAY BY A FAILED RE-POLL.
+#
+# THE DEFECT THIS OWNS, measured on main 2026-09-16: 46 of 54 completed runs
+# that day exited 6 UNREACHABLE saying "this run classified nothing and does not
+# know how many pull requests exist" AFTER logging `poll 1/3: 55 row(s) answered
+# mergeable=UNKNOWN` — i.e. after reading all 55 rows. fetch_prs kept only the
+# LAST pass, so a transport failure on a re-poll erased a population the run had
+# already read, and with it any rc-1 scream that population carried.
+#
+# Here page 1 answers UNKNOWN (forcing the re-poll) and page 2 answers ONCE and
+# then 502s. Poll 1 reads both pages; poll 2 cannot. The run must still report
+# the stale green page 2 carried.
+out="$(run_stubbed repoll-loses-page-2 --attempts 2 --page-attempts 2)"; rc=$?
+[ "$rc" = "1" ] \
+  && ok "(p-6) a completed poll survives a failed re-poll — the run still reaches its rc-1 verdict" \
+  || bad "(p-6) expected exit 1 from the population poll 1 read, got $rc: $out"
+grep -q "#9102" <<<"$out" \
+  && ok "(p-6) …and the CONFLICTING row with the stale green is still named" \
+  || bad "(p-6) the stale green poll 1 had already read was swallowed by the failed re-poll: $out"
+grep -qE "^  2 open . 1 CONFLICTING" <<<"$out" \
+  && ok "(p-6) …over the REAL population size (2 open), so nothing was truncated into the denominator" \
+  || bad "(p-6) the reported open count is not the 2 rows poll 1 read: $out"
+grep -q "UNREACHABLE" <<<"$out" \
+  && bad "(p-6) a run that read its whole population still called itself UNREACHABLE: $out" \
+  || ok "(p-6) …and never claims it does not know how many pull requests exist"
+grep -q "read the WHOLE population" <<<"$out" \
+  && ok "(p-6) …and SAYS which poll the reported read came from, so the staleness of the rows is on the record" \
+  || bad "(p-6) the fallback is silent about being a fallback: $out"
+
+# (p-6m) THE SAME ARM, MUTATION-PROVEN. Neuter the fallback on a copy and this
+# population must go back to UNREACHABLE — otherwise (p-6) is passing for some
+# other reason and proves nothing about the fallback.
+sed 's/if \[ -n "$last_full" \]; then/if false; then/' "$WATCH" > "$TMP/mut-lastfull.sh"
+if diff -q "$WATCH" "$TMP/mut-lastfull.sh" >/dev/null 2>&1; then
+  bad "(p-6m) MUTATION did not apply — the fallback moved, so (p-6) proves nothing"
+else
+  : > "$STUB_LOG"; rm -f "$TMP/page2-failed-once" "$TMP/page2-served-once"
+  mk_stub repoll-loses-page-2
+  mout="$(env PATH="$STUB_PATH" SVW_RETRY_SLEEP="0 0 0" SVW_PAGE_SLEEP="0 0 0 0" \
+    bash "$TMP/mut-lastfull.sh" --spec "$SPEC" --repo FRIKKern/barkpark --commits "$COMMITS" \
+      --baseline '' --page-size 1 --attempts 2 --page-attempts 2 2>&1)"; mrc=$?
+  [ "$mrc" = "6" ] \
+    && ok "(p-6m) with the fallback removed the same population exits 6 UNREACHABLE again — the fix is live, not decorative" \
+    || bad "(p-6m) MUTATION SURVIVED: expected 6 without the fallback, got $mrc: $mout"
+fi
+
+# (p-7) A LATER POLL THAT SEES LESS DOES NOT ERASE AN EARLIER ONE THAT SAW MORE.
+#
+# THE DEFECT THIS OWNS, measured on main run 35121820618 (2026-09-16T16:25:41Z)
+# — the first failing run that ALREADY carried #18600's keep-the-last-complete-
+# pass fix. It logged `poll 1/3: 28 row(s) answered mergeable=UNKNOWN` (so 22 of
+# 50 rows WERE classified), then `poll 2/3: 50 row(s) answered UNKNOWN`, kept
+# poll 2 because it was later, and concluded `BLIND — classified 0 of 50 open
+# pull request(s)`. It had classified 22. GitHub invalidates mergeability behind
+# every merge, so under a merge burst re-polling routinely makes the run see
+# LESS, and keeping the most RECENT complete pass threw the sight away.
+#
+# Here poll 1 reads page 1 UNKNOWN + page 2 CONFLICTING-with-a-stale-green, and
+# poll 2 reads both pages UNKNOWN. The run must report poll 1's verdict — the
+# scream, exit 1 — not a BLIND that names no pull request at all.
+out="$(run_stubbed repoll-goes-blind --attempts 2 --page-attempts 2)"; rc=$?
+[ "$rc" = "1" ] \
+  && ok "(p-7) a blinder re-poll does not erase the pass that saw the stale green — still exit 1" \
+  || bad "(p-7) expected exit 1 from the pass that classified rows, got $rc: $out"
+grep -q "#9102" <<<"$out" \
+  && ok "(p-7) …and the CONFLICTING row poll 1 classified is named" \
+  || bad "(p-7) the stale green poll 1 had read was erased by the blinder re-poll: $out"
+grep -q "BLIND" <<<"$out" \
+  && bad "(p-7) a run holding a pass that classified a row still called itself BLIND: $out" \
+  || ok "(p-7) …and never calls itself BLIND while holding a pass that classified a row"
+grep -q "is not a fresher verdict, it is a blinder one" <<<"$out" \
+  && ok "(p-7) …and SAYS which poll it reported from and why, so the staleness is on the record" \
+  || bad "(p-7) the selection is silent about preferring an earlier poll: $out"
+
+# (p-7d) DISARM — THE RED THIS MUST NOT REMOVE. If NO pass ever classified a
+# row, BLIND is the truth and the selection above must not launder it. Every
+# page of every poll answers UNKNOWN.
+out="$(run_stubbed always-unknown --attempts 2 --page-attempts 2)"; rc=$?
+[ "$rc" = "5" ] \
+  && ok "(p-7d) a run where NO poll classified anything STILL exits 5 BLIND — the selection bought no green" \
+  || bad "(p-7d) expected 5 when every poll is all-UNKNOWN, got $rc — BLIND was laundered: $out"
+grep -q "BLIND" <<<"$out" \
+  && ok "(p-7d) …and still says BLIND" || bad "(p-7d) no BLIND sentence: $out"
+
+# (p-7m) THE SAME ARM, MUTATION-PROVEN. Put the keep-the-LAST-pass rule back on
+# a copy and (p-7)'s population must go back to BLIND — otherwise (p-7) passes
+# for some other reason and proves nothing about the selection.
+sed 's/if \[ "$last_full_unknown" -lt 0 \] || \[ "$unknown" -lt "$last_full_unknown" \]; then/if true; then/' \
+  "$WATCH" > "$TMP/mut-bestpass.sh"
+if diff -q "$WATCH" "$TMP/mut-bestpass.sh" >/dev/null 2>&1; then
+  bad "(p-7m) MUTATION did not apply — the selection moved, so (p-7) proves nothing"
+else
+  : > "$STUB_LOG"; rm -f "$TMP/page2-failed-once" "$TMP/page2-served-once"
+  mk_stub repoll-goes-blind
+  mout="$(env PATH="$STUB_PATH" SVW_RETRY_SLEEP="0 0 0" SVW_PAGE_SLEEP="0 0 0 0" \
+    bash "$TMP/mut-bestpass.sh" --spec "$SPEC" --repo FRIKKern/barkpark --commits "$COMMITS" \
+      --baseline '' --page-size 1 --attempts 2 --page-attempts 2 2>&1)"; mrc=$?
+  [ "$mrc" = "5" ] \
+    && ok "(p-7m) with keep-the-LAST-pass restored the same population exits 5 BLIND again — the fix is live, not decorative" \
+    || bad "(p-7m) MUTATION SURVIVED: expected 5 with last-pass-wins, got $mrc: $mout"
+fi
+
+# ═══ (p-8) mergeStateStatus IS THE WALL, AND THE PER-ROW RESOLVE IS THE WAY ══
+section "(p-8) the population page cannot carry mergeStateStatus; UNKNOWN rows resolve one at a time"
+
+# THE DEFECT THIS OWNS, measured in CI 2026-09-16 (runs 35131226693 and
+# 35131624861, the probe pushed on a branch so it ran under the workflow's own
+# GITHUB_TOKEN). Asking `mergeStateStatus` across a page of 25 open pull
+# requests returned HTTP 502 with an HTML body at ~10.5s on 3 of 3 attempts,
+# while the SAME page without that one field answered in 0.45s; dropping
+# `mergeable` instead and keeping `mergeStateStatus` still 502'd. No page size
+# escapes it — a full walk walled at page 3 of size 10 and page 6 of size 5 —
+# because the cost is per COLD row: that field forces GitHub to compute the
+# merge commit inside the request. Asked cold WITHOUT it, 24 of 25 rows came
+# back mergeable=UNKNOWN, which is this watch's original blindness. A
+# single-row query carrying BOTH fields answered 8 of 8 in 0.54-0.91s.
+#
+# The stub below encodes exactly that transport: a population page carrying
+# `mergeStateStatus` 502s, one without it answers UNKNOWN, and a per-PR query
+# answers a computed verdict. So these probes fail if the shipped query starts
+# asking for that field again, and fail if the per-row resolve stops running.
+MSTUB="$TMP/m-stub"; mkdir -p "$MSTUB"
+MLOG="$TMP/m-stub.log"
+
+# Built here rather than derived from an earlier section's fixture, so a later
+# edit to those cannot silently change which row these probes are about.
+M_ROLL="[]"
+for c in "${CTX[@]}"; do
+  M_ROLL="$(jq -c --arg n "$c" --arg t "$OLD" \
+    '. + [{__typename:"CheckRun", name:$n, conclusion:"SUCCESS", completedAt:$t, status:"COMPLETED"}]' <<<"$M_ROLL")"
+done
+jq -n --argjson roll "$M_ROLL" \
+  '{data:{repository:{pullRequests:{
+      pageInfo:{hasNextPage:false, endCursor:null},
+      nodes:[{number:9201, mergeable:"UNKNOWN",
+              headRefOid:"0123456789abcdef0123456789abcdef01234567",
+              updatedAt:"2026-08-01T00:00:00Z",
+              commits:{nodes:[{commit:{statusCheckRollup:{contexts:{nodes:$roll}}}}]}}]}}}}' \
+  > "$TMP/m-page-unknown.json"
+jq -n --argjson roll "$M_ROLL" \
+  '{data:{repository:{pullRequest:{number:9201, mergeStateStatus:"DIRTY",
+      commits:{nodes:[{commit:{statusCheckRollup:{contexts:{nodes:$roll}}}}]}}}}}' \
+  > "$TMP/m-rollup.json"
+jq -n '{data:{repository:{pullRequest:{number:9201, mergeable:"CONFLICTING", mergeStateStatus:"DIRTY"}}}}' \
+  > "$TMP/m-one-conflicting.json"
+jq -n '{data:{repository:{pullRequest:{number:9201, mergeable:"UNKNOWN", mergeStateStatus:null}}}}' \
+  > "$TMP/m-one-unknown.json"
+
+mk_mstub() { # <mode: resolve|hard-unknown>
+  cat > "$MSTUB/gh" <<MSTUBEOF
+#!/usr/bin/env bash
+echo "\$@" >> "$MLOG"
+mode="$1"
+case "\$1 \${2:-}" in
+  "api repos/"*) cat "$COMMITS"; exit 0 ;;
+esac
+# The per-PR ROLLUP query is the one that also selects statusCheckRollup; the
+# per-PR MERGEABILITY query is the one that does not. Telling them apart here
+# is what makes a passing probe mean the script issued the right one.
+if grep -q 'pullRequest(number:' <<<"\$*"; then
+  if grep -q 'statusCheckRollup' <<<"\$*"; then cat "$TMP/m-rollup.json"; exit 0; fi
+  if [ "\$mode" = "hard-unknown" ]; then cat "$TMP/m-one-unknown.json"; else cat "$TMP/m-one-conflicting.json"; fi
+  exit 0
+fi
+# THE MEASURED WALL: a population page that asks for mergeStateStatus times out.
+if grep -q 'mergeStateStatus' <<<"\$*"; then
+  echo "HTTP 502: Bad gateway (https://api.github.com/graphql)" >&2
+  exit 1
+fi
+cat "$TMP/m-page-unknown.json"; exit 0
+MSTUBEOF
+  chmod +x "$MSTUB/gh"
+}
+run_mstub() { # <mode> [script] [extra…]
+  local mode="$1"; shift
+  local script="${1:-$WATCH}"; shift || true
+  : > "$MLOG"; mk_mstub "$mode"
+  env PATH="$MSTUB:/usr/bin:/bin:/usr/sbin:/sbin" SVW_RETRY_SLEEP="0 0 0" SVW_PAGE_SLEEP="0 0 0 0" \
+    bash "$script" --spec "$SPEC" --repo FRIKKern/barkpark --commits "$COMMITS" \
+      --baseline '' --page-size 1 "$@" 2>&1
+}
+
+out="$(run_mstub resolve)"; rc=$?
+[ "$rc" = "1" ] && ok "(p-8) against a transport that 502s any page asking mergeStateStatus, the run still READS and reds at exit 1" \
+  || bad "(p-8) expected exit 1, got $rc — the population was not read: $out"
+grep -q '#9201' <<<"$out" \
+  && ok "(p-8) …and the row the bulk page could only call UNKNOWN is named in the verdict" \
+  || bad "(p-8) #9201 never reached the verdict: $out"
+grep -qi 'BLIND' <<<"$out" \
+  && bad "(p-8) the run called itself BLIND while a per-row read had classified the row: $out" \
+  || ok "(p-8) …and never calls itself BLIND, because a row it could resolve is a row it read"
+grep -q 'pullRequest(number:' "$MLOG" \
+  && ok "(p-8) …and a per-PR query was actually issued, so the resolve is the live path and not an accident of the fixture" \
+  || bad "(p-8) no per-PR query was ever issued: $(cat "$MLOG")"
+
+# (p-8m1) MUTATION — PUT mergeStateStatus BACK ON THE POPULATION PAGE. If that
+# field returns to the bulk query the stub's 502 fires on every page and the
+# run goes UNREACHABLE, which is precisely the red this fix exists to clear.
+M1="$TMP/mut-p8-field.sh"
+sed 's/nodes{ number mergeable updatedAt headRefOid isDraft }/nodes{ number mergeable mergeStateStatus updatedAt headRefOid isDraft }/' \
+  "$WATCH" > "$M1"
+if ! grep -q 'nodes{ number mergeable mergeStateStatus updatedAt headRefOid isDraft }' "$M1"; then
+  bad "(p-8m1) MUTATION did not apply — the light query moved, so (p-8) proves nothing"
+else
+  mout="$(run_mstub resolve "$M1")"; mrc=$?
+  [ "$mrc" = "6" ] \
+    && ok "(p-8m1) MUTATION CAUGHT: with mergeStateStatus back on the page the same transport goes UNREACHABLE (exit 6) — the field is the wall, not the page size" \
+    || bad "(p-8m1) MUTATION SURVIVED: expected 6 with mergeStateStatus on the page, got $mrc: $mout"
+fi
+
+# (p-8m2) MUTATION — REMOVE THE PER-ROW RESOLVE. The cheap page answers UNKNOWN
+# for every row, so without the resolve the run is BLIND at rc 5. That is the
+# original symptom of this row, reproduced on demand.
+M2="$TMP/mut-p8-resolve.sh"
+sed 's/^      out="\$(resolve_unknown "\$repo" "\$out")"$/      : no resolve/' "$WATCH" > "$M2"
+if grep -q 'out="$(resolve_unknown "$repo" "$out")"' "$M2"; then
+  bad "(p-8m2) MUTATION did not apply — the resolve call moved, so (p-8) proves nothing"
+else
+  mout="$(run_mstub resolve "$M2")"; mrc=$?
+  [ "$mrc" = "5" ] \
+    && ok "(p-8m2) MUTATION CAUGHT: without the per-row resolve the same population is BLIND (exit 5) — the resolve is what classifies it" \
+    || bad "(p-8m2) MUTATION SURVIVED: expected 5 without the resolve, got $mrc: $mout"
+fi
+
+# (p-8d) DISARM — THE GREEN THIS MUST NOT BUY. When the per-PR read ALSO
+# answers UNKNOWN there is nothing to resolve, and the resolve must not invent
+# a classification to look useful: the run stays BLIND and still names the row.
+out="$(run_mstub hard-unknown)"; rc=$?
+[ "$rc" = "5" ] \
+  && ok "(p-8d) a row the per-row read ALSO cannot compute stays UNKNOWN and the run is still BLIND (exit 5)" \
+  || bad "(p-8d) expected 5 when nothing resolves, got $rc — the resolve manufactured a classification: $out"
+grep -q '? #9201' <<<"$out" \
+  && ok "(p-8d) …and the unresolved row is still printed as a row this run did not read" \
+  || bad "(p-8d) the unresolved row vanished from the report: $out"
 
 # ═══ (i) the harness's own assertions can fail ═══════════════════════════════
 section "(i) disarm: prove these probes are able to fail"
@@ -1334,6 +1652,479 @@ else
   bad "(r7b) the mutation did not apply — (r7) would prove nothing"
 fi
 
+
+
+# ═══ (m) a READ FAULT and a STALE GREEN red under DIFFERENT check-run names ══
+# task-bc902e08cdfd2ee7. The defect: ONE step of ONE job named `Stale verdict
+# watch` mapped rc 1 ("a conflicted PR is asserting a stale green — go rebase or
+# close #N") and rc 3/4/5/6/7/9 ("this run could not look, and names no pull
+# request") all to `exit 1`. MEASURED on run 34589487018 (2026-09-11T10:29:43Z,
+# main): rc 6 UNREACHABLE rendered as name `Stale verdict watch`, conclusion
+# `failure` — character for character what an rc-1 verdict renders.
+#
+# The proof has to FORCE BOTH, which is why the rc->outcome table lives in
+# scripts/stale-verdict-watch-route.sh instead of in a `run:` block nobody can
+# drive offline. Two halves, and BOTH are needed:
+#   (a) the router: for every rc, exactly the right role reds.
+#   (b) the wiring: the workflow actually gives the two roles two different job
+#       NAMES, and actually skips the verdict job on every read-fault rc. A
+#       perfect router wired into one job proves nothing.
+section "(m) a read fault and a stale green scream under different names"
+
+route_rc() {  # role rc -> prints exit code, never dies
+  local r=0
+  bash "$ROUTE" "$1" "$2" >/dev/null 2>&1 || r=$?
+  echo "$r"
+}
+# The fence, modelled from the verdict job's `if:` in the workflow. The wiring
+# half below proves the workflow really carries exactly this set, so this
+# function cannot quietly disagree with the YAML.
+FAULT_RCS="3 4 5 6 7 9"
+verdict_job() {
+  case " $FAULT_RCS " in
+    *" $1 "*) echo skipped; return ;;
+  esac
+  [ -z "$1" ] && { echo skipped; return; }
+  if [ "$(route_rc verdict "$1")" = 0 ]; then echo green; else echo RED; fi
+}
+fault_job() {
+  if [ "$(route_rc fault "$1")" = 0 ]; then echo green; else echo RED; fi
+}
+
+while read -r rc want_fault want_verdict note; do
+  got_fault="$(fault_job "$rc")"
+  got_verdict="$(verdict_job "$rc")"
+  if [ "$got_fault" = "$want_fault" ] && [ "$got_verdict" = "$want_verdict" ]; then
+    ok "rc=$rc: 'Stale verdict watch read fault' $got_fault, 'Stale verdict watch' $got_verdict ($note)"
+  else
+    bad "rc=$rc: fault job $got_fault (want $want_fault), verdict job $got_verdict (want $want_verdict) — $note"
+  fi
+done <<'TABLE'
+0 green green clean:-neither-check-run-screams,-and-the-VERDICT-name-publishes-the-green
+1 green RED stale-green:-ONLY-'Stale-verdict-watch'-screams
+2 green green PARTIAL-warning:-neither-check-run-screams
+3 RED skipped CONFIGURATION-FAULT:-ONLY-the-fault-name-screams
+4 RED skipped COMPUTE-FAULT:-ONLY-the-fault-name-screams
+5 RED skipped BLIND-RUN:-ONLY-the-fault-name-screams
+6 RED skipped UNREACHABLE-(run-34589487018):-ONLY-the-fault-name-screams,-verdict-name-SKIPPED-not-green
+7 RED skipped DISTANCE-UNREADABLE:-ONLY-the-fault-name-screams
+8 green RED BASELINE-DRIFT:-ONLY-'Stale-verdict-watch'-screams
+9 RED skipped ROLLUP-BUDGET:-ONLY-the-fault-name-screams
+10 green RED AGED-CONFLICT:-ONLY-'Stale-verdict-watch'-screams
+TABLE
+
+# THE TWO ROWS THAT CARRY THE WHOLE DEFECT, asserted AGAINST EACH OTHER rather
+# than only against constants: the PAIR of check-run conclusions must DIFFER
+# between a real stale green (rc 1) and the measured transport silence (rc 6),
+# and the name that screams must not be the same name. If a future edit fused
+# the classes again, every row above could still be re-baselined one-by-one
+# while this one could not be satisfied at all without a real split.
+pair1="$(fault_job 1)/$(verdict_job 1)"
+pair6="$(fault_job 6)/$(verdict_job 6)"
+if [ "$pair1" != "$pair6" ] && [ "$(verdict_job 1)" = RED ] && [ "$(fault_job 6)" = RED ] \
+   && [ "$(fault_job 1)" != RED ] && [ "$(verdict_job 6)" != RED ]; then
+  ok "a stale green (fault/verdict = $pair1) and an UNREACHABLE transport silence ($pair6) scream under DIFFERENT names"
+else
+  bad "a stale green ($pair1) and an UNREACHABLE transport silence ($pair6) are not separated by name — the classes are fused"
+fi
+
+# On a read fault the verdict name must be SKIPPED, never green: "this run read
+# no population" must not render as "nothing is asserting a stale green". A
+# `|| true` softening would show up here as `green`.
+for f in $FAULT_RCS; do
+  if [ "$(verdict_job "$f")" = skipped ]; then
+    ok "on rc=$f 'Stale verdict watch' is SKIPPED, not green — no population, no verdict"
+  else
+    bad "on rc=$f 'Stale verdict watch' renders $(verdict_job "$f") — a run that read nothing must never report success"
+  fi
+done
+
+# The defensive arm: if the fence ever drifts and a read-fault rc DOES reach the
+# verdict role, it must red as a ROUTING ERROR rather than answer a question it
+# cannot.
+for f in $FAULT_RCS; do
+  if [ "$(route_rc verdict "$f")" != 0 ]; then
+    ok "if the fence drifts and rc=$f reaches the verdict role anyway, the router reds instead of guessing"
+  else
+    bad "the verdict role passes on rc=$f — a drifted fence would render a green verdict with no population behind it"
+  fi
+done
+
+# An rc the script does not define, and a MISSING rc (the shape an empty
+# `needs.<job>.outputs.rc` takes when the upstream job died before writing
+# GITHUB_OUTPUT), must never read as a pass in either role.
+for bogus in 11 "" "x"; do
+  bf="$(route_rc fault "$bogus")"; bv="$(route_rc verdict "$bogus")"
+  if [ "$bf" != 0 ] && [ "$bv" != 0 ]; then
+    ok "an undefined rc ('${bogus}') reds in both roles (fault=$bf verdict=$bv) — never a silent pass"
+  else
+    bad "an undefined rc ('${bogus}') passed a role (fault=$bf verdict=$bv)"
+  fi
+done
+
+# ── MUTANT 1: the router SOFTENED. Every `exit 1` becomes `exit 0`; the rc=6
+# fault arm must then pass, and the table above asserts it must not.
+sed 's|^        exit 1$|        exit 0|' "$ROUTE" > "$TMP/route-softened.sh"
+if cmp -s "$ROUTE" "$TMP/route-softened.sh"; then
+  bad "(m) the softened-router mutant was never BUILT (no exit-1 arm matched) — the next assertion would prove nothing"
+else
+  mr=0
+  bash "$TMP/route-softened.sh" fault 6 >/dev/null 2>&1 || mr=$?
+  if [ "$mr" = 0 ]; then
+    ok "(m) MUTANT 1: a softened router passes on rc=6, and the table above asserts it must RED"
+  else
+    bad "(m) MUTANT 1 did not reach the arm (softened copy still exits $mr on rc=6) — the table is unproven"
+  fi
+fi
+
+# ── MUTANT 2: the router emits the FAULT name UNCONDITIONALLY (criterion 1's
+# named mutation). Its fault role reds on rc=1 too, so the pair assertion above
+# — which requires `fault_job 1 != RED` — must fail. Modelled by re-running the
+# pair test against the mutant rather than by re-asserting a constant.
+sed 's@^      0.1.2.8.10)$@      99)@' "$ROUTE" > "$TMP/route-always-fault.sh"
+if grep -q '^      99)$' "$TMP/route-always-fault.sh" 2>/dev/null; then
+  m_fault1=0
+  bash "$TMP/route-always-fault.sh" fault 1 >/dev/null 2>&1 || m_fault1=$?
+  if [ "$m_fault1" != 0 ]; then
+    ok "(m) MUTANT 2: a router that emits the fault name unconditionally reds the fault role on rc=1 (exit $m_fault1), which the pair assertion above forbids"
+  else
+    bad "(m) MUTANT 2 did not take: the always-fault copy still passes the fault role on rc=1"
+  fi
+else
+  bad "(m) MUTANT 2 was never BUILT — the pass-through arm did not match, so criterion 1's named mutation is unproven"
+fi
+
+# ── MUTANT 3: the two jobs RE-FUSED. Drop rc 6 from the fence and the verdict
+# job would red on a transport silence exactly as it reds on a stale green —
+# which is the original defect. Re-run the pair test with the fused fence.
+fused_verdict_6="$( if [ "$(route_rc verdict 6)" = 0 ]; then echo green; else echo RED; fi )"
+if [ "$fused_verdict_6/$(fault_job 6)" = "RED/RED" ] && [ "$fused_verdict_6" = "$(verdict_job 1)" ]; then
+  ok "(m) MUTANT 3: with rc 6 dropped from the fence the verdict name reds on a transport silence (RED), identical to rc=1 — the fence is what separates them"
+else
+  bad "(m) MUTANT 3 proves nothing: an unfenced rc=6 renders '$fused_verdict_6' on the verdict role, so the fence is not what carries the split"
+fi
+
+# ── (b) THE WIRING. Two distinct job NAMES, each shelling its own role, and the
+# verdict job fenced off EVERY read-fault rc. Parsed as YAML, not grepped: a
+# `name:` is a structural fact, and a grep over prose that ARGUES about these
+# names would match its own explanation.
+wiring_read() {  # <yaml-file> <expected fault rcs>
+  python3 - "$1" "$2" <<'PYWIRE'
+import sys, re, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+expected = set(sys.argv[2].split())
+jobs = d.get("jobs") or {}
+def job_with(role):
+    hits = []
+    for jid, j in jobs.items():
+        for st in (j.get("steps") or []):
+            if ("stale-verdict-watch-route.sh %s" % role) in (st.get("run") or ""):
+                hits.append((jid, j.get("name") or jid, str(j.get("if") or "")))
+    return hits
+f, v = job_with("fault"), job_with("verdict")
+problems = []
+if len(f) != 1: problems.append("expected exactly 1 job shelling the router as `fault`, found %d" % len(f))
+if len(v) != 1: problems.append("expected exactly 1 job shelling the router as `verdict`, found %d" % len(v))
+if not problems:
+    (fid, fname, fif), (vid, vname, vif) = f[0], v[0]
+    if fid == vid:
+        problems.append("both roles run in the SAME job `%s` — the failure classes still share one check-run name" % fid)
+    if fname == vname:
+        problems.append("both jobs render the SAME check-run name %r" % fname)
+    if fname != "Stale verdict watch read fault":
+        problems.append("the fault job's check-run name is %r" % fname)
+    if vname != "Stale verdict watch":
+        problems.append("the verdict job RENAMED the pre-existing check run to %r — the old name must keep publishing" % vname)
+    vifq = vif.replace('"', "'")
+    fenced = set(re.findall(r"!=\s*'(\d+)'", vifq))
+    if fenced != expected:
+        problems.append("the verdict job `%s` fences off %s, expected %s — an unfenced read fault would red it as a stale green"
+                        % (vid, sorted(fenced) or "nothing", sorted(expected)))
+    if "!= ''" not in vifq:
+        problems.append("the verdict job `%s` does not fence off an EMPTY rc — a dead upstream would read as a verdict" % vid)
+    if "needs" not in (jobs[vid] or {}):
+        problems.append("the verdict job `%s` does not `needs:` the job that produces the rc" % vid)
+    if not problems:
+        print("OK %s|%s|fenced=%s" % (fname, vname, ",".join(sorted(fenced))))
+if problems:
+    print("BAD " + "; ".join(problems))
+PYWIRE
+}
+
+if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" >/dev/null 2>&1; then
+  wiring="$(wiring_read "$WF" "$FAULT_RCS")" || wiring="BAD the wiring reader itself failed"
+  case "$wiring" in
+    OK\ *) ok "the workflow wires the roles to two different check-run names: ${wiring#OK }" ;;
+    *)     bad "workflow wiring: ${wiring#BAD }" ;;
+  esac
+
+  # ── MUTANT 4: the FENCE DROPPED from the YAML. Delete the rc-6 exclusion and
+  # the wiring reader must say so — otherwise the reader is decoration.
+  grep -v "outputs.rc != '6'" "$WF" > "$TMP/wf-unfenced.yml"
+  if cmp -s "$WF" "$TMP/wf-unfenced.yml"; then
+    bad "(m) MUTANT 4 was never BUILT — no rc-6 exclusion line matched in $WF"
+  else
+    mw="$(wiring_read "$TMP/wf-unfenced.yml" "$FAULT_RCS")" || mw="BAD reader failed"
+    case "$mw" in
+      BAD*) ok "(m) MUTANT 4: dropping rc 6 from the verdict job's fence is CAUGHT by the wiring reader — ${mw#BAD }" ;;
+      *)    bad "(m) MUTANT 4 SURVIVED: the wiring reader accepted a workflow with no rc-6 fence ($mw)" ;;
+    esac
+  fi
+
+  # ── MUTANT 5: the two jobs RENAMED to one name. The reader must refuse.
+  sed "s|^    name: Stale verdict watch read fault$|    name: Stale verdict watch|" "$WF" > "$TMP/wf-onename.yml"
+  if cmp -s "$WF" "$TMP/wf-onename.yml"; then
+    bad "(m) MUTANT 5 was never BUILT — the fault job's name line did not match"
+  else
+    mw2="$(wiring_read "$TMP/wf-onename.yml" "$FAULT_RCS")" || mw2="BAD reader failed"
+    case "$mw2" in
+      BAD*) ok "(m) MUTANT 5: giving both jobs ONE check-run name is CAUGHT — ${mw2#BAD }" ;;
+      *)    bad "(m) MUTANT 5 SURVIVED: the reader accepted two jobs under one name ($mw2)" ;;
+    esac
+  fi
+else
+  bad "python3+pyyaml unavailable — the wiring half of section (m) CANNOT READ, and an unread wiring is not a proven one"
+fi
+
+# ═══ (t) THE AGING BOUND (task-87f845f92d7884c8) ═════════════════════════════
+#
+# The row this replaces asked for "no CONFLICTING open PR right now", an EMPTY
+# MOMENT no repository can hold. The bound is a rule instead: past 6h a
+# CONFLICTING non-draft row no pin covers reds (rc 10) with its age; under it,
+# the row is printed and does not red. Every probe below moves ONE timestamp
+# and watches the verdict move, and the rows carry NO green at all — so the
+# stale arm (rc 1) cannot be what reds them.
+section "(t) the aging bound: past 6h reds with its age, younger is reported, unreadable fails closed"
+
+T_NOW="2026-09-24T12:00:00Z"
+t_row() { # <number> <committedDate|null> [isDraft] [head]
+  jq -c -n --argjson n "$1" --arg c "$2" --argjson d "${3:-false}" \
+    --arg h "${4:-7777777777abcdef0123456789abcdef01234567}" \
+    '{number:$n, mergeable:"CONFLICTING", mergeStateStatus:"DIRTY", headRefOid:$h,
+      updatedAt:"2026-09-24T11:59:00Z", isDraft:$d, statusCheckRollup:[]}
+     + (if $c == "null" then {} else {headCommittedDate:$c} end)'
+}
+t_run() { # <fixture> [extra…] — the default bound, the pinned T_NOW clock
+  local fx="$1"; shift
+  SVW_NOW="$T_NOW" run_watch "$fx" --baseline "$NB.empty" "$@"
+}
+
+# (t1) PAST THE BOUND: committed 7h before now, no green anywhere → rc 10.
+fixture "$TMP/t-aged.json" "$(t_row 9201 2026-09-24T05:00:00Z)"
+out="$(t_run "$TMP/t-aged.json")"; rc=$?
+[ "$rc" = "10" ] && ok "(t1) a CONFLICTING row 7h old exits 10 (AGED CONFLICT) with no stale green anywhere" \
+  || bad "(t1) expected exit 10 for a 7h-old conflicting row, got $rc: $out"
+grep -q "AGED   1 — #9201" <<<"$out" && ok "(t1) …#9201 is named AGED" || bad "(t1) #9201 not named AGED: $out"
+grep -q "~ #9201  head 777777777  age 7h0m since 2026-09-24T05:00:00Z  \[AGED — FAILS\]" <<<"$out" \
+  && ok "(t1) …and the red carries its AGE and the timestamp it was measured from" \
+  || bad "(t1) the aged row does not print its age and anchor: $out"
+grep -q "^AGED — 1 CONFLICTING" <<<"$out" && ok "(t1) …and the verdict line says AGED" || bad "(t1) no AGED verdict line: $out"
+grep -qE "NOVEL +0" <<<"$out" && ok "(t1) …while NOVEL stays 0: this red is the age arm, not the stale arm" \
+  || bad "(t1) the stale arm reported this row — the probe is not isolating the age arm: $out"
+
+# (t2) THE SAME ROW, 5h OLD → reported, NOT red. The one-field mutation.
+fixture "$TMP/t-young.json" "$(t_row 9201 2026-09-24T07:00:00Z)"
+out="$(t_run "$TMP/t-young.json")"; rc=$?
+[ "$rc" = "0" ] && ok "(t2) the SAME row 5h old exits 0 — under the bound it does not red" \
+  || bad "(t2) expected exit 0 for a 5h-old conflicting row, got $rc: $out"
+grep -q "YOUNG  1 — #9201" <<<"$out" && ok "(t2) …and it is still REPORTED as YOUNG, not silenced" \
+  || bad "(t2) the young conflicting row was not reported: $out"
+grep -q "~ #9201  head 777777777  age 5h0m since 2026-09-24T07:00:00Z  \[YOUNG — under the bound\]" <<<"$out" \
+  && ok "(t2) …with its age" || bad "(t2) the young row does not print its age: $out"
+
+# (t3) THE EDGE: exactly 6h is inside the bound, 6h + 1 minute is past it.
+fixture "$TMP/t-edge.json" "$(t_row 9201 2026-09-24T06:00:00Z)"
+out="$(t_run "$TMP/t-edge.json")"; rc=$?
+[ "$rc" = "0" ] && ok "(t3) exactly 6h0m is inside the bound (exit 0)" || bad "(t3) 6h0m exited $rc"
+fixture "$TMP/t-edge2.json" "$(t_row 9201 2026-09-24T05:59:00Z)"
+out="$(t_run "$TMP/t-edge2.json")"; rc=$?
+[ "$rc" = "10" ] && ok "(t3) 6h1m is past it (exit 10)" || bad "(t3) 6h1m exited $rc, expected 10"
+
+# (t4) AN UNREADABLE AGE FAILS CLOSED — never age 0. Three shapes: no anchor at
+# all, an anchor that does not parse, and one in the future.
+for shape in "null" "yesterday" "2026-09-24T14:00:00Z"; do
+  fixture "$TMP/t-unread.json" "$(t_row 9201 "$shape")"
+  out="$(t_run "$TMP/t-unread.json")"; rc=$?
+  if [ "$rc" = "10" ] && grep -q "age UNREADABLE" <<<"$out"; then
+    ok "(t4) committedDate='$shape' → age UNREADABLE, exit 10: it fails closed"
+  else
+    bad "(t4) committedDate='$shape' exited $rc — an unreadable age must red, never read as 0: $out"
+  fi
+done
+
+# (t5) THE SERVER TIME CAPS A FUTURE COMMITTER CLOCK. committedDate says 1h
+# from now; a check on that head COMPLETED 7h ago (server time), so the head
+# existed 7h ago. The anchor is the EARLIER one → aged, not "young" or unread.
+fixture "$TMP/t-skew.json" "$(jq -c '.headCommittedDate = "2026-09-24T13:00:00Z"
+  | .statusCheckRollup = [{__typename:"CheckRun", name:"not-required", status:"COMPLETED",
+                           conclusion:"FAILURE", completedAt:"2026-09-24T05:00:00Z"}]' <<<"$(t_row 9201 null)")"
+out="$(t_run "$TMP/t-skew.json")"; rc=$?
+[ "$rc" = "10" ] && grep -q "age 7h0m since 2026-09-24T05:00:00Z" <<<"$out" \
+  && ok "(t5) a future committedDate is capped by the head's first completed check (age 7h, exit 10)" \
+  || bad "(t5) expected exit 10 at age 7h from the check time, got $rc: $out"
+
+# (t6) A DRAFT past the bound is PRINTED with its age and NOT failed on.
+fixture "$TMP/t-draft.json" "$(t_row 9201 2026-09-24T05:00:00Z true)"
+out="$(t_run "$TMP/t-draft.json")"; rc=$?
+[ "$rc" = "0" ] && grep -q "~ #9201 .*age 7h0m.*\[DRAFT — printed, NOT failed on\]" <<<"$out" \
+  && ok "(t6) a 7h-old DRAFT is printed with its age and exits 0" \
+  || bad "(t6) expected exit 0 and a printed draft age row, got $rc: $out"
+
+# (t7) THE PIN COVERS THE AGE ARM, on the same (number, head) key.
+printf '9201 7777777777 2026-09-24 pinned by the harness to prove the age arm honours a pin\n' > "$NB.t-pin"
+out="$(SVW_NOW="$T_NOW" run_watch "$TMP/t-aged.json" --baseline "$NB.t-pin")"; rc=$?
+[ "$rc" = "0" ] && grep -q "PINNED 1 — #9201" <<<"$out" \
+  && ok "(t7) a pinned aged row is KNOWN (PINNED 1) and exits 0" \
+  || bad "(t7) expected exit 0 and PINNED 1 for a pinned aged row, got $rc: $out"
+
+# (t8) THE BOUND IS AN ARGUMENT, and a bad one is a configuration fault.
+out="$(t_run "$TMP/t-aged.json" --max-conflict-age-hours 8)"; rc=$?
+[ "$rc" = "0" ] && ok "(t8) the same 7h row under --max-conflict-age-hours 8 exits 0 — the flag is live" \
+  || bad "(t8) --max-conflict-age-hours 8 did not move the verdict (exit $rc)"
+for badv in 0 abc ""; do
+  out="$(t_run "$TMP/t-aged.json" --max-conflict-age-hours "$badv")"; rc=$?
+  [ "$rc" = "3" ] && ok "(t8) --max-conflict-age-hours '$badv' is a configuration fault (3)" \
+    || bad "(t8) --max-conflict-age-hours '$badv' exited $rc, expected 3"
+done
+out="$(SVW_NOW="not-a-time" run_watch "$TMP/t-aged.json" --baseline "$NB.empty")"; rc=$?
+[ "$rc" = "3" ] && ok "(t8) an unparseable clock is a configuration fault (3), never 'nothing is old'" \
+  || bad "(t8) an unparseable clock exited $rc, expected 3"
+
+# (t9) THE WORKFLOW STATES THE BOUND, and runs it on a SCHEDULE. A PR ages while
+# nothing happens, so the clock-driven leg is the one that enforces this.
+grep -q -- '--max-conflict-age-hours 6' "$WF" \
+  && ok "(t9) the workflow passes --max-conflict-age-hours 6 explicitly" \
+  || bad "(t9) the workflow does not state the 6h bound"
+grep -qE '^\s*- cron: "\*/30 \* \* \* \*"' "$WF" \
+  && ok "(t9) …and the */30 schedule leg is what enforces it" || bad "(t9) no */30 schedule leg"
+
+# (t10) THE LIVE PATH carries committedDate. --fixture never touches
+# ROLLUP_QUERY, so a stubbed gh serves a real page + a real per-PR rollup whose
+# ONLY timestamp is commit.committedDate.
+TSTUB="$TMP/t-stub"; mkdir -p "$TSTUB/bin"
+t_live() { # <committedDate> -> output; rc is the script's
+  jq -n '{data:{repository:{pullRequests:{pageInfo:{hasNextPage:false,endCursor:null},
+          nodes:[{number:9202, mergeable:"CONFLICTING", updatedAt:"2026-09-24T11:59:00Z",
+                  headRefOid:"5555555555abcdef0123456789abcdef01234567", isDraft:false}]}}}}' > "$TSTUB/page.json"
+  jq -n --arg c "$1" '{data:{repository:{pullRequest:{number:9202, mergeStateStatus:"DIRTY",
+          commits:{nodes:[{commit:{committedDate:$c, statusCheckRollup:{contexts:{nodes:[]}}}}]}}}}}' > "$TSTUB/rollup.json"
+  printf '#!/usr/bin/env bash\ncase "$*" in *"pullRequest(number:"*) cat "%s" ;; *graphql*) cat "%s" ;; *) echo "[]" ;; esac\n' \
+    "$TSTUB/rollup.json" "$TSTUB/page.json" > "$TSTUB/bin/gh"
+  chmod +x "$TSTUB/bin/gh"
+  env PATH="$TSTUB/bin:/usr/bin:/bin:/usr/sbin:/sbin" GH_TOKEN=stub SVW_NOW="$T_NOW" \
+    bash "$WATCH" --commits "$COMMITS" --spec "$SPEC" --repo FRIKKern/barkpark --baseline "$NB.empty" 2>&1
+}
+out="$(t_live 2026-09-24T05:00:00Z)"; rc=$?
+[ "$rc" = "10" ] && grep -q "age 7h0m since 2026-09-24T05:00:00Z" <<<"$out" \
+  && ok "(t10) LIVE path: committedDate travels ROLLUP_QUERY → the age arm (7h, exit 10)" \
+  || bad "(t10) LIVE path did not age the row from committedDate (exit $rc): $out"
+out="$(t_live 2026-09-24T11:00:00Z)"; rc=$?
+[ "$rc" = "0" ] && ok "(t10) …and the same live row committed 1h ago exits 0" \
+  || bad "(t10) the 1h live row exited $rc: $out"
+# MUTATION: drop committedDate from the live query. The row then has no anchor
+# and must FAIL CLOSED (10, UNREADABLE) — not quietly read as young.
+sed 's/commit{ committedDate statusCheckRollup{/commit{ statusCheckRollup{/' "$WATCH" > "$TMP/mut-nocd.sh"
+if cmp -s "$WATCH" "$TMP/mut-nocd.sh"; then
+  bad "(t10) the no-committedDate mutant was never BUILT — ROLLUP_QUERY moved"
+else
+  jq '.data.repository.pullRequest.commits.nodes[0].commit |= del(.committedDate)' "$TSTUB/rollup.json" > "$TSTUB/r2" && mv "$TSTUB/r2" "$TSTUB/rollup.json"
+  out="$(env PATH="$TSTUB/bin:/usr/bin:/bin:/usr/sbin:/sbin" GH_TOKEN=stub SVW_NOW="$T_NOW" \
+    bash "$TMP/mut-nocd.sh" --commits "$COMMITS" --spec "$SPEC" --repo FRIKKern/barkpark --baseline "$NB.empty" 2>&1)"; rc=$?
+  [ "$rc" = "10" ] && grep -q "age UNREADABLE" <<<"$out" \
+    && ok "(t10) MUTANT: with committedDate gone the live row FAILS CLOSED (10, UNREADABLE), never young" \
+    || bad "(t10) MUTANT: a live row with no anchor exited $rc: $out"
+fi
+
+# ═══ (u) c0 + c1: the healed arm is REACHABLE and QUIET where it should be, and
+# a green check run says WHICH green it is (task-87f845f92d7884c8) ══════════
+section "(u) the healed arm across both arms, and rc 0 vs rc 2 without a log"
+
+# (u1) FIRES. A pinned PR that recovers: rebased (new head) and now MERGEABLE.
+# Neither arm reports the pinned (number, head) → rc 8, and it says why.
+fixture "$TMP/u-rebased.json" "$(jq -c '.mergeable = "MERGEABLE" | .mergeStateStatus = "CLEAN"
+  | .headRefOid = "8888888888abcdef0123456789abcdef01234567"' <<<"$(t_row 9201 2026-09-24T11:30:00Z)")"
+out="$(SVW_NOW="$T_NOW" run_watch "$TMP/u-rebased.json" --baseline "$NB.t-pin")"; rc=$?
+[ "$rc" = "8" ] && grep -q "HEALED 1 — #9201" <<<"$out" \
+  && ok "(u1) FIRES: a pinned PR that was rebased and is now MERGEABLE exits 8, HEALED 1 — #9201" \
+  || bad "(u1) a recovered pinned PR did not fire the healed arm (exit $rc): $out"
+grep -q "still open, and no longer asserting a stale green, nor CONFLICTING past the age bound" <<<"$out" \
+  && ok "(u1) …and names BOTH arms in why it healed" || bad "(u1) healed reason does not name both arms: $out"
+
+# (u2) QUIET. The pinned PR did NOT recover: same head, still CONFLICTING and
+# 7h old, with no stale green (its greens are gone). The stale arm alone would
+# call it healed and tell a human to delete a line that re-reds as AGED on the
+# next run. It is still reported by the AGE arm, so it is not healed.
+out="$(SVW_NOW="$T_NOW" run_watch "$TMP/t-aged.json" --baseline "$NB.t-pin")"; rc=$?
+[ "$rc" = "0" ] && grep -q "HEALED 0" <<<"$out" && grep -q "PINNED 1 — #9201" <<<"$out" \
+  && ok "(u2) QUIET: a pinned PR still CONFLICTING past the bound is NOT healed (exit 0, HEALED 0, PINNED 1)" \
+  || bad "(u2) a pinned, still-aged PR was treated as healed (exit $rc): $out"
+# (u2m) MUTATION: healed consults the stale arm only. (u2) must flip to 8.
+sed 's/| (\$R + \$A) as \$RALL/| $R as $RALL/' "$WATCH" > "$TMP/mut-rall.sh"
+if cmp -s "$WATCH" "$TMP/mut-rall.sh"; then
+  bad "(u2m) the stale-only-healed mutant was never BUILT — the RALL line moved"
+else
+  out="$(env PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" SVW_NOW="$T_NOW" bash "$TMP/mut-rall.sh" --fixture "$TMP/t-aged.json" \
+    --commits "$COMMITS" --spec "$SPEC" --repo FRIKKern/barkpark --baseline "$NB.t-pin" 2>&1)"; rc=$?
+  [ "$rc" = "8" ] \
+    && ok "(u2m) MUTANT: with healed reading the stale arm only, the same still-aged pin wrongly exits 8 — (u2) is load-bearing" \
+    || bad "(u2m) MUTANT survived: stale-only healed still exited $rc on a still-aged pin"
+fi
+
+# (u3) A HEALED PIN UNDER A LOUDER RED is still on the page a human opens
+# first. rc 1 wins the exit code, so without the summary headline the healed
+# fact lived only in the log.
+fixture "$TMP/u-mixed.json" "$(pr_row 9001 CONFLICTING DIRTY "$(full_set "$OLD")")"
+: > "$TMP/u-summary.md"
+out="$(GITHUB_STEP_SUMMARY="$TMP/u-summary.md" SVW_NOW="$T_NOW" run_watch "$TMP/u-mixed.json" --baseline "$NB.t-pin")"; rc=$?
+[ "$rc" = "1" ] && grep -q "^## stale-verdict-watch rc=1 — NOVEL STALE GREEN" "$TMP/u-summary.md" \
+  && grep -q "healed 1" "$TMP/u-summary.md" \
+  && ok "(u3) rc 1 masks rc 8 in the exit code, and the summary headline still says rc=1 AND healed 1" \
+  || bad "(u3) the healed pin under a novel red is not in the summary headline (exit $rc): $(cat "$TMP/u-summary.md")"
+
+# (u4) c1 — EVERY verdict rc emits exactly ONE annotation titled with its rc.
+ann() { bash "$ROUTE" verdict "$1" 2>&1 | grep -E '^::(notice|warning|error) title=stale-verdict-watch rc='"$1"' ' ; }
+for r in 0 1 2 8 10; do
+  n="$(ann "$r" | grep -c . || true)"
+  [ "$n" = "1" ] && ok "(u4) rc=$r emits exactly one annotation titled 'stale-verdict-watch rc=$r'" \
+    || bad "(u4) rc=$r emits $n rc-titled annotation(s), expected 1: $(route_say verdict "$r")"
+done
+lvl0="$(ann 0 | sed 's/^::\([a-z]*\) .*/\1/')"; lvl2="$(ann 2 | sed 's/^::\([a-z]*\) .*/\1/')"
+if [ "$(route_exit verdict 0)" = 0 ] && [ "$(route_exit verdict 2)" = 0 ] \
+   && [ "$lvl0" = notice ] && [ "$lvl2" = warning ] && [ "$(ann 0)" != "$(ann 2)" ]; then
+  ok "(u4) BOTH greens conclude success, and rc 0 is a NOTICE while rc 2 is a WARNING — distinguishable from the check run's annotations alone"
+else
+  bad "(u4) rc 0 and rc 2 are not distinguishable without the log: 0='$lvl0' 2='$lvl2'"
+fi
+: > "$TMP/u-route-summary.md"
+GITHUB_STEP_SUMMARY="$TMP/u-route-summary.md" bash "$ROUTE" verdict 2 >/dev/null 2>&1
+grep -q "^## Stale verdict watch: rc=2 PARTIAL (green, and NOT rc 0)" "$TMP/u-route-summary.md" \
+  && ok "(u4) …and rc 2 heads the verdict job's summary" \
+  || bad "(u4) rc 2 did not head the job summary: $(cat "$TMP/u-route-summary.md")"
+# (u4m) MUTATION: make rc 2 annotate exactly like rc 0. The distinguisher above
+# must then fail — otherwise it was never measuring anything.
+sed 's/::warning title=stale-verdict-watch rc=2 PARTIAL - this green is NOT rc 0::rows/::notice title=stale-verdict-watch rc=0 CLEAN::rows/' \
+  "$ROUTE" > "$TMP/route-fused-green.sh"
+if cmp -s "$ROUTE" "$TMP/route-fused-green.sh"; then
+  bad "(u4m) the fused-green mutant was never BUILT — the rc 2 annotation moved"
+else
+  m2="$(bash "$TMP/route-fused-green.sh" verdict 2 2>&1 | grep -cE '^::warning title=stale-verdict-watch rc=2 ' || true)"
+  [ "$m2" = "0" ] \
+    && ok "(u4m) MUTANT: an rc 2 annotated as rc 0 loses its rc-2 annotation, which (u4) requires — the check can fail" \
+    || bad "(u4m) MUTANT survived: the fused router still emits an rc-2 annotation"
+fi
+
+# (u5) END TO END: the WATCH's own step summary headline names rc 2 on a
+# partial-coverage run — one MERGEABLE row read, one UNKNOWN.
+fixture "$TMP/u-partial.json" \
+  "$(pr_row 9401 MERGEABLE CLEAN "$(full_set "$OLD")")" \
+  "$(pr_row 9402 UNKNOWN null "$(full_set "$OLD")")"
+: > "$TMP/u-partial.md"
+out="$(GITHUB_STEP_SUMMARY="$TMP/u-partial.md" run_watch "$TMP/u-partial.json" --baseline "$NB.empty")"; rc=$?
+[ "$rc" = "2" ] && grep -q "^## stale-verdict-watch rc=2 — PARTIAL" "$TMP/u-partial.md" \
+  && ok "(u5) a partial run exits 2 and its summary headline says rc=2 PARTIAL, not a bare green" \
+  || bad "(u5) expected exit 2 and an rc=2 headline, got $rc: $(cat "$TMP/u-partial.md")"
+
+bash -n "$ROUTE" && ok "stale-verdict-watch-route.sh passes bash -n" || bad "stale-verdict-watch-route.sh has a syntax error"
 
 echo "── stale-verdict-watch: $PASS passed, $FAIL failed ──"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -198,7 +198,7 @@ defmodule BarkparkWeb.AuthNotificationWithholdTest do
   describe "the airdrop grant path is deliberately untouched" do
     test "GrantNotifier.deliver_grant is called unconditionally, so it is not a withhold" do
       # Guard against a future edit turning the unconditional send into a branch.
-      # airdrop.ex:254 calls deliver_grant with no surrounding condition; only a
+      # airdrop.ex calls `GrantNotifier.deliver_grant` with no surrounding condition; only a
       # documented best-effort PubSub toast is skipped there.
       source = File.read!("lib/barkpark_web/live/studio/studio_live/handlers/airdrop.ex")
 

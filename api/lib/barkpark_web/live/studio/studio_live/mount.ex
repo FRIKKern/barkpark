@@ -49,7 +49,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
     # studio_path stays byte-identical to the pre-scoped era.
     |> assign_new(:scope_prefix, fn -> "" end)
     |> assign(
-      nav_section: :structure,
       page_title: "Studio",
       # ── Responsive width bucket (studio-space-priority-desk spd-s2) ─────
       # Which viewport width band the desk is rendering for: "wide" (the
@@ -94,6 +93,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       # goes green while silently pinning every non-paper desk to false,
       # which is the same hole wearing a passing test.
       sidebar_user_opened: false,
+      # ── Inspector preference (spd-b1-pane-state-persistence) ────────────
+      # The user's standing "keep the Document inspector collapsed" choice,
+      # remembered per client in localStorage (`barkpark_inspector`) and
+      # delivered ONLY through connect_params — the presence-identity path
+      # above. On the static render connect_params is nil, so this is false
+      # there and first paint stays CSS-owned: the head pre-paint script
+      # stamps `data-inspector-pref="closed"` on <html> and the painted-closed
+      # rule in root.html.heex paints the strip. At connected mount it seeds
+      # `sidebar_open: false` through `Shared.Paper.sidebar_assigns/2`, whose
+      # `.is-collapsed` strip is the same geometry — nothing moves.
+      #
+      # Only "closed" is ever remembered, and only from a toggle at `wide`
+      # (Handlers.Paper.sidebar_toggle_panel/1). Below `wide` the default is
+      # already painted-closed and an open is a per-visit SUMMON (D91; at
+      # narrow/phone the full-pane Tier-3 destination), so a reload never
+      # paints an inspector the user did not ask for on this visit.
+      inspector_pref_closed: connect_params["inspector_closed"] == true,
       presence_topic: nil,
       subscribed_doc: nil,
       image_picker_field: nil,
@@ -177,6 +193,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       access_workspace_grants: [],
       access_error: nil,
       validation_errors: %{},
+      # ── Desk search (Gyldendal parity E8) ────────────────────────────
+      # The text in the desk's search box and the hits it resolved. Empty
+      # box ⇒ empty hits ⇒ the desk renders its own items, unchanged.
+      desk_search: "",
+      desk_search_hits: [],
+      # Warning-level findings (schema `"level": "warning"` rules, Gyldendal
+      # parity E1.6): rendered inline and counted in the publish bar, never a
+      # gate on save or publish.
+      validation_warnings: %{},
       # ── Cross-field validations (Task barkpark-cgn) ──────────────────
       # Populated after every autosave by `Barkpark.Content.CrossValidator
       # .violations/2`. Each entry is a string-keyed map carrying name,
@@ -191,6 +216,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       valueref_panel: nil,
       confirm_modal: nil,
       nav_group: nil,
+      # ── Document views (Gyldendal parity E10) ───────────────────────
+      # The open view's id, nil for the form, and the related documents it
+      # resolved. A schema that declares no `desk.views` never leaves nil.
+      nav_view: nil,
+      nav_view_docs: [],
       # ── Content preview side-pane (Goal barkpark-G1, task s3) ─────────
       # Doc-type-agnostic. Pane is rendered iff a plugin's
       # `content_renderer/3` callback contributes iodata via
@@ -240,6 +270,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       paper_rev: 0,
       paper_html: "",
       paper_block_mode: false,
+      # Paper masters (task-3b6e562e916c8ce4): the open paper's in-scope
+      # masters for the slash picker, or nil when the pane may not write.
+      paper_masters: nil,
+      paper_masters_impl: nil,
+      # Linked master instances (task-59f078a2fd248698): the open paper's
+      # `%{key => html}` render map for the boundary preview, or nil.
+      paper_master_render: nil,
       paper_topic: nil,
       # t9 — live task-block previews, keyed by block id. Display-only rows
       # for the canvas boundary widgets (never the save baseline — doctrine

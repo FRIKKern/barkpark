@@ -65,7 +65,8 @@ defmodule BarkparkWeb.Integration.HaltPathTest do
       "barkpark-dev-token",
       "dev",
       "halt-path-integration",
-      ["read", "write", "admin"]
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
     )
 
     {:ok, _schema} =
@@ -115,7 +116,7 @@ defmodule BarkparkWeb.Integration.HaltPathTest do
   describe "POST /v1/data/mutate/<dataset> publish — halt path" do
     test "returns HTTP 409 with halted body when before_publish hook halts", %{conn: conn} do
       _draft = create_draft!("halt-test-1")
-      Application.put_env(:barkpark, :plugins, [HaltingPlugin])
+      Barkpark.PluginEnv.put!([HaltingPlugin])
 
       resp = conn |> authed() |> post("/v1/data/mutate/test", publish_body("halt-test-1"))
 
@@ -135,7 +136,7 @@ defmodule BarkparkWeb.Integration.HaltPathTest do
 
     test "passes through when before_publish returns :ok", %{conn: conn} do
       _draft = create_draft!("pass-test-1")
-      Application.put_env(:barkpark, :plugins, [PassthroughPlugin])
+      Barkpark.PluginEnv.put!([PassthroughPlugin])
 
       resp = conn |> authed() |> post("/v1/data/mutate/test", publish_body("pass-test-1"))
 
@@ -152,7 +153,7 @@ defmodule BarkparkWeb.Integration.HaltPathTest do
 
     test "halt does not write — draft remains drafts.X after halted publish", %{conn: conn} do
       _draft = create_draft!("halt-noop-1")
-      Application.put_env(:barkpark, :plugins, [HaltingPlugin])
+      Barkpark.PluginEnv.put!([HaltingPlugin])
 
       resp = conn |> authed() |> post("/v1/data/mutate/test", publish_body("halt-noop-1"))
       assert resp.status == 409

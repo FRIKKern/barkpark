@@ -5,35 +5,39 @@ For people who edit content in Barkpark Studio (not for developers).
 
 ## What Barkpark is
 
-A headless CMS: book metadata (ONIX 3.0 first-class) plus generic content (posts, pages). Multi-pane Studio at `/w/<ws>/p/<proj>/d/<dataset>/studio` — open any URL as `/studio/<dataset>` for a session-resolved redirect to your workspace.
+A headless CMS. You edit documents of whatever types your team modelled — `post`, `page`, `product` — in the multi-pane Studio at `/w/<ws>/p/<proj>/d/<dataset>/studio`; `/studio/<dataset>` redirects there for your session. Plugins add specialised editors on top; the ONIX book editor below is one.
 
-Content hierarchy: **Workspace → Project → Dataset → Documents**. Most teams have one workspace. Old content was moved to a Default workspace and project automatically — nothing lost, old links still work.
+Content hierarchy: **Workspace → Project → Dataset → Documents**. Most teams have one workspace. Legacy content moved to a Default workspace and project automatically; old links still work.
 
 ## Navigation — the desk
 
 ```
 +--------------+-----------------+-----------+---------------------------------+
 |  Structure   |  All Post       |  p1       |  Editor pane: p1                |
-|  Book        |  drafts.book-…  |  book-…   |  [tabs] [violations]            |
+|  Content     |  drafts.post-…  |  post-…   |  [tabs] [violations]            |
 |  …           |                 |           |  fields…                        |
 +--------------+-----------------+-----------+---------------------------------+
 ```
 
-Click left-to-right to drill. Each pane is its own URL segment — deep-linkable.
+Click left-to-right to drill. Each pane is its own URL segment, so a Studio URL reopens the same document for anyone you share it with.
 
-**Tab not in URL:** the active editor tab lives in the LiveView socket, NOT the URL. Sharing a book link always lands on the default (Core) tab. Desk filter chips (`?desk=drafts`) DO live in the URL and are shareable.
+**Tab not in URL:** the active editor tab lives in the LiveView socket, NOT the URL. A shared link always lands on the default tab. Desk filter chips (`?desk=drafts`) DO live in the URL and are shareable.
 
-## Book editor
+## Editing any content type
 
-47 ONIX fields split into 8 tabs: Core · Descriptive · Contributors · Subjects · Marketing · Publishing · Supply & Pricing · Status.
+Your own types appear in the Structure pane under **Content**, the group for every type no curated group or plugin claims; a type with no documents yet still shows. Click it for its document list, then a document to open the editor.
 
-### Common tasks
+**Create:** Structure → your type → `+` → fill the fields → Publish when ready.
 
-**Create a book:** Studio → Book → `+` → fill title + identifier → ONIX preview updates live → Publish when ready.
-
-**Fix a typo in a published book:** Open the book → edit any field (Studio auto-creates a draft) → click Diff → click Publish.
+**Fix a typo in a published document:** open it → edit any field (Studio auto-creates a draft) → click Diff for the field-level changes → click Publish.
 
 **Bulk publish/unpublish:** check rows in the document list → floating action bar appears.
+
+## Book editor — ONIX plugin only
+
+Everything in this section needs the OnixEdit plugin enabled.
+
+47 ONIX fields in 8 tabs: Core · Descriptive · Contributors · Subjects · Marketing · Publishing · Supply & Pricing · Status. The ONIX 3.0 XML preview updates live beside them.
 
 ### Importing an ONIX feed
 
@@ -49,11 +53,25 @@ mix onix.import path/to/feed.xml --dry-run   # preview first
 mix onix.import path/to/feed.xml             # creates drafts
 ```
 
-Each `<Product>` becomes a draft book. `doc_id` derives from `<RecordReference>` (host prefix stripped); fallback: first `<ProductIdentifier>` `<IDValue>`; final fallback: a random `imported-<n>` placeholder. Round-trip is byte-stable: export → import → re-export produces identical XML (modulo `<SentDateTime>`).
+Each `<Product>` becomes a draft book; `doc_id` derives from `<RecordReference>` (host prefix stripped), else the first `<IDValue>`, else a random `imported-<n>`. Round-trip is byte-stable: export → import → re-export produces identical XML (modulo `<SentDateTime>`).
 
 ### Bokbasen submission
 
-**Publish to Bokbasen** button (book only): two-stage modal (dry-run → real). Fix violations first: the `isbn_xor_gtin` cross-validation is an **error** (blocks submission); `price_currency_required` is a **warning**. Status pill: `draft → pending → staging → staged → polling → accepted`. On rejection: `bp_export_status.last_error` has Bokbasen's message. Full ops procedure: `docs/ops/bokbasen-go-live.md`.
+**Publish to Bokbasen** button (book only): two-stage modal (dry-run → real). Fix violations first: the `isbn_xor_gtin` cross-validation is an **error** (blocks submission); `price_currency_required` is a **warning**. Status pill: `draft → pending → staging → staged → polling → accepted`. On rejection: `bp_export_status.last_error` has Bokbasen's message.
+
+### Thema picker
+
+`themaSubjectCategory`: ~9,000 hierarchical subject categories. Search input + scrollable tree; click a node to expand, a leaf to select.
+
+### "(no codelist registered)" field
+
+```bash
+# dev box
+mix run -e 'Barkpark.Codelists.EDItEUR.seed_bundled()'
+
+# prod — restart restores it via post-boot seeder
+systemctl restart barkpark
+```
 
 ## Editor header actions
 
@@ -68,32 +86,18 @@ Each `<Product>` becomes a draft book. `doc_id` derives from `<RecordReference>`
 | Open another | Load a second doc side-by-side (read-only) |
 | Export ONIX | Download ONIX 3.0 XML (book only) |
 
-## Thema picker
-
-`themaSubjectCategory`: ~9,000 hierarchical subject categories. Search input + scrollable tree; click a node to expand, a leaf to select.
-
-## "(no codelist registered)" field
-
-```bash
-# dev box
-mix run -e 'Barkpark.Codelists.EDItEUR.seed_bundled()'
-
-# prod — restart restores it via post-boot seeder
-systemctl restart barkpark
-```
-
 ## URL reference
 
-```
-/w/<ws>/p/<proj>/d/<dataset>/studio                  → the canonical Studio URL (workspace + project + dataset live in the path)
-/w/<ws>/p/<proj>/d/<dataset>/studio/book             → all books
-/w/<ws>/p/<proj>/d/<dataset>/studio/book?desk=drafts → only drafts
-/w/<ws>/p/<proj>/d/<dataset>/studio/book/<doc-id>    → editor
-/studio[/<dataset>/...]                              → 302 to your scoped Studio (path + query preserved)
-/admin/onixedit/staleness                            → book sync status overview
-```
+`P` stands for `/w/<ws>/p/<proj>/d/<dataset>`:
 
-Links are addresses now: a Studio URL opens the same workspace/project/dataset/document for whoever you share it with (membership permitting) — switching workspace changes the URL, and reload reproduces your exact location.
+```
+P/studio                    → the canonical Studio URL
+P/studio/<type>             → all documents of a type
+P/studio/<type>?desk=drafts → only drafts
+P/studio/<type>/<doc-id>    → editor
+/studio[/<dataset>/...]     → 302 to your scoped Studio
+/admin/onixedit/staleness   → book sync status (ONIX)
+```
 
 ## Getting help
 

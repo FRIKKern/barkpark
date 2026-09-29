@@ -89,7 +89,21 @@ defmodule BarkparkWeb.Layouts.ReaderMermaidSharedAssetTest do
     end
 
     test "the reader still loads the asciinema player it alone paints", %{html: html} do
-      assert html =~ "asciinema-player@3.8.0"
+      # The subject is unchanged — "the reader loads a player, and it is the
+      # reader's OWN hook that paints it" — only the player's ADDRESS moved.
+      # This used to read `assert html =~ "asciinema-player@3.8.0"`, a
+      # cdn.jsdelivr.net package specifier, which was never the point: the
+      # version pin is not what this file guards, the READER-ONLY-ness of
+      # `runAsciicast` is (see the moduledoc). pe-bl-asciicast-selfhost
+      # vendored the same 3.8.0 dist bytes into priv/static/assets/, so the
+      # specifier no longer appears on the page and the local URL is the
+      # honest spelling of the same assertion.
+      #
+      # `BarkparkWeb.Layouts.ReaderAsciicastSelfhostTest` owns the
+      # self-hosting invariant itself (no jsdelivr tag survives, the engine
+      # stays `defer` below </head>, the vendored bytes reach off-origin
+      # nowhere). This line only needs the player to be THERE.
+      assert html =~ ~s(src="/assets/asciinema-player.min.js")
       assert html =~ "runAsciicast"
     end
   end

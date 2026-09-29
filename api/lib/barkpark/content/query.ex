@@ -33,6 +33,14 @@ defmodule Barkpark.Content.Query do
   # The public page bounds, named so `list_documents/3`, `list_documents_page/3`
   # and the HTTP layer that echoes them back cannot drift apart.
   @max_limit 1000
+
+  # Whole-corpus bound for `collect_corpus_documents/3` — the in-memory fold
+  # read behind the drafts graph. Twenty times the `@max_limit` page, matching
+  # the (page_size 1000 x max_pages 20) budget the per-type OFFSET walk it
+  # replaces carried, but applied ONCE to the whole corpus rather than to each
+  # type: peak memory is now bounded by one number instead of by
+  # (types x pages).
+  @corpus_limit 20_000
   @max_offset 100_000
 
   @doc """
@@ -209,6 +217,234 @@ defmodule Barkpark.Content.Query do
   defp finish(acc), do: acc |> Enum.reverse() |> Enum.concat()
 
   @doc """
+  Read a WHOLE dataset corpus for an in-memory fold — every document of every
+  named `types`, drafts-merged, in ONE query per ACL class instead of one
+  OFFSET page per type.
+
+  ## Why this exists and `collect_all_documents/3` does not serve it
+
+  `collect_all_documents/3` pages with `LIMIT/OFFSET` over
+  `list_with_drafts_merged/4`, and that query is a `DISTINCT ON
+  (regexp_replace(doc_id, '^drafts\.', ''))` subquery re-sorted by `updated_at
+  DESC, id`. Neither sort key is indexed, so EVERY page re-sorts the ENTIRE
+  type corpus TWICE, carrying the full `content` jsonb through the sort tuple.
+  Total work is therefore QUADRATIC in the corpus (pages x corpus), and the
+  outer sort spills to disk. Measured on an 8,000-document corpus
+  (`EXPLAIN (ANALYZE, BUFFERS)`, page 6 of 8):
+
+      Limit (actual time=70.158..70.255 rows=1000)
+        Sort (actual time=69.764..70.122 rows=6000)
+          Sort Key: s0.updated_at DESC, s0.id
+          Sort Method: external merge  Disk: 2336kB
+          -> Unique (actual rows=8001)
+             -> Sort (actual rows=8001) Sort Method: quicksort  Memory: 2747kB
+
+  — 8,001 rows sorted to return 1,000, once per page. The whole-request cost
+  of `GET /v1/graph/:id?drafts=true` was 47 such reads (`Content.Graph`'s fold
+  walked every schema in the dataset), 1,046 ms of 1,264 ms.
+
+  A fold does not need ORDER and does not need OFFSET: it needs the set, once.
+  So this reads it as ONE bounded `DISTINCT ON` — a single sort, no outer
+  re-sort, no offset walk, no per-type multiplication.
+
+  ## Options
+
+    * `:limit` — hard bound on documents returned (default #{@corpus_limit}).
+      Unlike `collect_all_documents/3`'s per-TYPE `max_pages` bound this is a
+      WHOLE-CORPUS bound, so the caller's peak memory is bounded by one number
+      rather than by (types x pages).
+    * `:owner_scoped` — when `true`, appends the row-ownership ACL
+      (`scope_to_owner/2`) exactly as `base_query/4` does for an
+      `owner_scoped: true` type. Callers holding the schema list MUST split
+      their types by that flag and make one call per class; a mixed call would
+      apply one type's ACL to another's rows.
+    * `:perspective` — `:published` applies the SAME `doc_id NOT LIKE
+      'drafts.%'` clause `list_linear/5` applies (`apply_perspective/2`), so a
+      published-perspective corpus read is row-identical to the walk it
+      replaces. Any other value (default) leaves the draft-preferred
+      `DISTINCT ON` in place. The two are mutually exclusive by construction:
+      with drafts excluded there is no draft twin left to prefer.
+    * `:workspace_id` / `:project_id` / `:caller_context` — as `list_documents/3`.
+
+  ## Identity
+
+  `DISTINCT ON (type, regexp_replace(doc_id, '^drafts\.', ''))` — the `type`
+  leg is LOAD-BEARING. Row identity is `(doc_id, type, dataset_id)`, so two
+  different types may legitimately carry the same `doc_id`; distinct-ing on the
+  slug alone would silently collapse `task/foo` and `paper/foo` into one row.
+  The per-type reads this replaces could not make that mistake; this one must
+  not either.
+
+  Draft-preferred, same as `list_with_drafts_merged/4`: the `CASE WHEN doc_id
+  LIKE 'drafts.%' THEN 0 ELSE 1 END` tiebreaker puts the draft twin first, so
+  `DISTINCT ON` keeps it over its published twin.
+
+  Returns `{documents, nil | :cap}` with the same contract as
+  `collect_all_documents/3`: `nil` means the corpus is exhausted and `docs` is
+  all of it; `:cap` means the bound stopped the read and `docs` is a PREFIX
+  that must not be reported as complete.
+  """
+  @spec collect_corpus_documents([String.t()], String.t(), keyword()) ::
+          {[Document.t()], nil | :cap}
+  def collect_corpus_documents(types, dataset, opts \\ [])
+
+  def collect_corpus_documents([], _dataset, _opts), do: {[], nil}
+
+  def collect_corpus_documents(types, dataset, opts) when is_list(types) do
+    types
+    |> corpus_query(dataset, opts)
+    |> corpus_read(opts)
+  end
+
+  @doc """
+  The LIVE-EXTRACT SET: the documents whose edges cannot be trusted to the
+  materialised `content_edges` table, and therefore must be re-extracted from
+  their `content` on this request.
+
+  Two clauses, and both are PREDICATES rather than lists — a list of "the
+  special documents" is a snapshot that goes wrong the moment the corpus moves.
+
+    1. `doc_id LIKE 'drafts.%'` — a draft twin. `content_edges` is
+       published-only by construction (`EdgeProjector.Lifecycle` projects at
+       `perspective: :published`), so a draft's edges are NOWHERE in it. This
+       is the clause that makes the hybrid correct.
+
+    2. `updated_at > :live_since` — THE PROJECTOR-LAG WINDOW. Projection is
+       asynchronous and debounced: `ProjectorWorker` enqueues with
+       `schedule_in: 5` seconds, dedups on `unique: [period: 30]` across
+       `:available`/`:scheduled`/`:executing` (so a save inside that window
+       rides an already-scheduled job that may predate it), runs on a
+       concurrency-2 queue, and the DEFAULT op is a full per-scope REBUILD
+       under a `timeout: 60_000` transaction. A document saved moments ago can
+       therefore have stale edges, or none, and NOTHING in the schema says so —
+       `content_edges` carries no per-document projection marker and
+       `documents` has no `edges_projected_at`. A `doc.updated_at > max(its
+       edges' updated_at)` detector would not close the hole either: a rebuild
+       is delete-then-insert, so a document that SHOULD have edges and has none
+       yet is indistinguishable from one that genuinely has none. The window is
+       the honest instrument: it needs no marker and no migration, and it is a
+       strict superset of "possibly not yet projected".
+
+  Pass `:live_since` as a `DateTime`; omit it (or pass `nil`) to take clause 1
+  alone. Same `{documents, nil | :cap}` contract, same identity model and same
+  draft-preferred `DISTINCT ON` as `collect_corpus_documents/3`.
+  """
+  @spec collect_live_extract_documents([String.t()], String.t(), keyword()) ::
+          {[Document.t()], nil | :cap}
+  def collect_live_extract_documents(types, dataset, opts \\ [])
+
+  def collect_live_extract_documents([], _dataset, _opts), do: {[], nil}
+
+  def collect_live_extract_documents(types, dataset, opts) when is_list(types) do
+    drafts_prefix = DraftId.drafts_prefix() <> "%"
+
+    base = corpus_query(types, dataset, opts)
+
+    base =
+      case Keyword.get(opts, :live_since) do
+        %DateTime{} = since ->
+          where(base, [d], like(d.doc_id, ^drafts_prefix) or d.updated_at > ^since)
+
+        _ ->
+          where(base, [d], like(d.doc_id, ^drafts_prefix))
+      end
+
+    corpus_read(base, opts)
+  end
+
+  @doc """
+  The corpus SLUG SET — every logical document id in scope, and NOT ONE BYTE OF
+  `content`.
+
+  The drafts graph needs this set to decide whether a plugin edge's target is a
+  real document or a phantom, and that question is answered by MEMBERSHIP
+  alone. Selecting `content` for it cost 810 ms over a 9,646-document corpus
+  (241 MB decoded); selecting `doc_id` and `type` costs 56 ms. Measured, same
+  corpus, same `DISTINCT ON`.
+
+  Returns `{[%{doc_id: String.t(), type: String.t()}], nil | :cap}`.
+  """
+  @spec collect_corpus_slugs([String.t()], String.t(), keyword()) ::
+          {[%{doc_id: String.t(), type: String.t()}], nil | :cap}
+  def collect_corpus_slugs(types, dataset, opts \\ [])
+
+  def collect_corpus_slugs([], _dataset, _opts), do: {[], nil}
+
+  def collect_corpus_slugs(types, dataset, opts) when is_list(types) do
+    types
+    |> corpus_query(dataset, opts)
+    |> select([d], %{doc_id: d.doc_id, type: d.type})
+    |> corpus_read(opts)
+  end
+
+  @doc """
+  The `documents.id` PKs of a scoped corpus, as a QUERY for use in a
+  `subquery/1`.
+
+  `content_edges` carries no tenancy columns — an edge is scoped by its
+  endpoints — so the drafts graph's materialised arm scopes its read by asking
+  "is this edge's SOURCE one of the documents this caller may read". Handing it
+  this query rather than a hand-written `where` keeps ONE scoping pipeline:
+  dataset, workspace/project, grants and (per class) the row-ownership ACL are
+  applied by exactly the code every other corpus read uses.
+  """
+  @spec corpus_scope_ids_query([String.t()], String.t(), keyword()) :: Ecto.Query.t()
+  def corpus_scope_ids_query(types, dataset, opts \\ []) when is_list(types) do
+    types
+    |> corpus_query(dataset, opts)
+    |> select([d], d.id)
+  end
+
+  # The scoped, un-distincted base every corpus read shares. Mirrors
+  # `base_query/4` minus the single-type `where` and the filter map: one type
+  # list, the tenancy scope, the grant scope, and the row-ownership ACL when the
+  # caller says this class of types opts into it.
+  defp corpus_query(types, dataset, opts) do
+    base =
+      Document
+      |> where([d], d.type in ^types)
+      |> scope_to_dataset(dataset, opts)
+      # global-read: corpus_query/3 is the corpus twin of base_query/4 (same module, line ~465, baselined fail-open) and MUST keep that nil-posture. Its three public callers — collect_live_extract_documents/3, collect_corpus_slugs/3 and corpus_scope_ids_query/3 — are reached only from Content.Graph.build_drafts_index/1, which threads :workspace_id straight out of BarkparkWeb.ScopeHelpers.scope_opts/1. Over HTTP that is ALWAYS a binary workspace id or the :shared_only sentinel (never nil), so this arm is unreachable from a request; nil arrives only from an internal caller or a Studio LiveView socket (ScopeHelpers' :legacy arm OMITS the key, and Studio.PaneBuilder then hands Graph.traverse/2 an empty scope keyword). Failing closed here would return zero rows to the Studio GraphView pane while its un-batched sibling base_query/4 kept reading globally over the very same opts.
+      |> scope_to_workspace_or_global(
+        Keyword.get(opts, :workspace_id),
+        Keyword.get(opts, :project_id)
+      )
+      |> maybe_scope_to_grants(opts)
+
+    base =
+      if Keyword.get(opts, :owner_scoped, false),
+        do: scope_to_owner(base, Keyword.get(opts, :caller_context)),
+        else: base
+
+    apply_perspective(base, Keyword.get(opts, :perspective, :raw))
+  end
+
+  # One read of `limit + 1`: the extra row is the honest truncation probe — it
+  # is present exactly when the set is larger than the bound.
+  defp corpus_read(base, opts) do
+    limit = opts |> Keyword.get(:limit, @corpus_limit) |> max(1)
+
+    rows =
+      from(d in base,
+        distinct: [
+          d.type,
+          fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)
+        ],
+        order_by: [
+          asc: d.type,
+          asc: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+          asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 0 ELSE 1 END", d.doc_id)
+        ],
+        limit: ^(limit + 1)
+      )
+      |> Repo.all()
+
+    if length(rows) > limit,
+      do: {Enum.take(rows, limit), :cap},
+      else: {rows, nil}
+  end
+
+  @doc """
   Count documents matching the same type / scope / filter / perspective as
   `list_documents`, ignoring `limit`/`offset` — the total a paginator needs.
   For `:drafts` the draft/published twins are merged (counted once), matching
@@ -242,7 +478,7 @@ defmodule Barkpark.Content.Query do
     )
     |> maybe_scope_to_owner(type, dataset, opts)
     |> maybe_scope_to_grants(opts)
-    |> apply_filter_map(filter_map)
+    |> apply_filter_map(filter_map, dataset, opts)
   end
 
   # Row/ownership ACL (Phase 4, core-auth). Appends `scope_to_owner/2` ONLY when
@@ -314,7 +550,16 @@ defmodule Barkpark.Content.Query do
   # callers and `Content.Query` tests use them, so validation must accept them
   # exactly where a clause exists and nowhere else. Accepting them field-wide
   # would let a desk chip pass write-validation and then raise at render.
-  @doc_id_only_ops ~w(starts_with not_starts_with)
+  # `referencedBy` / `notReferencedBy` join the same list (Gyldendal parity E9).
+  # They are BUILDER-ONLY on purpose: their clause is a correlated EXISTS over
+  # `content_edges`, not a column compare, and the public wire door has no
+  # vocabulary for it. The desk structure is the caller.
+  @doc_id_only_ops ~w(starts_with not_starts_with referencedBy notReferencedBy)
+
+  # The two ops above bind a TYPE NAME, not a value of the id column. A blank or
+  # non-binary value has no clause and would otherwise fall to the catch-all and
+  # return every row — the same silent-unfiltered-set shape `hasStrong` refuses.
+  @reference_count_ops ~w(referencedBy notReferencedBy)
 
   # `in`/`nin` are the ONLY ops with an `is_list` clause in `apply_field_op/4`;
   # every other op binds a SCALAR param. Array-bracket syntax
@@ -526,18 +771,124 @@ defmodule Barkpark.Content.Query do
   # its own guard. `QueryController` still pre-guards so the HTTP surface keeps
   # its field-naming envelope (and its ordering behind `forbidden_query_field/4`);
   # this is the floor under every OTHER door.
-  defp apply_filter_map(query, map) when map_size(map) == 0, do: query
+  defp apply_filter_map(query, map, _dataset, _opts) when map_size(map) == 0, do: query
 
-  defp apply_filter_map(query, map) do
+  defp apply_filter_map(query, map, dataset, opts) do
     case validate_filter_map(map) do
       :ok -> :ok
       {:error, {field, op}} -> raise Barkpark.Content.InvalidFilterError.new(field, op)
     end
 
+    map = resolve_reference_count_ops(map, dataset, opts)
+
     Enum.reduce(map, query, fn
       {field, %{} = ops}, q -> apply_field_ops(q, field, ops)
       {field, value}, q -> apply_field_op(q, field, "eq", value)
     end)
+  end
+
+  # `referencedBy: "publication"` names a TYPE; the clause needs that type's
+  # REFERENCE FIELD NAMES, which live in the schema. Resolved once here, at the
+  # chokepoint that already has `dataset` and `opts`, so `apply_field_op/4`
+  # stays a pure query builder.
+  #
+  # READ THE DOCUMENTS, NOT `content_edges`. The edge table is a MATERIALISED
+  # projection refreshed by `Barkpark.EdgeProjector` — correct for the graph
+  # view, wrong for a desk list, because an editor who has just linked a
+  # category would keep seeing it under «Kategorier uten utgivelser» until the
+  # projector next ran. This clause reads the referencing documents' own
+  # `content`, the same live predicate `Edges.find_referencing_docs/3` uses.
+  #
+  # AN UNKNOWN TYPE IS A REFUSAL, not an empty list. A desk node with a typo'd
+  # type would otherwise render an empty «med utgivelser» and a complete
+  # «uten utgivelser» — two plausible-looking lists, both lies.
+  defp resolve_reference_count_ops(map, dataset, opts) do
+    Map.new(map, fn
+      {field, %{} = ops} -> {field, Map.new(ops, &resolve_one_op(&1, field, dataset, opts))}
+      other -> other
+    end)
+  end
+
+  defp resolve_one_op({op, type}, field, dataset, opts)
+       when op in @reference_count_ops and is_binary(type) do
+    schemas = Barkpark.Content.Schema.list_schemas(dataset, tenancy_opts(opts))
+
+    case Enum.find(schemas, &(&1.name == type)) do
+      nil ->
+        raise Barkpark.Content.InvalidFilterError.new(field, op)
+
+      schema ->
+        {op, {type, reference_field_names(schema)}}
+    end
+  end
+
+  defp resolve_one_op(pair, _field, _dataset, _opts), do: pair
+
+  # Scalar `reference` fields and `arrayOf` fields whose element is a reference.
+  # Sanity's `references(^._id)` does not care which field carried the link, so
+  # neither does this: every reference-shaped field on the type is a candidate.
+  # No reference-shaped field on the referencing type means nothing there CAN
+  # point here, so the existence question answers false — the same verdict
+  # Sanity's `references()` gives, and the complement still partitions the set.
+  defp reference_exists(query, _type, [], negate?) do
+    if negate?, do: query, else: where(query, [d], false)
+  end
+
+  defp reference_exists(query, type, ref_fields, negate?) do
+    scalars = for {name, "reference"} <- ref_fields, do: name
+    arrays = for {name, "arrayOf"} <- ref_fields, do: name
+
+    if negate? do
+      where(
+        query,
+        [d],
+        not fragment(
+          "EXISTS (SELECT 1 FROM documents f WHERE f.type = ? AND f.dataset IS NOT DISTINCT FROM ? AND f.dataset_id IS NOT DISTINCT FROM ? AND f.workspace_id IS NOT DISTINCT FROM ? AND f.project_id IS NOT DISTINCT FROM ? AND (EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE f.content ->> k = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE jsonb_typeof(f.content -> k) = 'array' AND f.content -> k @> to_jsonb((CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)))))",
+          ^type,
+          d.dataset,
+          d.dataset_id,
+          d.workspace_id,
+          d.project_id,
+          ^scalars,
+          d.doc_id,
+          d.doc_id,
+          d.doc_id,
+          ^arrays,
+          d.doc_id,
+          d.doc_id,
+          d.doc_id
+        )
+      )
+    else
+      where(
+        query,
+        [d],
+        fragment(
+          "EXISTS (SELECT 1 FROM documents f WHERE f.type = ? AND f.dataset IS NOT DISTINCT FROM ? AND f.dataset_id IS NOT DISTINCT FROM ? AND f.workspace_id IS NOT DISTINCT FROM ? AND f.project_id IS NOT DISTINCT FROM ? AND (EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE f.content ->> k = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE jsonb_typeof(f.content -> k) = 'array' AND f.content -> k @> to_jsonb((CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)))))",
+          ^type,
+          d.dataset,
+          d.dataset_id,
+          d.workspace_id,
+          d.project_id,
+          ^scalars,
+          d.doc_id,
+          d.doc_id,
+          d.doc_id,
+          ^arrays,
+          d.doc_id,
+          d.doc_id,
+          d.doc_id
+        )
+      )
+    end
+  end
+
+  defp reference_field_names(schema) do
+    for f <- schema.fields || [],
+        f["type"] == "reference" or
+          (f["type"] == "arrayOf" and get_in(f, ["of", "type"]) == "reference"),
+        is_binary(f["name"]),
+        do: {f["name"], f["type"]}
   end
 
   # `{field, ops}` -> the first {field, op} with no SQL arm, or nil.
@@ -558,6 +909,9 @@ defmodule Barkpark.Content.Query do
 
       Map.has_key?(ops, "hasStrong") and parse_has_strong(Map.get(ops, "hasStrong")) == :error ->
         {field, "hasStrong"}
+
+      op = Enum.find(@reference_count_ops, fn op -> blank_type_value?(ops, op) end) ->
+        {field, op}
 
       op =
           Enum.find(Map.keys(ops), fn op ->
@@ -601,6 +955,13 @@ defmodule Barkpark.Content.Query do
   end
 
   defp unsupported_op?(_field, _op), do: true
+
+  defp blank_type_value?(ops, op) do
+    case Map.fetch(ops, op) do
+      {:ok, v} -> not (is_binary(v) and String.trim(v) != "")
+      :error -> false
+    end
+  end
 
   defp non_scalar_op_value?(ops, op) do
     case Map.fetch(ops, op) do
@@ -1016,6 +1377,46 @@ defmodule Barkpark.Content.Query do
   # no-op here, matching the strict-parser convention (`parse_number`,
   # `parse_ts`) — the public wire is 400-guarded up front by the controller's
   # `invalid_filter` check, which calls `parse_has_strong/1` too.
+  # ── REFERENCE-COUNT OPS (Gyldendal parity E9) ─────────────────────────────
+  #
+  # Sanity's agency desk has three lists Barkpark's filter language could not
+  # express, because each is a CORRELATED SUBQUERY over a different type:
+  #
+  #   _type == "category" && count(*[_type == "publication" && references(^._id)]) > 0
+  #   _type == "author"   && count(*[_type == "publication" && references(^._id)]) > 0
+  #   _type == "category" && count(*[_type == "publication" && references(^._id)]) == 0
+  #
+  # Only `> 0` and `== 0` appear in the real desk, so these two ops answer
+  # EXISTENCE and not a count. That is deliberate: an op named for a count would
+  # promise arithmetic this clause does not do, and the desk has never asked for
+  # it. They are also BUILDER-ONLY (`@doc_id_only_ops`), because the public wire
+  # door has no vocabulary for a subquery and a desk node is the only caller.
+  #
+  # TENANCY RIDES ON THE OUTER ROW, NOT ON opts. The referencing document must
+  # sit in the SAME dataset, workspace and project as the row being filtered, so
+  # the subquery correlates to `d`'s own scope columns rather than to a bound
+  # parameter. A call site cannot forget to scope it, because there is nothing
+  # to pass: a neighbour tenant's publication can never satisfy the EXISTS.
+  #
+  # THE COMPARISON IS AGAINST THE PUBLISHED ID, not the row's own `doc_id`. A
+  # draft row is stored as `drafts.<id>` while every reference field holds the
+  # PUBLISHED id, so comparing `doc_id` verbatim answers false for every draft
+  # twin — the same reason `Edges.find_referencing_docs/3` opens with
+  # `DraftId.published_id/1`.
+  #
+  # DRAFTS COUNT, like Sanity's desk. A referencing draft twin is its own row,
+  # and an editor who has linked a category from an unsaved publication expects
+  # that category to leave the «uten utgivelser» list at once.
+  defp apply_field_op(query, field, "referencedBy", {type, ref_fields})
+       when field in @id_fields do
+    reference_exists(query, type, ref_fields, false)
+  end
+
+  defp apply_field_op(query, field, "notReferencedBy", {type, ref_fields})
+       when field in @id_fields do
+    reference_exists(query, type, ref_fields, true)
+  end
+
   defp apply_field_op(query, field, "hasStrong", v) do
     case parse_has_strong(v) do
       {:ok, tag, min} ->
@@ -1291,6 +1692,46 @@ defmodule Barkpark.Content.Query do
       nil -> {:error, :not_found}
       doc -> {:ok, doc}
     end
+  end
+
+  @doc """
+  BATCHED `get_document/4` EXISTENCE — which of `doc_ids` resolve as `type` in
+  `dataset` under this caller's scope, as a `MapSet` of the ids that do.
+
+  ONE query for the whole list, through the SAME scoping pipeline
+  `get_document/4` runs (`scope_to_dataset` -> `scope_to_workspace_or_global` ->
+  `maybe_scope_to_owner` -> `maybe_scope_to_grants`) with `in` where
+  `get_document/4` has `==`. That identity is the point: it exists so a fold
+  that would otherwise call `get_document/4` once per candidate can ask the same
+  question once for all of them and get the same answers.
+
+  Its caller is `Content.Edges.resolvable_targets/3` (the drafts graph's dangling
+  pass). See `Content.Graph.build_drafts_index/1` for why an un-batched version
+  of this question made `GET /v1/graph/:id?drafts=true` stop returning on
+  guerrilla (task-051a87de9a085e4d).
+  """
+  @spec resolvable_doc_ids([String.t()], String.t() | nil, String.t() | nil, keyword()) ::
+          MapSet.t(String.t())
+  def resolvable_doc_ids([], _type, _dataset, _opts), do: MapSet.new()
+
+  def resolvable_doc_ids(_doc_ids, type, dataset, _opts)
+      when is_nil(type) or is_nil(dataset),
+      do: MapSet.new()
+
+  def resolvable_doc_ids(doc_ids, type, dataset, opts) when is_list(doc_ids) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    Document
+    |> where([d], d.doc_id in ^doc_ids and d.type == ^type)
+    |> scope_to_dataset(dataset, opts)
+    # global-read: resolvable_doc_ids/4 is the BATCHED get_document/4 (line ~1512, baselined fail-open) and its whole contract is that the two answer identically — same opts, same scope_to_dataset -> scope_to_workspace_or_global -> maybe_scope_to_owner -> maybe_scope_to_grants pipeline, `in` where the single has `==`. A fail-CLOSED nil arm here would make the batch and the single DISAGREE on exactly the nil-workspace caller, which is the one case the batching was introduced to make cheaper. Tenancy is supplied by the same caller chain as get_document/4: Content.Edges.resolvable_targets/3 <- Content.Graph.build_drafts_index/1 <- ScopeHelpers.scope_opts/1, which over HTTP yields a binary id or :shared_only, never nil; nil is the documented internal / Studio-socket bridge.
+    |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_scope_to_owner(type, dataset, opts)
+    |> maybe_scope_to_grants(opts)
+    |> select([d], d.doc_id)
+    |> Repo.all()
+    |> MapSet.new()
   end
 
   @doc """
@@ -1624,6 +2065,68 @@ defmodule Barkpark.Content.Query do
         |> limit(^limit_n)
         |> Repo.all()
     end
+  end
+
+  @doc """
+  TYPELESS title search across every type the caller may see — the desk's own
+  search box (Gyldendal parity E8). `search_documents_by_title/5` answers for
+  ONE type, which the reference picker knows in advance; the desk does not.
+
+  Guard stack is `get_documents_by_ids/3`'s, the codebase's other TYPELESS
+  read, clause for clause: dataset + tenant (`scope_to_dataset`,
+  `scope_to_workspace_or_global`), the row/ownership ACL applied
+  UNCONDITIONALLY (a non-owner_scoped row carries a NULL `owner_id` and always
+  satisfies it, so this is byte-identical for those types and closes the leak
+  for owner_scoped ones), grants, and the schema-visibility clamp
+  (`restrict_to_visible_types/3` — allowlist, fails CLOSED to nothing).
+
+  `maybe_scope_to_owner/4` is deliberately NOT used: it keys on a single type.
+
+  Drafts are excluded — the desk lists published rows and their draft twin is
+  surfaced by the row's own pill, not as a second hit.
+  """
+  @spec search_documents_across_types(String.t(), String.t(), keyword(), pos_integer()) ::
+          [Document.t()]
+  def search_documents_across_types(query, dataset, opts \\ [], limit_n \\ 20)
+      when is_binary(query) do
+    case String.trim(query) do
+      "" ->
+        []
+
+      q ->
+        workspace_id = Keyword.get(opts, :workspace_id)
+        project_id = Keyword.get(opts, :project_id)
+        search_scoped(q, dataset, workspace_id, project_id, opts, limit_n)
+    end
+  end
+
+  # NIL WORKSPACE IS A REFUSAL, decided HERE and not in the scope helper. The
+  # desk's own listing reads through the fail-OPEN `scope_to_workspace_or_global/3`
+  # — a nil workspace leaves the query untouched, i.e. every tenant — and this
+  # search MUST answer with exactly what the desk above it can list, so it uses
+  # the same helper rather than a narrower one. What it must not inherit is that
+  # helper's nil arm, so the nil case never reaches it.
+  defp search_scoped(_q, _dataset, nil, _project_id, _opts, _limit_n), do: []
+
+  defp search_scoped(q, dataset, workspace_id, project_id, opts, limit_n) do
+    Document
+    |> where([d], ilike(d.title, ^like_contains(q)))
+    |> where([d], not like(d.doc_id, "drafts.%"))
+    |> scope_to_dataset(dataset, opts)
+    # The desk's own list read (PaneBuilder -> list_documents -> base_query)
+    # uses this same helper, and a search narrower than the list it sits above
+    # would hide rows the editor can see one click away. The fail-OPEN nil arm
+    # is unreachable from here: `search_scoped/6`'s first clause refuses it, so
+    # this call is only ever made with a real workspace_id or the `:shared_only`
+    # sentinel, which NARROWS to workspace_id IS NULL.
+    # global-read: mirrors the desk list's own scope; nil is refused above.
+    |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> scope_to_owner(Keyword.get(opts, :caller_context))
+    |> maybe_scope_to_grants(opts)
+    |> restrict_to_visible_types(dataset, opts)
+    |> order_by([d], asc: d.title, asc: d.type, asc: d.doc_id)
+    |> limit(^limit_n)
+    |> Repo.all()
   end
 
   @doc """

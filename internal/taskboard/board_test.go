@@ -3,6 +3,7 @@ package taskboard
 import (
 	"encoding/json"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -1100,4 +1101,256 @@ func TestFinishedEpicDecay(t *testing.T) {
 	if len(fin.FocusSet) != 0 {
 		t.Fatalf("past grace: FocusSet = %v, want empty (header-only on the shelf)", fin.FocusSet)
 	}
+}
+
+// ─── published-wins twin collapse (PDS-D748 item 4) ───────────────────────
+//
+// A task can exist twice — `x` and `drafts.x` — and every other Barkpark
+// display surface renders such a pair as ONE card. These arms pin that the TUI
+// now does too, in BOTH directions: a PAIR collapses to the published row, and
+// an UNPAIRED `drafts.<id>` row (PDS-D748 item 2's carve-out, the entire
+// mutate-created population) still renders.
+//
+// Measured before the collapse landed, on a real board cache from this box
+// (1306 tasks, 55 twinned pairs): BuildBoard painted 535 cards with 19 bare ids
+// appearing under BOTH spellings — one pair reading in_progress on the
+// published row and open on its draft, the same title twice. After: 481 cards,
+// 0 double-painted ids, 104 unpaired draft cards untouched.
+
+// twinSnapshot builds a snapshot carrying one twinned pair (published `pair`
+// reads in_progress, its draft twin reads open — the divergence measured live),
+// one UNPAIRED draft row, and one ordinary untwinned published row as the
+// CONTROL. All four are parentless leaves so they land in the loose pile.
+func twinSnapshot() Snapshot {
+	at := refNow.Add(-time.Hour)
+	mk := func(id, life, title string) Task {
+		return Task{DocID: id, Title: title, Lifecycle: life, UpdatedAt: at, InsertedAt: at}
+	}
+	return Snapshot{
+		Tasks: []Task{
+			mk("pair", lifeInProgress, "twinned task"),
+			mk(draftsPrefix+"pair", lifeOpen, "twinned task"),
+			mk(draftsPrefix+"lonely", lifeOpen, "unpaired draft"),
+			mk("control", lifeOpen, "ordinary untwinned task"),
+		},
+		Counts:    map[string]int{},
+		FetchedAt: refNow,
+	}
+}
+
+// boardCardCount counts every card the board paints for docID, across the NOW
+// band, epic roots and children, cluster members and the loose pile.
+func boardCardCount(b Board, docID string) int {
+	n := 0
+	for _, t := range b.Now {
+		if t.DocID == docID {
+			n++
+		}
+	}
+	for _, e := range b.Epics {
+		if e.Root.DocID == docID {
+			n++
+		}
+		for _, c := range e.Children {
+			if c.DocID == docID {
+				n++
+			}
+		}
+	}
+	for _, c := range b.Clusters {
+		for _, t := range c.Tasks {
+			if t.DocID == docID {
+				n++
+			}
+		}
+	}
+	for _, t := range b.Orphans {
+		if t.DocID == docID {
+			n++
+		}
+	}
+	return n
+}
+
+// TestBuildBoardCollapsesDraftTwinPublishedWins is THE arm that reds if the
+// collapse is reverted: with the collapse removed the draft twin paints its own
+// card and this test fails on "draft twin painted 1 card".
+func TestBuildBoardCollapsesDraftTwinPublishedWins(t *testing.T) {
+	s := twinSnapshot()
+	b := BuildBoard(s, RepoContext{}, refNow)
+
+	if got := boardCardCount(b, draftsPrefix+"pair"); got != 0 {
+		t.Fatalf("draft twin painted %d card(s), want 0 — a twinned pair must render ONCE, published wins (PDS-D748 item 4)", got)
+	}
+	if got := boardCardCount(b, "pair"); got != 1 {
+		t.Fatalf("published row painted %d card(s), want exactly 1", got)
+	}
+	// The SURVIVOR is the published row, not merely "one of them": it is the one
+	// reading in_progress, so it is the row that reaches the NOW-band lifecycle
+	// filter and the one whose lifecycle the corpus counts.
+	if len(b.Orphans) != 3 {
+		t.Fatalf("loose pile holds %d rows (%v), want 3 — pair + lonely draft + control", len(b.Orphans), docIDs(b.Orphans))
+	}
+	for _, o := range b.Orphans {
+		if o.DocID == "pair" && o.Lifecycle != lifeInProgress {
+			t.Fatalf("surviving twin reads %q, want %q — the DRAFT's lifecycle won", o.Lifecycle, lifeInProgress)
+		}
+	}
+	if b.TaskCount != 3 {
+		t.Fatalf("TaskCount = %d, want 3 — a twinned task counts ONCE, exactly as it does on the Studio board", b.TaskCount)
+	}
+}
+
+// TestBuildBoardKeepsUnpairedDraftTwin is the QUIET arm: it passes both with and
+// without the collapse, and reds only if someone "fixes" the twin by dropping
+// every `drafts.`-prefixed row — the blanket exclusion PDS-D748 item 2 and
+// Tasks.Query.collapse_twins/1 both forbid, because it would hide the whole
+// mutate-created task population (the rows `bp task next --frontier` exists to
+// reach).
+func TestBuildBoardKeepsUnpairedDraftTwin(t *testing.T) {
+	s := twinSnapshot()
+	b := BuildBoard(s, RepoContext{}, refNow)
+
+	if got := boardCardCount(b, draftsPrefix+"lonely"); got != 1 {
+		t.Fatalf("unpaired draft painted %d card(s), want 1 — an unpaired drafts.<id> IS the row of record (PDS-D748 item 2)", got)
+	}
+	// CONTROL: an ordinary untwinned published row paints exactly one card, with
+	// or without the collapse — so "one card" above is evidence about the twin,
+	// not about the harness.
+	if got := boardCardCount(b, "control"); got != 1 {
+		t.Fatalf("untwinned control painted %d card(s), want 1", got)
+	}
+}
+
+// TestCollapseDraftTwinsRetargetsSuppressedParent proves the collapse cannot
+// manufacture an orphan: a child whose parent_id names the SUPPRESSED draft
+// twin is re-pointed at the surviving published row, so it still groups under
+// its epic. Without the retarget the child's parent is a dangling pointer and
+// rootOf makes it its own root.
+func TestCollapseDraftTwinsRetargetsSuppressedParent(t *testing.T) {
+	at := refNow.Add(-time.Hour)
+	s := Snapshot{
+		Tasks: []Task{
+			{DocID: "epic", Title: "the epic", Lifecycle: lifeOpen, Kind: "goal", UpdatedAt: at, InsertedAt: at},
+			{DocID: draftsPrefix + "epic", Title: "the epic", Lifecycle: lifeOpen, Kind: "goal", UpdatedAt: at, InsertedAt: at},
+			{DocID: "kid", Title: "child of the draft twin", Lifecycle: lifeOpen, ParentID: draftsPrefix + "epic", UpdatedAt: at, InsertedAt: at},
+		},
+		Counts:    map[string]int{},
+		FetchedAt: refNow,
+	}
+	b := BuildBoard(s, RepoContext{}, refNow)
+
+	if len(b.Epics) != 1 || b.Epics[0].Root.DocID != "epic" {
+		t.Fatalf("epics = %v, want exactly one rooted at the published `epic`", b.Epics)
+	}
+	if ids := docIDs(b.Epics[0].Children); len(ids) != 1 || ids[0] != "kid" {
+		t.Fatalf("epic children = %v, want [kid] — the child of a suppressed draft twin must re-home on the survivor, not orphan", ids)
+	}
+	if len(b.Orphans) != 0 {
+		t.Fatalf("orphans = %v, want none", docIDs(b.Orphans))
+	}
+}
+
+// TestCollapseDraftTwinsIsNotAPrefixDrop pins the unit directly against the rule
+// it mirrors — Barkpark.Tasks.TwinResolver.winning_spelling_tier/1: bare-id rows
+// when any exist, the `drafts.` twins otherwise. Order is preserved and the
+// input slice is not mutated.
+func TestCollapseDraftTwinsIsNotAPrefixDrop(t *testing.T) {
+	in := []Task{
+		{DocID: draftsPrefix + "a"},
+		{DocID: "a"},
+		{DocID: draftsPrefix + "b"},
+		{DocID: "c"},
+	}
+	got := docIDs(collapseDraftTwins(in))
+	want := []string{"a", draftsPrefix + "b", "c"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("collapseDraftTwins = %v, want %v", got, want)
+	}
+	if len(in) != 4 || in[0].DocID != draftsPrefix+"a" {
+		t.Fatalf("collapseDraftTwins mutated its input: %v", docIDs(in))
+	}
+}
+
+// ── The bareID join, pinned (task-a7c3a17984689b3d, PDS-D748/PDS-D749) ──────────
+//
+// `collapseDraftTwins` above governs the BOARD path. It does not govern
+// `Frontier`, `readySnapshotByBare` or `resolveNext`'s `byBare`, which index
+// the snapshot they are handed: `BuildBoard` collapses its own COPY of the
+// Snapshot value, so `bp task next --frontier`, `bp task frontier` and
+// `bp cmux dispatch` all reach `buildByBare` with both spellings still present.
+// These two tests pin what happens there.
+
+// TestBuildByBarePublishedWinsRegardlessOfMapOrder is the RED arm. It reds on
+// TWO mutations:
+//
+//   - revert the winning-spelling tie-break in buildByBare (back to the plain
+//     `m[bareID(t.DocID)] = t`) and the twin slot is decided by Go's randomized
+//     map iteration order — measured before the fix: the draft won 349 of 400
+//     builds, the published row 51. The repeat loop below is what turns that
+//     coin-flip into a certain failure rather than a flake.
+//   - make bareID the identity function and the pair stops colliding at all, so
+//     the index holds TWO entries for one task and the `len(m)` assertion reds.
+func TestBuildByBarePublishedWinsRegardlessOfMapOrder(t *testing.T) {
+	byID := map[string]Task{
+		"pair":                {DocID: "pair", Title: "published", Lifecycle: lifeInProgress},
+		draftsPrefix + "pair": {DocID: draftsPrefix + "pair", Title: "the draft twin", Lifecycle: lifeOpen},
+	}
+	// Go randomizes map iteration per range, so one build proves nothing: a
+	// single pass passed 51/400 times even with the bug. Repeat until the
+	// probability of a false green is negligible.
+	const builds = 400
+	for i := 0; i < builds; i++ {
+		m := buildByBare(byID)
+		if len(m) != 1 {
+			t.Fatalf("build %d: byBare holds %d entries for ONE twinned task, want 1 — both spellings must join on the same bare key", i, len(m))
+		}
+		got, ok := m["pair"]
+		if !ok {
+			t.Fatalf("build %d: byBare has no entry under the bare id %q, keys=%v", i, "pair", bareKeys(m))
+		}
+		if got.DocID != "pair" {
+			t.Fatalf("build %d of %d: byBare[%q] resolved to %q, want the bare-id row %q — the twin slot must be decided by the winning-spelling tier (TwinResolver.winning_spelling_tier/1), never by map iteration order",
+				i, builds, "pair", got.DocID, "pair")
+		}
+	}
+}
+
+// TestBuildByBareKeepsUnpairedDraftTwin is the QUIET arm: it passes with AND
+// without the tie-break, because an UNPAIRED `drafts.<id>` has no bare-id row
+// to lose the slot to. It reds only if someone "fixes" twins by dropping every
+// `drafts.`-prefixed row — the blanket exclusion PDS-D748 item 2 forbids,
+// because it hides the whole mutate-created population (112 of the 170
+// `drafts.` rows in the measured TUI cache).
+func TestBuildByBareKeepsUnpairedDraftTwin(t *testing.T) {
+	byID := map[string]Task{
+		draftsPrefix + "lonely": {DocID: draftsPrefix + "lonely", Title: "born through /v1/data/mutate"},
+		"control":               {DocID: "control", Title: "an ordinary published row"},
+	}
+	m := buildByBare(byID)
+	if len(m) != 2 {
+		t.Fatalf("byBare holds %d entries, want 2 — an unpaired draft is the row of record and keeps its slot; keys=%v", len(m), bareKeys(m))
+	}
+	got, ok := m["lonely"]
+	if !ok {
+		t.Fatalf("unpaired draft twin is missing from byBare under its bare key; keys=%v — this is NOT a blanket `drafts.` drop", bareKeys(m))
+	}
+	if got.DocID != draftsPrefix+"lonely" {
+		t.Fatalf("byBare[%q] = %q, want the draft spelling %q preserved verbatim", "lonely", got.DocID, draftsPrefix+"lonely")
+	}
+	if m["control"].DocID != "control" {
+		t.Fatalf("byBare[%q] = %q, want %q — an untwinned published row must be untouched", "control", m["control"].DocID, "control")
+	}
+}
+
+// bareKeys renders a byBare index's key set for a failure message. An absence
+// is never caught by reading an empty result: printing the keys is what tells a
+// "missing" verdict apart from a "looked under the wrong key" one.
+func bareKeys(m map[string]Task) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	return ks
 }

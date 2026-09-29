@@ -49,6 +49,18 @@
 # Contamination is checked BEFORE completeness, so a tree that is both partial
 # and dirty reds rather than quietly falling back.
 #
+# NOT PROD-ONLY, DESPITE THE NAME. The three arms judge a `<build>/lib`
+# directory against two name lists; nothing in them knows or cares which
+# MIX_ENV produced the tree. elixir.yml calls it from THREE jobs —
+# `mix-prod-compile` over `_build/prod/lib`, and `mix-test` and
+# `validation-perf` over `_build/test/lib`, where the same `actions/cache@v4`
+# + `restore-keys:` prefix shape used to restore a stale first-party tree with
+# nothing watching. The file keeps its name because that name is carried by
+# scripts/pipefail-sigpipe-baseline.txt, scripts/.posix-vacuous-green-census,
+# scripts/gate-refusal-vocabulary-check.sh and scripts/elixir-path-escape-check.sh;
+# renaming it is a registry change and belongs in its own PR.
+# aka: test-build-cache-guard, build-cache-guard, elixir _build cache tripwire.
+#
 # USAGE
 #   prod-build-cache-guard.sh <build_lib_dir> <allowlist_file> <required_file>
 #   prod-build-cache-guard.sh --selftest
@@ -116,7 +128,11 @@ guard() {
       contaminated=1
       continue
     fi
-    if ! printf '%s\n' "${allow_names[@]}" | grep -qxF "$name"; then
+    # The allowlist is every dep in mix.lock (hundreds of lines). Piped into
+    # `grep -qxF` under `set -o pipefail` (line 69) the printf takes SIGPIPE on a
+    # match and the pipeline reports 141 — a HIT read as a miss. Materialise the
+    # list first; a here-string has no producer to signal.
+    if ! grep -qxF "$name" <<<"$(printf '%s\n' "${allow_names[@]}")"; then
       say "CONTAMINANT: directory '$name' is not a dependency named in mix.lock"
       contaminated=1
     fi
@@ -138,7 +154,7 @@ guard() {
   fi
 
   if [ "$contaminated" -eq 1 ]; then
-    say "CACHE-CONTAMINATED: the restored _build/prod tree is not dependency-only"
+    say "CACHE-CONTAMINATED: the restored $dir tree is not dependency-only"
     return 1
   fi
 

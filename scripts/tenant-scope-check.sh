@@ -42,6 +42,34 @@
 # This hardening makes an advisory security guard honest; it does not make it
 # blocking.
 #
+# SCAN SET: `*.ex` AND `*.exs` under the scan root (default api/lib), decided
+# 2026-09-10 (row cgsi-bl-s7-tenant-scope-exs-blindspot). The walk used to be
+# `fn.endswith(".ex")`, which is FALSE for `foo.exs` — so an identical fail-open
+# `scope_to_workspace_or_global/3` call, or a by-PK `Repo.get(Document, id)`,
+# written in a `.exs` under api/lib was invisible to this gate forever. Widening
+# the walk is the SAFE direction for a security scanner (it can only add reds),
+# and it was free: `find api/lib -name '*.exs' | wc -l` = 0 on 2026-09-10, so
+# closing the hole moved the baseline by nothing. A `.ex`/`.exs` split would have
+# been a rule the next author has to know; there is no reason a fail-open tenant
+# read is safer because the file compiles at runtime instead of at build time.
+#
+# ACCEPTED OVER-MATCH (decided 2026-09-10, same row): the scanner strips only
+# `@doc`/`@moduledoc` heredocs, so a fail-open function name written inside a
+# PLAIN heredoc or a string literal — `"""\n never call
+# scope_to_workspace_or_global(q, nil) \n"""` — still counts as a hit and reds
+# the gate. This is a FALSE RED, and it is ACCEPTED, not fixed. Narrowing a
+# security scanner is the risky direction: every string-position exclusion is a
+# new place to hide a real call (Elixir has `#{}` interpolation, sigils, nested
+# heredocs and `Code.eval_string/1`, so "it is in a string" is not the same as
+# "it does not run"). The harm is bounded and self-announcing: the author sees
+# the file:line, and the escape hatch is one reviewed `# global-read: <reason>`
+# comment — the SAME hatch a real deliberate read uses, so a waiver on prose is
+# greppable and reviewable rather than silent. Do NOT narrow this without a
+# control proving a real fail-open call in a string-ADJACENT position still reds;
+# the --selftest's four out-of-position marker shapes (red/marker-below-the-read,
+# red/marker-in-another-function, red/marker-in-moduledoc-heredoc,
+# red/marker-last-line-of-plain-heredoc) are the pins that must survive it.
+#
 # Modeled on scripts/studio-literal-check.sh (Python scanner + allowlist + a
 # per-line annotation escape hatch). bash 3.2 compatible.
 #
@@ -149,6 +177,68 @@ EX
   fi
   rm -f "$TMP/lib/barkpark/content/leak.ex"
   bash "$SELF" >/dev/null 2>&1 || fail_selftest "tree did not return to green after removing the planted leak"
+
+  # --- .exs is IN the scan set (2026-09-10, cgsi-bl-s7-tenant-scope-exs-blindspot)
+  # The walk used to be `fn.endswith(".ex")`, which is FALSE for `foo.exs`: the
+  # three probes below all passed GREEN before the widening. They are the control
+  # that the scan set never silently narrows back to `.ex` only.
+  EXS="$TMP/lib/barkpark/content/leak_script.exs"
+
+  # (d) a NEW unjustified fail-open read in a .exs → must RED, naming the .exs file.
+  cat > "$EXS" <<'EX'
+defmodule Demo.LeakScript do
+  def read(q) do
+    q |> Scope.scope_to_workspace_or_global(nil, nil)
+  end
+end
+EX
+  if bash "$SELF" >/dev/null 2>&1; then
+    fail_selftest "a NEW unjustified fail-open read in a .exs did NOT red the gate"
+  fi
+  exs_out="$(bash "$SELF" 2>&1 || true)"
+  case "$exs_out" in
+    *"leak_script.exs:3"*) ;;
+    *) fail_selftest "the .exs red did not name leak_script.exs:3 (got: $exs_out)" ;;
+  esac
+
+  # (e) the SAME .exs read, justified → must PASS (the waiver hatch works in .exs).
+  cat > "$EXS" <<'EX'
+defmodule Demo.LeakScript do
+  def read(q) do
+    # global-read: selftest — deliberate cross-tenant read in a script file
+    q |> Scope.scope_to_workspace_or_global(nil, nil)
+  end
+end
+EX
+  bash "$SELF" >/dev/null 2>&1 || fail_selftest "a justified (# global-read:) read in a .exs did NOT pass"
+
+  # (f) a NEW by-PK Repo.get(Document, id) in a .exs → must RED.
+  cat > "$EXS" <<'EX'
+defmodule Demo.LeakScript do
+  def read(id), do: Repo.get(Document, id)
+end
+EX
+  if bash "$SELF" >/dev/null 2>&1; then
+    fail_selftest "a NEW by-PK Repo.get(Document, id) in a .exs did NOT red the gate"
+  fi
+  rm -f "$EXS"
+  bash "$SELF" >/dev/null 2>&1 || fail_selftest "tree did not return to green after removing the planted .exs leak"
+
+  # A scan root holding ONLY .exs files is a real scan, not an empty one: the
+  # ex_files==0 "broken gate" guard must NOT fire when the sources are scripts.
+  ONLY_EXS="$TMP/only-exs"
+  mkdir -p "$ONLY_EXS/barkpark"
+  cat > "$ONLY_EXS/barkpark/only.exs" <<'EX'
+defmodule Demo.OnlyExs do
+  def read(q, ws, proj), do: Scope.scope_to_workspace_or_global(q, ws, proj)
+end
+EX
+  only_out="$(TENANT_SCOPE_LIB="$ONLY_EXS" bash "$SELF" 2>&1 || true)"
+  case "$only_out" in
+    *"holds no *.ex"*) fail_selftest "a scan root of only .exs files was reported as empty: $only_out" ;;
+    *"only.exs:2"*) ;;
+    *) fail_selftest "a .exs-only scan root neither red on its planted read nor named it (got: $only_out)" ;;
+  esac
 
   # --- the waiver is a COMMENT, not a substring -------------------------------
   # Each probe plants ONE file holding a live, unbaselined fail-open read plus a
@@ -372,6 +462,84 @@ EX
     fail_selftest "an EMPTY scan root (no *.ex files) did NOT red the gate"
   fi
 
+  # --- a GROWN triple names every CANDIDATE, never "the last N lines" ---------
+  # The baseline keys by (file, kind, normalised-line) with a COUNT, so when an
+  # identical fail-open line is ALREADY baselined and a second copy is added
+  # ABOVE it, the old read simply shifts down. Reporting the last `extra` line
+  # numbers then names the OLD read and the genuinely new one goes unreviewed —
+  # measured 2026-09-10 on query.ex (printed :1705/:2023, both July code; the
+  # new reads were :401 and :1553). This arm plants exactly that shape: it REDS
+  # on position-based reporting, which names only the shifted-down old line.
+  DUP_ROOT="$TMP/dup-root"
+  DUP_BASELINE="$TMP/dup-baseline.txt"
+  mkdir -p "$DUP_ROOT/barkpark/content"
+  DUP="$DUP_ROOT/barkpark/content/dup.ex"
+  cat > "$DUP" <<'EX'
+defmodule Demo.Dup do
+  def a(q, ws, proj) do
+    q |> Scope.scope_to_workspace_or_global(ws, proj)
+  end
+end
+EX
+  TENANT_SCOPE_LIB="$DUP_ROOT" TENANT_SCOPE_BASELINE="$DUP_BASELINE" \
+    bash "$SELF" --baseline >/dev/null
+  TENANT_SCOPE_LIB="$DUP_ROOT" TENANT_SCOPE_BASELINE="$DUP_BASELINE" \
+    bash "$SELF" >/dev/null 2>&1 \
+    || fail_selftest "the one-read dup tree did not pass after its own --baseline"
+
+  # Insert an IDENTICAL, unjustified fail-open read ABOVE the baselined one.
+  # The INSERTED read is now line 3; the pre-existing baselined read moved 3 -> 7.
+  cat > "$DUP" <<'EX'
+defmodule Demo.Dup do
+  def inserted(q, ws, proj) do
+    q |> Scope.scope_to_workspace_or_global(ws, proj)
+  end
+
+  def a(q, ws, proj) do
+    q |> Scope.scope_to_workspace_or_global(ws, proj)
+  end
+end
+EX
+  if TENANT_SCOPE_LIB="$DUP_ROOT" TENANT_SCOPE_BASELINE="$DUP_BASELINE" \
+       bash "$SELF" >/dev/null 2>&1; then
+    fail_selftest "a grown (file,kind,line) triple did NOT red the gate"
+  fi
+  dup_out="$(TENANT_SCOPE_LIB="$DUP_ROOT" TENANT_SCOPE_BASELINE="$DUP_BASELINE" \
+    bash "$SELF" 2>&1 || true)"
+  # THE ASSERTION: the output must name the INSERTED line (3). Position-based
+  # reporting names only line 7 — the July-shaped false anchor — and fails here.
+  case "$dup_out" in
+    *"dup.ex:3"*) ;;
+    *) fail_selftest "a grown triple did not name the INSERTED line dup.ex:3 — it reported by POSITION (got: $dup_out)" ;;
+  esac
+  # ...and the OLD line too: when the gate cannot tell which is new, ALL
+  # occurrences of the triple are candidates and all must be printed.
+  case "$dup_out" in
+    *7*) ;;
+    *) fail_selftest "a grown triple did not list the other candidate line 7 (got: $dup_out)" ;;
+  esac
+  # ...labelled, in words, as candidates rather than as a verdict.
+  case "$dup_out" in
+    *CANDIDATES*) ;;
+    *) fail_selftest "a grown triple did not label its lines as CANDIDATES (got: $dup_out)" ;;
+  esac
+  case "$dup_out" in
+    *"CANNOT tell WHICH occurrence is the new one"*) ;;
+    *) fail_selftest "a grown triple did not SAY the gate cannot tell which occurrence is new (got: $dup_out)" ;;
+  esac
+  # Removing the inserted read returns the tree to green (the arm is not a
+  # permanent red bolted onto the gate).
+  cat > "$DUP" <<'EX'
+defmodule Demo.Dup do
+  def a(q, ws, proj) do
+    q |> Scope.scope_to_workspace_or_global(ws, proj)
+  end
+end
+EX
+  TENANT_SCOPE_LIB="$DUP_ROOT" TENANT_SCOPE_BASELINE="$DUP_BASELINE" \
+    bash "$SELF" >/dev/null 2>&1 \
+    || fail_selftest "the dup tree did not return to green after removing the inserted read"
+
   # --- argument dispatch ------------------------------------------------------
   bash "$SELF" --baseline >/dev/null 2>&1 || fail_selftest "--baseline stopped dispatching"
   bash "$SELF" >/dev/null 2>&1 || fail_selftest "the bare check stopped dispatching"
@@ -381,7 +549,7 @@ EX
   set -e
   [ "$unknown_rc" = "2" ] || fail_selftest "an unknown argument exited $unknown_rc, expected 2"
 
-  echo "tenant-scope-check --selftest: PASS — gate reds on new fail-open + by-PK reads and on all 5 marker spoofs + 4 out-of-position markers + a missing/empty scan root; passes when genuinely justified (15 live marker forms + inline waiver); unknown args exit 2."
+  echo "tenant-scope-check --selftest: PASS — gate reds on new fail-open + by-PK reads in BOTH .ex and .exs and on all 5 marker spoofs + 4 out-of-position markers + a missing/empty scan root; a GROWN triple names every CANDIDATE line (inserted-above read included) instead of the last N by position; passes when genuinely justified (15 live marker forms + inline waiver + a .exs waiver); a .exs-only scan root is a real scan; unknown args exit 2."
   exit 0
 fi
 
@@ -570,12 +738,15 @@ if not os.path.isdir(lib):
           "  not a clean tree." % lib)
     sys.exit(1)
 
-# Walk api/lib/**/*.ex, collect non-exempt occurrences.
+# Walk api/lib/**/*.{ex,exs}, collect non-exempt occurrences.
 ex_files = 0
 occurrences = []  # (rel, kind, norm, lineno)
 for dirpath, _dirs, files in os.walk(lib):
     for fn in sorted(files):
-        if not fn.endswith(".ex"):
+        # `.ex` AND `.exs`: `endswith(".ex")` alone is FALSE for `foo.exs`, and a
+        # fail-open tenant read is no safer for living in a script file. See the
+        # SCAN SET note in the script header (2026-09-10).
+        if not (fn.endswith(".ex") or fn.endswith(".exs")):
             continue
         ex_files += 1
         path = os.path.join(dirpath, fn)
@@ -586,7 +757,7 @@ for dirpath, _dirs, files in os.walk(lib):
             occurrences.append((rel, kind, norm, lineno))
 
 if ex_files == 0:
-    print("tenant-scope-check: FAILED — scan root holds no *.ex files: %s\n"
+    print("tenant-scope-check: FAILED — scan root holds no *.ex/*.exs files: %s\n"
           "  The gate scanned nothing. An empty scan root is a broken gate, not\n"
           "  a clean tree." % lib)
     sys.exit(1)
@@ -630,21 +801,56 @@ locs = {}
 for rel, kind, norm, lineno in occurrences:
     locs.setdefault((rel, kind, norm), []).append(lineno)
 
-new_hits = []
+# POSITION IS NOT AGE (fixed 2026-09-18, row task-736a704ba317ec91). This loop
+# used to report `sorted(locs[k])[-extra:]` — the LAST `extra` line numbers of a
+# grown triple — as "the new reads". The baseline key is (file, kind,
+# normalised-line) with a COUNT, so when an identical line already sits in the
+# baseline and a second copy is added ABOVE it, the last-by-position line is the
+# OLD read (shifted down) and the real new read is never named. Measured on
+# 2026-09-10: the gate printed query.ex:1705 and query.ex:2023 — both July code
+# (88b7ab79f0, 989a9c75e4) — while the reads that actually grew the surface were
+# query.ex:401 (#17311) and query.ex:1553 (#17359); a task was filed against the
+# wrong anchors and a builder following them would have annotated two ratified
+# July reads and left the new ones unreviewed.
+#
+# The gate has no git tree to blame against (TENANT_SCOPE_LIB is routinely a
+# temp dir with no repository at all — every --selftest arm runs that way), so
+# it does not guess: for a triple that ALREADY had baselined occurrences it
+# names EVERY candidate line and says in words that it cannot tell which is new.
+# For a triple with NO baselined occurrences every occurrence IS new, so those
+# are still reported one line at a time — that report is exact, not a guess.
+new_hits = []  # (rel, first_lineno, kind, norm, all_linenos, baselined, extra)
 for k, n in cur.items():
-    extra = n - base.get(k, 0)
+    baselined = base.get(k, 0)
+    extra = n - baselined
     if extra > 0:
-        # report the last `extra` line numbers as the newly-introduced ones
-        for lineno in sorted(locs[k])[-extra:]:
-            new_hits.append((k[0], lineno, k[1], k[2]))
+        linenos = sorted(locs[k])
+        new_hits.append((k[0], linenos[0], k[1], k[2], linenos, baselined, extra))
 
 removed = [k for k in base if cur.get(k, 0) < base[k]]
 
 if new_hits:
     print("tenant-scope-check: FAILED — NEW fail-open tenant read(s) introduced "
           "without a reviewed `# global-read:` justification.\n")
-    for rel, lineno, kind, norm in sorted(new_hits):
-        print("  %s:%s  [%s]  %s" % (rel, lineno, kind, norm))
+    for rel, _first, kind, norm, linenos, baselined, extra in sorted(new_hits):
+        if baselined == 0:
+            # Nothing of this triple was baselined: every occurrence is new.
+            for lineno in linenos:
+                print("  %s:%s  [%s]  %s" % (rel, lineno, kind, norm))
+            continue
+        print("  %s:%s  [%s]  %s"
+              % (rel, ",".join(str(x) for x in linenos), kind, norm))
+        print("      ^ CANDIDATES: %d occurrence(s) of this identical line, %d of "
+              "them new." % (len(linenos), extra))
+        print("        The baseline counts this (file, kind, code) triple; it does "
+              "NOT record")
+        print("        line numbers, so the gate CANNOT tell WHICH occurrence is "
+              "the new one —")
+        print("        position says nothing about age. EVERY line listed above is "
+              "a candidate:")
+        print("        review them all, or run `git blame`/`git diff` against the "
+              "tree the")
+        print("        baseline was generated from to find the new one(s).")
     print("\n  A tenant-scoped read MUST thread a real workspace_id through the "
           "fail-CLOSED\n  Scope.scope_to_workspace/3 (where:false on nil), NOT the "
           "fail-OPEN _or_global\n  family; a by-PK Repo.get(Document, id) must be "

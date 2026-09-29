@@ -36,6 +36,11 @@
 #   * a --floor the runner cannot read must red, BY NAME       (case 12) — a
 #     floor that silently parses to nothing is a call site that LOOKS floored
 #     and is not, the exact shape of gate this whole file exists to refuse
+#   * a file whose tests are all SKIPPED must red               (case 14) — a
+#     skipped test emits the same `# Subtest:` line as one that ran, so case 3's
+#     per-file check was satisfied by a file where nothing executed, and
+#     `# tests` counted it as having run. Case 14 is the one that reds if the
+#     runner's `# skipped` handling is removed; case 15 reds if case 14 is.
 # A harness with only green cases is the defect, not the proof.
 
 set -euo pipefail
@@ -280,6 +285,70 @@ if [ "$rc" -eq 0 ]; then ok "exit 0 with --floor BEFORE the -- separator"; else 
 out="$(cd "$FX9" && node "$RUNNER" -- --floor 3 '*.test.mjs' 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -eq 0 ]; then ok "exit 0 with --floor AFTER the -- separator (not read as a glob)"; else no "--floor after -- was treated as a pattern (rc=$rc): $out"; fi
 if has "[floor 3 files]" "$out"; then ok "the floor is honoured from after the separator"; else no "--floor after -- was dropped instead of applied: $out"; fi
+
+# ── case 14 — SKIPPED IS NOT EXECUTED. ─────────────────────────────────────
+# The defect this arm exists for, measured 2026-09-18 on origin/main c511a44fc:
+# `test("x", { skip: true }, ...)` still emits `# Subtest: x`, so case 3's
+# per-file "registered >= 1" check PASSED a file where nothing ran, and the
+# summary said `ran 1 tests from 1 files (pass 0, fail 0)` at exit 0.
+# The rule is NOT "any skip reds": a platform-conditional `t.skip()` guarding
+# one control among many is a legitimate shape, so 14b/14c assert a file that
+# still executes SOMETHING stays green. The rule is per FILE, on ZERO.
+# SKIP-ARM — case 15 counts this marker; do not rename it without updating both.
+
+# 14a — SKIP-ARM — a file whose ONLY test is skipped must red, by name.
+FX14="$TMPROOT/c14"; mkdir -p "$FX14"
+cat >"$FX14/allskip.test.mjs" <<'JS'
+import { test } from "node:test";
+test("never runs", { skip: "platform" }, () => { throw new Error("would fail if it ran"); });
+test("also never runs", { skip: true }, () => {});
+JS
+out="$(cd "$FX14" && node "$RUNNER" --floor 1 '*.test.mjs' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then ok "exit $rc on a file whose tests are ALL skipped"; else no "AN ALL-SKIPPED FILE PASSED — registration was read as execution: $out"; fi
+if has "allskip.test.mjs" "$out"; then ok "names the all-skipped file"; else no "the refusal does not name the all-skipped file: $out"; fi
+if has "executed NONE" "$out"; then ok "says the file executed NONE of its tests"; else no "the refusal does not distinguish registered from executed: $out"; fi
+
+# 14b — SKIP-ARM — a file that still executes something stays GREEN, and the
+# skipped tests are REPORTED rather than swallowed. `ran N` is the EXECUTED
+# count: pr-meta.yml parses that number as a per-suite test floor, and a floor
+# that counts skipped tests is satisfied by a suite that stopped running.
+FX14B="$TMPROOT/c14b"; mkdir -p "$FX14B"
+cat >"$FX14B/mixed.test.mjs" <<'JS'
+import { test } from "node:test";
+test("this one really runs", () => {});
+test("guarded control", { skip: "not applicable here" }, () => {});
+JS
+out="$(cd "$FX14B" && node "$RUNNER" --floor 1 '*.test.mjs' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then ok "exit 0 when one test is skipped and another executes"; else no "a legitimate conditional skip was treated as a hole (rc=$rc): $out"; fi
+if has "ran 1 tests from 1 files" "$out"; then ok "ran N counts EXECUTED tests, not registered ones"; else no "the summary counted the skipped test as having run: $out"; fi
+if has "skipped 1" "$out"; then ok "the summary reports the skipped tally"; else no "the skipped tests were swallowed by the summary: $out"; fi
+
+# 14c — SKIP-ARM — a NESTED skip leaves the outer test executed. node's
+# `# skipped` is an aggregate over every level, so a naive tests-minus-skipped
+# on a file of one outer test with two skipped children would read zero.
+FX14C="$TMPROOT/c14c"; mkdir -p "$FX14C"
+cat >"$FX14C/nested.test.mjs" <<'JS'
+import { test } from "node:test";
+test("outer runs", async (t) => {
+  await t.test("inner skipped", { skip: true }, () => {});
+  await t.test("inner also skipped", { skip: true }, () => {});
+  await t.test("inner runs", () => {});
+});
+JS
+out="$(cd "$FX14C" && node "$RUNNER" --floor 1 '*.test.mjs' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then ok "exit 0 when only NESTED tests are skipped"; else no "a nested skip reds a file whose outer test ran (rc=$rc): $out"; fi
+
+# ── case 15 — the coverage check: case 14 must still be here. ───────────────
+# Criterion of task-76ba232ae17f7015: removing the skip arm must make this
+# harness fail its OWN coverage check, not merely lose a silent case. The
+# threshold is counted, not boolean, precisely because the check's own line
+# contains the marker — a boolean `has` would be satisfied by itself forever.
+self_markers=$(grep -c 'SKIP-ARM' "${BASH_SOURCE[0]}" || true)
+if [ "${self_markers:-0}" -ge 5 ]; then
+  ok "the skipped-test arm is present ($self_markers SKIP-ARM markers)"
+else
+  no "THE SKIP ARM IS GONE ($self_markers SKIP-ARM markers, expected >= 5) — scripts/node-test-floor.mjs's skipped-is-not-executed handling is now untested; restore case 14"
+fi
 
 echo
 echo "----"

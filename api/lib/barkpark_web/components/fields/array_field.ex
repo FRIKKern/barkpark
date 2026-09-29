@@ -29,12 +29,15 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Components.Fields.{CodelistField, CompositeField, LocalizedTextField}
 
   attr :field, :map, required: true
   attr :value, :list, default: []
   attr :errors, :map, default: %{}
+  # Gyldendal parity E1.11 — warning subtree, same shape as `:errors`.
+  attr :warnings, :map, default: %{}
   attr :on_change, :string, default: nil
   attr :on_reorder, :string, default: "array_op"
   attr :plugin_name, :string, default: "core"
@@ -60,6 +63,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       assigns
       |> Map.put_new(:value, [])
       |> Map.put_new(:errors, %{})
+      |> Map.put_new(:warnings, %{})
       |> Map.put_new(:on_change, nil)
       |> Map.put_new(:on_reorder, "array_op")
       |> Map.put_new(:plugin_name, "core")
@@ -99,7 +103,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                   phx-value-path={@path}
                   phx-value-index={idx}
                   disabled={@readonly or idx == 0}
-                  aria-label="Move up"
+                  aria-label={gettext("Move up")}
                 >▲</button>
                 <button
                   type="button"
@@ -111,7 +115,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                   phx-value-path={@path}
                   phx-value-index={idx}
                   disabled={@readonly or idx == length(@rows) - 1}
-                  aria-label="Move down"
+                  aria-label={gettext("Move down")}
                 >▼</button>
               <% end %>
               <button
@@ -124,11 +128,14 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                 phx-value-path={@path}
                 phx-value-index={idx}
                 disabled={@readonly}
-                aria-label="Remove row"
+                aria-label={gettext("Remove row")}
               >×</button>
             </div>
             <%= for err <- row_errors(@errors, idx) do %>
               <span class="error" data-error-for-row={idx}><%= err %></span>
+            <% end %>
+            <%= for warn <- row_errors(@warnings, idx) do %>
+              <span class="warning" role="note" data-warning-for-row={idx}><%= warn %></span>
             <% end %>
           </li>
         <% end %>
@@ -142,7 +149,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         phx-value-field={@field.name}
         phx-value-path={@path}
         disabled={@readonly}
-      >+ Add</button>
+      >+ <%= gettext("Add") %></button>
     </fieldset>
     """
   end
@@ -208,18 +215,61 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           item: item,
           idx: idx,
           preview: preview,
-          open: row_empty?(row_value),
+          # A row carrying a finding opens so the author sees it (E1.11).
+          open: row_empty?(row_value) or row_findings?(assigns, idx),
           row_id: "bp-item-" <> sanitize_id("#{assigns.field.name}#{row_path}"),
           body:
             CompositeField.composite_field(%{
               field: item,
               value: row_value || %{},
               errors: row_subfield_errors(assigns.errors, idx),
+              warnings: row_subfield_errors(assigns.warnings, idx),
               on_change: assigns.on_change,
               plugin_name: assigns.plugin_name,
               path: row_path,
               readonly: assigns.readonly,
-              bare: true
+              bare: true,
+              # Picker context for reference / image subfields inside the row
+              # (Gyldendal parity E1.6) — a scoped workspace's picker must
+              # search its own scope, not the flat default.
+              dataset: assigns[:dataset] || "production",
+              scope_prefix: assigns[:scope_prefix] || "",
+              api_token_raw: assigns[:api_token_raw] || ""
+            })
+        })
+
+      # Gyldendal parity E1.6 (task-cd8e10ca44ccb932 criterion 1) — an image
+      # ROW is Sanity's image array item («Fremhevete bilder»): the same
+      # bp-media-picker a top-level image field mounts (hotspot / alt opt-ins
+      # from the element declaration), inside a collapsed row whose summary
+      # shows the thumbnail and the alt text. Before this the row fell through
+      # to a bare text input holding the image's JSON.
+      "image" ->
+        opts = subfield_attr(item, :raw) || %{}
+        map = image_row_map(row_value)
+
+        item_row(%{
+          item: item,
+          idx: idx,
+          preview: %{
+            title: image_row_title(map, item),
+            subtitle: nil,
+            media: media_url(map)
+          },
+          open: map == %{},
+          row_id: "bp-item-" <> sanitize_id("#{assigns.field.name}#{row_path}"),
+          body:
+            image_row(%{
+              wrap_id: ref_row_id(assigns.field, row_path, map, idx),
+              input_name: row_path,
+              row_value: if(map == %{}, do: "", else: Jason.encode!(map)),
+              hotspot: image_opt(opts, "hotspot"),
+              alt: image_opt(opts, "alt"),
+              dataset: assigns[:dataset] || "production",
+              scope_prefix: assigns[:scope_prefix] || "",
+              api_token_raw: assigns[:api_token_raw] || "",
+              on_change: assigns.on_change,
+              readonly: assigns.readonly
             })
         })
 
@@ -228,6 +278,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           field: item,
           value: row_value || [],
           errors: row_subfield_errors(assigns.errors, idx),
+          warnings: row_subfield_errors(assigns.warnings, idx),
           on_change: assigns.on_change,
           on_reorder: assigns.on_reorder,
           plugin_name: assigns.plugin_name,
@@ -419,7 +470,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         value={@row_value}
         phx-change={@on_change}
       />
-      <bp-media-picker
+      <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@row_value}
         value-mode="reference"
         dataset={@dataset}
@@ -441,7 +492,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         value={@row_value}
         phx-change={@on_change}
       />
-      <bp-reference-picker
+      <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@row_value}
         ref-type={@ref_type}
         dataset={@dataset}
@@ -460,8 +511,76 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
 
   # refType lives on the RAW field map (a v1 leaf key parse/2 preserves
   # verbatim); parsed %Field{} carries it under .raw, plain maps directly.
-  defp ref_type_of(%{raw: %{} = raw}), do: raw["refType"] || ""
-  defp ref_type_of(%{} = item), do: item["refType"] || Map.get(item, :ref_type) || ""
+  # Several target types (Sanity `to: [...]`) ride comma-joined — the same
+  # attribute shape FieldInputs emits (Gyldendal parity E1.6).
+  defp ref_type_of(%{raw: %{} = raw}), do: ref_type_of(raw)
+
+  defp ref_type_of(%{} = item) do
+    case BarkparkWeb.Components.FieldInputs.reference_types(item) do
+      [] -> Map.get(item, :ref_type) || ""
+      types -> Enum.join(types, ",")
+    end
+  end
+
+  # An image row's stored value: the object, its JSON string, or nothing.
+  defp image_row_map(%{} = m), do: m
+
+  defp image_row_map(v) when is_binary(v) do
+    case String.trim(v) do
+      "" ->
+        %{}
+
+      t when binary_part(t, 0, 1) == "{" ->
+        with({:ok, %{} = m} <- Jason.decode(t), do: m, else: (_ -> %{"url" => v}))
+
+      _ ->
+        %{"url" => v}
+    end
+  end
+
+  defp image_row_map(_), do: %{}
+
+  defp image_row_title(map, item) do
+    case Map.get(map, "alt") do
+      alt when is_binary(alt) and alt != "" ->
+        alt
+
+      _ ->
+        case Map.get(map, "url") do
+          url when is_binary(url) and url != "" -> url |> String.split("/") |> List.last()
+          _ -> title_for(item) || "Image"
+        end
+    end
+  end
+
+  defp image_opt(opts, key) when is_map(opts) do
+    if Map.get(opts, key) == true or get_in(opts, ["options", key]) == true, do: true, else: nil
+  end
+
+  defp image_opt(_, _), do: nil
+
+  defp image_row(assigns) do
+    ~H"""
+    <div id={@wrap_id} phx-update="ignore" phx-hook="BarkparkFieldBridge" class="bp-array-image-row">
+      <input
+        type="hidden"
+        id={"#{@wrap_id}-h"}
+        name={@input_name}
+        value={@row_value}
+        phx-change={@on_change}
+      />
+      <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
+        value={@row_value}
+        dataset={@dataset}
+        scope-prefix={@scope_prefix}
+        data-bridge-target={"#{@wrap_id}-h"}
+        data-token={@api_token_raw}
+        hotspot={@hotspot}
+        alt={@alt}
+      ></bp-media-picker>
+    </div>
+    """
+  end
 
   defp leaf_input(assigns) do
     ~H"""
@@ -556,4 +675,9 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   end
 
   defp row_subfield_errors(_, _), do: %{}
+
+  defp row_findings?(assigns, idx) do
+    row_subfield_errors(assigns.errors, idx) != %{} or
+      row_subfield_errors(assigns.warnings, idx) != %{}
+  end
 end

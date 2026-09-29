@@ -1,6 +1,8 @@
 package pdrender
 
 import (
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -182,5 +184,49 @@ func TestStatusLegendShowsFullLadder(t *testing.T) {
 	// contain a single-space " — ", so match the wider "  — " to count only rows).
 	if n := strings.Count(out, "  — "); n != 8 {
 		t.Errorf("expected eight ladder rungs (eight meaning separators), got %d:\n%s", n, out)
+	}
+}
+
+func TestNotesReaderUsesNoteCarriers(t *testing.T) {
+	blocks := noteReaderCarrierFixtures(t)
+	items := make([]any, len(blocks))
+	for i, b := range blocks {
+		item := make(map[string]any, len(b.Attrs))
+		for key, value := range b.Attrs {
+			if key != "type" {
+				item[key] = value
+			}
+		}
+		items[i] = item
+	}
+	expected := []any{
+		map[string]any{"label": "Shadow carrier label edited", "lead": "Chain lead", "text": "Shadow carrier body edited."},
+		map[string]any{"label": "Content", "text": "Direct content carrier edited."},
+		map[string]any{"label": "Read only", "text": "First authored run. Second authored run stays separate."},
+	}
+	for _, mode := range []string{"stack", "grid"} {
+		t.Run(mode, func(t *testing.T) {
+			attrs := map[string]any{"items": items, "layout": map[string]any{"mode": mode}}
+			flat := map[string]any{"items": expected, "layout": map[string]any{"mode": mode}}
+			before, _ := json.Marshal(attrs)
+			reg := testRegistry()
+			for _, width := range []int{1, 10, 20, 40, 80, 160} {
+				ctx := RenderCtx{Width: width, Theme: DarkTheme(), Profile: NoColor}
+				got := reg.Render(Block{Type: "notes", Attrs: attrs}, ctx)
+				want := reg.Render(Block{Type: "notes", Attrs: flat}, ctx)
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("width %d: got %q; want %q", width, got, want)
+				}
+				for _, line := range got {
+					if ansi.StringWidth(line) > width {
+						t.Errorf("width %d overflow: %q", width, line)
+					}
+				}
+			}
+			after, _ := json.Marshal(attrs)
+			if string(before) != string(after) {
+				t.Fatal("notes reader mutated items")
+			}
+		})
 	}
 }

@@ -13,7 +13,7 @@ package cli
 //     production admin token at the target is the failure this closes.
 //  2. A manifest GRAIN assertion between the two halves. A workspace-grain
 //     bundle wearing a dataset command line imports perfectly and then every
-//     downstream census silently describes the whole workspace (PDS-D61/D62).
+//     downstream census silently describes the whole workspace (PDS-D61/PDS-D62).
 //     The guard lived only in the shell harness (scripts/pds-pull-proof.sh
 //     step 1, its manifest_field reader); bundleGrain is the Go port.
 //  3. ONE receipt that DESCENDS from the import's own receipt — the target's

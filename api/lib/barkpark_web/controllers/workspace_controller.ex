@@ -20,6 +20,11 @@ defmodule BarkparkWeb.WorkspaceController do
       workspace-blind by construction, so on its own it let any admin token
       destroy any tenant's workspace (task-a5636ad31304b23a).
 
+    * `POST /api/workspaces/:workspace_slug/archive` and `.../restore` — the
+      REVERSIBLE sibling of delete (task-55474a106554e65a). Same two-part gate
+      as delete. Archive destroys nothing; while archived, scoped traffic is
+      refused 409 `workspace_archived` (not delete's 404, not a bare 403).
+
     * `GET /api/workspaces/:workspace_slug/export` — stream that workspace's
       complete bundle. Same two-part gate, same reason: on the global
       permission alone it streamed any tenant's whole workspace to any admin
@@ -61,8 +66,11 @@ defmodule BarkparkWeb.WorkspaceController do
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle
   alias Barkpark.Tenancy.WorkspaceBundle.Archive
+  alias Barkpark.Tenancy.WorkspaceBundle.DatasetRemapError
   alias Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError
   alias Barkpark.Tenancy.WorkspaceBundle.Janitor
+  alias Barkpark.Tenancy.WorkspaceBundle.SingleFlight
+  alias BarkparkWeb.ErrorResponse
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -128,13 +136,15 @@ defmodule BarkparkWeb.WorkspaceController do
     case Tenancy.get_workspace_by_slug(slug) do
       %Tenancy.Workspace{} = workspace ->
         if TenancyAuth.authorize(token, workspace.id, :write) == :ok do
-          # A changeset error flows to the FallbackController (422).
-          with {:ok, project} <-
-                 Tenancy.create_project_with_dataset(workspace, project_attrs(params)) do
-            conn
-            |> put_status(:created)
-            |> json(%{project: render_project(project)})
-          end
+          unless_archived(workspace, fn ->
+            # A changeset error flows to the FallbackController (422).
+            with {:ok, project} <-
+                   Tenancy.create_project_with_dataset(workspace, project_attrs(params)) do
+              conn
+              |> put_status(:created)
+              |> json(%{project: render_project(project)})
+            end
+          end)
         else
           {:error, :forbidden}
         end
@@ -186,6 +196,16 @@ defmodule BarkparkWeb.WorkspaceController do
   unknown / `RequireWorkspaceRole` 403 unauthorized): an unknown slug is 404,
   a real workspace the caller does not administer is 403.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, %{"workspace_slug" => slug}) do
     token = conn.assigns[:api_token]
 
@@ -204,6 +224,66 @@ defmodule BarkparkWeb.WorkspaceController do
       false -> {:error, :forbidden}
       {:error, :not_found} -> {:error, :not_found}
       {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  POST /api/workspaces/:workspace_slug/archive — archive a workspace
+  REVERSIBLY (task-55474a106554e65a). Destroys nothing: `Tenancy.archive_workspace/1`
+  sets `archived_at` and writes no other row, so `restore/2` returns the
+  workspace and every document scoped to it to exactly their pre-archive state.
+
+  SAME AUTHORISATION FLOOR AS `delete/2`, and by the same two halves: the
+  router's `[:api, :require_admin]` pipeline proves the global `admin` bit (the
+  VERB), and `authorize_workspace_admin/2` — `TenancyAuth.workspace_admin?/2`
+  against the URL's workspace, the predicate `delete/2` uses — proves the
+  TENANT. An admin whose only seat is another workspace gets 403.
+
+  Unknown slug 404 · not administered 403 · the instance-Default workspace
+  409 `default_workspace_not_archivable` · success 200 echoing the workspace
+  with its `archived_at`. Idempotent: archiving an archived workspace is 200
+  and keeps the original `archived_at`.
+  """
+  def archive(conn, %{"workspace_slug" => slug}) do
+    with {:ok, workspace} <- authorize_workspace_admin(conn, slug),
+         {:ok, archived} <- Tenancy.archive_workspace(workspace) do
+      json(conn, %{workspace: render_workspace(archived), archived: true})
+    end
+  end
+
+  @doc """
+  POST /api/workspaces/:workspace_slug/restore — lift an archive
+  (task-55474a106554e65a). Same two-half gate as `archive/2` and `delete/2`.
+  Clears `archived_at` and nothing else. Idempotent: restoring a live
+  workspace is 200.
+
+  REACHABLE WHILE ARCHIVED, by construction: this action resolves the slug
+  itself (no `ResolveWorkspace` on its pipeline), and its route carries the
+  `private:` flag that exempts it from `DeriveWorkspaceFromToken`'s archive
+  halt — so the guard does not refuse the verb that lifts it.
+  """
+  def restore(conn, %{"workspace_slug" => slug}) do
+    with {:ok, workspace} <- authorize_workspace_admin(conn, slug),
+         {:ok, restored} <- Tenancy.restore_workspace(workspace) do
+      json(conn, %{workspace: render_workspace(restored), archived: false})
+    end
+  end
+
+  # The tenant half of the archive/restore gate — the SAME predicate and the
+  # SAME denial shape as `delete/2` (unknown slug 404, real-but-not-
+  # administered 403). `workspace_admin?/2`, not `member?/2` and not
+  # `authorize/3`: see `delete/2`'s doc for why each weaker form is wrong.
+  defp authorize_workspace_admin(conn, slug) do
+    token = conn.assigns[:api_token]
+
+    case Tenancy.get_workspace_by_slug(slug) do
+      %Tenancy.Workspace{} = workspace ->
+        if TenancyAuth.workspace_admin?(token, workspace.id),
+          do: {:ok, workspace},
+          else: {:error, :forbidden}
+
+      nil ->
+        {:error, :not_found}
     end
   end
 
@@ -283,6 +363,110 @@ defmodule BarkparkWeb.WorkspaceController do
   Any OTHER engine error answers a logged 500 `internal_error`, never 404. A
   404 on this route means the workspace is genuinely absent — an unknown slug,
   or a row deleted between the slug lookup and the export — and nothing else.
+
+  ## SINGLE-FLIGHT (PDS-D719)
+
+  This route used to have NO concurrency guard: `:require_admin` is an AUTH
+  gate, and N concurrent admin requests each paid the peak independently. It
+  now takes a slot from `WorkspaceBundle.SingleFlight` after the tenant gate
+  and releases it in an `after`; a refused second caller gets **409
+  `export_already_running`** with a `Retry-After` header and a `reason` that
+  distinguishes "your own workspace is already exporting"
+  (`workspace_export_in_flight`, slug echoed) from "some other workspace holds
+  the only slot" (`export_capacity_reached`, slug deliberately withheld — the
+  caller proved admin on theirs and on nothing else).
+
+  The guard is keyed on the NODE, not the workspace, and the reason is the
+  free-space preflight documented above: it reads `df` once before the first
+  spill byte and can only ever guarantee `required ≤ free` per caller, never
+  `Σ required ≤ free` — so its margin is divided by the number of concurrent
+  exports and the check goes vacuous at two. Full derivation, and what this
+  does NOT fix about the janitor's cross-slot race, in `SingleFlight`.
+  """
+  # THE `send_file` / `File.rm` SOBELOW ANNOTATION MOVED WITH THE CODE, to
+  # `stream_bundle/3` below. `export/2` no longer contains either call, and an
+  # annotation left on a function that does not raise the finding is a skip
+  # that silently stops covering anything.
+  def export(conn, %{"workspace_slug" => slug} = params) do
+    token = conn.assigns[:api_token]
+
+    # ADMISSION CONTROL (PDS-D719), ordered AFTER both halves of the tenant
+    # gate and before any bundle work. A denial must not spend a slot, and a
+    # caller who is about to get 404/403 must never learn from a 409 that an
+    # export is running — the whole reason `SingleFlight` withholds the other
+    # tenant's slug is undone if the gate order lets an unauthorized caller
+    # probe it.
+    #
+    # The slot is released in the `after` below, which covers the raising
+    # paths too (a socket killed mid-`send_file` raises a CATCHABLE
+    # `Bandit.TransportError`). The path `after` CANNOT cover — the holder
+    # killed outright — is covered by the guard's own monitor, not by this
+    # clause; see `SingleFlight`'s moduledoc.
+    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
+         true <- TenancyAuth.workspace_admin?(token, workspace.id),
+         :ok <- SingleFlight.acquire(workspace.slug) do
+      try do
+        stream_bundle(conn, workspace, params)
+      after
+        SingleFlight.release(workspace.slug)
+      end
+    else
+      nil ->
+        {:error, :not_found}
+
+      # The tenant boundary (task-f416f96ef0860f47). Needs its own arm: `false`
+      # matches none of the tuple clauses, so without it a denial is a
+      # WithClauseError (500) rather than a 403.
+      false ->
+        {:error, :forbidden}
+
+      # 409, not 429 and not a queue. Nothing about the caller's RATE is wrong
+      # and no budget replenishes on a timer: the request conflicts with a
+      # specific export running right now, which is exactly what 409 means. A
+      # queue would hold the socket open across the ~130 s server-side phase
+      # plus the leader's drain, and a client that cannot tell "queued" from
+      # "hung" retries — the fan-out the guard exists to prevent.
+      {:error, {:export_in_flight, info}} ->
+        export_in_flight_conflict(conn, info)
+    end
+  end
+
+  @doc """
+  THE DELIVERY EDGE. Puts the finished bundle on the socket and deletes it on
+  every exit from that write — success, client hang-up, or raise.
+
+  Split out of `stream_bundle/3` and made public so a test can drive this exact
+  code over a REAL TCP socket (`test/barkpark_web/export_delivery_edge_test.exs`).
+  `Plug.Test`'s conn never opens one, so before this split the only two
+  properties that matter about a multi-minute export — that the archive arrives
+  byte-complete, and that the temp tar is removed after a mid-transfer
+  disconnect — were unprovable in the suite. Not part of the HTTP contract;
+  `stream_bundle/3` is its only production caller.
+
+  ## What bounds this write (pds-backlog-export-edge-idle-timeout)
+
+  MEASURED on Bandit 1.12 / Thousand Island 1.5, not inferred:
+
+    * Bandit's HTTP/1 stack has **no response-side timeout at all** — see
+      `t:Bandit.http_1_options/0`, which offers none.
+    * Thousand Island's `read_timeout` (default 60_000 ms) waits for CLIENT
+      data. Nothing is read while a response is being written, so it cannot
+      cut this.
+    * Thousand Island's `transport_options[:send_timeout]` (default 30_000 ms,
+      `send_timeout_close: true`) is the only remaining candidate, and it is
+      **inert for this path**: TI delivers a `send_file` with one
+      `:file.sendfile(fd, socket, offset, length, [])` call, and `:file.sendfile/5`
+      does not honour the socket's send_timeout. The control test injects a
+      400 ms `send_timeout` and stalls the reader for 3 s; all bytes still
+      arrive.
+
+  So NOTHING in this application bounds the duration of an export response.
+  A multi-minute export that dies is being cut by an INTERMEDIARY — the
+  deployed Caddy reverse proxy, or any hop in front of it — never by here.
+  Raising an app-side timeout is not available as a remedy because there is no
+  app-side timeout to raise.
+
+  @canonical capability:workspace-export-delivery aka:send_file,export edge,bundle delivery
   """
   # @sobelow_skip — Traversal.SendFile is an accepted false positive here, on a
   # stronger argument than the three media_controller sites: `path` is a
@@ -292,49 +476,47 @@ defmodule BarkparkWeb.WorkspaceController do
   # there is no traversal surface to defend.
   # The `after File.rm(path)` deletes that same engine-chosen temp tar; no
   # request input reaches the path, so it shares the SendFile argument above.
+  # The annotation MOVED HERE with the code: `stream_bundle/3` no longer
+  # contains either call, and a skip left on a function that does not raise the
+  # finding silently stops covering anything.
   # sobelow_skip ["Traversal.SendFile", "Traversal.FileModule"]
-  def export(conn, %{"workspace_slug" => slug} = params) do
-    token = conn.assigns[:api_token]
+  def deliver_bundle(conn, path, filename) do
+    # The engine hands ownership of the tar to us. `send_file/3` has finished
+    # writing to the socket by the time it returns, so deleting here is safe —
+    # and a socket killed mid-send raises a CATCHABLE Bandit.TransportError,
+    # which this `after` clause still fires on. (SIGKILL is out of reach by
+    # construction; sweeping orphans is pds-w11-spill-janitor's job.)
+    try do
+      conn
+      |> put_resp_content_type("application/x-tar", nil)
+      |> put_resp_header("content-disposition", "attachment; filename=#{filename}")
+      |> send_file(200, path)
+    after
+      # We are the deleter, so we are the disowner. The engine deliberately
+      # leaves the ownership sidecar on a tar it hands off — that is what keeps
+      # the janitor from reaping this file WHILE it is being streamed to the
+      # client, which for a multi-GB bundle on a slow link is a real window.
+      File.rm(path)
+      Janitor.disown(path)
+    end
+  end
 
-    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
-         true <- TenancyAuth.workspace_admin?(token, workspace.id),
-         {:ok, path} <- export_bundle(workspace, params) do
-      # The engine hands ownership of the tar to us. `send_file/3` has finished
-      # writing to the socket by the time it returns, so deleting here is safe —
-      # and a socket killed mid-send raises a CATCHABLE Bandit.TransportError,
-      # which this `after` clause still fires on. (SIGKILL is out of reach by
-      # construction; sweeping orphans is pds-w11-spill-janitor's job.)
-      try do
-        conn
-        |> put_resp_content_type("application/x-tar", nil)
-        |> put_resp_header(
-          "content-disposition",
-          "attachment; filename=#{export_filename(params, workspace)}"
-        )
-        |> send_file(200, path)
-      after
-        # We are the deleter, so we are the disowner. The engine deliberately
-        # leaves the ownership sidecar on a tar it hands off — that is what keeps
-        # the janitor from reaping this file WHILE it is being streamed to the
-        # client, which for a multi-GB bundle on a slow link is a real window.
-        File.rm(path)
-        Janitor.disown(path)
-      end
+  # The admitted half of `export/2`. Split out of the action ONLY so the
+  # single-flight slot can be released in one `after` that covers every exit
+  # from it — the error arms below all used to be `export/2`'s own `else`, and
+  # an arm that returned before the release would strand the slot until the
+  # request process died.
+  defp stream_bundle(conn, %Tenancy.Workspace{} = workspace, params) do
+    with {:ok, path} <- export_bundle(workspace, params) do
+      deliver_bundle(conn, path, export_filename(params, workspace))
     else
-      nil ->
-        {:error, :not_found}
-
-      # The tenant boundary (task-f416f96ef0860f47). Needs its own arm: `false`
-      # matches none of the tuple clauses below, so without it a denial is a
-      # WithClauseError (500) rather than a 403. Ordered before every
-      # `{:error, _}` arm for the same reason.
-      false ->
-        {:error, :forbidden}
-
       {:error, {:export_scope, reason, message}} ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: %{code: "unprocessable", reason: reason, message: message}})
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "unprocessable",
+          reason: reason,
+          message: message
+        })
 
       # PDS-D43: a transport-class failure used to escape as a bare 500
       # `internal_error / unknown error` — the caller learned nothing and could
@@ -346,16 +528,13 @@ defmodule BarkparkWeb.WorkspaceController do
       # actually succeeds (PDS-D44: an attempt costs the same as a success).
       {:error, {:export_failed, reason, message}} ->
         conn
-        |> put_status(:service_unavailable)
-        |> json(%{
-          error: %{
-            code: "export_transport_failed",
-            reason: reason,
-            message: message,
-            hint:
-              "the export did not finish (database transport failure). Retry; " <>
-                "if it fails again, narrow the bundle with ?profile=dev and/or ?dataset=<slug>."
-          }
+        |> ErrorResponse.emit_fields(:service_unavailable, %{
+          code: "export_transport_failed",
+          reason: reason,
+          message: message,
+          hint:
+            "the export did not finish (database transport failure). Retry; " <>
+              "if it fails again, narrow the bundle with ?profile=dev and/or ?dataset=<slug>."
         })
 
       # THE ENGINE'S ERROR CENSUS. `WorkspaceBundle.export_to_file/2` returns
@@ -392,6 +571,47 @@ defmodule BarkparkWeb.WorkspaceController do
         error
     end
   end
+
+  # The 409 a refused second caller gets (PDS-D719). Two reasons, because they
+  # are different facts and a client branches differently on them:
+  #
+  #   * `workspace_export_in_flight` — the caller's OWN workspace is exporting.
+  #     The slug is echoed: the caller just proved `workspace_admin?/2` on it,
+  #     so naming it back leaks nothing, and a client polling for its own
+  #     bundle wants to see WHICH one it collided with.
+  #   * `export_capacity_reached` — every slot is held, by an export of some
+  #     other workspace. `info.workspace_slug` is `nil` here BY CONSTRUCTION
+  #     (the guard never puts it in the term) and must stay out of the
+  #     envelope: this caller proved admin on their workspace and on nothing
+  #     else, so naming the in-flight tenant would be exactly the
+  #     cross-tenant existence leak the route's own DENIAL SHAPE section is
+  #     about. `running_for_seconds` is not that — the caller could have
+  #     measured it from the outside.
+  #
+  # `Retry-After` is a real header, not just prose in the body, so a proxy or a
+  # generic HTTP client backs off correctly without parsing the envelope.
+  defp export_in_flight_conflict(conn, info) do
+    conn
+    |> put_resp_header("retry-after", Integer.to_string(info.retry_after_seconds))
+    |> ErrorResponse.emit_fields(:conflict, %{
+      code: "export_already_running",
+      reason: Atom.to_string(info.reason),
+      message: export_in_flight_message(info),
+      running_for_seconds: info.running_for_seconds,
+      limit: info.limit,
+      hint:
+        "one workspace export runs at a time on this instance, because the " <>
+          "free-space preflight that refuses an export before its first spill " <>
+          "byte measures a single shared filesystem. Retry in " <>
+          "#{info.retry_after_seconds}s."
+    })
+  end
+
+  defp export_in_flight_message(%{reason: :workspace_export_in_flight, workspace_slug: slug}),
+    do: "an export of workspace #{slug} is already in flight on this instance"
+
+  defp export_in_flight_message(%{reason: :export_capacity_reached}),
+    do: "another workspace export is already in flight on this instance"
 
   # The engine RAISES on an unresolvable scope opt (a scope mistake must never
   # resolve silently into a wrong bundle); the HTTP edge turns that into an
@@ -513,7 +733,7 @@ defmodule BarkparkWeb.WorkspaceController do
       below (the 25P02 blindfold that made it a bare `internal_error` 500 is
       gone, task-63a199c0a0ce2a06), and that refusal is pinned by an
       HTTP-level test.
-    * `mode=merge` (PDS-D8/D10) — convergent upsert over a possibly-populated
+    * `mode=merge` (PDS-D8/PDS-D10) — convergent upsert over a possibly-populated
       workspace. FAIL-CLOSED OPT-IN: refused with 403 `bundle_import_disabled`
       unless `Application.get_env(:barkpark, :allow_bundle_import, false)` is
       true (the env plumb ships separately; the default here is always false).
@@ -523,7 +743,7 @@ defmodule BarkparkWeb.WorkspaceController do
   Returns the import stats — `{tables, total_rows}` — as JSON (plus
   `mode: "merge"` on the merge path), and a `provenance` receipt: pulled data
   says WHERE it came from, both in the response and, durably, in the target
-  workspace's `settings["pull_provenance"]` (PDS-D15/D16).
+  workspace's `settings["pull_provenance"]` (PDS-D15/PDS-D16).
 
   An empty or truncated body answers 422 `invalid_bundle` — an honest refusal
   rather than the MatchError-driven 500 it used to raise (PDS-D50).
@@ -534,9 +754,41 @@ defmodule BarkparkWeb.WorkspaceController do
   `import_constraint_violation` naming the violated constraint + table — never
   the opaque `internal_error` 500 the live support chain died blind on
   (task-63a199c0a0ce2a06). Non-constraint Postgres raises still 500 loudly.
+
+  ## Import as a NEW dataset (`into_dataset`, task-9a458d67319697b3)
+
+  `?into_dataset=<new slug>&into_project=<project slug>` imports a
+  DATASET-scoped bundle as a new dataset under that project of the workspace
+  in the URL, with fresh ids and every pointer to the source rewritten
+  (`WorkspaceBundle`'s `:into_dataset` option; the rewrite table lives in
+  `Barkpark.Tenancy.WorkspaceBundle.DatasetRemap`). Here, unlike a restore, the
+  URL's `workspace_slug` IS the target, so it is bound like `export/2` binds
+  its workspace: on top of this route's admin + operator pipeline, the caller
+  must pass `TenancyAuth.authorize(token, workspace_id, :write)` on the TARGET
+  workspace (member, with write or admin). Unknown workspace or project is 404,
+  a caller without write on the target is 403, both before the body is read.
+
+  Refusals keep existing codes, with the engine's reason named in `reason`:
+  409 `conflict` for `dataset_slug_conflict` (the project already has that
+  slug), 422 `validation_failed` for every other `DatasetRemapError`
+  (`dangling_reference`, `unhandled_dataset_rows`, `not_a_dataset_bundle`, …)
+  and for a malformed request (`into_project` missing, or `mode=merge`).
   """
-  def import(conn, %{"workspace_slug" => _slug} = params) do
-    case params["mode"] || "clean" do
+  def import(conn, %{"workspace_slug" => slug} = params) do
+    case {params["mode"] || "clean", Map.has_key?(params, "into_dataset")} do
+      {"clean", true} ->
+        remap_import(conn, slug, params)
+
+      {"merge", true} ->
+        remap_request_invalid(conn, "into_dataset imports only in mode=clean")
+
+      {mode, false} ->
+        plain_import(conn, mode)
+    end
+  end
+
+  defp plain_import(conn, mode) do
+    case mode do
       "clean" ->
         with_spilled_body(conn, &clean_import/3)
 
@@ -548,27 +800,119 @@ defmodule BarkparkWeb.WorkspaceController do
           # the server operator must explicitly allow it — refused BEFORE the
           # body is drained or the engine is touched.
           conn
-          |> put_status(:forbidden)
-          |> json(%{
-            error: %{
-              code: "bundle_import_disabled",
-              message:
-                "mode=merge requires the server to opt in via the " <>
-                  ":allow_bundle_import config (BARKPARK_ALLOW_BUNDLE_IMPORT)"
-            }
+          |> ErrorResponse.emit_fields(:forbidden, %{
+            code: "bundle_import_disabled",
+            message:
+              "mode=merge requires the server to opt in via the " <>
+                ":allow_bundle_import config (BARKPARK_ALLOW_BUNDLE_IMPORT)"
           })
         end
 
       other ->
         conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: %{
-            code: "invalid_import_mode",
-            message: "unknown import mode #{inspect(other)} (expected clean or merge)"
-          }
+        |> ErrorResponse.emit_fields(:unprocessable_entity, %{
+          code: "invalid_import_mode",
+          message: "unknown import mode #{inspect(other)} (expected clean or merge)"
         })
     end
+  end
+
+  # ── into_dataset: import a dataset bundle as a new dataset ──────────────────
+
+  defp remap_import(conn, ws_slug, params) do
+    token = conn.assigns[:api_token]
+
+    with {:ok, new_slug, project_slug} <- remap_params(params),
+         %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws_slug),
+         :ok <- TenancyAuth.authorize(token, workspace.id, :write),
+         %Tenancy.Project{} = project <- Tenancy.get_project(workspace.slug, project_slug) do
+      target = [workspace_id: workspace.id, project_id: project.id, slug: new_slug]
+
+      with_spilled_body(conn, fn conn, path, receipt ->
+        remap_into(conn, path, receipt, target)
+      end)
+    else
+      {:invalid, message} -> remap_request_invalid(conn, message)
+      nil -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :forbidden}
+    end
+  end
+
+  defp remap_params(params) do
+    case {params["into_dataset"], params["into_project"]} do
+      {slug, project}
+      when is_binary(slug) and slug != "" and is_binary(project) and project != "" ->
+        {:ok, slug, project}
+
+      {slug, _} when not is_binary(slug) or slug == "" ->
+        {:invalid, "into_dataset must be the new dataset's slug"}
+
+      _ ->
+        {:invalid, "into_dataset needs into_project, the slug of the target project"}
+    end
+  end
+
+  defp remap_request_invalid(conn, message) do
+    ErrorResponse.emit_fields(conn, :unprocessable_entity, %{
+      code: "validation_failed",
+      message: message
+    })
+  end
+
+  defp remap_into(conn, path, receipt, target) do
+    case WorkspaceBundle.import_bundle_file(path, into_dataset: target) do
+      {:ok, stats} ->
+        remap = stats.remap
+
+        json(
+          conn,
+          Map.merge(receipt, %{
+            tables: stats.tables,
+            total_rows: stats.total_rows,
+            dataset: %{
+              id: remap.dataset_id,
+              slug: remap.dataset_slug,
+              workspace_id: remap.workspace_id,
+              project_id: remap.project_id
+            },
+            source: remap.source,
+            dropped_out_of_dataset: remap.dropped_out_of_dataset,
+            skipped_workspace_scoped: remap.skipped_workspace_scoped,
+            not_carried: remap.not_carried
+          })
+        )
+
+      {:error, other} ->
+        import_failed(conn, :clean, other)
+    end
+  rescue
+    e in DatasetRemapError -> remap_refused(conn, e)
+    e in InvalidBundleError -> invalid_bundle(conn, e)
+    e in Postgrex.Error -> constraint_conflict_or_reraise(conn, e, __STACKTRACE__)
+    e -> log_import_crash_and_reraise(:clean, e, __STACKTRACE__)
+  end
+
+  # Existing codes only: the engine's refusal reason rides in `reason`, and
+  # `details` carries only JSON-safe keys (an `invalid_target` refusal holds
+  # changeset error tuples, which are summarised in the message instead).
+  defp remap_refused(conn, %DatasetRemapError{} = e) do
+    {status, code} =
+      case e.code do
+        "dataset_slug_conflict" -> {:conflict, "conflict"}
+        _ -> {:unprocessable_entity, "validation_failed"}
+      end
+
+    details =
+      e.details
+      |> Map.take([:count, :sample, :existing_dataset_id, :project_id, :slug])
+      |> Map.put(:table, e.table)
+
+    ErrorResponse.emit_fields(conn, status, %{
+      code: code,
+      reason: e.code,
+      message: e.message,
+      details: details
+    })
   end
 
   defp clean_import(conn, path, receipt) do
@@ -617,18 +961,15 @@ defmodule BarkparkWeb.WorkspaceController do
 
       {:error, {:workspace_slug_conflict, info}} ->
         conn
-        |> put_status(:conflict)
-        |> json(%{
-          error: %{
-            code: "workspace_slug_conflict",
-            message:
-              "workspace slug #{inspect(info.slug)} exists under a different id and is " <>
-                "not an empty shell — refuse to merge over it",
-            details: %{
-              slug: info.slug,
-              existing_id: info.existing_id,
-              bundle_id: info.bundle_id
-            }
+        |> ErrorResponse.emit_fields(:conflict, %{
+          code: "workspace_slug_conflict",
+          message:
+            "workspace slug #{inspect(info.slug)} exists under a different id and is " <>
+              "not an empty shell — refuse to merge over it",
+          details: %{
+            slug: info.slug,
+            existing_id: info.existing_id,
+            bundle_id: info.bundle_id
           }
         })
 
@@ -720,8 +1061,7 @@ defmodule BarkparkWeb.WorkspaceController do
   # machine-branchable 422 rather than an opaque 500 the caller cannot act on.
   defp invalid_bundle(conn, %InvalidBundleError{} = e) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: e.code, message: e.message}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{code: e.code, message: e.message})
   end
 
   # The Postgres error classes an import can hit against RESIDENT target
@@ -753,24 +1093,21 @@ defmodule BarkparkWeb.WorkspaceController do
        )
        when code in @import_constraint_pg_codes do
     conn
-    |> put_status(:conflict)
-    |> json(%{
-      error: %{
-        code: "import_constraint_violation",
-        # Class-A raw-echo ruling (task arpss-classa-lowsev-hygiene-rulings,
-        # site 3) — ACCEPT BY DESIGN. The raw Postgres message names the
-        # colliding key values, and that IS the deliverable: the only caller
-        # who can reach this arm is a GLOBAL admin (the router's
-        # `:require_admin` pipeline gates the whole import action) importing a
-        # bundle they supplied, who needs the constraint + values to repair it.
-        # Re-affirms task-63a199c0a0ce2a06, which added this after an on-box
-        # import 500'd with nothing but "exit status 8".
-        message: Exception.message(e),
-        details: %{
-          pg_code: Atom.to_string(code),
-          constraint: pg[:constraint],
-          table: pg[:table]
-        }
+    |> ErrorResponse.emit_fields(:conflict, %{
+      code: "import_constraint_violation",
+      # Class-A raw-echo ruling (task arpss-classa-lowsev-hygiene-rulings,
+      # site 3) — ACCEPT BY DESIGN. The raw Postgres message names the
+      # colliding key values, and that IS the deliverable: the only caller
+      # who can reach this arm is a GLOBAL admin (the router's
+      # `:require_admin` pipeline gates the whole import action) importing a
+      # bundle they supplied, who needs the constraint + values to repair it.
+      # Re-affirms task-63a199c0a0ce2a06, which added this after an on-box
+      # import 500'd with nothing but "exit status 8".
+      message: Exception.message(e),
+      details: %{
+        pg_code: Atom.to_string(code),
+        constraint: pg[:constraint],
+        table: pg[:table]
       }
     })
   end
@@ -787,7 +1124,7 @@ defmodule BarkparkWeb.WorkspaceController do
     reraise(e, stacktrace)
   end
 
-  # PDS-D15/D16 — stamp WHERE the imported data came from into the target
+  # PDS-D15/PDS-D16 — stamp WHERE the imported data came from into the target
   # workspace's `settings["pull_provenance"]`, keyed by dataset slug, and echo
   # the same receipt in the response.
   #
@@ -1054,7 +1391,18 @@ defmodule BarkparkWeb.WorkspaceController do
   # `Archive.open_scratch_dir!/0` just created — `spill_dir/0` (operator config)
   # plus System.unique_integer/1. No request input reaches the path; `spill_body`
   # below writes only to `Path.join(scratch, "body.tar")` under it.
-  # sobelow_skip ["Traversal.FileModule"]
+  #
+  # NO `sobelow_skip` HERE, DELIBERATELY: this body makes no `File.` call of its
+  # own, not even a capture. The removal it describes is
+  # `Archive.discard_scratch_dir/1` — see the `after` clause below, which spells
+  # out why it is that and not a bare `File.rm_rf/1` — and the write is
+  # `spill_body/2`'s. Each of those carries its own waiver where the call
+  # actually is. A waiver here suppressed nothing and told the next reader a
+  # risk had been weighed on this def; the reachability argument above outlived
+  # the call it was written for. If you add a direct `File.` call below, the
+  # waiver belongs with it — not back up here. (PR #12837 moved an annotation
+  # onto this function once already; `.sobelow-annotation-bindings` is what
+  # catches that, and it no longer has a row here to be stolen.)
   defp with_spilled_body(conn, fun) do
     scratch = Archive.open_scratch_dir!()
 
@@ -1185,17 +1533,14 @@ defmodule BarkparkWeb.WorkspaceController do
 
   defp body_too_large(conn, read) do
     conn
-    |> put_status(:request_entity_too_large)
-    |> json(%{
-      error: %{
-        code: "import_body_too_large",
-        message:
-          "import body exceeds the #{max_import_body_bytes()}-byte ceiling " <>
-            "(read #{read} bytes before refusing). The limit is 2x the measured " <>
-            "2,605.5 MiB full-fidelity bundle — one more doubling of the growth this " <>
-            "epic observed (942 MB -> 2,012,650,519 B of database).",
-        details: %{limit_bytes: max_import_body_bytes(), read_bytes: read}
-      }
+    |> ErrorResponse.emit_fields(:request_entity_too_large, %{
+      code: "import_body_too_large",
+      message:
+        "import body exceeds the #{max_import_body_bytes()}-byte ceiling " <>
+          "(read #{read} bytes before refusing). The limit is 2x the measured " <>
+          "2,605.5 MiB full-fidelity bundle — one more doubling of the growth this " <>
+          "epic observed (942 MB -> 2,012,650,519 B of database).",
+      details: %{limit_bytes: max_import_body_bytes(), read_bytes: read}
     })
   end
 
@@ -1204,15 +1549,12 @@ defmodule BarkparkWeb.WorkspaceController do
   # 3-byte handshake failure from a 2 GB upload that timed out at the last mile.
   defp body_read_failed(conn, reason, read) do
     conn
-    |> put_status(:bad_request)
-    |> json(%{
-      error: %{
-        code: "import_body_read_failed",
-        message:
-          "the import body could not be read to completion (#{inspect(reason)}) after " <>
-            "#{read} bytes — the upload was interrupted; nothing was imported. Re-run it.",
-        details: %{reason: inspect(reason), read_bytes: read}
-      }
+    |> ErrorResponse.emit_fields(:bad_request, %{
+      code: "import_body_read_failed",
+      message:
+        "the import body could not be read to completion (#{inspect(reason)}) after " <>
+          "#{read} bytes — the upload was interrupted; nothing was imported. Re-run it.",
+      details: %{reason: inspect(reason), read_bytes: read}
     })
   end
 
@@ -1228,33 +1570,27 @@ defmodule BarkparkWeb.WorkspaceController do
       end
 
     conn
-    |> put_status(507)
-    |> json(%{
-      error: %{
-        code: "import_spill_write_failed",
-        message:
-          "writing the import body to #{scratch} failed (#{inspect(reason)}) after " <>
-            "#{read} bytes; free space now reads #{free}. Nothing was imported, and the " <>
-            "scratch is removed by this request's `after` clause on the way out. Free " <>
-            "space or point BARKPARK_BUNDLE_SPILL_DIR at a larger filesystem.",
-        details: %{reason: inspect(reason), written_bytes: read, free_bytes: free}
-      }
+    |> ErrorResponse.emit_fields(507, %{
+      code: "import_spill_write_failed",
+      message:
+        "writing the import body to #{scratch} failed (#{inspect(reason)}) after " <>
+          "#{read} bytes; free space now reads #{free}. Nothing was imported, and the " <>
+          "scratch is removed by this request's `after` clause on the way out. Free " <>
+          "space or point BARKPARK_BUNDLE_SPILL_DIR at a larger filesystem.",
+      details: %{reason: inspect(reason), written_bytes: read, free_bytes: free}
     })
   end
 
   defp insufficient_disk_space(conn, info) do
     conn
-    |> put_status(507)
-    |> json(%{
-      error: %{
-        code: "insufficient_disk_space",
-        message:
-          "refusing the import before spilling: #{info.dir} has #{info.free_bytes} bytes " <>
-            "free and this import needs #{info.required_bytes} (the body spill and the " <>
-            "extracted members are held together). Free space or point " <>
-            "BARKPARK_BUNDLE_SPILL_DIR at a larger filesystem.",
-        details: info
-      }
+    |> ErrorResponse.emit_fields(507, %{
+      code: "insufficient_disk_space",
+      message:
+        "refusing the import before spilling: #{info.dir} has #{info.free_bytes} bytes " <>
+          "free and this import needs #{info.required_bytes} (the body spill and the " <>
+          "extracted members are held together). Free space or point " <>
+          "BARKPARK_BUNDLE_SPILL_DIR at a larger filesystem.",
+      details: info
     })
   end
 
@@ -1297,12 +1633,14 @@ defmodule BarkparkWeb.WorkspaceController do
     case Tenancy.get_workspace_by_slug(slug) do
       %Tenancy.Workspace{} = workspace ->
         if TenancyAuth.member?(token, workspace.id) do
-          projects = Tenancy.list_projects(workspace)
+          unless_archived(workspace, fn ->
+            projects = Tenancy.list_projects(workspace)
 
-          json(conn, %{
-            workspace: render_workspace(workspace),
-            projects: Enum.map(projects, &render_project/1)
-          })
+            json(conn, %{
+              workspace: render_workspace(workspace),
+              projects: Enum.map(projects, &render_project/1)
+            })
+          end)
         else
           {:error, :forbidden}
         end
@@ -1328,19 +1666,21 @@ defmodule BarkparkWeb.WorkspaceController do
     case Tenancy.get_workspace_by_slug(ws_slug) do
       %Tenancy.Workspace{} = workspace ->
         if TenancyAuth.member?(token, workspace.id) do
-          case Tenancy.get_project(ws_slug, proj_slug) do
-            %Tenancy.Project{} = project ->
-              datasets = Tenancy.list_datasets(project)
+          unless_archived(workspace, fn ->
+            case Tenancy.get_project(ws_slug, proj_slug) do
+              %Tenancy.Project{} = project ->
+                datasets = Tenancy.list_datasets(project)
 
-              json(conn, %{
-                workspace: render_workspace(workspace),
-                project: render_project(project),
-                datasets: Enum.map(datasets, &render_dataset/1)
-              })
+                json(conn, %{
+                  workspace: render_workspace(workspace),
+                  project: render_project(project),
+                  datasets: Enum.map(datasets, &render_dataset/1)
+                })
 
-            _ ->
-              {:error, :not_found}
-          end
+              _ ->
+                {:error, :not_found}
+            end
+          end)
         else
           {:error, :forbidden}
         end
@@ -1350,8 +1690,23 @@ defmodule BarkparkWeb.WorkspaceController do
     end
   end
 
+  # `archived_at` is ADDITIVE (task-55474a106554e65a): `null` on a live
+  # workspace, an ISO-8601 timestamp on an archived one — so the LIST still
+  # shows an archived workspace to its members, marked, rather than hiding the
+  # one thing they would need to find to restore it.
   defp render_workspace(%Tenancy.Workspace{} = ws) do
-    %{id: ws.id, slug: ws.slug, name: ws.name}
+    %{id: ws.id, slug: ws.slug, name: ws.name, archived_at: ws.archived_at}
+  end
+
+  # The per-action twin of `Plugs.ResolveWorkspace`'s archive refusal, for the
+  # three `/api/workspaces/:slug/...` interior actions that resolve the slug
+  # themselves (no ResolveWorkspace on their pipeline). Called AFTER the
+  # membership / write check, so a stranger keeps its 403 and learns nothing
+  # about the workspace's state — the same disclosure order as the plug.
+  defp unless_archived(%Tenancy.Workspace{} = workspace, fun) do
+    if Tenancy.Workspace.archived?(workspace),
+      do: {:error, {:workspace_archived, workspace.slug}},
+      else: fun.()
   end
 
   defp render_project(%Tenancy.Project{} = project) do

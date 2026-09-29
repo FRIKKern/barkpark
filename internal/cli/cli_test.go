@@ -377,10 +377,23 @@ func TestAuthHeaders(t *testing.T) {
 		t.Errorf("flat read should carry token when present: %v", h)
 	}
 
-	// none -> never carries a token, even when one is present.
+	// none -> carries the token WHEN ONE IS CONFIGURED (task-621bcf889e730f4c).
+	// This assertion is the REVERSE of what it was: the floor used to withhold a
+	// bearer it was holding, which is what let BARKPARK_TOKEN=not-a-real-token
+	// read the whole task type at rc=0 — the headerless query is a legitimate
+	// anonymous request and guerrilla answered it as one, while the SAME read
+	// carrying that bearer is a 401. "Needs no credential" is not "must not
+	// carry one".
 	none := manifest.Command{ID: "x.public", AuthTier: "none", HTTP: manifest.HTTP{Method: "GET", PathTemplate: "/v1/data/doc/:dataset/:type/:id"}}
-	if h := authHeaders(none, ctx); h["Authorization"] != "" {
-		t.Errorf("none tier must not send a token: %v", h)
+	if h := authHeaders(none, ctx); h["Authorization"] != "Bearer tok" {
+		t.Errorf("none tier must present a configured token: %v", h)
+	}
+
+	// The public FLOOR itself is unchanged: no token in context, no header —
+	// this is the control that keeps the fix above from becoming "tier none
+	// always authenticates", which would break every anonymous caller.
+	if h := authHeaders(none, manifest.Context{}); h["Authorization"] != "" {
+		t.Errorf("none tier with no token must send nothing: %v", h)
 	}
 
 	// No token in context -> no Authorization header for an auth tier.
@@ -423,7 +436,12 @@ func TestBuildManifestRequestAuthenticatesNonPublishedPerspective(t *testing.T) 
 			})
 		}
 
-		t.Run(verb+"_published_stays_public", func(t *testing.T) {
+		// A published read now ALSO carries the configured bearer
+		// (task-621bcf889e730f4c) — the "stays byte-for-byte public" half of
+		// this test was the defect, not the contract. A caller with NO token is
+		// the case that stays public, and TestTokenlessReadStaysAnonymous
+		// (refused_credential_test.go) is its lock.
+		t.Run(verb+"_published_carries_the_configured_bearer", func(t *testing.T) {
 			req, derr := buildManifestRequest(
 				globals{}, baseCtx, m, *cmd,
 				[]string{"post", "--perspective", "published"},
@@ -432,8 +450,8 @@ func TestBuildManifestRequestAuthenticatesNonPublishedPerspective(t *testing.T) 
 			if derr != nil {
 				t.Fatalf("buildManifestRequest: %v", derr)
 			}
-			if got := req.headers["Authorization"]; got != "" {
-				t.Errorf("published Authorization = %q, want public request unchanged", got)
+			if got := req.headers["Authorization"]; got != "Bearer draft-reader-token" {
+				t.Errorf("published Authorization = %q, want the configured bearer", got)
 			}
 		})
 	}
@@ -469,7 +487,6 @@ func TestBuildManifestRequestRejectsNonPublishedPerspectiveWithoutToken(t *testi
 func TestExitForCode(t *testing.T) {
 	cases := map[string]int{
 		"not_found":           exitNotFound,
-		"schema_unknown":      exitNotFound,
 		"share_expired":       exitNotFound,
 		"unauthorized":        exitAuth,
 		"forbidden":           exitAuth,
@@ -510,6 +527,7 @@ func TestClassifyError(t *testing.T) {
 		{"canonical forbidden", `{"error":{"code":"forbidden","message":"token lacks required permission"}}`, exitAuth, "forbidden"},
 		{"canonical validation", `{"error":{"code":"validation_failed","message":"bad"}}`, exitValidation, "validation_failed"},
 		{"canonical rev_mismatch", `{"error":{"code":"rev_mismatch"}}`, exitConflict, "rev_mismatch"},
+		{"canonical paper_exists", `{"error":{"code":"paper_exists","message":"Paper already exists"}}`, exitConflict, "paper_exists"},
 		// Canonical envelopes for the codes added when the server moved these off
 		// bare-string / fail-open shapes — each must resolve via error.code.
 		{"canonical halted", `{"error":{"code":"halted","message":"lifecycle veto"}}`, exitConflict, "halted"},
@@ -650,7 +668,7 @@ func TestUsageErrfJSONEnvelope(t *testing.T) {
 // TestExitForCode / TestClassifyError.
 func TestApiErrorHint(t *testing.T) {
 	nonEmpty := []string{
-		"not_found", "schema_unknown",
+		"not_found",
 		"validation_failed", "invalid_op", "type_mismatch", "duplicate_id",
 		"rev_mismatch", "precondition_failed", "conflict",
 		"fenced_off", "stale_claim", "already_claimed", "not_ready", "doc_changed_since_claim",
@@ -964,7 +982,13 @@ func TestIngestAuthHeader(t *testing.T) {
 		t.Fatalf("fixture changed: bulldocs publish tier = %q, want ingest", pub.AuthTier)
 	}
 
-	ctx := manifest.Context{Token: "api-bearer-tok"}
+	// AmbientCredentialsOK models the OPERATOR-LOCAL invocation this test is
+	// about — `bp bulldocs publish …` from a shell, where the process environment
+	// IS the requester's credential store, which is what ResolveWithSources
+	// produces. The env-first precedence asserted below is scoped to exactly that
+	// case now; the remote `--http` transport clears the flag and never
+	// substitutes a process secret for a caller's own (mcp_http_ingest_test.go).
+	ctx := manifest.Context{Token: "api-bearer-tok", AmbientCredentialsOK: true}
 
 	t.Run("BARKPARK_INGEST_TOKEN wins", func(t *testing.T) {
 		t.Setenv("BARKPARK_INGEST_TOKEN", "bp-ingest")
@@ -1949,7 +1973,11 @@ func TestBuildBodyTaskRelease(t *testing.T) {
 	if release.HTTP.Method != "POST" || release.HTTP.PathTemplate != "/v1/tasks/:doc_id/release" {
 		t.Fatalf("task release http = %s %s, want POST /v1/tasks/:doc_id/release", release.HTTP.Method, release.HTTP.PathTemplate)
 	}
-	if !release.Writes || release.AuthTier != "read" || release.DefaultOutput != "minimal" {
+	// auth_tier is the SERVER's policy for this row, re-read from the manifest on
+	// every fixture refresh — it moved read -> write between the 2026-07-23 and
+	// 2026-09-20 fixtures with no CLI change. What this test is actually about is
+	// the SHAPE (writes, minimal output, URL-bound doc_id), which is unchanged.
+	if !release.Writes || release.AuthTier != "write" || release.DefaultOutput != "minimal" {
 		t.Fatalf("task release contract = writes:%v auth:%q output:%q", release.Writes, release.AuthTier, release.DefaultOutput)
 	}
 
@@ -3087,22 +3115,41 @@ func tree0(t *testing.T) *manifest.Tree {
 func TestSoleReadVerbRule(t *testing.T) {
 	_, tree := loadTreeFrom(t, fullManifest)
 
-	search, ok := lookupNoun(tree, "search")
-	if !ok {
-		t.Fatal("search noun missing from the fixture manifest")
+	// The real-manifest arm is chosen by the PREDICATE the rule is about — one
+	// verb, affirmatively non-writing — never by a noun NAME. `search` was that
+	// noun when this test was written and stopped being it the moment the server
+	// grew `search suggestions`, `search reindex`, …: a fixture refresh then red
+	// a test whose SUBJECT had not changed. A name is a snapshot; this is the
+	// rule. The Fatal below is the control: if no noun in the fixture qualifies,
+	// this arm is measuring NOTHING and must say so rather than pass silently.
+	var soleNoun *manifest.TreeNoun
+	for _, name := range tree.NounNames() {
+		n, ok := lookupNoun(tree, name)
+		if !ok || len(n.Verbs) != 1 || !n.Verbs[0].NonWriting() {
+			continue
+		}
+		soleNoun = n
+		break
 	}
-	if sole, inferable := soleReadVerb(search, "PDS crown proof"); !inferable || sole.Verb != "query" {
-		t.Errorf("soleReadVerb(search, free text) = %v,%v; want query,true", sole, inferable)
+	if soleNoun == nil {
+		t.Fatal("no single-verb non-writing noun in the fixture manifest — the real-manifest arm of this rule has no subject; add one or retire the arm")
+	}
+	soleVerb := soleNoun.Verbs[0].Verb
+	if sole, inferable := soleReadVerb(soleNoun, "PDS crown proof"); !inferable || sole.Verb != soleVerb {
+		t.Errorf("soleReadVerb(%s, free text) = %v,%v; want %s,true", soleNoun.Name, sole, inferable, soleVerb)
 	}
 	// A near-typo of the sole verb is a mistyped VERB, not an argument — it must
 	// fall through to the typo suggestion rather than be forwarded as a query.
-	if _, inferable := soleReadVerb(search, "quer"); inferable {
+	if len(soleVerb) < 3 {
+		t.Fatalf("sole verb %q is too short to truncate into a near-typo — this arm needs a subject", soleVerb)
+	}
+	if _, inferable := soleReadVerb(soleNoun, soleVerb[:len(soleVerb)-1]); inferable {
 		t.Error("a near-typo of the sole verb must not be inferred as an argument")
 	}
 	// Flag-shaped and empty tokens are never arguments to an inferred verb.
 	for _, typed := range []string{"--json", "-x", ""} {
-		if _, inferable := soleReadVerb(search, typed); inferable {
-			t.Errorf("soleReadVerb(search, %q) fired; want no inference", typed)
+		if _, inferable := soleReadVerb(soleNoun, typed); inferable {
+			t.Errorf("soleReadVerb(%s, %q) fired; want no inference", soleNoun.Name, typed)
 		}
 	}
 
@@ -3243,9 +3290,12 @@ func TestBuildManifestRequestAuthenticatesDraftIDOnPublicRead(t *testing.T) {
 		}
 	})
 
-	// NEGATIVE ARM: the published read must not gain a credential. A fix that
-	// attaches the bearer unconditionally fails here.
-	t.Run("plain_id_stays_public", func(t *testing.T) {
+	// The published read carries the bearer too, as of
+	// task-621bcf889e730f4c: withholding a CONFIGURED credential was the defect
+	// (a refused token became an anonymous 200 at rc=0). The arm that keeps
+	// this from meaning "tier none always authenticates" is the TOKENLESS one
+	// below — and TestTokenlessReadStaysAnonymous locks it end to end.
+	t.Run("plain_id_carries_the_configured_bearer", func(t *testing.T) {
 		req, derr := buildManifestRequest(
 			globals{}, ctx, m, *cmd,
 			[]string{"paper", "l5goc-draft-probe-2"},
@@ -3254,8 +3304,26 @@ func TestBuildManifestRequestAuthenticatesDraftIDOnPublicRead(t *testing.T) {
 		if derr != nil {
 			t.Fatalf("buildManifestRequest: %v", derr)
 		}
+		if got := req.headers["Authorization"]; got != "Bearer draft-reader-token" {
+			t.Errorf("Authorization = %q, want the configured bearer", got)
+		}
+	})
+
+	// NEGATIVE ARM: a caller holding NO token still sends no header — the
+	// public floor, unchanged.
+	t.Run("plain_id_tokenless_stays_public", func(t *testing.T) {
+		anon := ctx
+		anon.Token = ""
+		req, derr := buildManifestRequest(
+			globals{}, anon, m, *cmd,
+			[]string{"paper", "l5goc-draft-probe-2"},
+			false,
+		)
+		if derr != nil {
+			t.Fatalf("buildManifestRequest: %v", derr)
+		}
 		if got := req.headers["Authorization"]; got != "" {
-			t.Errorf("Authorization = %q, want the published read to stay byte-for-byte public", got)
+			t.Errorf("Authorization = %q, want a tokenless published read to stay byte-for-byte public", got)
 		}
 	})
 }

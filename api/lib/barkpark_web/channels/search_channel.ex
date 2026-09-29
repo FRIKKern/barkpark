@@ -250,7 +250,17 @@ defmodule BarkparkWeb.SearchChannel do
     {docs, count, meta} = Content.search_documents(query, socket.assigns.dataset, opts)
 
     reply =
-      build_reply(seq, query, docs, count, meta, socket, params["fields"], params["view"])
+      build_reply(
+        seq,
+        query,
+        docs,
+        count,
+        meta,
+        socket,
+        params["fields"],
+        params["view"],
+        opts_base[:offset]
+      )
 
     # Cache the latest query parameters so a downstream
     # `{:document_changed, _}` PubSub message can re-run the SAME search
@@ -361,7 +371,17 @@ defmodule BarkparkWeb.SearchChannel do
         push(
           socket,
           "results",
-          build_reply(seq, query, docs, count, meta, socket, last[:fields], last[:view])
+          build_reply(
+            seq,
+            query,
+            docs,
+            count,
+            meta,
+            socket,
+            last[:fields],
+            last[:view],
+            opts_base[:offset]
+          )
         )
 
         {:noreply, socket}
@@ -398,13 +418,31 @@ defmodule BarkparkWeb.SearchChannel do
   end
 
   # ONE shared envelope builder (AXI R3) — the same `HitEnvelope.build/5` the
-  # HTTP routes consume, so the client renders identically whether the hit came
-  # over HTTP or the socket. BOTH call sites (the "query" reply and the P5
+  # HTTP routes consume. BOTH call sites (the "query" reply and the P5
   # live-push) go through this function. Per-type schema resolution drops a
   # non-encrypted private/owner_only/readable_by field for a non-authorized
   # subscriber; `fields` mirrors the HTTP `?fields=` allowlist; `view: "brief"`
   # returns brief hit cards (id/type/title/slug/snippet/highlights).
-  defp build_reply(seq, query, docs, count, meta, socket, fields, view) do
+  #
+  # SHARING THE BUILDER IS NOT SHARING ITS ARGUMENTS, and this comment used to
+  # claim the client "renders identically whether the hit came over HTTP or the
+  # socket" while passing four of the builder's five options
+  # (task-2fcfad0f92b49f6d). The missing one was `:offset`, so
+  # `HitEnvelope.build/5` fell back to its `|| 0` default and every WS page two
+  # reported `offset: 0`, a `nextOffset` continuing from zero, and a `hasMore`
+  # that over-reported near the end of a corpus. All three derive from the same
+  # base, so they AGREED WITH EACH OTHER and no self-consistency check could
+  # see it — only a comparison against the REQUEST can.
+  #
+  # `offset` is now threaded from `opts_base[:offset]` — THE SAME clamped value
+  # handed to `Content.search_documents/3` — at both call sites, so the envelope
+  # describes the page the retriever was actually asked for. The argument sets
+  # are now identical across the HTTP and WS callers; the count of options one
+  # passes and the other does not is ZERO. (`FederatedSearchController` is the
+  # third caller and deliberately passes no `:offset`: `rekey_federated/1` drops
+  # `hasMore`/`offset`/`nextOffset` together, so that surface stays silent about
+  # paging rather than mis-stating it.)
+  defp build_reply(seq, query, docs, count, meta, socket, fields, view, offset) do
     caller_context = CallerContext.from_conn(socket)
 
     docs
@@ -412,7 +450,8 @@ defmodule BarkparkWeb.SearchChannel do
       caller_context: caller_context,
       schema_resolver: schema_resolver(socket),
       fields: fields,
-      view: view
+      view: view,
+      offset: offset
     )
     |> Map.put(:seq, seq)
   end

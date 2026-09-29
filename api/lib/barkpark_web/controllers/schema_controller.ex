@@ -98,6 +98,16 @@ defmodule BarkparkWeb.SchemaController do
   # deleting a schema that still has documents is refused with a 409
   # `schema_has_documents` (see Content.Schema.delete_schema/3) so a public type
   # can't be silently removed out from under its now-unreadable documents.
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, %{"dataset" => dataset, "name" => name} = params) do
     opts = Keyword.put(scope_opts(conn), :force, force_param?(params))
 

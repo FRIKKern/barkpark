@@ -111,6 +111,7 @@ defmodule Barkpark.Sites.ProvisionerTest do
       }
       |> maybe_put("runtime_target", Keyword.get(opts, :runtime_target))
       |> maybe_put("template", Keyword.get(opts, :template))
+      |> maybe_put("source_kind", Keyword.get(opts, :source_kind))
 
     {:ok, req} = DeployRequest.new(params)
     req
@@ -118,6 +119,58 @@ defmodule Barkpark.Sites.ProvisionerTest do
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  # ── external-source fixtures ──────────────────────────────────────────────
+  #
+  # A stand-in for a tree a git clone / artifact untar put at <slug>/src. Every
+  # file is a SENTINEL: the guard is proven by these exact bytes surviving, not
+  # by "provision returned something".
+  @external_sentinels %{
+    "package.json" => ~s({"name":"customers-own-app"}),
+    "src/index.js" => "export const answer = 42;\n",
+    "src/deep/nested/notes.md" => "# do not clobber me\n",
+    ".env.example" => "SECRET=placeholder\n"
+  }
+
+  defp seed_external_src!(slug) do
+    src = Provisioner.src_dir(slug)
+
+    Enum.each(@external_sentinels, fn {rel, body} ->
+      path = Path.join(src, rel)
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, body)
+    end)
+
+    src
+  end
+
+  # Every sentinel still present with its EXACT bytes, and the tree carries
+  # nothing the Provisioner would have added.
+  defp assert_external_src_intact!(slug) do
+    src = Provisioner.src_dir(slug)
+
+    Enum.each(@external_sentinels, fn {rel, body} ->
+      path = Path.join(src, rel)
+      assert File.exists?(path), "external source file #{rel} was DELETED by provision"
+
+      assert File.read!(path) == body,
+             "external source file #{rel} was OVERWRITTEN by provision"
+    end)
+
+    refute File.exists?(Path.join(src, ".bp-provisioned")),
+           "provision claimed ownership of an external source tree (wrote .bp-provisioned)"
+
+    refute File.exists?(Path.join(src, "astro.config.mjs")),
+           "provision materialized the starter over an external source tree"
+
+    refute File.exists?(Path.join(src, ".partial")) or File.exists?(src <> ".partial"),
+           "provision left a staging tree beside an external source"
+
+    refute File.exists?(src <> ".stale"),
+           "provision moved an external source tree aside"
+
+    src
+  end
 
   # ── the happy path: template → <sites_dir>/<slug>/src ────────────────────
 
@@ -566,5 +619,153 @@ defmodule Barkpark.Sites.ProvisionerTest do
       assert Provisioner.provision(rollback) == :ok
       refute File.exists?(Provisioner.src_dir("rb"))
     end
+  end
+
+  # ── the external-source guard (site-spawner-provision-guard-external-source)
+  #
+  # provision/1 rm_rf-swaps <slug>/src and materializes a starter for any deploy
+  # whose src is not marker-fresh. For a site whose source came from somewhere
+  # ELSE — a git clone, an unpacked artifact — that is DESTRUCTION of the
+  # customer's code. The guard is the `source_kind` axis: the Provisioner owns
+  # `:content_bound` src trees and REFUSES the other two, by name.
+
+  describe "provision/1 — external-source guard" do
+    for kind <- ~w(external-git external-artifact) do
+      test "REFUSES to materialize over a #{kind} source tree, byte-for-byte" do
+        kind = unquote(kind)
+        slug = "ext-#{String.replace(kind, "-", "")}"
+        seed_external_src!(slug)
+
+        result = Provisioner.provision(deploy(slug, source_kind: kind))
+
+        # DESTRUCTION FIRST: the bytes are the finding. Asserted before the
+        # return value so an unguarded provision reds on "was DELETED", not on
+        # a tag mismatch.
+        assert_external_src_intact!(slug)
+
+        # And the refusal is EXPLICIT and NAMED — not a bare :ok, which would
+        # equally mean "materialized fine".
+        assert result == {:ok, :external_source_preserved}
+      end
+
+      test "a retry and a redeploy of a #{kind} site leave the tree byte-identical" do
+        kind = unquote(kind)
+        slug = "ext-retry-#{String.replace(kind, "-", "")}"
+        src = seed_external_src!(slug)
+        before = tree_snapshot(src)
+
+        # Provision, retry (same build), redeploy (new build) — the three ways
+        # the runner re-enters this path.
+        assert Provisioner.provision(deploy(slug, source_kind: kind, build_id: "b1")) ==
+                 {:ok, :external_source_preserved}
+
+        assert Provisioner.provision(deploy(slug, source_kind: kind, build_id: "b1")) ==
+                 {:ok, :external_source_preserved}
+
+        assert Provisioner.provision(deploy(slug, source_kind: kind, build_id: "b2")) ==
+                 {:ok, :external_source_preserved}
+
+        assert_external_src_intact!(slug)
+        assert tree_snapshot(src) == before
+      end
+    end
+
+    test "a tree the Provisioner OWNS is left intact — not deleted — when the site flips to external-git" do
+      slug = "flip-to-ext"
+
+      # First: a content-bound deploy materializes and marks the tree.
+      assert Provisioner.provision(deploy(slug)) == :ok
+      src = Provisioner.src_dir(slug)
+      assert File.exists?(Path.join(src, ".bp-provisioned"))
+      owned = tree_snapshot(src)
+
+      # Now the same slug arrives as external-git. The stale OWNED output is
+      # handled explicitly: refused, and left exactly where it is for the
+      # external fetch step to replace. Provision never deletes it out from
+      # under a caller.
+      assert Provisioner.provision(deploy(slug, source_kind: "external-git")) ==
+               {:ok, :external_source_preserved}
+
+      assert tree_snapshot(src) == owned
+    end
+
+    test "a content-bound deploy STILL materializes the starter (the guard is not fail-closed-everything)",
+         %{sites: sites} do
+      assert Provisioner.provision(deploy("still-works", source_kind: "content-bound")) == :ok
+
+      src = Path.join([sites, "still-works", "src"])
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"astro-stub"})
+      assert File.exists?(Path.join(src, ".bp-provisioned"))
+    end
+
+    test "an ABSENT source_kind still materializes — every pre-guard caller is unaffected",
+         %{sites: sites} do
+      assert Provisioner.provision(deploy("legacy-caller")) == :ok
+      assert File.exists?(Path.join([sites, "legacy-caller", "src", "astro.config.mjs"]))
+    end
+
+    # BOTH DIRECTIONS. A guard that mis-reads an external site as internal
+    # clobbers it; one that mis-reads a content-bound site as external leaves
+    # the box with no source and BUILD dies at exit 10. Drive all three kinds
+    # through ONE table so neither direction can be silently absent.
+    test "detection is exhaustive in BOTH directions across all three source kinds",
+         %{sites: sites} do
+      matrix = [
+        {"content-bound", :materializes},
+        {"external-git", :preserves},
+        {"external-artifact", :preserves}
+      ]
+
+      # Every kind DeployRequest accepts is in the table — a fourth kind added
+      # later without a decision here reds this line, not production.
+      assert Enum.sort(Enum.map(matrix, &elem(&1, 0))) ==
+               Enum.sort(DeployRequest.source_kinds())
+
+      for {kind, expected} <- matrix do
+        slug = "both-#{String.replace(kind, "-", "")}"
+        seed_external_src!(slug)
+        src = Path.join([sites, slug, "src"])
+
+        result = Provisioner.provision(deploy(slug, source_kind: kind))
+
+        case expected do
+          :materializes ->
+            assert result == :ok, "#{kind} must materialize, got #{inspect(result)}"
+
+            assert File.exists?(Path.join(src, "astro.config.mjs")),
+                   "#{kind} was treated as EXTERNAL — the box is left with no starter"
+
+          :preserves ->
+            assert result == {:ok, :external_source_preserved},
+                   "#{kind} must be preserved, got #{inspect(result)}"
+
+            assert File.read!(Path.join(src, "src/index.js")) ==
+                     @external_sentinels["src/index.js"],
+                   "#{kind} was treated as CONTENT-BOUND — the source was clobbered"
+        end
+      end
+    end
+
+    test "a rollback and a teardown of an external-source site are still no-ops" do
+      for mode <- ~w(rollback teardown) do
+        slug = "ext-#{mode}"
+        src = seed_external_src!(slug)
+        before = tree_snapshot(src)
+
+        assert Provisioner.provision(deploy(slug, mode: mode, source_kind: "external-git")) == :ok
+        assert tree_snapshot(src) == before
+      end
+    end
+  end
+
+  # relative path => sha256 of contents, for the whole tree.
+  defp tree_snapshot(root) do
+    root
+    |> Path.join("**")
+    |> Path.wildcard(match_dot: true)
+    |> Enum.reject(&File.dir?/1)
+    |> Map.new(fn abs ->
+      {Path.relative_to(abs, root), :crypto.hash(:sha256, File.read!(abs)) |> Base.encode16()}
+    end)
   end
 end

@@ -307,6 +307,82 @@ else
   bad "16) scripts/breaker-capture.sh is missing"
 fi
 
+# -- 16b. WHICH COMMAND FAILED (task-2e11c7faa11c80d9) -----------------------
+# A step NAME is a label on a label. Measured on main 0542e9677, the
+# `Doc budgets + anchors` job declares 42 steps and runs 69 checker
+# invocations; 50 of them share a step with a sibling, and the commonest pair is
+# `bash scripts/X.sh --selftest` followed by `bash scripts/X.sh` -- two
+# different failures under one name. These arms assert the wrapper NAMES the
+# command; the controls assert it names the right one and stays silent when it
+# should.
+if [ -f "$CAPSH" ]; then
+  ARM='          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step'"'"'s error block'
+  mkdir -p "$TMP/g/scripts"
+  printf '%s\n' '#!/usr/bin/env bash' 'if [ "${1:-}" = "--selftest" ]; then echo "gate --selftest: FAILED"; exit 1; fi' 'echo "gate ok"' > "$TMP/g/scripts/gate.sh"
+  printf '%s\n' '#!/usr/bin/env bash' 'set -e' 'echo "inner: starting"' 'grep -q "absent-token" /dev/null' 'echo unreachable' > "$TMP/g/scripts/inner.sh"
+
+  # 16b-A THE ARM. Two commands, one step name, the FIRST one reds.
+  cap="$TMP/cap16b.txt"; : > "$cap"
+  { printf '%s\n' "$ARM"; printf '%s\n' 'bash scripts/gate.sh --selftest' 'bash scripts/gate.sh'; } > "$TMP/g/two-cmd.sh"
+  o="$( cd "$TMP/g" && (BREAKER_ERROR_LOG="$cap" bash "$CAPSH" "$TMP/g/two-cmd.sh" 2>&1; echo "RC=$?") )"
+  has "$o" "RC=1" "16b-A) the step's exit code still passes through"
+  has "$o" "the command that failed, verbatim:" "16b-A) the red says a command failed, not merely that the step did"
+  has "$o" "bash scripts/gate.sh --selftest" "16b-A) and NAMES it: the --selftest arm, not its live sibling"
+  has "$o" "this step runs 2 command(s)" "16b-A) it counts the step's commands, derived from the step script"
+  has "$o" "1. bash scripts/gate.sh --selftest" "16b-A) the ordered list names command 1"
+  has "$o" "2. bash scripts/gate.sh" "16b-A) and command 2, which no step NAME could have distinguished"
+  has "$o" "::warning title=Failing command::bash scripts/gate.sh --selftest" "16b-A) legible from the checks page without opening the log"
+  # 16b-B THE FENCE LABEL. It used to be the BREAKER_CAPTURE_ARMED preamble --
+  #       byte-identical in EVERY armed step, so main-red-breaker.sh's per-step
+  #       OPAQUE report named nothing.
+  if head -n1 "$cap" | grep -qF '##[breaker-block]begin bash scripts/gate.sh --selftest'; then
+    ok "16b-B) the capture's fence label carries the failing command"
+  else
+    bad "16b-B) fence label is not the failing command: $(head -n1 "$cap")"
+  fi
+  if head -n1 "$cap" | grep -q 'BREAKER_CAPTURE_ARMED'; then
+    bad "16b-B) fence label is still the arming preamble every step shares"
+  else
+    ok "16b-B) and is no longer the preamble every armed step shares"
+  fi
+  # 16b-C CONTROL: the diagnostic never enters the capture. A line our side
+  #       carries and main's log does not is what `comm -23` reads as the PR's
+  #       OWN red, so enriching the signature set manufactures accusations.
+  if grep -q 'breaker-capture: the command that failed' "$cap"; then
+    bad "16b-C) the diagnostic leaked into the capture -- it would poison the signature set"
+  else
+    ok "16b-C) CONTROL: the diagnostic stays out of the capture file"
+  fi
+  # 16b-D CONTROL: a GREEN step is silent. A tripwire self-test that prints the
+  #       word FAIL and exits 0 must produce no annotation and no capture.
+  cap2="$TMP/cap16b-green.txt"; : > "$cap2"
+  { printf '%s\n' "$ARM"; printf '%s\n' 'echo "tripwire OK - FAIL was never planted"'; } > "$TMP/g/green.sh"
+  o="$( cd "$TMP/g" && (BREAKER_ERROR_LOG="$cap2" bash "$CAPSH" "$TMP/g/green.sh" 2>&1; echo "RC=$?") )"
+  has "$o" "RC=0" "16b-D) a passing step still exits 0"
+  case "$o" in *"::warning title=Failing command"*) bad "16b-D) a GREEN step emitted a failing-command warning" ;; *) ok "16b-D) CONTROL: a green step emits no annotation" ;; esac
+  case "$o" in *"breaker-capture: "*) bad "16b-D) a GREEN step printed the failure diagnostic" ;; *) ok "16b-D) CONTROL: and prints no diagnostic" ;; esac
+  [ ! -s "$cap2" ] && ok "16b-D) CONTROL: and writes nothing to the capture" || bad "16b-D) a green step polluted the capture"
+  # 16b-E CONTROL: the name must be the INVOCATION the reader re-runs, not a
+  #       line inside the checker. The ERR trap is installed through BASH_ENV,
+  #       which every child shell would otherwise re-source; `unset BASH_ENV`
+  #       in the prelude is what keeps `grep -q absent-token` out of this line.
+  cap3="$TMP/cap16b-nested.txt"; : > "$cap3"
+  { printf '%s\n' "$ARM"; printf '%s\n' 'echo "selftest pass"' 'bash scripts/inner.sh'; } > "$TMP/g/nested.sh"
+  o="$( cd "$TMP/g" && (BREAKER_ERROR_LOG="$cap3" bash "$CAPSH" "$TMP/g/nested.sh" 2>&1; echo "RC=$?") )"
+  has "$o" "::warning title=Failing command::bash scripts/inner.sh" "16b-E) names the invocation the reader re-runs"
+  case "$o" in *"Failing command::grep"*|*"Failing command::"*"absent-token"*) bad "16b-E) reported a line INSIDE the checker -- BASH_ENV leaked into the child" ;; *) ok "16b-E) CONTROL: does not report a line inside the checker" ;; esac
+  # 16b-F CONTROL: a step with its own EXIT cleanup trap. An ERR trap fires on
+  #       the command that tripped `bash -e`; a DEBUG trap would have reported
+  #       the `rm -rf` that runs afterwards, and several gate steps have one.
+  cap4="$TMP/cap16b-cleanup.txt"; : > "$cap4"
+  { printf '%s\n' "$ARM"; printf '%s\n' 'set -u' 'scratch="$(mktemp -d)"' "trap 'rm -rf \"\$scratch\"' EXIT" 'bash scripts/inner.sh'; } > "$TMP/g/cleanup.sh"
+  o="$( cd "$TMP/g" && (BREAKER_ERROR_LOG="$cap4" bash "$CAPSH" "$TMP/g/cleanup.sh" 2>&1; echo "RC=$?") )"
+  has "$o" "::warning title=Failing command::bash scripts/inner.sh" "16b-F) an EXIT cleanup trap does not displace the failing command"
+  case "$o" in *"Failing command::rm "*) bad "16b-F) reported the cleanup rm as the failure" ;; *) ok "16b-F) CONTROL: the cleanup rm is not mistaken for the failure" ;; esac
+else
+  bad "16b) scripts/breaker-capture.sh is missing"
+fi
+
 
 # ── 17. MAIN'S SIDE, AS THE API ACTUALLY RENDERS IT (task-2dbe8808f2a6f7b5) ──
 # Arms 2-5 and 11-14 feed main's jobs JSON with gate steps marked
@@ -647,7 +723,7 @@ fi
 
 # 19f. Drop the unambiguous marker parse (M4's fix) -> 18h2 must stop inheriting
 #      and fall back to the shredded ';' recovery.
-if mutate "19f MAIN-FAILED-STEP marker parse" "mark = \"main-red-breaker: MAIN-FAILED-STEP in '%s': \" % want" "mark = \"__no_such_marker__\"" 1; then
+if mutate "19f MAIN-FAILED-STEP marker parse" 'mark = re.compile(r"main-red-breaker: MAIN-FAILED-STEP in " + NAMED + r": ")' 'mark = re.compile(r"__no_such_marker__")' 1; then
   ( SUBJECT="$TMP/mut-subject.sh"; out="$(semi_run "$semi_log_marked" "$semi_cap")"
     case "$out" in *INHERITED-FROM-MAIN*) echo "  FAIL  19f) MUTATION SURVIVED: still inherited with the marker parse removed"; exit 1 ;; *) echo "  PASS  19f) removing the marker parse breaks 18h2 — the arm is not vacuous" ;; esac ) || FAIL=$((FAIL+1))
   [ $? -eq 0 ] && PASS=$((PASS+1))
@@ -1247,5 +1323,459 @@ fi
 out="$(run "$out_s2" pull_request "$main_green_trusted")"
 has "$out" "a step main does not" "25b) CONTROL: when the API reports a GATE step failed, api_trusted fires and the breaker accuses"
 has "$out" "RC=1" "25b) …rc 1 — the proof is alive, and only its precondition is absent in production"
+
+# ── 26. THE VACUOUS SIGNATURE (task-501a3f6f34d5aa20) ───────────────────────
+# The subset test above compares the FINDING SET, not the step name. It is only
+# as strong as that set: a step whose red prints the SAME sentence for every
+# breach makes `comm -23` empty no matter what the PR broke, and the verdict
+# silently degrades to v1's step-name match.
+#
+# THE SPECIMEN IS REAL AND IS QUOTED VERBATIM. PR #17984 (head 9dced86a), job
+# 103556399633, 2026-09-12: `Doc byte budgets` runs its --selftest first under
+# `bash -e`, arm (i) of that selftest runs the FULL gate and expects a pass, so
+# on an over-cap tree the selftest reds and the step ABORTS before the gate's
+# per-file `FAIL: <doc> is <n>B, cap is <m>B` lines are ever printed. Main's job
+# 103555717072 printed the same one line. The breaker reported
+#   "Signature matched too: all 13 normalised error line(s) ... reports neutral (exit 0)"
+# while the PR carried a genuinely new breach: docs/setup/TASK-SYSTEM.md went
+# 16450B -> 16532B against a 16000B cap.
+SPEC_BUDGET='check-doc-budgets --selftest: FAILED — the full gate did not pass with DOC_BUDGETS_SPAN_ONLY set'
+SPEC_ANCHOR='FAIL: docs/evidence/spd-b2-subxs-type-scale/README.md missing G1 doc-tier header'
+spec_names="$(python3 -c 'import json; print(json.dumps({"s1":"Doc byte budgets (fails this job)","s2":"Doc anchors + headers (fails this job)"}))')"
+spec_out='{"s1":{"outcome":"failure"},"s2":{"outcome":"failure"}}'
+spec_jobs="$TMP/spec-jobs.json"; cat > "$spec_jobs" <<'J'
+{"jobs":[{"id":103555717072,"name":"Doc budgets + anchors","conclusion":"failure","steps":[
+  {"name":"Doc byte budgets (fails this job)","conclusion":"success"},
+  {"name":"Doc anchors + headers (fails this job)","conclusion":"success"},
+  {"name":"Decide (main-red breaker — inherited reds are neutral, own reds fail)","conclusion":"failure"}]}]}
+J
+# main's side: the opaque budget line, the anchors detail, and one
+# MAIN-FAILED-STEP marker per failing step (main's own Decide writes these).
+spec_main_log="$TMP/spec-main.log"; {
+  printf '2026-09-12T12:55:07.5909393Z %s\n' "$SPEC_BUDGET"
+  printf '2026-09-12T12:55:40.0000000Z %s\n' "$SPEC_ANCHOR"
+  printf '2026-09-12T12:55:41.0000000Z docs-anchors-check: FAILED\n'
+  printf "2026-09-12T12:56:00.0000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Doc byte budgets (fails this job)\n"
+  printf "2026-09-12T12:56:00.1000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Doc anchors + headers (fails this job)\n"
+} > "$spec_main_log"
+spec_run() { # $1 = our capture file
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$spec_out" STEP_NAMES="$spec_names" \
+      JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE=doc-gates.yml \
+      GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t \
+      GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_FIXTURE="$spec_jobs" \
+      MAIN_RED_BREAKER_LOG_FIXTURE="$spec_main_log" BREAKER_ERROR_LOG="$1"
+    bash "$SUBJECT" 2>&1; echo "RC=$?" )
+}
+BB='##[breaker-block]begin '
+BE='##[breaker-block]end'
+# (A) THE SPECIMEN AS IT REALLY WAS — the budget step's whole red is one line
+#     that names no document. Fenced, exactly as breaker-capture.sh now writes.
+spec_opaque="$TMP/spec-opaque.txt"; {
+  printf '%s%s\n' "$BB" 'bash scripts/check-doc-budgets.sh --selftest'
+  printf '%s\n' "$SPEC_BUDGET"
+  printf '%s\n' "$BE"
+  printf '%s%s\n' "$BB" 'bash scripts/docs-anchors-check.sh'
+  printf '%s\n' "$SPEC_ANCHOR"
+  printf 'docs-anchors-check: FAILED\n'
+  printf '%s\n' "$BE"
+} > "$spec_opaque"
+# (B) THE SAME JOB, GENUINELY INHERITED — the budget step names the doc it
+#     found, and it is the doc main already carries. Nothing new: neutral.
+spec_same="$TMP/spec-same.txt"; {
+  printf '%s%s\n' "$BB" 'bash scripts/check-doc-budgets.sh'
+  printf 'FAIL: docs/api/error-codes.md is 2154B, cap is 1900B — split to the owning contract/runbook or retire content\n'
+  printf '%s\n' "$BE"
+  printf '%s%s\n' "$BB" 'bash scripts/docs-anchors-check.sh'
+  printf '%s\n' "$SPEC_ANCHOR"
+  printf '%s\n' "$BE"
+} > "$spec_same"
+# (C) A NEW FINDING INSIDE THE ALREADY-FAILING STEP — the second over-cap doc
+#     that #17984 really added. Main's log has error-codes.md only.
+spec_new="$TMP/spec-new.txt"; {
+  printf '%s%s\n' "$BB" 'bash scripts/check-doc-budgets.sh'
+  printf 'FAIL: docs/api/error-codes.md is 2154B, cap is 1900B — split to the owning contract/runbook or retire content\n'
+  printf 'FAIL: docs/setup/TASK-SYSTEM.md is 16532B, cap is 16000B — split to the owning contract/runbook or retire content\n'
+  printf '%s\n' "$BE"
+  printf '%s%s\n' "$BB" 'bash scripts/docs-anchors-check.sh'
+  printf '%s\n' "$SPEC_ANCHOR"
+  printf '%s\n' "$BE"
+} > "$spec_new"
+# main's log for (B)/(C) must carry the per-file line, or (B) would differ for
+# the wrong reason. Same markers, budget detail instead of the opaque sentence.
+spec_main_detail="$TMP/spec-main-detail.log"; {
+  printf '2026-09-12T12:55:07.5909393Z FAIL: docs/api/error-codes.md is 2154B, cap is 1900B — split to the owning contract/runbook or retire content\n'
+  printf '2026-09-12T12:55:40.0000000Z %s\n' "$SPEC_ANCHOR"
+  printf "2026-09-12T12:56:00.0000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Doc byte budgets (fails this job)\n"
+  printf "2026-09-12T12:56:00.1000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Doc anchors + headers (fails this job)\n"
+} > "$spec_main_detail"
+spec_run_detail() { MAIN_RED_BREAKER_LOG_FIXTURE_OVERRIDE=1 spec_run_with "$spec_main_detail" "$1"; }
+spec_run_with() { # $1 main log, $2 our capture
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$spec_out" STEP_NAMES="$spec_names" \
+      JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE=doc-gates.yml \
+      GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t \
+      GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_FIXTURE="$spec_jobs" \
+      MAIN_RED_BREAKER_LOG_FIXTURE="$1" BREAKER_ERROR_LOG="$2"
+    bash "$SUBJECT" 2>&1; echo "RC=$?" )
+}
+
+# 26a. THE INHERITED DIRECTION STILL WORKS. Identical finding set, and every
+#      block NAMES what it found: neutral, exit 0. If this arm ever reds the fix
+#      has become a blanket refusal, which is a different lie.
+out="$(spec_run_with "$spec_main_detail" "$spec_same")"
+has "$out" "INHERITED-FROM-MAIN" "26a) identical finding set, both blocks discriminating => still inherited"
+has "$out" "RC=0" "26a) rc 0"
+has "$out" "also NAMES what it found" "26a) and the notice states the set was discriminating"
+case "$out" in *"CANNOT READ the finding set"*) bad "26a) refused a red it could read" ;; *) ok "26a) no spurious refusal" ;; esac
+
+# 26b. A NEW FINDING INSIDE AN ALREADY-FAILING STEP IS THE PR'S OWN. This is the
+#      direction the whole row exists for, and it is reachable ONLY because the
+#      step names its findings.
+out="$(spec_run_with "$spec_main_detail" "$spec_new")"
+has "$out" "NOT with the same failure signature" "26b) a second over-cap doc in the same step is the PR's OWN"
+has "$out" "TASK-SYSTEM.md" "26b) and it prints the breach main does not carry"
+has "$out" "RC=1" "26b) rc 1"
+case "$out" in *INHERITED-FROM-MAIN*) bad "26b) waved a new over-cap doc through as inherited" ;; *) ok "26b) does not inherit a fresh breach" ;; esac
+
+# 26c. THE SPECIMEN ITSELF. Byte-identical opaque sentence on both sides, so the
+#      subset test is empty and v1 and v2 agree on "inherited" — and both are
+#      wrong. The breaker must REFUSE, loudly, and never with the neutral text.
+out="$(spec_run "$spec_opaque")"
+has "$out" "CANNOT READ the finding set" "26c) the specimen refuses instead of inheriting"
+has "$out" "OWNERSHIP-UNDETERMINED" "26c) it is the undetermined verdict, not a blame verdict"
+has "$out" "RC=1" "26c) rc 1 — never exit 0"
+has "$out" "check-doc-budgets.sh --selftest" "26c) it names the step whose red names nothing"
+has "$out" "$SPEC_BUDGET" "26c) and quotes that step's entire captured red"
+has "$out" "::warning" "26c) ::warning, not ::notice — a scraper can tell them apart"
+case "$out" in *INHERITED-FROM-MAIN*) bad "26c) THE DEFECT IS BACK: the specimen read as inherited" ;; *) ok "26c) the specimen no longer reads as inherited" ;; esac
+case "$out" in *"reports neutral (exit 0)"*) bad "26c) printed the neutral sentence for a red it could not read" ;; *) ok "26c) the refusal is not byte-similar to the neutral notice" ;; esac
+
+# 26d. THE SIBLING BLOCK DOES NOT RESCUE IT. `$spec_opaque` block 2 (the anchors
+#      guard) DOES name a path. Before the fence the two blocks were one flat
+#      file and that path made the whole set look detailed — which is precisely
+#      how the union hid the opaque half. Assert the discriminating sibling is
+#      present, or 26c passes for the wrong reason.
+grep -q 'docs/evidence/spd-b2-subxs-type-scale/README.md' "$spec_opaque" \
+  && ok "26d) PRECONDITION: the opaque fixture DOES contain a path-bearing sibling block" \
+  || bad "26d) PRECONDITION FAILED: no sibling path in the fixture, so 26c proves nothing about the union"
+out="$(spec_run "$(cat "$spec_opaque" > "$TMP/spec-flat-src.txt"; grep -v '^##\[breaker-block\]' "$TMP/spec-flat-src.txt" > "$TMP/spec-flat.txt"; echo "$TMP/spec-flat.txt")")"
+has "$out" "INHERITED-FROM-MAIN" "26d) UNFENCED (the pre-fix capture shape): the sibling's path makes the union look detailed and the red inherits"
+has "$out" "unfenced" "26d) and the notice says it read an unfenced capture rather than pretending otherwise"
+
+# 26e. THE FENCE LITERALS MUST AGREE ACROSS THE TWO FILES. They are a wire
+#      format between two scripts; a one-sided rename turns every capture into a
+#      single unfenced block and 26c silently stops firing.
+for lit in '##[breaker-block]begin ' '##[breaker-block]end'; do
+  a="$(grep -cF "$lit" "$ROOT/scripts/breaker-capture.sh")"; b="$(grep -cF "$lit" "$ROOT/scripts/main-red-breaker.sh")"
+  if [ "$a" -ge 1 ] && [ "$b" -ge 1 ]; then ok "26e) fence literal '$lit' present in BOTH scripts ($a / $b)"
+  else bad "26e) fence literal '$lit' drifted — capture:$a breaker:$b"; fi
+done
+
+# 26f. MUTATION — neutralise the locator predicate (every line counts as naming
+#      something), which is exactly the pre-fix behaviour. 26a must stay GREEN
+#      and 26c must go RED. A mutation that reds both would mean 26a was never
+#      measuring the inherited direction.
+if mutate "26f locator predicate" "LOC = re.compile(r'[A-Za-z0-9_.~-]+/[A-Za-z0-9_./~-]+|\\b[A-Za-z0-9_~-]+\\.[A-Za-z][A-Za-z0-9]{0,6}\\b')" "LOC = re.compile(r'')" 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"
+    oa="$(spec_run_with "$spec_main_detail" "$spec_same")"
+    oc="$(spec_run "$spec_opaque")"
+    rc=0
+    case "$oa" in *INHERITED-FROM-MAIN*) echo "  PASS  26f) with the predicate neutralised the INHERITED arm (26a) is UNCHANGED — the guard is not a blanket refusal" ;;
+                  *) echo "  FAIL  26f) the mutation also broke 26a, so 26a was not measuring what it claims"; rc=1 ;; esac
+    case "$oc" in *INHERITED-FROM-MAIN*) echo "  PASS  26f) and the SPECIMEN (26c) regresses to INHERITED-FROM-MAIN — the predicate is the load-bearing part" ;;
+                  *) echo "  FAIL  26f) MUTATION SURVIVED: the specimen still refused without the locator predicate"; rc=1 ;; esac
+    exit $rc ) && PASS=$((PASS+2)) || FAIL=$((FAIL+1))
+fi
+# 26g. MUTATION — delete the refusal itself (fall through to the neutral notice),
+#      the literal pre-fix control flow. 26c must stop refusing.
+if mutate "26g the refusal" 'if [ "${OPAQUE_N:-0}" -gt 0 ]; then' 'if false; then' 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(spec_run "$spec_opaque")"
+    case "$out" in *INHERITED-FROM-MAIN*) echo "  PASS  26g) without the refusal the specimen inherits again — 26c is not vacuous"; exit 0 ;;
+                   *) echo "  FAIL  26g) MUTATION SURVIVED: still refused with the refusal branch removed"; exit 1 ;; esac ) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+fi
+
+# ── 26h/26i. THE BARE-IDENTIFIER CLASS (task-a512d8f733bed771) ───────────────
+# THE DEFECT 26f's predicate still had: it asked "does this red name a FILE?"
+# and we read the answer as "does this red name its FINDINGS?". A gate whose
+# findings are BARE IDENTIFIERS has no slash and no dot, so it read OPAQUE
+# forever however well it reported, and the ACTION line told its author to make
+# the step print what it found WHEN THE STEP ALREADY DID.
+#
+# BOTH SPECIMENS BELOW ARE REAL AND WERE RUN, not invented. Measured on a clean
+# detached worktree at main d4177ca6b, 2026-09-14:
+#   bash scripts/pd-parity-completeness.sh   -> EXIT 1, complete captured body
+#   FOUR non-blank lines (the capture is NOT truncated; breaker-capture.sh cats
+#   the whole step output), the FAIL line intact, and the old locator regex
+#   matched ZERO of those four lines.
+#   bash scripts/docs-anchors-check.sh with one @canonical marker duplicated
+#   -> FAIL: @canonical capability:field-encryption claimed by >1 impl (…)
+# and the CONSTANT that must NOT be rescued with them is $SPEC_BUDGET, byte
+# identical whether one document is over cap or twenty.
+#
+# THE TWO HALVES ARE PROVED IN ONE RUN AGAINST THE SAME CLASSIFIER, because a
+# remedy that greens the first by also greening the second has deleted the test.
+SPEC_PDP_TYPES='in-scope types: action api-endpoint bar-chart blockquote callout card delta diagram divider heading list note num paragraph spark stat table toc video'
+SPEC_PDP_FAIL='FAIL: no golden fixture for in-scope type(s): delta num spark'
+SPEC_PDP_HINT='  → add it to @inputs and run `MIX_ENV=test mix barkpark.portable_doc.gen_pd_parity`'
+SPEC_ANCH_DUP='FAIL: @canonical capability:field-encryption claimed by >1 impl (a copy-paste that kept the marker?)'
+mix_names="$(python3 -c 'import json; print(json.dumps({"s1":"Doc byte budgets (fails this job)","s2":"PortableDoc render-parity completeness (fails this job)","s3":"Doc anchors + headers (fails this job)"}))')"
+mix_out='{"s1":{"outcome":"failure"},"s2":{"outcome":"failure"},"s3":{"outcome":"failure"}}'
+mix_jobs="$TMP/mix-jobs.json"; cat > "$mix_jobs" <<'J'
+{"jobs":[{"id":103555717072,"name":"Doc budgets + anchors","conclusion":"failure","steps":[
+  {"name":"Doc byte budgets (fails this job)","conclusion":"success"},
+  {"name":"PortableDoc render-parity completeness (fails this job)","conclusion":"success"},
+  {"name":"Doc anchors + headers (fails this job)","conclusion":"success"},
+  {"name":"Decide (main-red breaker — inherited reds are neutral, own reds fail)","conclusion":"failure"}]}]}
+J
+mix_ours="$TMP/mix-ours.txt"; {
+  printf '%s%s\n' "$BB" 'bash scripts/check-doc-budgets.sh --selftest'
+  printf '%s\n' "$SPEC_BUDGET"
+  printf '%s\n' "$BE"
+  printf '%s%s\n' "$BB" 'bash scripts/pd-parity-completeness.sh'
+  printf '%s\n' "$SPEC_PDP_TYPES"
+  printf 'in-scope count: 68\n'
+  printf '%s\n' "$SPEC_PDP_FAIL"
+  printf '%s\n' "$SPEC_PDP_HINT"
+  printf '%s\n' "$BE"
+  printf '%s%s\n' "$BB" 'bash scripts/docs-anchors-check.sh'
+  printf '%s\n' "$SPEC_ANCH_DUP"
+  printf '%s\n' "$BE"
+} > "$mix_ours"
+mix_main="$TMP/mix-main.log"; {
+  printf '2026-09-14T23:19:07.0000000Z %s\n' "$SPEC_BUDGET"
+  printf '2026-09-14T23:19:08.0000000Z %s\n' "$SPEC_PDP_TYPES"
+  printf '2026-09-14T23:19:08.1000000Z in-scope count: 68\n'
+  printf '2026-09-14T23:19:08.2000000Z %s\n' "$SPEC_PDP_FAIL"
+  printf '2026-09-14T23:19:08.3000000Z %s\n' "$SPEC_PDP_HINT"
+  printf '2026-09-14T23:19:09.0000000Z %s\n' "$SPEC_ANCH_DUP"
+  printf "2026-09-14T23:19:10.0000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Doc byte budgets (fails this job)\n"
+  printf "2026-09-14T23:19:10.1000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': PortableDoc render-parity completeness (fails this job)\n"
+  printf "2026-09-14T23:19:10.2000000Z main-red-breaker: MAIN-FAILED-STEP in 'Doc budgets + anchors': Doc anchors + headers (fails this job)\n"
+} > "$mix_main"
+mix_run() { # $1 = subject override is taken from $SUBJECT, as everywhere else here
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$mix_out" STEP_NAMES="$mix_names" \
+      JOB_NAME="Doc budgets + anchors" WORKFLOW_FILE=doc-gates.yml \
+      GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t \
+      GITHUB_STEP_SUMMARY="$TMP/summary.md" MAIN_RED_BREAKER_FIXTURE="$mix_jobs" \
+      MAIN_RED_BREAKER_LOG_FIXTURE="$mix_main" BREAKER_ERROR_LOG="$mix_ours"
+    bash "$SUBJECT" 2>&1; echo "RC=$?" )
+}
+# PRECONDITION. An arm that measured a fixture missing one of its three blocks
+# would print a verdict about a comparison it never made. Assert the setup, not
+# its exit code.
+mix_blocks="$(grep -c 'breaker-block.begin' "$mix_ours")"
+if [ "$mix_blocks" = "3" ] \
+   && grep -qF "$SPEC_BUDGET" "$mix_ours" \
+   && grep -qF "$SPEC_PDP_FAIL" "$mix_ours" \
+   && grep -qF "$SPEC_ANCH_DUP" "$mix_ours"; then
+  ok "26h) PRECONDITION: the mixed fixture carries all THREE blocks (constant + pd-parity + bare-slug), so one run measures both halves"
+else
+  bad "26h) PRECONDITION FAILED: mixed fixture has $mix_blocks block(s) / a specimen line is missing — 26h/26i would prove nothing"
+fi
+mix_o="$(mix_run)"
+# 26h. THE NAMED-FINDING HALF. Neither bare-identifier red may be called opaque.
+case "$mix_o" in *"no golden fixture for in-scope type(s)"*)
+  bad "26h) pd-parity's red was quoted as a red that NAMES NOTHING — the bare-identifier class still reads opaque" ;;
+  *) ok "26h) pd-parity's bare-identifier red is NOT classified opaque (its FAIL line is not in the refusal's quoted set)" ;; esac
+case "$mix_o" in *"capability:field-encryption"*)
+  bad "26h) the duplicated-@canonical red was quoted as naming nothing — a second real bare-identifier gate still reads opaque" ;;
+  *) ok "26h) the duplicated-@canonical red (bare capability slug) is NOT classified opaque" ;; esac
+# 26i. THE CONSTANT HALF, SAME RUN, SAME CLASSIFIER. The doc-budget sentence must
+#      STILL refuse, or the remedy deleted the test it was built from.
+has "$mix_o" "CANNOT READ the finding set: 1 of the failing step(s)" "26i) exactly ONE of the three blocks reads opaque — the constant sentence, and only it"
+has "$mix_o" "$SPEC_BUDGET" "26i) and the refusal quotes that constant sentence verbatim"
+has "$mix_o" "OWNERSHIP-UNDETERMINED" "26i) still the undetermined verdict"
+has "$mix_o" "RC=1" "26i) rc 1"
+case "$mix_o" in *INHERITED-FROM-MAIN*) bad "26i) THE TEST WAS DELETED: the constant sentence now reads as a named finding and the red inherited" ;;
+  *) ok "26i) the constant sentence was not rescued along with the bare identifiers" ;; esac
+# 26i2. THE ACTION LINE STOPS MISDIRECTING. It may no longer open by telling the
+#       author to make the step print what it found.
+case "$mix_o" in *"ACTION: make the step print what it found"*)
+  bad "26i2) the ACTION line still opens by telling the author to print what the step already printed" ;;
+  *) ok "26i2) the ACTION line no longer opens with 'make the step print what it found'" ;; esac
+has "$mix_o" "READ THAT BLOCK FIRST" "26i2) it tells the reader to read the captured block first"
+has "$mix_o" "the defect is HERE, in this classifier" "26i2) and it names the third possibility: the step DID name its findings and this file cannot see it"
+has "$mix_o" "main-red-breaker.test.sh" "26i2) and points at the file where a new specimen and arm go — in the warning itself, not a doc to go open"
+
+# 26j. MUTATION — make the classifier ACCEPT EVERYTHING (the constant included).
+#      26i must RED; 26h must stay GREEN. That direction is the "deleted the
+#      test" failure, and it is the one a widened regex would have produced.
+if mutate "26j accept-everything" 'if LOC.search(l) or WELD.search(l):' 'if True:' 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(mix_run)"; rc=0
+    case "$out" in *"CANNOT READ the finding set"*) echo "  FAIL  26j) MUTATION SURVIVED: the constant still refused with the classifier accepting everything"; rc=1 ;;
+                   *) echo "  PASS  26j) accepting everything stops the constant from refusing — 26i is not vacuous" ;; esac
+    case "$out" in *"no golden fixture for in-scope type(s)"*) echo "  FAIL  26j) it also changed 26h's subject, so the two arms are not independent"; rc=1 ;;
+                   *) echo "  PASS  26j) and 26h's half is UNCHANGED by it — the arms measure different halves" ;; esac
+    exit $rc ) && PASS=$((PASS+2)) || FAIL=$((FAIL+1))
+fi
+# 26k. MUTATION — neutralise the WELD slot only. The bare-slug specimen must RED;
+#      pd-parity (carried by the ITEM-SET slot) and the constant must not move.
+if mutate "26k weld slot" "WELD = re.compile(r'\\b[A-Za-z][A-Za-z0-9_-]*:[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)+\\b')" "WELD = re.compile(r'(?!x)x')" 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(mix_run)"; rc=0
+    case "$out" in *"capability:field-encryption"*) echo "  PASS  26k) without the WELD slot the bare capability slug reads opaque again — that arm is load-bearing" ;;
+                   *) echo "  FAIL  26k) MUTATION SURVIVED: the bare slug still discriminated with WELD removed"; rc=1 ;; esac
+    case "$out" in *"no golden fixture for in-scope type(s)"*) echo "  FAIL  26k) it ALSO broke pd-parity, so WELD and ITEM-SET are not two different halves"; rc=1 ;;
+                   *) echo "  PASS  26k) and pd-parity is UNCHANGED — a DIFFERENT arm carries it" ;; esac
+    exit $rc ) && PASS=$((PASS+2)) || FAIL=$((FAIL+1))
+fi
+# 26l. MUTATION — neutralise the ITEM-SET corroboration only. The mirror of 26k:
+#      pd-parity must RED and the bare slug must not move.
+if mutate "26l item-set corroboration" 'if sets[i] & sets[j]:' 'if False:' 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; out="$(mix_run)"; rc=0
+    case "$out" in *"no golden fixture for in-scope type(s)"*) echo "  PASS  26l) without the corroborated ITEM-SET slot pd-parity reads opaque again — that arm is load-bearing" ;;
+                   *) echo "  FAIL  26l) MUTATION SURVIVED: pd-parity still discriminated with the ITEM-SET slot removed"; rc=1 ;; esac
+    case "$out" in *"capability:field-encryption"*) echo "  FAIL  26l) it ALSO broke the bare slug, so the asymmetry against 26k is not real"; rc=1 ;;
+                   *) echo "  PASS  26l) and the bare capability slug is UNCHANGED — the asymmetry against 26k holds" ;; esac
+    exit $rc ) && PASS=$((PASS+2)) || FAIL=$((FAIL+1))
+fi
+
+# ── 27. THE DECIDE LINE ROUND-TRIPS, AND SAYS SO WHEN IT DOES NOT ───────────
+# (task-658971cd9db61621 c1/c2/c4.) api_trusted is unreachable by construction
+# (25b), so the accusing path rests on main's own Decide line being read back by
+# this script. If the WRITER (the `say` lines on main's push run) and the READER
+# (the classifier's head/mark/green patterns) ever disagree, log_parsed goes
+# false for every breaker job at once and nothing reds. These arms are the
+# tripwire, and they are built so the two sides CAN disagree:
+#   - 27a/27b drive the REAL writer (the subject, in push mode) and feed what it
+#     printed to the REAL reader (the subject, in PR mode). The writer's text is
+#     a bash string; the reader's is a python pattern. Neither is derived from
+#     the other, so a wording change on either side reds here (27m1/27m2).
+#   - 27c feeds lines CAPTURED VERBATIM from real main job logs. It pins the
+#     wire format against history, so a change that moves writer AND reader
+#     together — which 27a/27b cannot see — still reds (27m3).
+#   - 27d is the matrix-suffix case; 27e-27g are the LOUD line; 27h its silence.
+# RUNS WHERE THE REST OF THIS HARNESS RUNS: the tooling-harnesses leg of
+# shell-harnesses.yml (.github/shell-harness-legs.json), on every change to
+# scripts/main-red-breaker.sh or this file.
+SOB_JOB='Sobelow static analysis (regression gate, baseline .sobelow-skips)'
+SOB_NAMES='{"s1": "Fetch deps", "s2": "Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)", "s3": "Reconcile baseline on the pinned CI toolchain", "s4": "Fresh-finding guard can lose (selftest first, like its two siblings below)", "s5": "Prove a fresh String.to_atom finding still reds", "s6": "Anchor-token table still matches the Sobelow detector modules"}'
+SOB_S2='Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)'
+sob_out_s2='{"s1":{"outcome":"success"},"s2":{"outcome":"failure"},"s3":{"outcome":"success"},"s4":{"outcome":"success"},"s5":{"outcome":"success"},"s6":{"outcome":"success"}}'
+sob_out_green='{"s1":{"outcome":"success"},"s2":{"outcome":"success"},"s3":{"outcome":"success"},"s4":{"outcome":"success"},"s5":{"outcome":"success"},"s6":{"outcome":"success"}}'
+# Main's jobs listing in its REAL shape: the matrix leg is published WITH the
+# tuple (run 35968072109, job 107532012469), JOB_NAME is passed WITHOUT it.
+sob_steps='{"name":"Fetch deps","conclusion":"success"},{"name":"Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)","conclusion":"success"},{"name":"Reconcile baseline on the pinned CI toolchain","conclusion":"success"},{"name":"Fresh-finding guard can lose (selftest first, like its two siblings below)","conclusion":"success"},{"name":"Prove a fresh String.to_atom finding still reds","conclusion":"success"},{"name":"Anchor-token table still matches the Sobelow detector modules","conclusion":"success"}'
+sob_red="$TMP/sob-red.json"; printf '{"jobs":[{"id":107532012469,"name":"%s (27.0, 1.18.1)","conclusion":"failure","steps":[%s,{"name":"Decide (main-red breaker — inherited reds are neutral, own reds fail)","conclusion":"failure"}]}]}\n' "$SOB_JOB" "$sob_steps" > "$sob_red"
+sob_green="$TMP/sob-green.json"; printf '{"jobs":[{"id":107532012469,"name":"%s (27.0, 1.18.1)","conclusion":"success","steps":[%s,{"name":"Decide (main-red breaker — inherited reds are neutral, own reds fail)","conclusion":"success"}]}]}\n' "$SOB_JOB" "$sob_steps" > "$sob_green"
+writer_log() { # $1 outcomes, $2 out file -> what main's push-run Decide step PRINTS, as runner log lines
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$1" STEP_NAMES="$SOB_NAMES" JOB_NAME="$SOB_JOB" WORKFLOW_FILE=security.yml \
+      GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t GITHUB_STEP_SUMMARY="$TMP/summary.md"
+    bash "$SUBJECT" > "$2.raw" 2>&1 )
+  awk '{ print "2026-09-24T07:17:28.3140432Z " $0 }' "$2.raw" > "$2"
+}
+reader() { # $1 jobs fixture, $2 main log, $3 JOB_NAME the PR-side Decide step was given -> output + RC + report
+  rm -f "$TMP/rt-report.txt"
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$sob_out_s2" STEP_NAMES="$SOB_NAMES" JOB_NAME="$3" WORKFLOW_FILE=security.yml \
+      GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t GITHUB_STEP_SUMMARY="$TMP/summary.md" \
+      MAIN_RED_BREAKER_FIXTURE="$1" MAIN_RED_BREAKER_LOG_FIXTURE="$2" MAIN_RED_BREAKER_REPORT_OUT="$TMP/rt-report.txt"
+    bash "$SUBJECT" 2>&1; echo "RC=$?" )
+  echo "---REPORT"; cat "$TMP/rt-report.txt" 2>/dev/null
+}
+UNREAD='DECIDE-LINE UNREADABLE'
+UNREAD_ANN='::warning title=Main-red breaker: Decide line unreadable::'
+silent() { case "$1" in *"$UNREAD"*|*"$UNREAD_ANN"*) bad "$2 — the liveness line fired on a Decide line that parses" ;; *) ok "$2" ;; esac; }
+
+# 27a. WRITER -> READER, red main. PRECONDITION first: the writer must have
+#      printed a marker at all, or the arm measures an empty file.
+writer_log "$sob_out_s2" "$TMP/w-red.log"
+if grep -q "MAIN-FAILED-STEP" "$TMP/w-red.log"; then ok "27a) PRECONDITION: main's writer printed a MAIN-FAILED-STEP marker"; else bad "27a) PRECONDITION FAILED: the writer printed no marker — $(head -c 200 "$TMP/w-red.log")"; fi
+o="$(reader "$sob_red" "$TMP/w-red.log" "$SOB_JOB")"
+has "$o" "LOGMARKED=1" "27a) the reader parses the writer's MAIN-FAILED-STEP marker (not merely the legacy sentence)"
+has "$o" "DECIDESTATE=PARSED" "27a) DECIDESTATE=PARSED"
+has "$o" "$(printf 'STEP\tFAILED\t%s' "$SOB_S2")" "27a) and recovers main's failed step by name, through a matrix-suffixed jobs listing"
+silent "$o" "27a) silent on a Decide line that parses"
+# 27b. WRITER -> READER, green main: the "no gate step failed" line is the ONLY
+#      pass proof an all-success security.yml job has in production.
+writer_log "$sob_out_green" "$TMP/w-green.log"
+if grep -q "no gate step failed" "$TMP/w-green.log"; then ok "27b) PRECONDITION: main's writer printed the all-green line"; else bad "27b) PRECONDITION FAILED: no all-green line — $(head -c 200 "$TMP/w-green.log")"; fi
+o="$(reader "$sob_green" "$TMP/w-green.log" "$SOB_JOB")"
+has "$o" "LOGGREEN=1" "27b) the reader parses the writer's all-green line"
+has "$o" "$(printf 'STEP\tPASSED\t%s' "$SOB_S2")" "27b) so main's pass is PROVEN (log_parsed), not UNKNOWN"
+silent "$o" "27b) silent on a Decide line that parses"
+# 27c. THE CAPTURED LINES. Verbatim from main's own job logs (see the ids);
+#      only the wire format matters, so the rest of each log is elided.
+real_green="$TMP/real-green.log"; cat > "$real_green" <<'L'
+2026-09-24T07:17:28.2775358Z ##[group]Run bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" main-red-breaker-sobelow -- bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+2026-09-24T07:17:28.3140432Z main-red-breaker: no gate step failed in 'Sobelow static analysis (regression gate, baseline .sobelow-skips)' — nothing to decide
+2026-09-24T07:17:28.3154349Z instrument main-red-breaker-sobelow: exit 0 -> MEASURED-CLEAN
+L
+real_red="$TMP/real-red.log"; cat > "$real_red" <<'L'
+2026-09-20T12:06:07.3871289Z main-red-breaker: FAIL — 'Sobelow static analysis (regression gate, baseline .sobelow-skips)' failed on: Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding). This is not a pull_request run, so the red is main's state and stands.
+2026-09-20T12:06:07.3873167Z main-red-breaker: MAIN-FAILED-STEP in 'Sobelow static analysis (regression gate, baseline .sobelow-skips)': Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)
+L
+real_check() { # $1 green log, $2 red log -> "OK" or the first thing that failed to parse
+  local g r
+  g="$(reader "$sob_green" "$1" "$SOB_JOB")"; r="$(reader "$sob_red" "$2" "$SOB_JOB")"
+  case "$g" in *"LOGGREEN=1"*) ;; *) echo "green line did not parse"; return ;; esac
+  case "$r" in *"LOGMARKED=1"*) ;; *) echo "red marker did not parse"; return ;; esac
+  echo OK
+}
+has "$(real_check "$real_green" "$real_red")" "OK" "27c) main's REAL captured Decide lines (green: job 107532012469; red: job 106074787706, run 35509451177, a matrix leg) still parse"
+# 27d. THE MATRIX TAIL ON THE WRITER'S SIDE. Both sides take the name from
+#      JOB_NAME today, so no tuple appears in practice (27a-27c). If a workflow
+#      ever templates the tuple into the writer's JOB_NAME and not the reader's,
+#      M1's convention — exact name OR name + " (…)" — must hold here too.
+sfx_log="$TMP/sfx.log"; printf "2026-09-24T07:17:28.3Z main-red-breaker: MAIN-FAILED-STEP in '%s (27.0, 1.18.1)': %s\n" "$SOB_JOB" "$SOB_S2" > "$sfx_log"
+o="$(reader "$sob_red" "$sfx_log" "$SOB_JOB")"
+has "$o" "LOGMARKED=1" "27d) a matrix-suffixed marker round-trips (M1's convention on the read side)"
+silent "$o" "27d) silent on it"
+# 27e. LOUD: main's Decide wrote a line this reader cannot parse (the wording
+#      drifted). The line and the annotation fire, and the VERDICT is unchanged
+#      from what an unparsed log always produced: undetermined, never an accusation.
+drift_log="$TMP/drift.log"; sed 's/no gate step failed in/no gate steps failed in/' "$real_green" > "$drift_log"
+# sob_red, not sob_green: an all-green, error-free main job carries job_trusted
+# independently of the Decide line, so it would (correctly) still accuse.
+o="$(reader "$sob_red" "$drift_log" "$SOB_JOB")"
+has "$o" "$UNREAD" "27e) a drifted Decide line prints DECIDE-LINE UNREADABLE"
+has "$o" "$UNREAD_ANN" "27e) …with its OWN annotation title, not the undetermined one"
+has "$o" "First line(s) seen: main-red-breaker: no gate steps failed in" "27e) …quoting what main DID write, so the drift is visible"
+has "$o" "OWNERSHIP-UNDETERMINED" "27e) the verdict is still undetermined"
+case "$o" in *"the red is this PR's own"*) bad "27e) an unreadable Decide line made the breaker MORE accusing" ;; *) ok "27e) and never more accusing" ;; esac
+# 27f. LOUD, on a REAL log: the reader handed the RENDERED matrix name — the one
+#      the jobs API prints — while main's writer used JOB_NAME. That is the
+#      mismatch this row's 2026-09-08 measurement made in its own reader.
+o="$(reader "$sob_green" "$real_green" "$SOB_JOB (27.0, 1.18.1)")"
+has "$o" "$UNREAD" "27f) a JOB_NAME that differs from the writer's fires the liveness line on a real log"
+# 27g. LOUD, other reason: main's log holds no breaker line at all.
+nodecide="$TMP/nodecide.log"; grep -v 'main-red-breaker: ' "$real_green" > "$nodecide"
+o="$(reader "$sob_green" "$nodecide" "$SOB_JOB")"
+has "$o" "NO main-red-breaker line at all" "27g) a log with no Decide output says main's Decide did not run"
+# 27h. SILENT when there was no log to read: that is NOLOG, already said by the
+#      masking note, and not a parse failure.
+: > "$TMP/empty.log"
+o="$(reader "$sob_green" "$TMP/empty.log" "$SOB_JOB")"
+has "$o" "DECIDESTATE=NOLOG" "27h) an empty log is NOLOG"
+silent "$o" "27h) silent on NOLOG"
+
+# ── 27m. MUTATIONS — each proves an arm above can fail.
+# 27m1. The WRITER's marker wording moves; the reader does not. 27a must red.
+if mutate "27m1 writer marker wording" "say \"MAIN-FAILED-STEP in '\${JOB_NAME}': \${_s}\"" "say \"MAIN-FAILED-STEP for '\${JOB_NAME}': \${_s}\"" 1; then
+  # Only the MARKER moves here, so main's legacy ';'-joined sentence still
+  # parses and the breaker is not yet blind — which is exactly why the tripwire
+  # asserts LOGMARKED rather than log_parsed: the drift is caught while a
+  # fallback is still masking it, before the loud line would ever fire.
+  ( SUBJECT="$TMP/mut-subject.sh"; writer_log "$sob_out_s2" "$TMP/m1.log"; o="$(reader "$sob_red" "$TMP/m1.log" "$SOB_JOB")"
+    case "$o" in *"LOGMARKED=1"*) echo "  FAIL  27m1) MUTATION SURVIVED: the reader still parsed a marker the writer no longer writes"; exit 1 ;; *) echo "  PASS  27m1) a writer-only wording change reds 27a — writer and reader can disagree" ;; esac ) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+fi
+# 27m2. The WRITER's all-green wording moves. 27b must red.
+if mutate "27m2 writer all-green wording" "say \"no gate step failed in '\${JOB_NAME}' — nothing to decide\"" "say \"no gate steps failed in '\${JOB_NAME}' — nothing to decide\"" 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; writer_log "$sob_out_green" "$TMP/m2.log"; o="$(reader "$sob_green" "$TMP/m2.log" "$SOB_JOB")"
+    case "$o" in *"LOGGREEN=1"*) echo "  FAIL  27m2) MUTATION SURVIVED: all-green line still parsed"; exit 1 ;; *) echo "  PASS  27m2) a writer-only all-green wording change reds 27b" ;; esac ) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+fi
+# 27m3. The CAPTURED fixture's format moves (what a writer+reader co-change would
+#       look like against history). 27c must red, for each captured line.
+sed 's/MAIN-FAILED-STEP in/MAIN-FAILED-STEP for/' "$real_red" > "$TMP/real-red-mut.log"
+sed 's/no gate step failed in/no gate steps failed in/' "$real_green" > "$TMP/real-green-mut.log"
+case "$(real_check "$real_green" "$TMP/real-red-mut.log")" in OK) bad "27m3) MUTATION SURVIVED: a changed red marker in the captured fixture still parsed" ;; *) ok "27m3) a changed MAIN-FAILED-STEP format in the captured fixture reds 27c" ;; esac
+case "$(real_check "$TMP/real-green-mut.log" "$real_red")" in OK) bad "27m3) MUTATION SURVIVED: a changed all-green line in the captured fixture still parsed" ;; *) ok "27m3) a changed all-green format in the captured fixture reds 27c" ;; esac
+# 27m4. Strip the matrix handling from the reader. 27d must red.
+if mutate "27m4 reader matrix tail" "NAMED = r\"'%s(?: \\([^()']*\\))?'\" % re.escape(want)" "NAMED = r\"'%s'\" % re.escape(want)" 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; o="$(reader "$sob_red" "$sfx_log" "$SOB_JOB")"
+    case "$o" in *"LOGMARKED=1"*) echo "  FAIL  27m4) MUTATION SURVIVED: suffixed marker still parsed without the matrix tail"; exit 1 ;; *) echo "  PASS  27m4) without the matrix tail 27d reds" ;; esac ) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+fi
+# 27m5. Silence the liveness line. 27e must red.
+if mutate "27m5 liveness line" 'if [ "$DECIDESTATE" = "UNREADABLE" ]; then' 'if false; then' 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; o="$(reader "$sob_red" "$drift_log" "$SOB_JOB")"
+    case "$o" in *"$UNREAD"*) echo "  FAIL  27m5) MUTATION SURVIVED: the line printed with its guard removed"; exit 1 ;; *) echo "  PASS  27m5) without the guard 27e reds — the line is not printed by anything else" ;; esac ) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+fi
 
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]

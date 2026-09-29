@@ -9,7 +9,7 @@
 # fifteen days — on a branch that will never push again. Nothing in this
 # repository reported either fact to anyone.
 #
-# WHY THIS IS A SCHEDULE, AND ONLY A SCHEDULE
+# WHY A SCHEDULE — THE FLOOR; THE BOUND IS THE CADENCE SECTION BELOW
 #
 # 1. A LEVEL TRIGGER IS THE ONLY ONE THAT FITS THE SUBJECT. A run that never
 #    dispatched emits no event. `push` and `pull_request` are edge triggers on
@@ -42,6 +42,77 @@
 # because a failure that nobody is paged for is indistinguishable from health.
 # When the census finds something, this run fails.
 #
+# THE CADENCE — AN EVENT LEG AND A RE-ARM ON TOP OF THE SCHEDULE, STILL NO
+# `pull_request` (task-a0abaae6f64c0a9c)
+#
+# THE FLOOR IS NOT A BOUND, measured 2026-09-23.
+# This file's 181 scheduled runs since 2026-08-07 started a median 152 min
+# after their `17 */6` slot, and the widest gap between two of them was
+# 13.7 h. A tighter cron does not rescue it: main-gate-watch's `*/30`
+# delivered 94 runs in 707 slots between 2026-09-09 and 2026-09-23, median
+# gap 215 min, widest 415 min. The blackout this cadence is judged against
+# (PR #18045, head b1990da86, 2026-09-13) lasted TWO HOURS, so no cron in
+# this repository can promise to see it. Two legs below can.
+#
+# THE EVENT LEG — `workflow_run: completed` on the four workflows that
+# produce the committed required set (elixir, cloud, console-harness,
+# pr-task-gate). Every census reads EVERY open head live, so any one
+# completion anywhere re-censuses all of them; the event is a doorbell, never
+# a payload. The test derives the list from .github/required-checks.json, so
+# the list cannot drift from the spec: a new context there reds the harness
+# until its producer is named here.
+#
+# THE RE-ARM — the `cadence` job. While the census counts a producer run
+# that was created and has dispatched nothing (UNDISPATCHED_YOUNG), it
+# dispatches the census again. That population is exactly the one that can
+# end without an event: a `startup_failure` conclusion fires NO workflow_run
+# (measured: elixir run 34748579496 concluded startup_failure on main at
+# 2026-09-13T08:54:20Z and no elixir-main-red-attribution run was created,
+# while all eight ordinary elixir completions around it fired one within
+# 2-16 s), and a run that never leaves the queue completes never.
+#
+# WORST-CASE LATENCY, DERIVED FROM THE TWO NUMBERS IN THIS FILE (the harness
+# recomputes it from them and reds past 120 min). P = HOLD_MINUTES, the least
+# spacing between two census starts; T = the census job's timeout-minutes.
+# One cycle, an event to a concluded verdict, is at most max(P,T) + T: the
+# event lands while run k is holding the group, run k+1 starts no later than
+# max(start_k + P, end_k), and runs at most T. With P = 20 and T = 20:
+#   NAME_NOT_IN_RUN, RERUN_DELETED  the producing run's own completion IS
+#                   the event -> <= 40 min.
+#   CANCELLED_CURRENT  PR #16709's specimen (first filed NAME_NOT_IN_RUN):
+#                   its run was cancelled while still pending, with ZERO
+#                   jobs. Whether a cancel-before-dispatch fires
+#                   workflow_run is NOT measured here (a startup_failure,
+#                   the other zero-job completion, measurably does not), so
+#                   the bound claimed is the sibling one: <= the first
+#                   sibling producer's run time + 40 min.
+#   NO_RUN          the first sibling producer to complete on the same head
+#                   is the event -> <= that sibling's run time + 40 min.
+#   STARTUP_FAILURE no event of its own; the first sibling completion reads
+#                   it concluded (scream) or still UNDISPATCHED_YOUNG
+#                   (re-arm) -> <= that sibling's run time + 80 min.
+#   ZOMBIED         the 24 h age threshold is crossed with no event; the
+#                   young run re-arms every cycle -> <= 40 min past 24 h.
+# Plus, on every line, GitHub's own dispatch and runner-queue time, which no
+# trigger definition bounds and which the census cannot observe from inside
+# its own queue (the outage residual below). ONLY THE CRON'S BOUND remains
+# for a head on which NO producer dispatched at all and no producer completed
+# anywhere else in the repository — an Actions outage or a dead-quiet night.
+#
+# RUNNER COST. The cadence job sleeps on a runner for the rest of P. That is
+# not extra occupancy: at a median 54 events an hour a pending census always
+# exists, so without the hold the group would run census after census
+# back-to-back on the same one slot. The hold turns that slot's time into sleep
+# instead of API reads. Off-peak (36 of 94 measured hours had no completion at
+# all) no event arrives and nothing holds.
+#
+# COST, BOUNDED BY P rather than by traffic. Measured 2026-09-20..23: the four
+# producers completed a median 54 times an hour, 142 at peak. One census makes
+# 3 API reads per open head + 4 (153 at 50 open PRs, counted by shimming gh),
+# and GITHUB_TOKEN carries 1000 requests an hour for the whole repository, so
+# a census per completion would spend the repository's budget in minutes. The
+# hold caps starts at 60/P = 3 an hour whatever the traffic.
+#
 # THE HARNESS RUNS FIRST, EVERY TIME. scripts/absent-context-census.test.sh is a
 # hermetic mutation suite: it disarms each verdict and watches the census go
 # green, so an instrument that has quietly lost the ability to report says so
@@ -49,9 +120,9 @@
 # which is precisely why it runs here rather than being trusted.
 #
 # RESIDUALS, STATED IN NUMBERS RATHER THAN DISCOVERED LATER
-#   · a six-hour observation window: an absence can exist for up to six hours
-#     before this run names it. The subject rots over days, so that is the
-#     trade bought against six API-reading runs a day.
+#   · the latency table above: 40-80 min on the event and re-arm legs, and the
+#     cron's measured, unpromised floor (widest gap 13.7 h) for a head no
+#     producer ever dispatched on during a quiet spell.
 #   · silence during a GitHub Actions outage, which is also when the queue is
 #     worst. Nothing here can fix that; it is why the age column is anchored on
 #     the queued run's own created_at rather than on this run's clock.
@@ -63,8 +134,19 @@ name: absent-context-census
 on:
   schedule:
     # Four times a day, offset off the hour because GitHub queues cron under
-    # load — treat this as "within ~6-7 hours", never "at :17".
+    # load — treat this as "within ~6-7 hours", never "at :17". THE FLOOR, not
+    # the bound: see WORST-CASE LATENCY in the header.
     - cron: "17 */6 * * *"
+  # THE EVENT LEG. The `name:` of each workflow that produces a context in
+  # .github/required-checks.json — the harness derives this set from the spec
+  # and reds on any difference. A workflow_run run executes on the DEFAULT
+  # branch (measured: elixir-main-red-attribution runs carry main's head sha,
+  # never the triggering run's), so its check runs render on main commits and
+  # on no pull-request head: reason 2 below still holds.
+  workflow_run:
+    workflows: [elixir, cloud, console-harness, pr-task-gate]
+    types: [completed]
+  # Also the RE-ARM's door: the cadence job dispatches this file on main.
   workflow_dispatch:
 
 permissions:
@@ -75,6 +157,11 @@ permissions:
   checks: read
   actions: read
   pull-requests: read
+  # The ONLY write. The final step files this census's red as a GitHub issue
+  # through scripts/file-ci-failure-issue.sh, and that needs `issues: write`.
+  # Granted at workflow level because this file has exactly one job and the
+  # filer runs in it (scheduled-arm-health.yml is the same shape).
+  issues: write
 
 concurrency:
   group: absent-context-census
@@ -83,10 +170,92 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ── THE CADENCE: hold the group for P, re-arm while a silent run exists ─────
+  # Declared ABOVE the census job so this file's tail — the census job's last
+  # step — stays where other changes append to it.
+  #
+  # WHY A HOLD, AND WHY IT DOES NOT STARVE. The group below is shared and
+  # `cancel-in-progress: false`, so GitHub keeps one RUNNING census and at most
+  # one PENDING; a newer event evicts the pending one. For a deploy that is
+  # starvation, because each evicted run carried a sha nobody re-queues
+  # (scripts/deploy-concurrency-check.sh). Here it is coalescing: a census reads
+  # all open heads LIVE at its start and carries no payload from its event, so
+  # the survivor answers every question the evicted run would have asked, from
+  # fresher data. The running census is never cancelled, so a pending one always
+  # starts when this job releases the group. This job keeps the run open until
+  # P minutes after the census started, which is what spaces two starts by P.
+  cadence:
+    name: Census cadence (hold, re-arm)
+    needs: absent-context-census
+    if: always()
+    runs-on: ubuntu-latest
+    # P + margin. A hold that hung would hold the group; this ends it.
+    timeout-minutes: 25
+    permissions:
+      # The re-arm is a workflow_dispatch of this file, and GITHUB_TOKEN may
+      # create one (workflow_dispatch is the documented exception to "events
+      # made by GITHUB_TOKEN start no workflow"). Job-level, so the census job
+      # itself stays a reader.
+      actions: write
+      contents: read
+    env:
+      # P. The harness reads THIS line to recompute the latency table.
+      HOLD_MINUTES: "20"
+      STARTED: ${{ needs.absent-context-census.outputs.started }}
+      YOUNG: ${{ needs.absent-context-census.outputs.undispatched_young }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Re-arm while a producer run can still end without an event
+        run: |
+          set -uo pipefail
+          case "${YOUNG:-}" in
+            ''|*[!0-9]*) echo "::notice::the census published no undispatched-young count (it exited before its SUMMARY); no re-arm, the schedule and the event leg still stand"; exit 0 ;;
+          esac
+          if [ "$YOUNG" -gt 0 ]; then
+            # Dispatched now, it waits PENDING behind this still-open run and
+            # starts when the hold below releases the group.
+            if gh workflow run absent-context-census.yml --ref main; then
+              echo "re-armed: $YOUNG producer run(s) created and never dispatched — the census looks again one cycle from now"
+            else
+              echo "::error::the re-arm dispatch was refused, so a startup_failure or a zombie among those $YOUNG run(s) waits for the next event or the cron"
+              exit 1
+            fi
+          else
+            echo "no undispatched producer run — nothing can end silently, so no re-arm"
+          fi
+
+      - name: Hold the group until P minutes after the census started
+        run: |
+          set -uo pipefail
+          now="$(date +%s)"
+          case "${STARTED:-}" in
+            ''|*[!0-9]*) started="$now" ;;   # no stamp: hold the full P
+            *) started="$STARTED" ;;
+          esac
+          rem=$(( started + HOLD_MINUTES * 60 - now ))
+          if [ "$rem" -gt 0 ]; then
+            echo "holding ${rem}s so the next census starts no sooner than ${HOLD_MINUTES} min after this one did"
+            sleep "$rem"
+          else
+            echo "the census alone ran past ${HOLD_MINUTES} min; no hold"
+          fi
+
   absent-context-census:
     name: Absent required-context census
     runs-on: ubuntu-latest
+    # T in the header's latency table. Measured over 183 runs: median about a
+    # minute, and the four runs past 20 min all concluded failure anyway, so a
+    # timeout here cancels nothing that was going to be green.
+    timeout-minutes: 20
+    outputs:
+      started: ${{ steps.stamp.outputs.started }}
+      undispatched_young: ${{ steps.census.outputs.undispatched_young }}
     steps:
+      - name: Stamp the cycle start
+        id: stamp
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -96,8 +265,11 @@ jobs:
         run: bash scripts/absent-context-census.test.sh
 
       - name: Census every open head, and the queue behind them
+        id: census
         env:
           GH_TOKEN: ${{ github.token }}
+          # Publishes the undispatched-young count as this step's output.
+          ABSENT_CENSUS_EMIT_OUTPUT: "1"
         run: |
           set -uo pipefail
           rc=0
@@ -121,3 +293,88 @@ jobs:
             3) echo "::error::CONFIGURATION FAULT — this run's credential cannot read the Actions and check-run endpoints. A census with no authority is not a clean census."; exit 1 ;;
             *) echo "::error::absent-context-census.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
           esac
+
+      # ── THE CARRIER. A RED HERE MUST REACH A HUMAN ─────────────────────────
+      #
+      # dr-w33-bl-carrier-less-watches-get-a-carrier-or-go. Until this step the
+      # header above argued that "a failure that nobody is paged for is
+      # indistinguishable from health" and then paged nobody: this file invoked
+      # no notifier, carried no push arm (section 7 of the test FORBIDS one),
+      # and scripts/cron-scream-coverage.sh scored it UNREAD with a ledger row
+      # that read "R3 is the open remedy and is a one-step change". This is
+      # that step. Measured before it landed: run 35892264098 (2026-09-23
+      # 16:56Z) SCREAMED that PR #16709 had "PR references an active task"
+      # rendering nowhere (class NAME_NOT_IN_RUN), failed, and reached no one.
+      #
+      # THE GUARD IS `failure() || cancelled()` FROM THE START. `failure()` is
+      # FALSE on a cancelled run, so a census that was cancelled mid-read would
+      # otherwise look exactly like one that read clean — the one confusion this
+      # file exists to abolish (dr-w33-s4-alarm-reaches-a-human widened the five
+      # older alert steps for the same reason). The ref conjunct keeps a
+      # workflow_dispatch debug run on a topic branch from minting a public
+      # issue; the schedule arm only ever runs on the default branch.
+      #
+      # ITS OWN KEY. file-ci-failure-issue.sh dedupes on CI_FAILURE_KEY, so a
+      # standing absence appends to ONE issue (and escalates once after
+      # ESCALATE_AFTER repeats) instead of opening four a day. The filer exits 1
+      # when the alert was NOT delivered, so a failure to file is itself red.
+      - name: File the census red to a human
+        if: (failure() || cancelled()) && github.ref == 'refs/heads/main'
+        env:
+          # The filer reads GITHUB_TOKEN, never GH_TOKEN (crown-reconcile's
+          # first production scream died on exactly that slip).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # THE FALLBACK KEY ONLY. A census FINDING is filed under a key that
+          # names it (absence: the sorted set of absent heads; queue: its own
+          # stable key), emitted by the census step — see notify_keys() in
+          # scripts/absent-context-census.sh. Under one fixed key the filer's
+          # escalate-after-3 silenced this census within an hour of one stuck
+          # head, and every NEW absent head after it reached nobody
+          # (task-a0abaae6f64c0a9c). This key carries only a red with no
+          # finding: harness red, UNKNOWN, CONFIGURATION FAULT, cancelled.
+          CI_FAILURE_KEY: absent-context-census
+          ABSENT_KEY: ${{ steps.census.outputs.absent_key }}
+          QUEUE_KEY: ${{ steps.census.outputs.queue_key }}
+          CI_FAILURE_DETAIL: |
+            **A required context renders nowhere on an open pull request, and/or
+            a workflow run has sat queued past the threshold.** Neither shows up
+            as a red check anywhere else, which is why this census exists.
+
+            Read the run log: every ABSENT row names the PR, the context, its
+            CLASS and a remedy line; the queue limb names each stale run.
+
+            - `NAME_NOT_IN_RUN` — the producing run executed and carried no job
+              of that name (a head predating the context, a renamed job).
+              Rebase the PR, or fix the spec. Never re-dispatch.
+            - `CANCELLED_CURRENT` — the newest producing run on the head was
+              cancelled before it rendered the context (usually evicted from
+              its concurrency group). Re-dispatch: `gh pr update-branch <n>`,
+              or push a new sha.
+            - `STARTUP_FAILURE` — the run was refused at creation. Re-arm the
+              head the same way: `gh pr update-branch <n>`, or push.
+            - `NO_RUN` — no producing run exists for the head. Push, or close.
+            - `ZOMBIED` / stale-queued — a run was created and never
+              dispatched. Cancel it or re-run it.
+            - exit 2 — a feed could not be read twice in a row (UNKNOWN, not
+              clean). exit 3 — the token cannot read the Actions/check-run
+              endpoints (CONFIGURATION FAULT).
+            - a CANCELLED run files here too: a census that never finished is
+              not a clean census.
+
+            Idempotent per key: a standing condition appends a comment rather
+            than opening a new issue. CLOSE IT once a run concludes success;
+            the next red opens a fresh one.
+        run: |
+          set -uo pipefail
+          rc=0; filed=0
+          # One issue per FINDING key; a key the census left empty files nothing.
+          for k in "$ABSENT_KEY" "$QUEUE_KEY"; do
+            [ -n "$k" ] || continue
+            filed=1
+            CI_FAILURE_KEY="$k" bash scripts/file-ci-failure-issue.sh || rc=1
+          done
+          # A red with no finding still reaches a human, under the fallback key.
+          if [ "$filed" = 0 ]; then
+            bash scripts/file-ci-failure-issue.sh || rc=1
+          fi
+          exit "$rc"

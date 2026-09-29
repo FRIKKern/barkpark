@@ -11,6 +11,7 @@ defmodule Barkpark.Tasks.Internal do
   alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Repo
   alias Barkpark.Tasks.BriefMirror
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   # New rev token, same shape as `Content.generate_rev/0`. Kept here so the task
   # modules do not depend on a private function in another module.
@@ -20,6 +21,63 @@ defmodule Barkpark.Tasks.Internal do
 
   def current_epoch(%Document{content: %{"claim" => %{"epoch" => e}}}) when is_integer(e), do: e
   def current_epoch(_), do: 0
+
+  # ─── THE HELD PREDICATE (task-4787fdd569f3aff4) ───────────────────────────
+  #
+  # "Is this row HELD right now?" has exactly ONE authoritative answer, and it
+  # is `content.claim.worker` being a NON-BLANK binary. Every server-side door
+  # already fences on that field and nothing else:
+  #
+  #   * `Tasks.ClaimFence.verify_task/2` (claim_fence.ex:58) refuses
+  #     `:task_not_claimed` on `not is_binary(Map.get(claim, "worker"))`;
+  #   * `Tasks.Internal.check_holder/2` (below) compares `claim.worker`;
+  #   * `Tasks.Release.check_releasable/1` calls a row STRANDED on
+  #     `claim.worker` alone;
+  #   * `Tasks.QueueGate.live_claim_worker/1` starts from a non-blank
+  #     `claim.worker`.
+  #
+  # THREE PRESENCE TESTS ARE FALSE TESTS OF HELDNESS, because `Tasks.Release`
+  # deliberately PRESERVES the claim object as an audit trail
+  # (`Release.apply_release_update/1`) — it nulls `worker` and nothing else:
+  #
+  #   claim != nil        -> TRUE on a released row  (the map survives)
+  #   claim.epoch != nil  -> TRUE on a released row  (BUMPED, not cleared)
+  #   has_key?(claim, "worker") -> TRUE on a released row (the key stays, nil)
+  #
+  # Measured on the live store: 48 of 400 open rows answer "claimed" to any of
+  # those, hiding genuinely available work from reconciliation sweeps.
+  #
+  # THE RETAINED EPOCH IS LOAD-BEARING, NOT RESIDUE. `Tasks.Claim` computes the
+  # next lease as `current_epoch(doc) + 1` (claim.ex, `current_epoch/1` call sites), reading it straight
+  # off the released row, so the epoch is what keeps the fence MONOTONIC across
+  # release-then-reclaim; and `Tasks.Close.check_fencing/2` (close.ex, its `{:error, :fenced_off}` arm)
+  # refuses `:fenced_off` whenever a claim map carries an epoch that does not
+  # match the caller's. Clearing it would let a stale holder's old-epoch close
+  # land on the next worker's lease. DO NOT "CLEAN IT UP".
+  #
+  # So: read `held?/1` when you mean "held". Read `current_epoch/1` when you
+  # mean "the number the next CAS must carry". They are different questions and
+  # a released row is exactly the row on which they disagree.
+  # NOT stamped `@canonical capability:task-held-predicate` yet: the marker's
+  # binding pin lives at scripts/canonical-marker-bindings.pin, outside this
+  # change's fence. Stamp both together (task-4787fdd569f3aff4 follow-up).
+  @spec held?(map() | nil) :: boolean()
+  def held?(content), do: not is_nil(holder(content))
+
+  @doc false
+  @spec holder(map() | nil) :: String.t() | nil
+  def holder(content) do
+    case claim_map(content) do
+      nil ->
+        nil
+
+      claim ->
+        case Map.get(claim, "worker") do
+          worker when is_binary(worker) -> if String.trim(worker) == "", do: nil, else: worker
+          _ -> nil
+        end
+    end
+  end
 
   # ─── The fenced content write (PDS-D451: the receipt is the STORED row) ───
   #
@@ -48,7 +106,15 @@ defmodule Barkpark.Tasks.Internal do
   # atom is deliberately NOT an `{:error, …}` tuple: callers map it to their own
   # existing error (`:stale_claim` for the lifecycle/claim arms, `:stale_rev` for
   # the merge reconcile), so no caller's return shape moves.
-  def fenced_content_write(%Document{} = doc, observed_rev, new_content, new_rev) do
+  # The one write door for every task verb (Barkdown C083, D-managed-writers): a held managed
+  # instance refuses here by raising, since the eighteen callers match {:ok, _} | :stale.
+  def fenced_content_write(%Document{} = doc, observed_rev, new_content, new_rev),
+    do:
+      Door.admit!(fn ->
+        admitted_fenced_content_write(doc, observed_rev, new_content, new_rev)
+      end)
+
+  defp admitted_fenced_content_write(%Document{} = doc, observed_rev, new_content, new_rev) do
     new_content = resync_brief_on_mirrored_change(doc, new_content)
 
     query =
@@ -181,6 +247,24 @@ defmodule Barkpark.Tasks.Internal do
   # fails (nil ≠ worker_id): there is no lease to act on. Extracted from
   # `Tasks.Release` (D7, expressive-agent-loops) so every new holder-only verb
   # reuses one definition instead of growing its own subtly-different copy.
+  #
+  # THE HOLDER KEY IS `claim.worker`, AND `claim.worker_id` DOES NOT EXIST
+  # (task-371c506d42be02cd). `worker_id` is the REQUEST parameter name — the
+  # JSON body key of claim/pulse/release/stamp/close, and the argument name
+  # below — never a key of the STORED claim map. The authority is the writer:
+  # `Tasks.Claim` builds `new_claim` with `"worker" => worker_id`, so the value
+  # goes in under `worker_id` and comes back out under `worker`.
+  #
+  # This matters because a reader that probes the readback for `worker_id` gets
+  # nil on EVERY row (measured 2026-09-14: 199 claim objects across 1133 live
+  # rows, 199 carry `worker`, 0 carry `worker_id`), and a field that is nil
+  # everywhere discriminates nothing — a lapse check keyed on it takes the
+  # "unheld" branch unconditionally and re-claims under the live holder, whose
+  # close is a CAS on (worker, epoch). The discriminator for "is this row held"
+  # is the PRESENCE OF THE CLAIM MAP (nil when unclaimed), not a key inside it.
+  #
+  # `claim_holder_key_test.exs` reds if this gate and the stored readback ever
+  # name different keys.
   def check_holder(%Document{content: content}, worker_id) do
     case get_in(content, ["claim", "worker"]) do
       ^worker_id -> :ok
@@ -334,7 +418,10 @@ defmodule Barkpark.Tasks.Internal do
   #     `withdrawals` list, snapshotting the evidence it supersedes. See the
   #     WITHDRAWAL block below.
   #
-  # The stored `criterion` text is never touched. The `"criterion"` guard is a
+  # The stored `criterion` text is touched by exactly ONE update kind — the
+  # AMENDMENT (`"amendment"` + `"amended_criterion"`, task-a1df012e89b1e289) —
+  # and that one preserves what it replaces. Every other update leaves the
+  # wording alone. The `"criterion"` guard is a
   # CAS at criteria grain: it must equal the stored text at that index or the
   # whole write aborts with :criteria_mismatch (the caller's view of the list is
   # stale — rows reordered/edited since read, or the index is off by one).
@@ -398,14 +485,14 @@ defmodule Barkpark.Tasks.Internal do
       end
 
     updates
-    |> Enum.reduce_while({:ok, existing}, fn update, {:ok, acc} ->
-      case apply_criteria_update(acc, update) do
-        {:ok, next} -> {:cont, {:ok, next}}
+    |> Enum.reduce_while({:ok, existing, MapSet.new()}, fn update, {:ok, acc, seeded} ->
+      case apply_criteria_update(acc, update, seeded) do
+        {:ok, next, next_seeded} -> {:cont, {:ok, next, next_seeded}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
     |> case do
-      {:ok, merged} -> {:ok, Map.put(content, "acceptance_criteria", merged)}
+      {:ok, merged, _seeded} -> {:ok, Map.put(content, "acceptance_criteria", merged)}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -433,16 +520,147 @@ defmodule Barkpark.Tasks.Internal do
   #   * `:criterion_not_found`  — no stored row has that exact wording (the text
   #     was edited, or the caller retyped rather than copied).
   #   * `:criterion_ambiguous`  — 2+ rows share it; pass `"index"` to say which.
-  defp apply_criteria_update(list, %{"criterion" => text} = update)
+  defp apply_criteria_update(list, %{"criterion" => text} = update, seeded)
        when is_binary(text) and text != "" and not is_map_key(update, "index") do
     case resolve_criterion_index(list, text) do
-      {:ok, index} -> apply_criteria_update(list, Map.put(update, "index", index))
+      {:ok, index} -> apply_criteria_update(list, Map.put(update, "index", index), seeded)
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp apply_criteria_update(list, %{"index" => index} = update)
+  defp apply_criteria_update(list, %{"index" => index} = update, seeded)
        when is_integer(index) and index >= 0 do
+    cond do
+      # SAME-WRITE CREATE-AND-MEET (the seeding loophole, closed). An index this
+      # very merge appended is not a row the caller READ — it is a row the
+      # caller just invented — so a second update in the same payload must not
+      # be able to reach it. Without this, a two-entry payload could seed a
+      # criterion at index N and flip it met at index N in one call, which is
+      # exactly the self-grading the seed's `met: false` birth rule exists to
+      # prevent. Refused wholesale (even for a miss, which flips nothing): no
+      # honest caller edits a criterion it created microseconds earlier, and a
+      # narrower rule would be another guard that reads as protection while
+      # leaving a shape open.
+      MapSet.member?(seeded, index) ->
+        {:error, :criterion_seed_not_met}
+
+      match?(%{}, Enum.at(list, index)) ->
+        update_stored_criterion(list, index, update, seeded)
+
+      # THE SEED (task-00f5bc88af7de2e9). Exactly ONE past the end appends.
+      # Before this clause, `Enum.at/2` missed on every index against `[]` and
+      # a row whose `acceptance_criteria` key was absent (or stored `[]`) could
+      # never be given a criterion by ANY writer — close `--set criteria` and
+      # stamp both answered `:criteria_index_out_of_range`, and a raw HTTP
+      # content mutate, outside every honesty gate, was the only remaining
+      # door. `index + 2` and beyond stay out of range.
+      index == length(list) ->
+        seed_criterion(list, index, update, seeded)
+
+      true ->
+        {:error, :criteria_index_out_of_range}
+    end
+  end
+
+  defp apply_criteria_update(_list, _update, _seeded), do: {:error, :invalid_criteria}
+
+  # THE SEED CLAUSE. A new criterion is BORN UNMET, always, and it has to say
+  # what it is:
+  #
+  #   * NON-EMPTY TEXT IS MANDATORY. An index-only update one past the end is
+  #     byte-indistinguishable from the 1-based-by-habit off-by-one the range
+  #     guard exists to catch (D56's five-of-eight builders), so it keeps
+  #     answering `:criteria_index_out_of_range`. A failed read must never be
+  #     spelled the same way as a successful append.
+  #   * DUPLICATE TEXT IS THE OFF-BY-ONE SIGNATURE, not a new criterion: a
+  #     caller naming wording the row already stores meant the stored row and
+  #     mis-counted, so it is `:criteria_mismatch` — the same error an in-range
+  #     stale guard gets.
+  #   * A SEED THAT ASSERTS SATISFACTION IS REFUSED (`:criterion_seed_not_met`).
+  #     That covers an explicit `met: true` AND the met-key-absent default
+  #     (close-time semantics make an index+evidence update a met-flip), so an
+  #     evidence key with no explicit `met: false` cannot smuggle a proof in.
+  #     Seeding must not become the false-done vector wearing a helpful face:
+  #     if a closer could invent a criterion and mark it met in one call, it
+  #     would grade its own homework and the ledger would read as proven work.
+  #   * A WITHDRAWAL CANNOT SEED. There is nothing to lower on a row that does
+  #     not exist; the index names no criterion, so it is out of range.
+  #
+  # `--miss` seeds honestly: the attempt path pins `met` to the stored value,
+  # which on a newborn entry is `false`. That is what makes `bp task stamp` a
+  # seeding door at all, so a criteria-less row is reachable from the writer
+  # surface a caller actually uses rather than from raw HTTP alone.
+  defp seed_criterion(list, index, update, seeded) do
+    text = Map.get(update, "criterion")
+
+    cond do
+      withdraws?(update) ->
+        {:error, :criteria_index_out_of_range}
+
+      # AN AMENDMENT CANNOT SEED (task-a1df012e89b1e289). There is no wording
+      # to supersede on a row that does not exist, so an amendment one past the
+      # end is a caller whose index is wrong — not a caller inventing a
+      # criterion. Same verdict as a withdrawal, for the same reason: a failed
+      # read must never be spelled the same way as a successful append.
+      amends?(update) ->
+        {:error, :criteria_index_out_of_range}
+
+      not guarded?(text) ->
+        {:error, :criteria_index_out_of_range}
+
+      Enum.any?(list, &(is_map(&1) and Map.get(&1, "criterion") == text)) ->
+        {:error, :criteria_mismatch}
+
+      flips_met_true?(update) ->
+        {:error, :criterion_seed_not_met}
+
+      true ->
+        base =
+          %{"criterion" => text, "met" => false, "evidence" => ""}
+          |> maybe_mint_ack_gate(update)
+
+        case apply_entry_update(base, update) do
+          {:ok, entry} -> {:ok, list ++ [entry], MapSet.put(seeded, index)}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  # THE ACKNOWLEDGEMENT FLAG, MINTED ON THE SEED AND NOWHERE ELSE
+  # (task-66cc8ad999fa5a24).
+  #
+  # `Github.Acknowledgement` recognises the reporter-loop criterion by
+  # `"ack_gate" => true` and *by nothing else* — the merge_gate lesson taken as
+  # law, so wording is free to be re-authored without changing what the gate
+  # reads. `Intake` mints the flag on the birth path. But the ELEVEN rows born
+  # BEFORE that gate existed carry no such criterion, and every writer with a
+  # `bp` verb built the newborn entry from a fixed base and then wrote only
+  # `met` / `evidence` / `attempts` — so a hand-added criterion came out
+  # UNFLAGGED. It read like an acknowledgement to a human and was invisible to
+  # the census and the close gate: the exact wording-versus-flag drift the flag
+  # exists to refuse, reproduced on the flag itself.
+  #
+  # Three properties make this safe to accept from a caller:
+  #
+  #   * SEED ONLY. A stored criterion cannot be retro-flagged — an in-range
+  #     update never reaches here — so the flag on any row is either `Intake`'s
+  #     or was minted with that row, never attached to someone else's criterion
+  #     after the fact.
+  #   * MINT ONLY, never release. Nothing here (or in `apply_entry_update/2`,
+  #     which `Map.put`s onto the stored entry) can clear the flag, so the door
+  #     opens in the direction that ADDS an obligation and in no other.
+  #   * THE LITERAL `true` AND NOTHING ELSE, matching `flagged?/1`'s own test. A
+  #     truthy-ish value silently minting a gate is how a guard starts lying.
+  defp maybe_mint_ack_gate(entry, update) do
+    if Map.get(update, "ack_gate") == true do
+      Map.put(entry, "ack_gate", true)
+    else
+      entry
+    end
+  end
+
+  # The in-range path — every guard exactly as D56 and D745 left it.
+  defp update_stored_criterion(list, index, update, seeded) do
     case Enum.at(list, index) do
       %{} = entry ->
         guard = Map.get(update, "criterion")
@@ -470,9 +688,37 @@ defmodule Barkpark.Tasks.Internal do
           withdraws?(update) and Map.get(entry, "met") != true ->
             {:error, :criterion_not_met}
 
+          # ── THE AMENDMENT'S THREE GUARDS (task-a1df012e89b1e289) ──────────
+          #
+          # An amendment REWRITES the criterion text, which is the one field
+          # every other update path leaves alone, so it answers to the same CAS
+          # the met-flip and the withdrawal do — and to two of its own.
+          #
+          # UNGUARDED INDEX. Re-wording the wrong neighbour is as much a lie as
+          # flipping it, and worse in one respect: a flipped neighbour is
+          # visible as a wrong `met`, while a re-worded one silently becomes a
+          # criterion nobody ever wrote. Same error, one definition, all three
+          # directions.
+          amends?(update) and not guarded?(guard) ->
+            {:error, :criterion_text_required}
+
+          # BLANK REPLACEMENT. Emptying a criterion is a DELETION wearing a
+          # correction's clothes: the row keeps its index and its met flag and
+          # stops saying what was proven. Refused with its own name so the
+          # caller is not told to pass a guard they already passed.
+          not amended_text?(update) and amends?(update) ->
+            {:error, :amended_criterion_required}
+
+          # A NO-OP. The guard already proved the stored text equals `guard`,
+          # so a replacement equal to it changes nothing and would mint an
+          # amendments record asserting a correction that never happened —
+          # the record's own discriminating power, spent on noise.
+          amends?(update) and Map.get(update, "amended_criterion") == Map.get(entry, "criterion") ->
+            {:error, :criterion_unchanged}
+
           true ->
             with {:ok, entry} <- apply_entry_update(entry, update) do
-              {:ok, List.replace_at(list, index, entry)}
+              {:ok, List.replace_at(list, index, entry), seeded}
             end
         end
 
@@ -480,8 +726,6 @@ defmodule Barkpark.Tasks.Internal do
         {:error, :criteria_index_out_of_range}
     end
   end
-
-  defp apply_criteria_update(_list, _update), do: {:error, :invalid_criteria}
 
   # Exact-match row lookup for a text-keyed update. Exactly one hit resolves;
   # zero and many are both named refusals (see the clause above).
@@ -506,6 +750,9 @@ defmodule Barkpark.Tasks.Internal do
   # back-compat default), so an index+evidence update flips too.
   defp flips_met_true?(%{"attempt" => %{}}), do: false
   defp flips_met_true?(%{"withdrawal" => %{}}), do: false
+  # An amendment PINS met to its stored value (see apply_entry_update below), so
+  # it flips nothing in either direction and cannot fabricate a done.
+  defp flips_met_true?(%{"amendment" => %{}}), do: false
   defp flips_met_true?(update), do: Map.get(update, "met", true) == true
 
   # A withdrawal is discriminated by its `"withdrawal"` record, never by the
@@ -513,6 +760,23 @@ defmodule Barkpark.Tasks.Internal do
   # not a withdrawal.
   defp withdraws?(%{"withdrawal" => %{}}), do: true
   defp withdraws?(_update), do: false
+
+  # An amendment is discriminated by its `"amendment"` RECORD, never by the
+  # presence of `"amended_criterion"` — the record is what makes the correction
+  # signed, and an update carrying replacement text with no record is not an
+  # amendment, it is a malformed one.
+  defp amends?(%{"amendment" => %{}}), do: true
+  defp amends?(_update), do: false
+
+  # Replacement wording only counts when it has words. `nil`, a non-string and
+  # a whitespace-only string are all "no wording", so none of them can reach the
+  # write and blank a criterion.
+  defp amended_text?(update) do
+    case Map.get(update, "amended_criterion") do
+      text when is_binary(text) -> String.trim(text) != ""
+      _ -> false
+    end
+  end
 
   # Miss path: append the attempt, bound the list, PIN met explicitly to its
   # current stored value (normalized to a boolean — only a stored `true` is
@@ -550,6 +814,43 @@ defmodule Barkpark.Tasks.Internal do
      entry
      |> Map.put("met", false)
      |> Map.put("withdrawals", withdrawals ++ [record])}
+  end
+
+  # AMENDMENT PATH (task-a1df012e89b1e289): correct a criterion's TEXT and
+  # PRESERVE the sentence it replaces. Ordered before the met/evidence clause so
+  # an amendment never falls through to it.
+  #
+  # Three properties, each the reason a silent rewrite was refused for so long:
+  #
+  #   * the superseded wording is snapshotted onto the record, so the sentence
+  #     a reader was once shown stays readable even after a second amendment;
+  #   * `met` is PINNED to its stored value — written explicitly, never
+  #     inherited from the met→true default, which is exactly the lock-flipping
+  #     footgun D8 names — and `evidence` is not touched at all. An amendment
+  #     corrects the QUESTION, never the verdict;
+  #   * the list is UNBOUNDED, like `withdrawals` and unlike `attempts`. A
+  #     bound is a silent drop, and a silent drop of a correction is the whole
+  #     defect this verb exists to end.
+  #
+  # The SECOND SURFACE rides `fenced_content_write/4` above, which re-derives
+  # `brief.blocks[criteria-list]` in the same rev-fenced statement: one write,
+  # both surfaces or neither. Patching one is the half-fix this was found by.
+  defp apply_entry_update(entry, %{"amendment" => %{} = record, "amended_criterion" => new_text})
+       when is_binary(new_text) do
+    amendments =
+      case Map.get(entry, "amendments") do
+        list when is_list(list) -> list
+        _ -> []
+      end
+
+    record =
+      Map.put(record, "superseded_criterion", to_string(Map.get(entry, "criterion") || ""))
+
+    {:ok,
+     entry
+     |> Map.put("met", Map.get(entry, "met") == true)
+     |> Map.put("criterion", new_text)
+     |> Map.put("amendments", amendments ++ [record])}
   end
 
   # Met/evidence path (close-time semantics — see merge_criteria/2 above).
@@ -600,7 +901,14 @@ defmodule Barkpark.Tasks.Internal do
   # landed-open-report.sh) is untouched. A landing that knows only one half
   # still writes that half into its scalar list and no pair — a half-pair would
   # assert an association nobody observed.
-  @landed_keys ~w(prs files capability_slugs commits notes landings)
+  # `file_digests` is the BOUNDED spelling of `files` (task-726717ba693eb424).
+  # A landing that changed more paths than a ledger row should carry verbatim
+  # stores `%{"count" => n, "dirs" => [sorted top-level dirs]}` under this key
+  # INSTEAD of `files`, so the two shapes never mix inside one list and a reader
+  # can tell a verbatim list from a summary by WHICH KEY IS PRESENT rather than
+  # by inspecting the elements. Union-merged like every other key: two big
+  # landings on one row accumulate two digests.
+  @landed_keys ~w(prs files file_digests capability_slugs commits notes landings)
 
   def merge_landed(content, landed) when is_map(landed) and map_size(landed) > 0 do
     existing =
@@ -652,13 +960,19 @@ defmodule Barkpark.Tasks.Internal do
   # `%{"fenced" => "edge_added", "edge" => …}`. It mirrors how `TtlSweeper`
   # nests its `"lease_expired"` reap payload. Defaults to `%{}` (no-op merge),
   # so the claim/close/relabel callers passing arity 3/4 are untouched.
-  def insert_mutation_event!(
-        %Document{} = doc,
-        kind,
-        previous_rev,
-        source \\ "api",
-        extra_document \\ %{}
-      ) do
+  def insert_mutation_event!(doc, kind, previous_rev, source \\ "api", extra_document \\ %{}),
+    do:
+      Door.admit!(fn ->
+        admitted_insert_mutation_event!(doc, kind, previous_rev, source, extra_document)
+      end)
+
+  defp admitted_insert_mutation_event!(
+         %Document{} = doc,
+         kind,
+         previous_rev,
+         source,
+         extra_document
+       ) do
     %MutationEvent{}
     |> Ecto.Changeset.change(%{
       dataset: doc.dataset,
@@ -722,8 +1036,113 @@ defmodule Barkpark.Tasks.Internal do
   # `content.claim.worker`. Backward-compatible: an anonymous / tokenless /
   # internal caller (no bearer resolved to `conn.assigns[:api_token]`) threads
   # `nil` and emits NO key, so pre-existing events stay byte-identical.
-  def caller_stamp(token_id) when is_binary(token_id), do: %{"caller_token_id" => token_id}
-  def caller_stamp(_), do: %{}
+  # `session` (optional 2nd arg) is the SessionId-derived session discriminator
+  # for this request — see `caller_identity_stamp/2` for why it rides here.
+  def caller_stamp(token_id, session \\ nil) do
+    base = if is_binary(token_id), do: %{"caller_token_id" => token_id}, else: %{}
+    Map.merge(base, caller_identity_stamp(token_id, session))
+  end
+
+  # ─── THE SERVER-DERIVED CALLER IDENTITY (task-56adb45f973e242f) ───────────
+  #
+  # WHO the SERVER measured making this mutation — as distinct from every
+  # other identity on a task event, all of which are the audited party's own
+  # self-report:
+  #
+  #   * `content.claim.worker` / `closed_by` / `actor.worker` — a free-form
+  #     string the CLIENT chooses and the server stores verbatim. It is the
+  #     handle the CAS fences on, which makes it the right thing to fence with
+  #     and the WRONG thing to attribute with: an agent that writes
+  #     `worker: "lead-api"` is believed.
+  #   * `caller_token_id` — server-authenticated, but an `audit_keys/0` member,
+  #     so `Tasks.Events`' `:payload` projection SUBTRACTS it. It reached no
+  #     read surface at all: the live measurement on this row's filing found
+  #     the default feed projection at exactly `{at, doc_id, event, id, rev}`
+  #     and concluded there was no attribution anywhere. It was half right —
+  #     `actor` (the self-report) does project under `--payload`; the
+  #     server-measured half did not project under ANY projection.
+  #
+  # So this is the ONE key on a task event that the client cannot choose:
+  #
+  #     "caller" => %{"kind" => "api_token",
+  #                   "id"   => <the token the server AUTHENTICATED>,
+  #                   "session" => <SessionId.derive/2 — HMAC(secret_key_base,
+  #                                 token_id <> 0 <> client key), never the
+  #                                 client's key and not replayable from the
+  #                                 stored row>}
+  #
+  # DELIBERATELY NOT AN AUDIT KEY. `audit_keys/0` is the list the payload
+  # projection removes; putting `caller` there would reproduce exactly the
+  # defect this closes. `caller_token_id` STAYS an audit key and stays written,
+  # byte for byte, so nothing that reads the raw `mutation_events.document`
+  # changes.
+  #
+  # NIL-SAFE, AND THAT IS CRITERION 2. A tokenless/internal/test caller
+  # (`nil`, `nil`) emits NO `caller` key — not `%{}`, not `""`. Historical rows
+  # are never touched and never backfilled, so a reader that finds no `caller`
+  # on an event is reading UNMEASURED, not "measured, nobody". An empty-string
+  # placeholder would destroy precisely that distinction across the whole back
+  # catalogue.
+  @spec caller_identity_stamp(term(), term()) :: map()
+  def caller_identity_stamp(token_id, session \\ nil) do
+    # `token_id != ""` is not defensive noise: an empty-string token id is the
+    # exact placeholder criterion 2 forbids. Without it this emits
+    # `%{"caller" => %{"kind" => "api_token", "id" => ""}}` — a row that reads
+    # MEASURED, NOBODY where the truth is UNMEASURED. (This arm was red on the
+    # first run of `caller_identity_stamp/2 never emits an empty placeholder`.)
+    named? = is_binary(token_id) and token_id != ""
+
+    identity =
+      %{}
+      |> maybe_put("kind", if(named?, do: "api_token"))
+      |> maybe_put("id", if(named?, do: token_id))
+      |> maybe_put("session", if(is_binary(session) and session != "", do: session))
+
+    if map_size(identity) == 0, do: %{}, else: %{"caller" => identity}
+  end
+
+  # ─── THE ACTOR STAMP (tlv-bl-events-actor-attribution) ────────────────────
+  #
+  # WHO held the lease, and on WHICH epoch, at the moment this mutation
+  # committed — stamped ONTO the event so a close/claim is attributable from
+  # the event feed alone.
+  #
+  # THE GAP THIS CLOSES. A done-set audit (wave 7, 2026-08-18) replayed 560
+  # task events and could not attribute a single close to a worker: every
+  # projected row was exactly `{at, doc_id, event, id, rev}`, so per-row close
+  # provenance was recoverable ONLY by fetching each done row's top-level
+  # `content.claim` map — N document reads to answer "who closed what, when".
+  # The claim map is the LIVE lease and is mutable (a later re-claim, a pulse,
+  # a compaction), so it is also not a history: it says who holds the row NOW,
+  # not who closed it THEN. The event is the durable, append-only record, and
+  # this is the field that makes it answer the question.
+  #
+  # WHY IT IS A TYPED STAMP AND NOT AN ENVELOPE KEY. `Tasks.Events`'s
+  # `:payload` projection is `document` MINUS `envelope_keys/0` MINUS
+  # `audit_keys/0`, so an `extra_document` merge surfaces on
+  # `bp task events --payload` the moment it is written, with no reader edit —
+  # the derived-projection contract `events.ex` documents. It is deliberately
+  # NOT an audit key: `caller_token_id` is the bearer the server
+  # AUTHENTICATED, while `actor` is the worker identity the ledger's CAS
+  # actually fenced on, which is the one an auditor reconstructs provenance
+  # from.
+  #
+  # Nil-safe in both slots: a claimless close (139 of 6,617 terminal rows on
+  # the guerrilla ledger carry no claim at all — container and root rows) emits
+  # the keys it has and NO `actor` key when it has neither, so those events
+  # stay byte-identical and go on saying, truthfully, that nobody held the row.
+  @spec actor_stamp(term(), term()) :: map()
+  def actor_stamp(worker, epoch) do
+    actor =
+      %{}
+      |> maybe_put("worker", if(is_binary(worker) and worker != "", do: worker))
+      |> maybe_put("epoch", if(is_integer(epoch), do: epoch))
+
+    if map_size(actor) == 0, do: %{}, else: %{"actor" => actor}
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   # Every CAS write path bypasses Content's canonical write path
   # (`tap_broadcast/5`), so these mirror its PubSub so the SSE listen endpoint

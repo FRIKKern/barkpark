@@ -5,11 +5,16 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
   Kept in its own module (not folded into accounts_test.exs) so the invitation
   surface is reviewable in isolation.
   """
-  use BarkparkCloud.DataCase, async: true
+  # async: false — `off_ladder!/3` DROPS `team_memberships_role_check` inside this
+  # test's sandbox transaction (see `BarkparkCloud.OffLadderRole`), which takes
+  # ACCESS EXCLUSIVE on `team_memberships`. ExUnit runs sync suites serially and
+  # only after every async suite, so that lock cannot stall a concurrent test.
+  use BarkparkCloud.DataCase, async: false
 
   import Ecto.Query, only: [from: 2]
 
   alias BarkparkCloud.Accounts
+  alias BarkparkCloud.OffLadderRole
   alias BarkparkCloud.Accounts.{TeamInvitation, TeamMembership}
   alias BarkparkCloud.Repo
 
@@ -48,9 +53,12 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
 
   # Put an OFF-LADDER role string straight into `team_memberships.role`.
   # `TeamMembership.changeset/2` refuses it (`validate_inclusion` against
-  # `@roles`); the DATABASE does not — no migration puts a CHECK on that column,
-  # proven independently by `Accounts.RoleAgreementCensusTest`'s "an off-ladder
-  # role string really persists". Writing it HERE, past the changeset, is what
+  # `@roles`), and since `team_memberships_role_check` (migration
+  # 20260918120000) so does the DATABASE — so the write goes through
+  # `OffLadderRole.without_role_constraint/1`, which drops the CHECK inside this
+  # test's own sandbox transaction. The shape is still real: rows written before
+  # that migration hold such strings, and charter D493 rules they rank 0.
+  # Writing it HERE, past the changeset, is what
   # makes the assertions that use it independent of `validate_inclusion` ever
   # having run: the guard under test must hold on a row the changeset would
   # never have produced.
@@ -60,14 +68,15 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
              "the caller would no longer be measuring the off-ladder branch"
 
     {1, _} =
-      Repo.update_all(
-        from(m in TeamMembership, where: m.team_id == ^team.id and m.user_id == ^user.id),
-        set: [role: role]
-      )
+      OffLadderRole.without_role_constraint(fn ->
+        Repo.update_all(
+          from(m in TeamMembership, where: m.team_id == ^team.id and m.user_id == ^user.id),
+          set: [role: role]
+        )
+      end)
 
-    # Non-vacuity: if a CHECK constraint ever guards the column, the write stops
-    # landing and every off-ladder assertion below would pass for the wrong
-    # reason. Asserted through `match?/2` so the message is live — a bare
+    # Non-vacuity: if the write ever stops landing (a second guard, a failed
+    # drop), every off-ladder assertion below would pass for the wrong reason. Asserted through `match?/2` so the message is live — a bare
     # `assert pattern = expr, msg` raises MatchError before assert/2 can speak.
     assert match?(%TeamMembership{role: ^role}, Accounts.get_membership(team, user)),
            "the off-ladder write did not survive — `team_memberships.role` now refuses " <>
@@ -485,19 +494,19 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
                Accounts.update_member_role_as(admin, team, admin, "member")
     end
 
-    test "owner on THEMSELVES: BOTH verbs allow it — the cell the console knowingly under-offers" do
-      # The console withholds `Remove` on the self row (charter D492 variant B)
-      # because the pure authority mirror reds the merge-blocking members smoke,
-      # whose 3-row roster has the actor at row 0. That withholding is a CONSOLE
-      # RULING that contradicts the server, filed as
-      # cch-w44-bl-self-row-underoffers-three-server-legal-cells — and an
-      # under-offer, not this epic's offered-but-refused class.
+    test "owner on THEMSELVES: BOTH verbs allow it — and the console now offers both" do
+      # WAS the cell the console knowingly under-offered: it withheld `Remove` on
+      # the self row (charter D492 variant B) while the server answered
+      # {:ok, :removed}. cch-w44-bl closed that gap — `canRemoveMember` no longer
+      # opens with a blanket `if (isSelf) return false`, and the console's
+      # MEMBER_AUTHORITY_MATRIX cell "owner acting on THEIR OWN row" now pins
+      # Remove as OFFERED. This test is the SERVER half of that pair: it is what
+      # makes the offered button honest, so if it reds, the console is over-
+      # offering and cloud/priv/static/__app.test.mjs must move with it.
       #
-      # It is pinned HERE so the contradiction stays a decision rather than
-      # decaying into a belief. If this test ever reds, the server moved TOWARD
-      # the console and the withholding stopped being an under-offer — at which
-      # point the console's matrix cell and the backlog task must be revisited
-      # together, not silently.
+      # The only refusal left on an owner's own row is STATE, not authority —
+      # the sole-owner arm at the bottom of this test — and the console models
+      # exactly that one with `isSoleOwnerSelf`, never with a self rule.
       {owner1, team} = owned_team()
       owner2 = user_fixture()
       {:ok, _} = Accounts.add_member(team, owner2, "owner")
@@ -512,8 +521,130 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
       {:ok, _} = Accounts.add_member(team2, owner4, "owner")
       # remove_member_as/3 has no `self?` branch, so the OWNER ESCAPE HATCH at
       # accounts.ex:1722 answers for the self row too: an owner may remove
-      # themselves. The console does not offer it.
+      # themselves. The console offers it (cch-w44-bl).
       assert {:ok, :removed} = Accounts.remove_member_as("owner", team2, owner3)
+    end
+
+    test "the SOLE owner on themselves: :last_owner, a STATE refusal — never :forbidden" do
+      # THE PRECONDITION FOR THE CONSOLE'S ONE REMAINING SELF-ROW OMISSION.
+      # cch-w44-bl gates the self Remove on `isSoleOwnerSelf`, i.e. on STATE,
+      # and that is only honest if the sole owner's own removal is refused by
+      # do_remove's `locked_owner_count(team) <= 1 -> Repo.rollback(:last_owner)`
+      # rather than by an authority arm. The two answers are NOT interchangeable:
+      # a :forbidden here would mean the withholding belongs in canRemoveMember,
+      # a :last_owner means it belongs where it now is.
+      #
+      # THE CONTROL is the test above: on a team with a SECOND owner the very
+      # same call answers {:ok, :removed}. Without it this assertion could not
+      # tell "the sole-owner guard fired" from "owners can never self-remove".
+      {owner, team} = owned_team()
+      assert [%{role: "owner"}] = Accounts.list_team_members(team)
+
+      assert {:error, :last_owner} = Accounts.remove_member_as("owner", team, owner)
+      # …and the refusal ROLLED BACK: the membership survives, so the console is
+      # withholding a control over a member who is genuinely still there.
+      assert %TeamMembership{role: "owner"} = Accounts.get_membership(team, owner)
+    end
+  end
+
+  describe "the REMAINDER of the member relation-by-verb matrix (cch-w44-bl)" do
+    # The describe above pins the cells where the two verbs DISAGREE. These are
+    # the cells where they AGREE and nothing asserted them: a census of
+    # cloud/test/** at cab3bf2fe found each of the five below reachable by no
+    # assertion in the tree, so the server could change its answer and every
+    # cloud test would stay green while the console's MEMBER_AUTHORITY_MATRIX
+    # went on mirroring the old law.
+    #
+    # Each test names the ARM it covers, because each one is mutation-proved
+    # against a DIFFERENT mutation of that arm — two tests that die to the same
+    # edit have proved one thing, not two.
+
+    test "owner on an ADMIN: removal is allowed — the outranks? conjunct" do
+      # ARM: remove_member_as/3's `outranks?(actor_role, target_role)`. The owner
+      # ESCAPE HATCH is not what carries this cell — owner strictly outranks
+      # admin, so the rank conjunct answers on its own. Narrowing that conjunct
+      # to "…and the target is a plain member" is the regression this catches.
+      {_owner, team} = owned_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+
+      assert {:ok, :removed} = Accounts.remove_member_as("owner", team, admin)
+      assert is_nil(Accounts.get_membership(team, admin))
+    end
+
+    test "owner on an ADMIN: demotion to member is allowed — the current-role outranks? arm" do
+      # ARM: update_member_role_as/4's `not self? and not outranks?(actor, current_role)`.
+      # The SIBLING of the cell above, in the verb that has no owner hatch: here
+      # the owner's authority comes from the rank comparison alone, exactly as it
+      # does for removal, which is why these two cells agree while the
+      # owner-on-peer-OWNER pair (the describe above) does not.
+      {owner, team} = owned_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+
+      assert {:ok, %TeamMembership{role: "member"}} =
+               Accounts.update_member_role_as(owner, team, admin, "member")
+
+      assert %TeamMembership{role: "member"} = Accounts.get_membership(team, admin)
+    end
+
+    test "admin on a MEMBER: promotion to ADMIN is allowed — can_grant?'s EQUAL-RANK rule" do
+      # ARM: Authz.can_grant?/3's `rank(target_role) > actor_rank`, a STRICT `>`,
+      # so minting a PEER of your own rank is permitted. Coolify's own guard is
+      # the stricter form and Authz's own @doc calls this an OPEN POLICY
+      # QUESTION, which is precisely why the shipped answer needs a witness: if
+      # the comparison is ever tightened to `>=`, an admin loses the ability to
+      # mint another admin and this cell must be the thing that says so.
+      {_owner, team} = owned_team()
+      admin = user_fixture()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      assert {:ok, %TeamMembership{role: "admin"}} =
+               Accounts.update_member_role_as(admin, team, member, "admin")
+    end
+
+    test "MEMBER as actor: removal is refused on EVERY in-ladder target" do
+      # ARM: remove_member_as/3's rank comparison. The one member-as-actor cell
+      # already in this file uses an OFF-LADDER target (the actor-tier floor),
+      # and that test cannot see this arm: an off-ladder target ranks 0, so it is
+      # the `admin?(actor_role)` conjunct that refuses there. On an IN-LADDER
+      # target the floor and the ladder agree, and this pins the ladder half —
+      # loosening `outranks?/2` from `>` to `>=` flips the peer cell below while
+      # leaving the off-ladder test perfectly green.
+      {owner, team} = owned_team()
+      peer = user_fixture()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, peer, "member")
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+
+      assert {:error, :forbidden} = Accounts.remove_member_as("member", team, peer)
+      assert {:error, :forbidden} = Accounts.remove_member_as("member", team, admin)
+      assert {:error, :forbidden} = Accounts.remove_member_as("member", team, owner)
+
+      # CONTROL — the refusals above are about the ACTOR, not about these three
+      # rows being unremovable: the very same target falls to an admin.
+      assert {:ok, :removed} = Accounts.remove_member_as("admin", team, peer)
+    end
+
+    test "MEMBER as actor on THEMSELVES: a self role-change is refused — can_grant?'s floor" do
+      # ARM: Authz.can_grant?/3's `not team_admin?(actor, team)` clause, and this
+      # is the ONLY cell in the matrix that can see it. A self role-change takes
+      # update_member_role_as/4's `self?` bypass, so the outranks? clause never
+      # runs and the actor-tier floor is the whole guard. On any OTHER target a
+      # member is refused twice over, and deleting this floor there changes
+      # nothing observable — which is exactly how a floor rots unseen.
+      {owner, team} = owned_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      assert {:error, :forbidden} = Accounts.update_member_role_as(member, team, member, "member")
+      assert {:error, :forbidden} = Accounts.update_member_role_as(member, team, member, "admin")
+
+      # CONTROL — the row is not frozen: an owner may change the very same row.
+      assert {:ok, %TeamMembership{role: "admin"}} =
+               Accounts.update_member_role_as(owner, team, member, "admin")
     end
   end
 
@@ -561,6 +692,147 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
                from(t in "user_tokens", where: t.user_id == type(^user.id, :binary_id)),
                :count
              ) == 0
+    end
+  end
+
+  # The read is `Repo.get_by(TeamInvitation, id: inv_id, team_id: tid)`. The
+  # `id:` half is exercised by every caller; the `team_id:` half had NO
+  # behavioural coverage (the only `revoke_invitation` mention under
+  # cloud/test was a vocabulary-census entry), so deleting it left the whole
+  # cloud suite green. These tests are that half.
+  #
+  # THE TWO FIXTURES, field for field. Both invitations are minted by
+  # `invite_member/4` from the SAME literal email and role, by the SAME
+  # inviter user (`alice`, made owner of BOTH teams on purpose so
+  # `invited_by_id` is not free either):
+  #
+  #   field          happy-path (team_a)      cross-team (team_b)
+  #   email          "twin@example.com"       "twin@example.com"     same
+  #   role           "member"                 "member"               same
+  #   invited_by_id  alice.id                 alice.id               same
+  #   accepted_at    nil                      nil                    same
+  #   team_id        team_a.id                team_b.id              THE VARIABLE
+  #   id             uuid A                   uuid B                 FORCED: @primary_key
+  #                                                                  {:id, :binary_id,
+  #                                                                  autogenerate: true}
+  #   token_hash     sha256(raw A)            sha256(raw B)          FORCED:
+  #                                                                  invite_member/4 mints a
+  #                                                                  fresh `generate_token()`
+  #                                                                  per row and stores only
+  #                                                                  its hash
+  #   expires_at     now_A + 7d               now_B + 7d             FORCED: derived from
+  #                                                                  DateTime.utc_now() at
+  #                                                                  mint time; differs by
+  #                                                                  microseconds
+  #   inserted_at/   two clock reads          two clock reads        FORCED: timestamps()
+  #   updated_at
+  #
+  # Nothing else differs. Note the email being IDENTICAL is legal: the partial
+  # UNIQUE index on (team_id, email) WHERE accepted_at IS NULL is per-team, so
+  # the same address may hold one live invite in each team — which is exactly
+  # the collision the fence has to survive.
+  defp twin_invitations do
+    alice = user_fixture()
+    team_a = team_fixture()
+    team_b = team_fixture()
+    {:ok, _} = Accounts.add_member(team_a, alice, "owner")
+    {:ok, _} = Accounts.add_member(team_b, alice, "owner")
+
+    {:ok, %{invitation: inv_a}} =
+      Accounts.invite_member(team_a, "twin@example.com", "member", alice)
+
+    {:ok, %{invitation: inv_b}} =
+      Accounts.invite_member(team_b, "twin@example.com", "member", alice)
+
+    %{team_a: team_a, team_b: team_b, inv_a: inv_a, inv_b: inv_b}
+  end
+
+  describe "revoke_invitation/2 — the team_id fence" do
+    test "the twins differ ONLY in team_id (plus the identity/secret/clock fields forced by the schema)" do
+      %{inv_a: a, inv_b: b, team_a: team_a, team_b: team_b} = twin_invitations()
+
+      # The free fields are equal...
+      assert a.email == b.email
+      assert a.role == b.role
+      assert a.invited_by_id == b.invited_by_id
+      assert a.accepted_at == nil and b.accepted_at == nil
+
+      # ...the variable under test is not...
+      assert a.team_id == team_a.id
+      assert b.team_id == team_b.id
+      refute a.team_id == b.team_id
+
+      # ...and every REMAINING difference is one the schema forces, named with
+      # the constraint that forces it. Anything not in this list is equal above.
+      forced = [:id, :token_hash, :expires_at, :inserted_at, :updated_at, :team_id]
+
+      differing =
+        for f <- [
+              :id,
+              :email,
+              :role,
+              :token_hash,
+              :expires_at,
+              :accepted_at,
+              :team_id,
+              :invited_by_id,
+              :inserted_at,
+              :updated_at
+            ],
+            Map.get(a, f) != Map.get(b, f),
+            do: f
+
+      # Subset, not equality: two clock reads CAN land on the same microsecond,
+      # so a forced field is allowed to come out equal. What may never happen is
+      # a difference this list does not name.
+      assert differing -- forced == []
+      assert :team_id in differing
+    end
+
+    # [0] has TWO halves — the RETURN VALUE and the ROW SURVIVING. They are two
+    # tests on purpose: ExUnit stops a test at its first failing assertion, so a
+    # single test leading with the return value would leave the destructive half
+    # (the half that matters) unproved under the mutation. Each test below leads
+    # with its own claim, so each reds on its own.
+    test "[0a] a cross-team invitation id RETURNS exactly what an unknown id returns" do
+      %{team_a: team_a, inv_b: inv_b} = twin_invitations()
+
+      assert {:error, :not_found} = Accounts.revoke_invitation(team_a, inv_b.id)
+
+      # Byte-for-byte identical to a NEVER-EXISTED id: the refusal leaks nothing
+      # about whether the id is real.
+      unknown = Ecto.UUID.generate()
+
+      assert Accounts.revoke_invitation(team_a, inv_b.id) ==
+               Accounts.revoke_invitation(team_a, unknown)
+    end
+
+    test "[0b] the other team's invitation row SURVIVES the call (re-read from the database)" do
+      %{team_a: team_a, inv_a: inv_a, inv_b: inv_b} = twin_invitations()
+
+      _ = Accounts.revoke_invitation(team_a, inv_b.id)
+
+      # The re-read is the assertion — NOT the return value. A refusal that still
+      # deleted the row would pass [0a] and be the whole bug. This is the FIRST
+      # assertion in this test so the mutation reds it directly.
+      assert %TeamInvitation{team_id: still_b} = Repo.get(TeamInvitation, inv_b.id)
+      assert still_b == inv_b.team_id
+
+      # team_a's own pending list never grew or shrank either.
+      assert [%TeamInvitation{id: only_live}] = Accounts.list_invitations(team_a)
+      assert only_live == inv_a.id
+    end
+
+    test "HAPPY-PATH CONTROL — the same call with the id's OWN team revokes it" do
+      %{team_a: team_a, inv_a: inv_a, inv_b: inv_b} = twin_invitations()
+
+      assert {:ok, %TeamInvitation{id: revoked_id}} = Accounts.revoke_invitation(team_a, inv_a.id)
+      assert revoked_id == inv_a.id
+      assert Repo.get(TeamInvitation, inv_a.id) == nil
+
+      # So the not_found in [0a] is the FENCE refusing, not revoke_invitation/2
+      # being dead — and the twin in team B is untouched by the control.
+      assert %TeamInvitation{} = Repo.get(TeamInvitation, inv_b.id)
     end
   end
 end

@@ -83,9 +83,21 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     Barkpark.ChatSessionResidue.purge!()
 
     {:ok, _} =
-      Auth.create_token(@admin_token, "chat admin", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        @admin_token,
+        "chat admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
-    {:ok, _} = Auth.create_token(@junior_token, "chat junior", "production", ["read"])
+    {:ok, _} =
+      Auth.create_token(
+        @junior_token,
+        "chat junior",
+        "production",
+        ["read"]
+      )
 
     Application.put_env(:barkpark, :studio_chat_title_http_adapter, NullTitleAdapter)
     Application.put_env(:barkpark, :studio_chat_title_cli, NullTitleCli)
@@ -3024,6 +3036,12 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "the empty archived shelf teaches instead of showing nothing", %{conn: conn} do
+      # This test's whole subject is an EMPTY archived shelf, so it is the one
+      # assertion committed residue can never coexist with: `purge!/0` archives
+      # every pinned row it cannot delete, straight onto this shelf. Name that
+      # cause rather than reding on a 40KB `=~` diff.
+      Barkpark.ChatSessionResidue.assert_archived_shelf_clean!()
+
       {:ok, view, _html} = live(conn, "/studio/chat")
       html = render_click(element(view, ~s([data-test-id="chat-archived-toggle"])))
       assert html =~ "No archived chats"
@@ -3915,8 +3933,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # tell a live subscription from a dead one. This one broadcasts on the
       # SAME `documents:<dataset>` topic the ledger writes to, proving the
       # subscription chat_live already holds is what carries the transition.
+      # The ledger's dataset is "production" — NOT the first-sorted
+      # `Content.list_datasets/0` entry the view mounts on, which is the stream
+      # the strip wrongly rode before task-ff3ed7ae0a242160.
       worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
-      dataset = List.first(Barkpark.Content.list_datasets()) || "production"
+      dataset = "production"
 
       {:document_changed, msg} =
         task_changed(
@@ -5413,6 +5434,54 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert live_chip != ""
       assert replay_chip == live_chip
       assert replay_chip =~ "/admin/projects?task=task-d76fa14f63626556"
+    end
+
+    # task-5a49dc55626ea80d (scc-w12-chip-replay-cap). The test ABOVE hand-writes
+    # the replayed row's `output`, so it never meets the Recorder's 4,000-char
+    # raw-text cap; this one drives the REAL recorder with a >100 KB result and
+    # reopens the same session, which is the path a large MCP read actually
+    # takes. The raw text in the row is truncated mid-JSON and cannot decode —
+    # the persisted chip envelope is what keeps the chip a chip.
+    test "a >4 KB result recorded for real still renders its chip when the session reopens",
+         %{conn: conn} do
+      output =
+        Jason.encode!(%{
+          "ok" => true,
+          "docs" =>
+            for i <- 1..700 do
+              %{
+                "doc_id" => "task-cap#{i}",
+                "title" => "Capped result #{i} #{String.duplicate("x", 120)}",
+                "type" => "task"
+              }
+            end
+        })
+
+      assert byte_size(output) > 100_000
+
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, live_view, _} = live(conn, "/studio/chat")
+      render_submit(element(live_view, "form[phx-submit=send]"), %{"message" => "go"})
+      sid = store_id(live_view)
+      send_tool_use(sid, "mcp__barkpark__task_ready", %{})
+      send_frame(sid, tool_result_frame("toolu_x", output))
+
+      live_html = render(live_view)
+      assert live_html =~ "700 results"
+      assert live_html =~ "/admin/projects?task=task-cap1"
+
+      # the store never holds the 100 KB body — the cap is untouched
+      row =
+        StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["tool_use_id"] == "toolu_x"))
+
+      assert String.length(row.metadata["output"]) == 4_000
+      refute match?({:ok, _}, Jason.decode(row.metadata["output"]))
+
+      {:ok, _replay_view, replay_html} = live(conn, "/studio/chat/#{sid}")
+
+      assert replay_html =~ "700 results"
+      assert chip_fragment(replay_html) == chip_fragment(live_html)
     end
   end
 
@@ -7178,6 +7247,90 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  # ── The slash floor is asserted SCOPED, never over the whole document ──────
+  #
+  # WHY. A `/studio/chat` response is ~457,000 bytes, and ~331,000 of them
+  # (72.5%, measured on this file's own fixtures) are ONE inlined stylesheet:
+  #
+  #     lib/barkpark_web/layouts/root.html.heex   <style><%= paper_stylesheet() %>
+  #       -> BarkparkWeb.Layouts.paper_stylesheet/0        (lib/barkpark_web/layouts.ex)
+  #          -> Barkpark.PortableDoc.Render.Stylesheet.css/0
+  #             -> compile-time File.read! of api/assets/paper-surface/paper-surface.css
+  #
+  # So `{:ok, _view, html} = live(conn, "/studio/chat")` hands back a document
+  # whose majority is CSS nobody thinks of as being under a studio-chat
+  # assertion, and a bare `refute html =~ "/default"` put ~5000 lines of it in
+  # this test's blast radius. MEASURED: PR #14146 added the CSS comment
+  # "email/default output", the substring landed in every chat page, and this
+  # test went red 15h later — with a failure that dumped the whole document and
+  # named nothing, so the failing test, the failing assertion and the offending
+  # file shared no vocabulary.
+  #
+  # (Stylesheet.css/0 strips comments today, which shuts that ONE door, not the
+  # class: the token "default" still occurs 21 times in the EMITTED bytes, and
+  # any selector, url() or content string carrying "/default" reopens it.)
+  #
+  # WHAT INSTEAD. The slash vocabulary has exactly one home in the document —
+  # the composer form's `data-commands` attribute, stamped by slash_vocab/1:
+  #
+  #     lib/barkpark_web/live/studio/chat_live.ex
+  #       <form id="chat-composer-form"
+  #             data-commands={Jason.encode!(slash_vocab(@commands))} …>
+  #
+  # 2,033 bytes, and the invariant is a decoded command NAME, not a substring of
+  # a page. That is what refute_slash_command_offered/2 asserts.
+
+  @composer_form "form#chat-composer-form"
+
+  # The decoded slash vocabulary the composer will offer (builtin floor +
+  # whatever the CLI advertised over {:chat_commands, …}).
+  defp slash_floor(view) do
+    form = render(element(view, @composer_form))
+
+    case LazyHTML.from_fragment(form)
+         |> LazyHTML.query(@composer_form)
+         |> LazyHTML.attribute("data-commands") do
+      [json] ->
+        Jason.decode!(json)
+
+      [] ->
+        flunk("""
+        #{@composer_form} carries no data-commands attribute, so the slash floor
+        could not be read. The attribute is stamped in
+        lib/barkpark_web/live/studio/chat_live.ex (grep: data-commands=).
+        """)
+    end
+  end
+
+  # Refute ONE slash command by name, scoped to the composer form. On failure it
+  # names the offending entry and the file that stamped it — never the document.
+  defp refute_slash_command_offered(view, name) do
+    floor = slash_floor(view)
+
+    case Enum.filter(floor, &(&1["name"] == name)) do
+      [] ->
+        :ok
+
+      offenders ->
+        flunk("""
+        the composer slash floor still offers #{name}.
+
+        found #{length(offenders)} matching entry in the data-commands attribute of
+        #{@composer_form}, stamped by slash_vocab/1 in
+        lib/barkpark_web/live/studio/chat_live.ex:
+
+        #{Enum.map_join(offenders, "\n", &("          " <> inspect(&1)))}
+
+        the full offered vocabulary was:
+          #{Enum.map_join(floor, ", ", &(&1["name"] || "<unnamed>"))}
+
+        Either the builtin came back (see builtin_command/1 and @slash_builtins
+        in chat_live.ex) or a CLI-advertised command of that name reached
+        {:chat_commands, _, _} and survived slash_vocab/1's dedupe.
+        """)
+    end
+  end
+
   describe "composer power — slash builtins + sticky draft/model (wave 6, charter D36)" do
     setup %{conn: conn} do
       enable_fake_chat()
@@ -7231,8 +7384,45 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "the retired /default builtin is gone from the floor", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/studio/chat")
-      refute html =~ "/default"
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      # scoped to the composer form's data-commands, NOT the whole document —
+      # see the refute_slash_command_offered/2 header above this describe.
+      refute_slash_command_offered(view, "/default")
+    end
+
+    test "the scoped /default refute still REDS when a real /default command is offered",
+         %{conn: conn} do
+      # Positive control for the narrowing above: narrowing the blast radius must
+      # not disarm the assertion. A genuine reappearance of /default in the chat
+      # page looks exactly like this — the CLI advertises its command list over
+      # {:chat_commands, …} (see "a chat_commands broadcast populates the
+      # advertised menu vocabulary"), and normalize_slash_command/1 gives a bare
+      # advertised name its leading slash, so this lands a real "/default" entry
+      # in the very attribute the scoped refute reads.
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      send(
+        view.pid,
+        {:chat_commands, "any",
+         [%{"name" => "default", "description" => "Default permission mode"}]}
+      )
+
+      _ = render(view)
+
+      # the injected command really is rendered as "/default" in the scoped region
+      assert Enum.any?(slash_floor(view), &(&1["name"] == "/default"))
+
+      # …and the narrowed assertion catches it, naming what it found
+      error =
+        assert_raise ExUnit.AssertionError, fn ->
+          refute_slash_command_offered(view, "/default")
+        end
+
+      message = Exception.message(error)
+      assert message =~ "still offers /default"
+      assert message =~ "Default permission mode"
+      assert message =~ "chat_live.ex"
     end
 
     test "a /default submit is NO LONGER a builtin — it rides as user text (D48)",

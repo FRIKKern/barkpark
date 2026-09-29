@@ -87,6 +87,13 @@ JL_EVENT="${CI_MEASURE_JL_EVENT:-pull_request}"
 JL_JOB_PREFIX="${CI_MEASURE_JL_JOB_PREFIX:-Test (Elixir}"
 JL_PROBE_STEP="${CI_MEASURE_JL_PROBE_STEP:-Is the compile-closure instrument alive?}"
 JL_RAW_OUT=""; JL_RAW_IN=""
+# --per-job defaults. PJ_RUNS is the per-WORKFLOW cap on how many completed
+# pull_request runs are descended into; PJ_PAGES is how many 100-run pages of the
+# repo-wide pull_request feed are walked to find them. 10 pages is the endpoint's
+# own 1000-item ceiling, which is why it is the default and not a larger number:
+# asking for page 11 returns nothing and says nothing (see THE 1000-ITEM CAP).
+PJ_RUNS="${CI_MEASURE_PJ_RUNS:-50}"
+PJ_PAGES="${CI_MEASURE_PJ_PAGES:-10}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --since) SINCE="${2:-}"; shift 2 ;;
@@ -95,6 +102,9 @@ while [ $# -gt 0 ]; do
     --allow-mixed-concurrency) ALLOW_MIXED=1; shift ;;
     --sample) SAMPLE="${2:-}"; shift 2 ;;
     --job-latency) MODE=joblat; shift ;;
+    --per-job) MODE=perjob; shift ;;
+    --runs) PJ_RUNS="${2:-}"; shift 2 ;;
+    --pages) PJ_PAGES="${2:-}"; shift 2 ;;
     --workflow) JL_WORKFLOW="${2:-}"; shift 2 ;;
     --event) JL_EVENT="${2:-}"; shift 2 ;;
     --job-prefix) JL_JOB_PREFIX="${2:-}"; shift 2 ;;
@@ -1119,6 +1129,128 @@ FIX
     fail=$((fail+1)); echo "  FAIL b9 exit=$b_ok_rc — the guard refuses a real measured zero, which would make a working breaker unreportable"
   fi
   echo
+
+  # -------------------------------------------------------------------------
+  # j1-j7 — THE --job-latency MODE. Added 2026-09-09/10 on task-33742276cf0a35b1
+  # because the mode landed (#17108, 25c73e08e) with ZERO selftest arms: the
+  # criterion that row exists to settle names this script as its instrument, and
+  # an instrument nothing can red is a claim, not a measurement. Every arm below
+  # drives the REAL job_latency() through --raw-in, so the fixtures exercise the
+  # shipped jl_analyze and not a copy of its rule.
+  cat > "$tmp/jl.jsonl" <<'FIX'
+{"__jlchunk__":true,"lo":"2026-09-09T00:00:00Z","hi":"2026-09-10T00:00:00Z","total_count":3,"listed":3}
+{"__jljob__":true,"name":"Test (Elixir 1.18.4 / OTP 27)","run_id":900001,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z","steps":[{"name":"Run the suite","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z"},{"name":"PROBE","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:00:01Z"}]}
+{"__jljob__":true,"name":"Test (Elixir 1.18.4 / OTP 27)","run_id":900002,"conclusion":"skipped","started_at":"2026-09-09T11:00:00Z","completed_at":"2026-09-09T10:59:59Z","steps":[{"name":"Set up job","conclusion":"skipped","started_at":"2026-09-09T11:00:00Z","completed_at":"2026-09-09T10:59:59Z"}]}
+{"__jljob__":true,"name":"Compile closure","run_id":900001,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:20:00Z","steps":[{"name":"compile","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:20:00Z"}]}
+FIX
+  local jl
+  jl=$(bash "$0" --job-latency --since 2026-09-09T00:00:00Z --until 2026-09-10T00:00:00Z \
+         --job-prefix "Test (Elixir" --probe-step "PROBE" --raw-in "$tmp/jl.jsonl" --json 2>/dev/null)
+  local jl_rc=$?
+  local jl_get='import json,sys;d=json.load(sys.stdin);print(eval(sys.argv[1],{},{"d":d}))'
+
+  # j1 — the prefix SELECTS. The 20-minute `Compile closure` job in the same run
+  # must not reach any number this mode prints; if it did, job-minutes would read
+  # 30.0 instead of 10.0 and the mode would be measuring the workflow, not the job.
+  local jl_sel jl_seen jl_min
+  jl_sel=$(printf '%s' "$jl" | python3 -c "$jl_get" 'd["jobs_selected"]')
+  jl_seen=$(printf '%s' "$jl" | python3 -c "$jl_get" 'd["jobs_seen"]')
+  jl_min=$(printf '%s' "$jl" | python3 -c "$jl_get" 'd["job_minutes_total"]')
+  if [ "$jl_rc" = "0" ] && [ "$jl_seen" = "3" ] && [ "$jl_sel" = "2" ] && [ "$jl_min" = "10.0" ]; then
+    pass=$((pass+1)); echo "  ok   j1 the job prefix discriminates — 3 jobs seen, 2 selected, and the 20-min sibling job in the SAME run contributes 0 (10.0 job-minutes, not 30.0)"
+  else
+    fail=$((fail+1)); echo "  FAIL j1 rc=$jl_rc seen=$jl_seen selected=$jl_sel job_minutes=$jl_min — expected 0/3/2/10.0"
+  fi
+
+  # j2 — THE ARM THE -1s FIX EXISTS FOR, and the one the shipped guard did not
+  # have. GitHub stamps a `skipped` job's completed_at ONE SECOND BEFORE its
+  # started_at. Run 900002 above is that shape AND carries a timestamped step, so
+  # it clears `if pairs:`; only the sign check keeps its -1s out of the median.
+  # Without that check wall n=2 and the median is 299.5s — a number that is not a
+  # latency of anything. Remove the `>= 0` condition in jl_analyze and this arm reds.
+  local jl_wn jl_wmed
+  jl_wn=$(printf '%s' "$jl" | python3 -c "$jl_get" 'd["wall_seconds"]["n"]')
+  jl_wmed=$(printf '%s' "$jl" | python3 -c "$jl_get" 'd["wall_seconds"]["median"]')
+  if [ "$jl_wn" = "1" ] && [ "$jl_wmed" = "600.0" ]; then
+    pass=$((pass+1)); echo "  ok   j2 a skipped job's -1s wall is NOT pooled into the median (n=1, median 600.0s = the one job that ran)"
+  else
+    fail=$((fail+1)); echo "  FAIL j2 wall n=$jl_wn median=${jl_wmed}s — expected 1/600.0; a -1s row is being read as a latency"
+  fi
+
+  # j3 — and the naive pooled answer is asserted by name, so the arm says WHICH
+  # bug it catches rather than merely agreeing with today's output.
+  if [ "$jl_wmed" != "299.5" ]; then
+    pass=$((pass+1)); echo "  ok   j3 the pooled-with--1s answer (299.5s) is NOT what we report"
+  else
+    fail=$((fail+1)); echo "  FAIL j3 reported the pooled answer that includes a skipped job"
+  fi
+
+  # j4 — the probe tally must discriminate the three states it exists to tell
+  # apart: the step ran, the step is ABSENT from the job, and (j6) it FAILED.
+  local jl_probe
+  jl_probe=$(printf '%s' "$jl" | python3 -c "$jl_get" 'sorted(d["probe"].items())')
+  if [ "$jl_probe" = "[('step-absent', 1), ('success', 1)]" ]; then
+    pass=$((pass+1)); echo "  ok   j4 the probe tally separates a step that RAN from a job that never carried the step"
+  else
+    fail=$((fail+1)); echo "  FAIL j4 probe tally is $jl_probe — expected [('step-absent', 1), ('success', 1)]"
+  fi
+
+  # j5 — THE SILENT-CAP GUARD. GitHub's list API stops at 1000 items; the day a
+  # chunk exceeds it, this census quietly becomes a sample and every median it
+  # prints is drawn from a truncated population. A chunk whose `listed` is short
+  # of its own `total_count` must surface in chunks_short_of_total_count.
+  cat > "$tmp/jl-capped.jsonl" <<'FIX'
+{"__jlchunk__":true,"lo":"2026-09-09T00:00:00Z","hi":"2026-09-10T00:00:00Z","total_count":1400,"listed":1000}
+{"__jljob__":true,"name":"Test (Elixir 1.18.4 / OTP 27)","run_id":900003,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z","steps":[{"name":"Run the suite","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z"}]}
+FIX
+  local jl_cap jl_capn
+  jl_cap=$(bash "$0" --job-latency --since 2026-09-09T00:00:00Z --until 2026-09-10T00:00:00Z \
+             --job-prefix "Test (Elixir" --raw-in "$tmp/jl-capped.jsonl" --json 2>/dev/null)
+  jl_capn=$(printf '%s' "$jl_cap" | python3 -c "$jl_get" 'len(d["census"]["chunks_short_of_total_count"])')
+  local jl_uncapn
+  jl_uncapn=$(printf '%s' "$jl" | python3 -c "$jl_get" 'len(d["census"]["chunks_short_of_total_count"])')
+  if [ "$jl_capn" = "1" ] && [ "$jl_uncapn" = "0" ]; then
+    pass=$((pass+1)); echo "  ok   j5 a chunk that listed 1000 of 1400 is flagged as short of its own total_count, and a complete chunk is NOT (the guard discriminates)"
+  else
+    fail=$((fail+1)); echo "  FAIL j5 capped=$jl_capn uncapped=$jl_uncapn — expected 1/0"
+  fi
+
+  # j6 — a DEAD probe names its run. `xref-probe: DEAD` reds nothing in CI by
+  # design (continue-on-error), so the run id printed here is the only trace that
+  # every test selection in that run silently fell back to ALL.
+  cat > "$tmp/jl-dead.jsonl" <<'FIX'
+{"__jlchunk__":true,"lo":"2026-09-09T00:00:00Z","hi":"2026-09-10T00:00:00Z","total_count":1,"listed":1}
+{"__jljob__":true,"name":"Test (Elixir 1.18.4 / OTP 27)","run_id":900004,"conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z","steps":[{"name":"Run the suite","conclusion":"success","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:10:00Z"},{"name":"PROBE","conclusion":"failure","started_at":"2026-09-09T10:00:00Z","completed_at":"2026-09-09T10:00:01Z"}]}
+FIX
+  local jl_dead jl_deadids
+  jl_dead=$(bash "$0" --job-latency --since 2026-09-09T00:00:00Z --until 2026-09-10T00:00:00Z \
+              --job-prefix "Test (Elixir" --probe-step "PROBE" --raw-in "$tmp/jl-dead.jsonl" --json 2>/dev/null)
+  jl_deadids=$(printf '%s' "$jl_dead" | python3 -c "$jl_get" 'd["probe_dead_run_ids"]')
+  if [ "$jl_deadids" = "[900004]" ]; then
+    pass=$((pass+1)); echo "  ok   j6 a FAILED probe step names its run id (900004) instead of vanishing into a tally"
+  else
+    fail=$((fail+1)); echo "  FAIL j6 probe_dead_run_ids is $jl_deadids — expected [900004]"
+  fi
+
+  # j7 — AN EMPTY COLLECTION IS NOT A ZERO MEASUREMENT. A raw feed with a chunk
+  # row and no job rows must REFUSE (non-zero, CANNOT READ on stderr), never print
+  # a tidy table of zeroes that reads like a win in a before/after.
+  cat > "$tmp/jl-empty.jsonl" <<'FIX'
+{"__jlchunk__":true,"lo":"2026-09-09T00:00:00Z","hi":"2026-09-10T00:00:00Z","total_count":0,"listed":0}
+FIX
+  local jl_erc jl_emsg
+  jl_emsg=$(bash "$0" --job-latency --since 2026-09-09T00:00:00Z --until 2026-09-10T00:00:00Z \
+              --raw-in "$tmp/jl-empty.jsonl" --json 2>&1 >/dev/null); jl_erc=$?
+  case "$jl_emsg" in
+    *"CANNOT READ"*) jl_emsg=CANNOT_READ ;;
+    *) jl_emsg=NO_REFUSAL ;;
+  esac
+  if [ "$jl_erc" != "0" ] && [ "$jl_emsg" = "CANNOT_READ" ]; then
+    pass=$((pass+1)); echo "  ok   j7 a zero-job feed REFUSES (rc $jl_erc) with a CANNOT READ line — an empty collection never prints as a measured zero"
+  else
+    fail=$((fail+1)); echo "  FAIL j7 rc=$jl_erc msg=$jl_emsg — a zero-job feed printed a table instead of refusing"
+  fi
+
   echo "SELFTEST: $pass passed, $fail failed."
   [ "$fail" -eq 0 ]
 }
@@ -2126,7 +2258,18 @@ for j in sel:
         # real jobs dragged the "median wall time" to 867s and 446s — a 48% drop
         # that was mostly a change in the SKIPPED SHARE, not in how long the job
         # takes. A median over a pool a third of which is -1 is not a latency.
-        if st and ct: wall.append((ct - st).total_seconds())
+        # AND the span must be non-negative. The nesting above already keeps out a
+        # `skipped` job in the shape GitHub emits TODAY (0 of 143 prefix-matching
+        # jobs on 2026-09-09 carried a timestamped step, measured on this row,
+        # task-33742276cf0a35b1), so today the guard is INCIDENTAL: it holds because
+        # skipped jobs arrive step-less, not because anything checks the sign. A
+        # skipped job that DID carry one timestamped step would sail through `if
+        # pairs:` and drop its -1s into the median, and the line this function prints
+        # would still say `EXECUTED jobs only`. Make the printed claim true by test,
+        # not by the shape of an upstream payload we do not control. Arm j2 reds
+        # without this condition.
+        if st and ct and (ct - st).total_seconds() >= 0:
+            wall.append((ct - st).total_seconds())
     else:
         zero_step += 1
     hit = [s for s in (j.get("steps") or []) if (s.get("name") or "") == probe]
@@ -2203,11 +2346,208 @@ PY
   return $rc
 }
 
+# ---------------------------------------------------------------------------
+# per_job — THE CI DIET TABLE, one row per (workflow, JOB), over the last N
+# completed pull_request runs of every workflow that fires on a PR.
+# (task-76e529e61d9e34d0, child of task-dee226be3107a98b.)
+#
+# WHY A NEW MODE AND NOT THE REPORT MODE. `--since/--until` reports per DAY and
+# per WORKFLOW, over a sampled repo-wide feed. The diet question is narrower and
+# needs a different unit: "which JOB, on the per-PR path, costs the most across
+# a PR push", which is a per-JOB number over a per-WORKFLOW population. A
+# workflow row cannot answer it — moving a workflow is exactly the mistake the
+# venue rules forbid (a workflow-level `paths:` makes every required name in the
+# file ABSENT and deadlocks the PR); the unit you may move is the JOB.
+#
+# WHAT IT READS, AND AT WHICH LEVEL. The run list is an INDEX only: the
+# projection is `{id, path, created_at}` and `.conclusion` is deliberately NOT in
+# it, so there is no run rollup in the payload for `continue-on-error` to launder
+# (see .github/run-level-readers.allow). Every conclusion this mode reads comes
+# from `actions/runs/<id>/jobs`, per JOB.
+#
+# THE COMPUTE RULE IS THE ONE AT THE TOP OF THIS FILE and it is not relaxed here:
+# a job's minutes come from its STEP spans, so a job with zero executed steps
+# contributes ZERO, whatever its wall clock says. Cancelled jobs and zero-step
+# jobs are COUNTED, in their own columns, and never summed into minutes. They are
+# printed because a job that is cancelled on half its runs is a queue symptom
+# worth seeing, not because they are compute.
+#
+# THE SORT IS execs x median, NOT median. A 4-minute job that fires twice is not
+# the diet target; a 40-second job that fires on every one of 50 pushes is. The
+# table is sorted by that product and prints it as its own column so the ordering
+# is checkable rather than asserted.
+#
+# WHAT IT IS NOT. It is not a sample and it is not scaled: within the stated
+# window it walks EVERY completed pull_request run of each workflow up to the
+# --runs cap, so the medians are real medians. What it IS bounded by is the
+# window the feed reaches (10 pages = 1000 runs = GitHub's own ceiling) — a
+# workflow with fewer than --runs runs in that window is reported at its true,
+# smaller n, and the n is in the table.
+#
+#   bash scripts/ci-measure.sh --per-job
+#   bash scripts/ci-measure.sh --per-job --runs 50 --raw-out jobs.ndjson
+#   bash scripts/ci-measure.sh --per-job --raw-in jobs.ndjson      # no network
+# ---------------------------------------------------------------------------
+per_job_mode() {
+  local raw meta
+  raw="$(mktemp)"; meta="$(mktemp)"
+
+  if [ -n "$JL_RAW_IN" ]; then
+    [ -r "$JL_RAW_IN" ] || { echo "ci-measure --per-job: --raw-in '$JL_RAW_IN' is unreadable" >&2; rm -f "$raw" "$meta"; return 1; }
+    cat "$JL_RAW_IN" > "$raw"
+  else
+    local listing pairs
+    listing="$(mktemp)"; pairs="$(mktemp)"
+    local page
+    for page in $(seq 1 "$PJ_PAGES"); do
+      gh api "repos/$REPO/actions/runs?event=pull_request&status=completed&per_page=100&page=$page" \
+        -q '.workflow_runs[] | [.id, .path, .created_at] | @tsv' 2>/dev/null
+    done > "$listing"
+    if [ ! -s "$listing" ]; then
+      echo "ci-measure --per-job: the pull_request run feed came back EMPTY. That is not" >&2
+      echo "  'a quiet repo' — it is an unauthenticated or rate-limited gh. REFUSING to" >&2
+      echo "  print a table over zero runs." >&2
+      rm -f "$raw" "$meta" "$listing" "$pairs"; return 1
+    fi
+    PJ_CAP="$PJ_RUNS" python3 - "$listing" "$pairs" > "$meta" <<'WPY'
+import sys, json, os, collections
+rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1]) if l.strip()]
+cap = int(os.environ["PJ_CAP"])
+ts = sorted(r[2] for r in rows if len(r) > 2)
+seen = collections.Counter(); keep = []
+for rid, path, created in rows:
+    seen[path] += 1
+    if seen[path] <= cap: keep.append((rid, path))
+with open(sys.argv[2], "w") as fh:
+    for rid, path in keep: fh.write(f"{rid}\n")
+print(json.dumps({"__pjwindow__": True, "first": ts[0], "last": ts[-1],
+                  "runs_listed": len(rows), "runs_descended": len(keep), "cap": cap,
+                  "runs_in_window_by_workflow": dict(collections.Counter(r[1] for r in rows))}))
+WPY
+    # One jobs call PER RUN. Parallel because this is a few hundred calls and a
+    # serial walk of them is slower than the window it measures.
+    xargs -P 8 -I{} sh -c \
+      'gh api "repos/'"$REPO"'/actions/runs/{}/jobs?per_page=100" -q "[.jobs[] | {run_id, workflow_name, name, conclusion, started_at, completed_at, steps: [.steps[]? | {started_at, completed_at}]}] | .[] | @json" 2>/dev/null' \
+      < "$pairs" > "$raw"
+    cat "$meta" >> "$raw"
+    rm -f "$listing" "$pairs"
+    if [ -n "$JL_RAW_OUT" ]; then cp "$raw" "$JL_RAW_OUT"; fi
+  fi
+
+  per_job_analyze < "$raw"
+  local rc=$?
+  rm -f "$raw" "$meta"
+  return $rc
+}
+
+per_job_analyze() {
+  local pyf; pyf="$(mktemp)"
+  cat > "$pyf" <<'PY'
+import json, sys, datetime, collections, statistics
+
+def parse(ts):
+    if not ts: return None
+    return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+window = None
+rows = collections.defaultdict(lambda: {"exec_min": [], "cancelled": 0,
+                                        "zero_step": 0, "red": 0, "skipped": 0, "n": 0})
+runs = collections.defaultdict(set)
+parsed = 0
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    try: j = json.loads(line)
+    except json.JSONDecodeError: continue
+    if j.get("__pjwindow__"): window = j; continue
+    parsed += 1
+    wf = j.get("workflow_name") or "?"
+    key = (wf, j.get("name") or "?")
+    r = rows[key]; r["n"] += 1
+    if j.get("run_id"): runs[wf].add(j["run_id"])
+    concl = j.get("conclusion")
+    if concl == "cancelled": r["cancelled"] += 1
+    if concl == "failure": r["red"] += 1
+    if concl == "skipped": r["skipped"] += 1
+    # THE COMPUTE RULE: minutes come from STEP spans, never the wall clock.
+    st = [(parse(s.get("started_at")), parse(s.get("completed_at"))) for s in (j.get("steps") or [])]
+    st = [(a, b) for a, b in st if a and b]
+    if st:
+        r["exec_min"].append((max(b for _, b in st) - min(a for a, _ in st)).total_seconds() / 60.0)
+    else:
+        r["zero_step"] += 1
+
+if parsed == 0:
+    print("ci-measure --per-job: ZERO job rows parsed. A table over nothing is not a", file=sys.stderr)
+    print("  small table, it is a broken read. REFUSING.", file=sys.stderr)
+    sys.exit(1)
+
+out = []
+for (wf, name), r in rows.items():
+    ex = r["exec_min"]
+    med = statistics.median(ex) if ex else 0.0
+    out.append({
+        "workflow": wf, "job": name, "jobs": r["n"], "execs": len(ex),
+        "median_min": round(med, 2), "total_min": round(sum(ex), 2),
+        "rank_min": round(len(ex) * med, 2),
+        "cancelled": r["cancelled"], "zero_step": r["zero_step"],
+        "skipped": r["skipped"], "red": r["red"],
+    })
+out.sort(key=lambda d: -d["rank_min"])
+
+if window:
+    print(f"CI PER-JOB DIET TABLE — window {window['first']} .. {window['last']}")
+    print(f"  population: {window['runs_listed']} completed pull_request runs listed; "
+          f"{window['runs_descended']} descended into (cap {window['cap']} runs per workflow)")
+else:
+    print("CI PER-JOB DIET TABLE — WINDOW UNKNOWN (no __pjwindow__ meta row in the input)")
+print(f"  {parsed} job rows read from actions/runs/<id>/jobs. Minutes are STEP-derived:")
+print("  a job with zero executed steps contributed ZERO compute whatever its wall clock said.")
+print("  `cancel` and `0step` are COUNTS, never minutes, and are excluded from every minute column.")
+print("  Sorted by execs x median (the column `rank`), not by median.")
+print()
+hdr = f"{'workflow':<26}{'job':<52}{'execs':>6}{'med':>8}{'total':>9}{'rank':>9}{'cancel':>7}{'0step':>6}{'skip':>6}{'red':>5}"
+print(hdr); print("-" * len(hdr))
+for d in out:
+    print(f"{d['workflow'][:25]:<26}{d['job'][:51]:<52}{d['execs']:>6}"
+          f"{d['median_min']:>8.2f}{d['total_min']:>9.1f}{d['rank_min']:>9.1f}"
+          f"{d['cancelled']:>7}{d['zero_step']:>6}{d['skipped']:>6}{d['red']:>5}")
+print("-" * len(hdr))
+tot = sum(d["total_min"] for d in out)
+nruns = sum(len(v) for v in runs.values())
+print(f"{'TOTAL':<26}{'':<52}{sum(d['execs'] for d in out):>6}{'':>8}{tot:>9.1f}"
+      f"{sum(d['rank_min'] for d in out):>9.1f}{sum(d['cancelled'] for d in out):>7}"
+      f"{sum(d['zero_step'] for d in out):>6}{sum(d['skipped'] for d in out):>6}"
+      f"{sum(d['red'] for d in out):>5}")
+print()
+print("PER-WORKFLOW ROLLUP — job-minutes and the per-run cost of carrying the workflow at all")
+print(f"{'workflow':<34}{'runs':>7}{'jobs':>7}{'total_min':>11}{'min/run':>10}")
+by_wf = collections.defaultdict(lambda: {"total": 0.0, "jobs": 0})
+for d in out:
+    by_wf[d["workflow"]]["total"] += d["total_min"]; by_wf[d["workflow"]]["jobs"] += d["execs"]
+for wf, v in sorted(by_wf.items(), key=lambda kv: -kv[1]["total"]):
+    n = len(runs.get(wf, ())) or 1
+    print(f"{wf[:33]:<34}{len(runs.get(wf, ())):>7}{v['jobs']:>7}{v['total']:>11.1f}{v['total']/n:>10.2f}")
+print()
+print(f"PER PR PUSH (the number the diet is about): {tot/max(1,max(len(v) for v in runs.values())):.1f} job-minutes"
+      f" across {len(out)} distinct job names, estimated as total_min / the busiest workflow's run count"
+      f" ({max(len(v) for v in runs.values())} runs) — i.e. one push's worth.")
+PY
+  python3 "$pyf"
+  local rc=$?
+  rm -f "$pyf"
+  return $rc
+}
+
 if [ "$MODE" = joblat ]; then
   [ -n "$SINCE" ] && [ -n "$UNTIL" ] || { echo "ci-measure: --job-latency needs --since and --until" >&2; usage; }
   job_latency; exit $?
 fi
 
+
+if [ "$MODE" = perjob ]; then
+  per_job_mode; exit $?
+fi
 
 if [ "$MODE" = value ]; then
   [ -n "$SINCE" ] || { echo "ci-measure: --value-audit needs --since" >&2; usage; }

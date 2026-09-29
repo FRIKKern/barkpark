@@ -81,6 +81,9 @@ defmodule Barkpark.Tasks.QueueTest do
       }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
       |> Map.merge(content_extra)
+      # The Tasks plugin's :before_publish brief wall (inert until #19303) now
+      # fires on first publish; mk_twin!/4 publishes, so the fixture needs one.
+      |> Barkpark.TaskBriefFixtures.with_brief()
 
     {:ok, doc} =
       Content.create_document(

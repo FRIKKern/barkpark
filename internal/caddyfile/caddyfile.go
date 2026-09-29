@@ -58,12 +58,27 @@ p{opacity:.7;line-height:1.5;margin:.25rem 0}
 </body>
 </html>`
 
-// MaintenanceHandler returns a Caddy `handle_errors` block that turns an
-// upstream-unreachable error — what every request hits while the app restarts
-// during a deploy — into a branded 503 "Back in a moment" page with a
-// Retry-After header, instead of Caddy's raw 502. It fires ONLY on errors Caddy
-// itself raises (dial failures, gateway timeouts); a 4xx/5xx the app returns is
-// proxied through untouched, so this never masks a real application error.
+// MaintenanceHandler returns a Caddy `handle_errors 502 503 504` block that
+// turns an upstream-unreachable error — what every request hits while the app
+// restarts during a deploy — into a branded 503 "Back in a moment" page with a
+// Retry-After header, instead of Caddy's raw 502.
+//
+// THE STATUS LIST IS LOAD-BEARING. `handle_errors` with no status list catches
+// EVERY error the site raises, and a `file_server` 404 IS an error Caddy itself
+// raises: inside an armed `handle_path /sites/<slug>/*` block, every miss on
+// every spawned static site answered this branded 503 instead of 404. Scoping
+// the handler to the gateway statuses 502/503/504 is the fix for that incident
+// (deploy/caddy/barkpark-maintenance.caddy is the reference form, and
+// deploy/caddy-handle-errors-scope-check.sh is the repo-wide predicate that
+// keeps every renderer on it). Do not drop the list back to a bare block.
+//
+// THE Content-Type HEADER IS LOAD-BEARING TOO, for the reason the reference
+// form states: Caddy's `respond` with a body and no Content-Type answers
+// `text/plain; charset=utf-8` (MEASURED on caddy 2.11.4 by
+// deploy/caddy-handle-errors-behaviour-proof.sh's ARM NO-CT), so the browser
+// paints the raw `<!doctype html>...` source instead of rendering the page. It
+// is a RENDERING fix only — the status stays an honest 503 + Retry-After. The
+// same predicate above reds any renderer that emits this block without it.
 //
 // Each structural line is prefixed with indent so the block nests cleanly inside
 // a site block. The body is a Caddyfile heredoc whose closing delimiter is
@@ -71,8 +86,9 @@ p{opacity:.7;line-height:1.5;margin:.25rem 0}
 // Caddyfile syntax.
 func MaintenanceHandler(indent string) string {
 	var sb strings.Builder
-	sb.WriteString(indent + "handle_errors {\n")
+	sb.WriteString(indent + "handle_errors 502 503 504 {\n")
 	sb.WriteString(indent + "\theader Retry-After \"15\"\n")
+	sb.WriteString(indent + "\theader Content-Type \"text/html; charset=utf-8\"\n")
 	// The block form of `respond` lets us set 503 AND supply a heredoc body — a
 	// heredoc opener (`<<TOKEN`) must be the last token on its line, so the
 	// status cannot follow it directly.
@@ -431,6 +447,18 @@ func writeSiteBlock(sb *strings.Builder, s Site, seen map[string]bool) bool {
 		// missing page must surface as a real 404, not get masked into the
 		// "Back in a moment" deploy page that handle_errors would impose.
 		fmt.Fprintf(sb, "  root * %s\n", s.Root)
+		// NO `disable_symlinks` HERE, ON PURPOSE (task-63877435cf4ad70a). It is not a
+		// Caddy construct at any level — measured on caddy 2.11.4, it is rejected as an
+		// unknown file_server subdirective, an unrecognized site directive, an
+		// unrecognized global option, and an unknown http.handlers.file_server JSON
+		// field; it is an NGINX directive. Emitting it would make the SHARED Caddyfile
+		// unparseable, so caddy would refuse the whole file and every site on the box
+		// with it. And even if it existed, the Root above IS the `current` release
+		// symlink the deploy swaps atomically (charter D11), so it would refuse every
+		// request to every static site — file_server has no root-only exemption. The
+		// symlink threat is fenced elsewhere: at the packer (charter D120,
+		// internal/cli/sites_tarball.go) and at the flip (deploy/site-deploy.sh's
+		// do_switch refuses to repoint `current` at a release containing any symlink).
 		sb.WriteString("  file_server\n")
 	} else {
 		fmt.Fprintf(sb, "  reverse_proxy 127.0.0.1:%d\n", s.Port)

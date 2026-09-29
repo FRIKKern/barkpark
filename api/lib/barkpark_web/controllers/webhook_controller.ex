@@ -46,6 +46,16 @@ defmodule BarkparkWeb.WebhookController do
     end
   end
 
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, %{"id" => id}) do
     with :ok <- validate_uuid(id),
          {:ok, wh} <- Webhooks.get_webhook(id, ScopeHelpers.scope_opts(conn)),
@@ -101,8 +111,16 @@ defmodule BarkparkWeb.WebhookController do
         )
         |> Jason.encode!()
 
-      {:ok, delivery} = Dispatcher.replay_delivery(wh, body, eid)
-      json(conn, %{delivery: render_delivery(delivery)})
+      case Dispatcher.replay_delivery(wh, body, eid) do
+        {:ok, delivery} ->
+          json(conn, %{delivery: render_delivery(delivery)})
+
+        # The event or its delivery row was deleted between the guard above and
+        # the claim (`:event_gone` / `:delivery_gone`). Same verdict as an
+        # unknown event id: 404, never a 500 from a bare match on the crash.
+        {:error, _gone} ->
+          event_not_found(conn)
+      end
     else
       :error -> webhook_not_found(conn)
       {:error, :bad_event_id} -> event_not_found(conn)
@@ -331,6 +349,17 @@ defmodule BarkparkWeb.WebhookController do
       consecutive_failures: wh.consecutive_failures,
       auto_disabled_at: wh.auto_disabled_at,
       disable_reason: wh.disable_reason,
+      # The AUTOMATIC exit, made visible. Without these two an operator reading
+      # a disabled endpoint sees a dead stop and clicks re-enable — taking by
+      # hand the action the system was already scheduled to take, and blind to
+      # whether that was 60s away or had walked out to the 1h cap. Both are pure
+      # functions of columns already on the row. Named to match
+      # `Barkpark.Audit.Export.sink_health/1` so the two latch surfaces read alike;
+      # `next_probe_at` carries the webhook latch's own verb (a half-open PROBE,
+      # not a queued retry). Both nil for an endpoint a PERSON disabled — only the
+      # automatic latch has an automatic exit.
+      next_probe_at: Webhooks.next_probe_at(wh),
+      dark_for_seconds: Webhooks.dark_for_seconds(wh),
       created_at: wh.inserted_at,
       updated_at: wh.updated_at
     }

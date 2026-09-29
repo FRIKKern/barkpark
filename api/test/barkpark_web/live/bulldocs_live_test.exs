@@ -20,11 +20,25 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
   import Phoenix.LiveViewTest
 
+  alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.Plugins.Bulldocs.Events
   alias Barkpark.Repo
+  alias BarkparkWeb.BulldocsLive.Edit
 
   @slug "2026-05-23-convergence-demo"
+  @dataset "production"
+
+  # A principal for the reader controls (ruling
+  # arpss-bulldocs-anon-paper-event-write-ruling): the four `paper_events`
+  # writers now require ONE, and a READ-only api token is enough — they record
+  # reader intent, they do not edit the document. Using the weakest credential
+  # that passes keeps the tests honest about what the gate actually demands.
+  defp reader_conn(conn) do
+    raw = "bulldocs-reader-#{System.unique_integer([:positive])}"
+    {:ok, _token} = Auth.create_token(raw, "bulldocs reader control", @dataset, ["read"])
+    Plug.Test.init_test_session(conn, %{"api_token" => raw})
+  end
 
   defp seed_paper(html) do
     {:ok, paper} =
@@ -326,6 +340,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
             "content" =>
               Barkpark.LabelFixtures.with_labels(%{
                 "kind" => "task",
+                "brief" => Barkpark.TaskBriefFixtures.brief(),
                 "lifecycle_status" => "open",
                 "design_doc" => @dt_paper,
                 "acceptance_criteria" => [
@@ -415,7 +430,14 @@ defmodule BarkparkWeb.BulldocsLiveTest do
         dataset
       )
 
+      # CLASS (c) DECLARATION (the seeded-Default ruling, task-e6523cc7154304f0).
+      # The caller_context is here only so the OWNER stamp has a principal; the
+      # write names no workspace and this test is about the used-by panel's
+      # owner-ACL, not tenancy. A principal-bearing write with no workspace is
+      # class (a) at the funnel and is refused (this synthetic user belongs to
+      # no workspace), so the fixture DECLARES what it means instead.
       owner_ctx = [
+        instance_wide: true,
         caller_context: Barkpark.Content.CallerContext.from_user(Ecto.UUID.generate(), roles: [])
       ]
 
@@ -965,7 +987,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     test "a /plans/ paper renders the plan action bar (build + grill)", %{conn: conn} do
       seed_action_paper()
 
-      {:ok, _view, html} = live(conn, "/papers/#{@action_slug}")
+      {:ok, _view, html} = live(reader_conn(conn), "/papers/#{@action_slug}")
 
       # The bar element + both plan buttons, each wired to "paper-action".
       assert html =~ ~s(id="paper-action-bar")
@@ -980,7 +1002,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
          %{conn: conn} do
       seed_action_paper()
 
-      {:ok, view, _html} = live(conn, "/papers/#{@action_slug}")
+      {:ok, view, _html} = live(reader_conn(conn), "/papers/#{@action_slug}")
 
       # No action events yet for this goal.
       refute Enum.any?(
@@ -1020,7 +1042,10 @@ defmodule BarkparkWeb.BulldocsLiveTest do
           })
         )
 
-      {:ok, _view, html} = live(conn, "/papers/#{slug}")
+      # An IDENTIFIED viewer: the refutation must measure the missing
+      # source_doc, not the missing principal (`@can_act?` would hide the bar
+      # from an anonymous mount and make this assertion vacuous).
+      {:ok, _view, html} = live(reader_conn(conn), "/papers/#{slug}")
 
       assert html =~ "No source doc here."
       refute html =~ ~s(id="paper-action-bar")
@@ -1052,7 +1077,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     test "a goal-bearing paper renders the Simplify button", %{conn: conn} do
       seed_simplify_paper()
 
-      {:ok, _view, html} = live(conn, "/papers/#{@simplify_slug}")
+      {:ok, _view, html} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
 
       assert html =~ ~s(id="paper-simplify")
       assert html =~ "Simplify"
@@ -1065,7 +1090,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     test "clicking Simplify records a simplify-request on simplified-1 + reveals Accept/Reject",
          %{conn: conn} do
       seed_simplify_paper()
-      {:ok, view, _html} = live(conn, "/papers/#{@simplify_slug}")
+      {:ok, view, _html} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
 
       # No simplify events yet for this paper.
       refute Enum.any?(
@@ -1097,7 +1122,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     test "a second Simplify click increments the branch index to simplified-2",
          %{conn: conn} do
       seed_simplify_paper()
-      {:ok, view, _html} = live(conn, "/papers/#{@simplify_slug}")
+      {:ok, view, _html} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
 
       view |> element(~s(button[phx-click="simplify-request"])) |> render_click()
       rendered = view |> element(~s(button[phx-click="simplify-request"])) |> render_click()
@@ -1115,7 +1140,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     test "clicking Accept records a simplify-accept event on the pending branch",
          %{conn: conn} do
       seed_simplify_paper()
-      {:ok, view, _html} = live(conn, "/papers/#{@simplify_slug}")
+      {:ok, view, _html} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
 
       view |> element(~s(button[phx-click="simplify-request"])) |> render_click()
       rendered = view |> element(~s(button[phx-click="simplify-accept"])) |> render_click()
@@ -1137,7 +1162,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     test "clicking Reject records a simplify-reject event on the pending branch",
          %{conn: conn} do
       seed_simplify_paper()
-      {:ok, view, _html} = live(conn, "/papers/#{@simplify_slug}")
+      {:ok, view, _html} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
 
       view |> element(~s(button[phx-click="simplify-request"])) |> render_click()
       rendered = view |> element(~s(button[phx-click="simplify-reject"])) |> render_click()
@@ -1152,6 +1177,132 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       refute rendered =~ ~s(phx-click="simplify-reject")
     end
 
+    # ── task-cefcbf5b3a9b1665 — the requester<->accepter identity tie ──────
+    #
+    # Accept/Reject used to name only a BRANCH: any principal's click wrote a
+    # `simplify-accept` row that a downstream automation could not distinguish
+    # from the requester's own. These exercise the UNAUTHORIZED PATH itself —
+    # a live socket pushing the decision with somebody else's request id —
+    # rather than asserting a guard clause exists.
+
+    # The paper document as stored, so a refused decision can be proven to
+    # have mutated nothing.
+    defp stored_paper(slug) do
+      Content.get_paper(slug)
+    end
+
+    test "the requester's OWN accept is tied to her request and marked authorized",
+         %{conn: conn} do
+      seed_simplify_paper()
+      {:ok, view, _html} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
+
+      view |> element(~s(button[phx-click="simplify-request"])) |> render_click()
+
+      request =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.find(&(&1.event_type == "simplify-request"))
+
+      assert request.actor_kind == "token"
+      assert is_binary(request.actor_id)
+
+      view |> element(~s(button[phx-click="simplify-accept"])) |> render_click()
+
+      accept =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.find(&(&1.event_type == "simplify-accept"))
+
+      assert accept.request_event_id == request.id
+      assert accept.actor_id == request.actor_id
+      assert accept.authorization == "authorized"
+      assert Events.authoritative_decision?(accept)
+    end
+
+    test "a DIFFERENT principal pushing accept with the requester's request id is refused, writes no row, and mutates no content",
+         %{conn: conn} do
+      seed_simplify_paper()
+
+      # Alice requests.
+      {:ok, alice, _} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
+      alice |> element(~s(button[phx-click="simplify-request"])) |> render_click()
+
+      request =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.find(&(&1.event_type == "simplify-request"))
+
+      before_events = Events.list_for_paper(@simplify_slug)
+      before_paper = stored_paper(@simplify_slug)
+
+      # Mallory — a DIFFERENT, fully identified principal — mounts the same
+      # public reader and pushes the decision naming ALICE's request id. This
+      # is the forgery the row describes; it must be refused.
+      {:ok, mallory, _} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
+
+      rendered =
+        render_click(mallory, "simplify-accept", %{"request-id" => request.id})
+
+      assert rendered =~ "not yours to decide"
+
+      # No `simplify-accept` row exists at all …
+      refute Enum.any?(
+               Events.list_for_paper(@simplify_slug),
+               &(&1.event_type == "simplify-accept")
+             )
+
+      # … the event history is byte-for-byte the same length …
+      assert length(Events.list_for_paper(@simplify_slug)) == length(before_events)
+
+      # … and the paper document itself is untouched.
+      assert stored_paper(@simplify_slug).content == before_paper.content
+      assert stored_paper(@simplify_slug).rev == before_paper.rev
+    end
+
+    test "REPLAY: re-pushing the same accept after it landed is refused and writes no second row",
+         %{conn: conn} do
+      seed_simplify_paper()
+      {:ok, view, _html} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
+
+      view |> element(~s(button[phx-click="simplify-request"])) |> render_click()
+
+      request =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.find(&(&1.event_type == "simplify-request"))
+
+      view |> element(~s(button[phx-click="simplify-accept"])) |> render_click()
+
+      # A captured click, replayed on the SAME socket with the SAME id.
+      rendered = render_click(view, "simplify-accept", %{"request-id" => request.id})
+
+      assert rendered =~ "already been decided"
+
+      accepts =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.filter(&(&1.event_type == "simplify-accept"))
+
+      assert length(accepts) == 1
+    end
+
+    test "an ANONYMOUS socket pushing accept with a real request id is refused and writes no row",
+         %{conn: conn} do
+      seed_simplify_paper()
+
+      {:ok, alice, _} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
+      alice |> element(~s(button[phx-click="simplify-request"])) |> render_click()
+
+      request =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.find(&(&1.event_type == "simplify-request"))
+
+      # No credential at all — `conn`, not `reader_conn(conn)`.
+      {:ok, anon, _} = live(conn, "/papers/#{@simplify_slug}")
+
+      render_click(anon, "simplify-accept", %{"request-id" => request.id})
+
+      refute Enum.any?(
+               Events.list_for_paper(@simplify_slug),
+               &(&1.event_type == "simplify-accept")
+             )
+    end
+
     test "a paper WITHOUT a goal_id renders NO Simplify button", %{conn: conn} do
       slug = "2026-05-25-no-goal-simplify-paper"
 
@@ -1164,11 +1315,141 @@ defmodule BarkparkWeb.BulldocsLiveTest do
           })
         )
 
-      {:ok, _view, html} = live(conn, "/papers/#{slug}")
+      # Identified, for the same reason as the U5 twin: the refutation is
+      # about the missing goal_id, not about the missing principal.
+      {:ok, _view, html} = live(reader_conn(conn), "/papers/#{slug}")
 
       assert html =~ "No goal, no simplify."
       refute html =~ ~s(id="paper-simplify")
       refute html =~ ~s(phx-click="simplify-request")
+    end
+  end
+
+  describe "anonymous readers cannot WRITE paper_events (ruling arpss-bulldocs-anon-paper-event-write-ruling)" do
+    @anon_slug "2026-09-10-anon-write-ruling-demo"
+    @anon_goal "g-anon-write-ruling"
+
+    # One paper that carries BOTH a source_doc (→ the U5 action bar) and a
+    # goal_id (→ the U4 Simplify control), so all four `paper_events` writers
+    # are reachable-in-principle from the same mount.
+    defp seed_anon_paper! do
+      {:ok, paper} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => @anon_slug,
+            "style" => "article",
+            "goal_id" => @anon_goal,
+            "source_doc" => "/plans/2026-09-10-anon-ruling-plan.html",
+            "body_html" => "<p id=\"anon-body\">Anon write ruling body.</p>"
+          })
+        )
+
+      # A pre-existing row so the "count unchanged" control is NON-VACUOUS: a
+      # broken query returning [] would otherwise read as "nothing written".
+      {:ok, _seed} =
+        Events.create_event(%{
+          "event_type" => "plan-written",
+          "goal_id" => @anon_goal,
+          "paper_slug" => @anon_slug,
+          "payload_html" => "<p>seed</p>",
+          "branch" => "main"
+        })
+
+      paper
+    end
+
+    # Every reader control that persists a `paper_events` row, with a payload
+    # that WOULD write if it reached the handler.
+    @writer_probes [
+      {"paper-action", %{"action" => "build"}},
+      {"simplify-request", %{}},
+      {"simplify-accept", %{}},
+      {"simplify-reject", %{}}
+    ]
+
+    defp anon_assigns(view), do: :sys.get_state(view.pid).socket.assigns
+    defp anon_flash(view), do: anon_assigns(view).flash || %{}
+
+    test "the derived writer set is exactly the four gated events" do
+      assert Enum.sort(Edit.reader_write_events()) ==
+               Enum.sort(Enum.map(@writer_probes, &elem(&1, 0)))
+    end
+
+    test "an anonymous mount is READ ONLY: no row is written, the socket lives",
+         %{conn: conn} do
+      seed_anon_paper!()
+
+      {:ok, view, html} = live(conn, "/papers/#{@anon_slug}")
+
+      # The reader rendered, and the viewer really is anonymous.
+      assert html =~ "Anon write ruling body."
+      assert anon_assigns(view).viewer == BarkparkWeb.PaperViewer.anonymous()
+      assert anon_assigns(view).can_act? == false
+
+      # Courtesy half: neither writing control is even offered.
+      refute html =~ ~s(id="paper-action-bar")
+      refute html =~ ~s(id="paper-simplify")
+
+      before = Events.list_for_paper(@anon_slug)
+      # Non-vacuous control: the query DOES see rows for this paper.
+      assert length(before) > 0
+
+      for {event, params} <- @writer_probes do
+        # simplify-accept / simplify-reject only write when a branch is
+        # pending, so hand the socket one — otherwise their arm of this
+        # mutation control would pass for the wrong reason.
+        :sys.replace_state(view.pid, fn state ->
+          put_in(state.socket.assigns.pending_simplify, "simplified-1")
+        end)
+
+        render_hook(view, event, params)
+
+        # The MUTATION assertion first: with the guard removed this is the
+        # line that reds, and it reds on the thing the ruling forbids (a row),
+        # not merely on missing refusal copy.
+        assert Events.list_for_paper(@anon_slug) == before,
+               "#{event} wrote a paper_events row as an anonymous visitor"
+
+        assert anon_flash(view)["error"] == Edit.anon_denial(),
+               "#{event} was not refused"
+
+        assert Process.alive?(view.pid), "#{event} killed the reader socket"
+      end
+
+      # Still rendering after four refusals.
+      assert render(view) =~ "Anon write ruling body."
+    end
+
+    test "a principal keeps the feature: simplify-request writes exactly one row",
+         %{conn: conn} do
+      seed_anon_paper!()
+
+      {:ok, view, html} = live(reader_conn(conn), "/papers/#{@anon_slug}")
+
+      assert %{kind: :token} = anon_assigns(view).viewer
+      assert anon_assigns(view).can_act? == true
+      assert html =~ ~s(id="paper-simplify")
+      assert html =~ ~s(id="paper-action-bar")
+
+      refute Enum.any?(
+               Events.list_for_paper(@anon_slug),
+               &(&1.event_type == "simplify-request")
+             )
+
+      rendered =
+        view
+        |> element(~s(button[phx-click="simplify-request"]))
+        |> render_click()
+
+      requests =
+        Events.list_for_paper(@anon_slug)
+        |> Enum.filter(&(&1.event_type == "simplify-request"))
+
+      assert length(requests) == 1
+      assert hd(requests).goal_id == @anon_goal
+      assert hd(requests).branch == "simplified-1"
+      assert rendered =~ "Simplify requested — simplified-1"
+      refute anon_flash(view)["error"] == Edit.anon_denial()
     end
   end
 

@@ -1165,6 +1165,89 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert Repo.get(Deployment, clean.id).deferral_depth == nil
     end
 
+    # dr-bl-deferral-scheduled-vs-actual-gap. The chain's SHAPE is data (above);
+    # its PACE was not. Nobody could tell whether a retry waited because the box
+    # was busy or because our OWN ladder told it to — the question the
+    # concurrency-cap experiment turns on — without hand SQL over `inserted_at`.
+    #
+    # The two columns describe THE SAME interval (previous round → this round),
+    # so this test backdates the first deferral by a known 61 seconds and reads
+    # BOTH numbers off the second row: 61 actual against the 60s window the
+    # ladder asked for. A ratio, from one row, with no self-join.
+    #
+    # IT CAN LOSE, twice over: delete `deferral_actual_gap_s:` from the
+    # transition in `Deploy.defer/3` and the 61 assertion reds on nil; delete
+    # `deferral_scheduled_s:` and the ladder assertion reds on nil. Neither
+    # deletion touches a single assertion in the two tests around it.
+    test "the chain's PACE is data too — the scheduled window and the actual gap, on the same row" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{"error" => %{"code" => "box_at_capacity", "message" => "1 of 1 build slots in use"}}}
+      )
+
+      {:ok, first} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(first.id)
+      first_row = Repo.get(Deployment, first.id)
+
+      # ROUND 1 RECORDS NOTHING, and that is the honest reading: there is no
+      # previous round, so no interval elapsed. A 0 here would say the rebuild
+      # fired instantly.
+      assert first_row.deferral_depth == 1
+      assert first_row.deferral_scheduled_s == nil
+      assert first_row.deferral_actual_gap_s == nil
+
+      # Age the first round by a KNOWN gap, so the second row's measurement is
+      # a number this test chose rather than whatever the suite's clock did.
+      backdated = DateTime.add(first_row.inserted_at, -61, :second)
+
+      {1, _} =
+        Repo.update_all(
+          from(d in Deployment, where: d.id == ^first.id),
+          set: [inserted_at: backdated]
+        )
+
+      {:ok, second} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(second.id)
+      second_row = Repo.get(Deployment, second.id)
+
+      assert second_row.deferral_depth == 2
+
+      # ACTUAL: the difference of the two rows' `inserted_at` — the SAME column
+      # and the same arithmetic the 2,262-deferral hand measurement used.
+      #
+      # DERIVED, NEVER A LITERAL. A literal 61 here asserts that ZERO wall-clock
+      # time passed between the backdate and the second enqueue, which is false
+      # the moment the suite crosses a second boundary in between — under CI
+      # load it reds with `left: 62, right: 61` on PRs that touch nothing near
+      # this file (run 34555593107, 2026-09-11). The expected value is read off
+      # the two rows' OWN stamps, so the assertion measures what the column
+      # recorded against what the rows say, and the floor below is what proves
+      # the 61s backdate actually took.
+      assert second_row.deferral_actual_gap_s ==
+               DateTime.diff(second_row.inserted_at, backdated)
+
+      assert second_row.deferral_actual_gap_s >= 61
+
+      # SCHEDULED: the window the ladder asked for when round 1 re-queued. Read
+      # off `deferral_backoff_seconds/1` and never a literal, so an operator who
+      # stretched `AUTODEPLOY_DEBOUNCE_S` does not red this test with a config.
+      assert second_row.deferral_scheduled_s == Deploy.deferral_backoff_seconds(1)
+
+      # Round 3 climbs the ladder with the chain: depth 3's scheduled window is
+      # the one depth 2 asked for, which is a longer window than depth 1's.
+      {:ok, third} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(third.id)
+      third_row = Repo.get(Deployment, third.id)
+
+      assert third_row.deferral_depth == 3
+      assert third_row.deferral_scheduled_s == Deploy.deferral_backoff_seconds(2)
+      assert third_row.deferral_scheduled_s > second_row.deferral_scheduled_s
+      assert is_integer(third_row.deferral_actual_gap_s)
+    end
+
     # dr-w28 S6. The previous test makes every DEFERRED round queryable — and
     # left the one row that matters most out of it. The terminal round is the
     # publish the fleet GAVE UP ON, and `fail/2` wrote only status /
@@ -1291,6 +1374,71 @@ defmodule BarkparkCloud.SitesDeployTest do
     # literal: a capacity chain gets 12 and a busy/stuck chain gets 6, so a
     # sentence that hardcoded either would misstate the other cause's whole
     # budget to the operator reading it.
+    # dr-w4-bl-deferral-raw-column-ambiguous — THE SPOOF, DRIVEN END TO END.
+    #
+    # Both runs below go through the REAL `start_on_box` → `box_refusal/3` →
+    # `defer/4` path. The only difference between the two 409 bodies is the
+    # presence of the `code` key: the codeless one's `message` is
+    # `"box_at_capacity — " <> <the verbatim capacity prose>`, so
+    # `refusal_detail/1` renders it to THE SAME BYTES the coded one renders to,
+    # and the test asserts that byte-identity rather than assuming it.
+    #
+    # Before the column, both rows classified BOX_AT_CAPACITY_DEFERRED and took
+    # the capacity leash of 12 — a forged cause with no code involved anywhere.
+    test "a CODELESS 409 forging the capacity bytes is deferred as BUSY, not as capacity" do
+      {bp, site} = setup_site()
+
+      # The verbatim body, READ from the fixture the api-side conformance test
+      # pins — never retyped here (#16598).
+      forged_message = "box_at_capacity — " <> BoxCapacityRefusalFixture.message()
+
+      # NO `code` KEY. This is the whole specimen.
+      FakeBoxRelay.program(start: {:ok, 409, %{"error" => %{"message" => forged_message}}})
+
+      {:ok, spoof} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(spoof.id)
+      spoof_row = Repo.get(Deployment, spoof.id)
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{
+             "error" => %{
+               "code" => "box_at_capacity",
+               "message" => BoxCapacityRefusalFixture.message()
+             }
+           }}
+      )
+
+      {:ok, coded} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(coded.id)
+      coded_row = Repo.get(Deployment, coded.id)
+
+      # THE PRECONDITION: the box's half of the two reasons is byte-identical.
+      # (`defer/3` appends its own `" — deferred: refusal N of B …"` clause,
+      # which is DOWNSTREAM of the classification and therefore differs — that
+      # divergence is the finding, not a flaw in the comparison.)
+      box_words = fn reason -> reason |> String.split(" — deferred: ") |> hd() end
+      assert box_words.(spoof_row.failure_reason) === box_words.(coded_row.failure_reason)
+
+      # THE COLUMN IS WHERE THEY DIFFER, and it was written at refusal time.
+      assert spoof_row.box_refusal_code == DeployLedger.no_box_code()
+      assert coded_row.box_refusal_code == "box_at_capacity"
+
+      # THE CRITERION, on the persisted rows.
+      refute DeployLedger.classify(spoof_row) == "BOX_AT_CAPACITY_DEFERRED"
+      assert DeployLedger.classify(spoof_row) == "BOX_BUSY_DEFERRED"
+      assert DeployLedger.classify(coded_row) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # …and the producer's OWN stamped cause agrees with the ledger, because it
+      # is computed through the same column-first reader. A forged capacity
+      # refusal takes the BUSY leash of 6, not the capacity leash of 12.
+      assert spoof_row.deferral_cause == "BOX_BUSY_DEFERRED"
+      assert spoof_row.deferral_bound == 6
+      assert coded_row.deferral_cause == "BOX_AT_CAPACITY_DEFERRED"
+      assert coded_row.deferral_bound == 12
+    end
+
     test "the rendered bound is the CAUSE's own bound — 12 for capacity, 6 for a busy box" do
       {bp, site} = setup_site()
 
@@ -1973,6 +2121,196 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert DeployLedger.classify(row) == "BOX_DEPLOY_DISABLED_503"
       refute DeployLedger.label("BOX_DEPLOY_DISABLED_503") =~ "unavailable"
       assert DeployLedger.refusal_phase(row.failure_reason) == :start
+    end
+  end
+
+  # dr-bl-w8-graced-deploys-are-uncounted. THE SAVES WERE THE UNCOUNTED HALF.
+  #
+  # Grace has always been able to say what it could not save: `with_graced_note/2`
+  # puts "after tolerating 3 transient box 5xx" into the `failure_reason` of a row
+  # that failed anyway, and four tests above assert exactly that. Nothing said
+  # what grace DID save, in any outcome — because `forget_graced_refusals/1`
+  # `Map.drop`s the ctx tally on every poll that reached the box, and a poll that
+  # reached the box is what a working grace LOOKS LIKE. The start-retry arm
+  # recorded nothing at all, win or lose.
+  #
+  # Charter D114 is the bill for that: one wire literal falling out of
+  # `transient_refusal?/1` deletes 3 start retries and 45 poll-grace beats per
+  # deploy, and with no counter the loss reads only as a higher failure rate with
+  # nothing naming the cause.
+  #
+  # THE MUTATION THESE TESTS ANSWER TO: reinstate the silent drop — delete the
+  # `record_grace(...)` call from `record_graced_refusal/2` and from the start
+  # `>= 500` arm of `start_on_box/6` — and every test in this block goes red.
+  describe "the grace that WORKED is counted (dr-bl-w8)" do
+    setup do
+      ref = make_ref()
+      test = self()
+
+      :telemetry.attach(
+        "grace-#{inspect(ref)}",
+        [:barkpark_cloud, :sites, :deploy, :grace],
+        fn event, measurements, metadata, _ ->
+          send(test, {:grace_telemetry, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("grace-#{inspect(ref)}") end)
+      :ok
+    end
+
+    test "graced poll refusals are counted on the row and SURVIVE the reaching poll that clears the caption tally" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      # Two blips, then the box comes back and the build finishes. This is the
+      # save: the deploy goes LIVE, so `with_graced_note/2` never runs and the
+      # ctx tally is dropped by the very poll that made the run a success.
+      FakeBoxRelay.program(
+        polls: [
+          crash_500(),
+          crash_500(),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "live"
+      # The pre-W8 record of those two saves, in full:
+      assert is_nil(row.failure_reason)
+
+      # The post-W8 record: a NUMBER on the row the grace saved.
+      assert row.graced_poll_refusals == 2
+      assert row.graced_start_retries == 0
+      assert %DateTime{} = row.last_graced_at
+
+      # …and the in-process signal, carrying the box's own caption so a reader
+      # can tell WHICH refusal was swallowed, not merely how many.
+      assert_received {:grace_telemetry, [:barkpark_cloud, :sites, :deploy, :grace], %{count: 1},
+                       %{
+                         kind: :poll_refusal,
+                         deployment_id: id,
+                         site_slug: slug,
+                         caption: caption
+                       }}
+
+      assert id == d.id
+      assert slug == site.slug
+      assert caption =~ "internal_error"
+      assert_received {:grace_telemetry, _, %{count: 1}, %{kind: :poll_refusal}}
+    end
+
+    test "a start retry that then succeeds is counted — the arm that recorded nothing in any outcome" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      # The blip ate the response and the box did NOT take the job; the retry
+      # lands and the build runs to live. Nothing about this row used to say a
+      # retry had happened.
+      FakeBoxRelay.program(
+        start: [crash_500(), {:ok, 202, %{"status" => "started"}}],
+        polls: [FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "live"
+      assert row.graced_start_retries == 1
+      assert row.graced_poll_refusals == 0
+      assert %DateTime{} = row.last_graced_at
+
+      assert_received {:grace_telemetry, _, %{count: 1},
+                       %{kind: :start_retry, deployment_id: id, caption: caption}}
+
+      assert id == d.id
+      assert caption =~ "refused the deploy"
+
+      # Two triggers, one build — the retry is a retry (the D9 guarantee the
+      # count now has a number behind it).
+      assert Enum.count(FakeBoxRelay.calls(), &match?({:start_deploy, _}, &1)) == 2
+    end
+
+    test "a wedged-Runner save is counted too — the exact literal charter D114 shows a rename deletes" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          runner_unavailable_503(),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "live"
+      # Drop `"deploy_runner_unavailable"` from `transient_refusal?/1` and this
+      # deploy stops going live at all — but BEFORE this column, the only visible
+      # difference between the two worlds was a failure rate.
+      assert row.graced_poll_refusals == 1
+    end
+
+    test "the counter also survives the FAILING path, alongside the caption it does not replace" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(polls: [crash_500()])
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      # The prose is the operator's and is untouched; the column is the
+      # aggregate's. Both, never one instead of the other.
+      assert row.failure_reason =~ "3 transient box 5xx"
+      assert row.graced_poll_refusals == 3
+    end
+
+    test "the count is reachable from a NAMED QUERY over a pinned window, not only from one row" do
+      {bp, site} = setup_site()
+
+      {:ok, saved} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          crash_500(),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(saved.id)
+
+      from_at = DateTime.add(DateTime.utc_now(), -3600, :second)
+      to_at = DateTime.add(DateTime.utc_now(), 3600, :second)
+
+      census = Registry.deploy_grace_census(from_at, to_at, site_ids: [site.id])
+
+      assert census.deployments == 1
+      assert census.graced_poll_refusals == 1
+      assert census.graced_start_retries == 0
+      assert census.deployments_graced == 1
+      # THE NUMBER THE TASK EXISTS FOR: deploys that reached `live` only because
+      # grace held. Kill grace and this goes to zero while failures climb.
+      assert census.saved == 1
+      # A zero that means "nobody was counting" is kept apart from a zero that
+      # means "no saves" — a census that summed them could not be read.
+      assert census.unmeasured == 0
+
+      # The window is PINNED, so a census that excludes the row reports zero
+      # rather than silently reusing the fleet's answer.
+      past =
+        Registry.deploy_grace_census(
+          DateTime.add(from_at, -7200, :second),
+          from_at,
+          site_ids: [site.id]
+        )
+
+      assert past.deployments == 0
+      assert past.saved == 0
     end
   end
 

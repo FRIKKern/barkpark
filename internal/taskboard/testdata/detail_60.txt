@@ -44,6 +44,11 @@ updated 8m ago (Jul 04, 17:22)
   what is true — never incremental event application, so
   no drift and no ghost rows.
 
+
+
+
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
   Approach
 
   Reuse internal/apiclient's StartSSE and pollOnce seams;

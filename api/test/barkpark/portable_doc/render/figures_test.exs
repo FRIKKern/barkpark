@@ -40,6 +40,15 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
   end
 
   describe "code_block_html/1" do
+    test "a lang rides as data-lang (escaped); no lang keeps the frame byte-identical (plan #27)" do
+      with_lang = Figures.code_block_html("IO.puts(1)", [], "elixir")
+      assert with_lang =~ ~s(<pre data-lang="elixir" style=")
+      assert with_lang =~ "IO.puts(1)</pre>"
+      assert Figures.code_block_html("x", [], nil) == Figures.code_block_html("x")
+      assert Figures.code_block_html("x", [], "  ") == Figures.code_block_html("x")
+      assert Figures.code_block_html("x", [], ~s(a"b)) =~ ~s(data-lang="a&quot;b")
+    end
+
     test "wraps value in <pre> with expected inline styles" do
       html = Figures.code_block_html("hello world")
       assert html =~ "<pre style="

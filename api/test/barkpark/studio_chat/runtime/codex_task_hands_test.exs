@@ -7,6 +7,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTaskHandsTest do
   alias Barkpark.StudioChat.Runtime.Codex
   alias Barkpark.StudioChat.Runtime.RemoteSecrets
   alias Barkpark.Tenancy
+  alias Barkpark.TestTmp
 
   @fake_app_server Path.expand("../../../fixtures/codex_app_server/fake_app_server.py", __DIR__)
 
@@ -18,7 +19,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTaskHandsTest do
        %{
          id: "host-1",
          workspace_id: workspace_id,
-         approved_roots: [System.tmp_dir!()],
+         approved_roots: [TestTmp.root()],
          capabilities: %{
            "providers" => %{
              "codex" => %{
@@ -60,7 +61,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTaskHandsTest do
       )
 
     session_id = Ecto.UUID.generate()
-    log = Path.join(System.tmp_dir!(), "codex_task_hands_#{suffix}.jsonl")
+    log = TestTmp.path("codex_task_hands_#{suffix}.jsonl")
     on_exit(fn -> File.rm(log) end)
 
     assert {:ok, runtime} =
@@ -80,6 +81,10 @@ defmodule Barkpark.StudioChat.Runtime.CodexTaskHandsTest do
     wire = File.read!(log)
     assert wire =~ ~s("mcp_servers")
     assert wire =~ ~s("barkpark")
+    # The Codex loopback spawns the CURATED chat toolset, never --tools all
+    # (task-scc-bl-mcp-chat-toolset, charter D64).
+    assert wire =~ ~s(["mcp","serve","--tools","chat"])
+    refute wire =~ ~s("--tools","all")
     assert wire =~ ~s("BARKPARK_WORKER_ID")
     refute wire =~ "bpcs_"
 

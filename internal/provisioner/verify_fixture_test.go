@@ -49,13 +49,13 @@ func readVerifyProbesFixture(t *testing.T) verifyProbesFixture {
 	return fx
 }
 
-// TestVerifyFixtureIsWellFormed pins the fixture's own shape: exactly three
+// TestVerifyFixtureIsWellFormed pins the fixture's own shape: exactly four
 // probes, each with a non-empty name/label/pass-rule, in the gate order. A typo
 // or a dropped field reds here before any executor even runs.
 func TestVerifyFixtureIsWellFormed(t *testing.T) {
 	fx := readVerifyProbesFixture(t)
 
-	wantNames := []string{"verify.api", "verify.login", "verify.studio"}
+	wantNames := []string{"verify.api", "verify.login", "verify.studio", "verify.siteplane"}
 	if len(fx.Probes) != len(wantNames) {
 		t.Fatalf("fixture has %d probes, want %d: %+v", len(fx.Probes), len(wantNames), fx.Probes)
 	}
@@ -98,13 +98,11 @@ func TestProvisionerProbeVocabularyMatchesFixture(t *testing.T) {
 		},
 	}
 
-	// The gate's dispatch order (runVerifyGate iterates exactly this slice).
-	probes := []func(context.Context, verifyConfig, *http.Client) probeOutcome{
-		verifyAPI, verifyLogin, verifyStudio,
-	}
-
+	// The gate's dispatch order — the SAME slice runVerifyGate walks, read
+	// directly so a probe added to (or dropped from) the gate cannot pass here
+	// by way of a stale hand-copied list.
 	var gotNames []string
-	for _, probe := range probes {
+	for _, probe := range verifyProbes {
 		out := probe(context.Background(), cfg, client)
 		gotNames = append(gotNames, out.name)
 	}

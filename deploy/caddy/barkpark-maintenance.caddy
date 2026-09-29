@@ -10,13 +10,43 @@
 # the whole 4xx surface of the static sites was indistinguishable from a deploy
 # window. `handle_errors 502 503 504` keeps the branded page on the gateway
 # errors it is for (dial failure / gateway timeout) and lets a 404 be a 404.
-# A 4xx/5xx the app RETURNS is proxied through untouched either way, so this
-# never masks a real application error.
+# A 4xx/5xx the app RETURNS is proxied through untouched either way. Do NOT
+# shorten that to "this never masks a real application error" — the handler
+# fires on errors CADDY raises, and a `file_server` 404 IS one of those, which
+# is the entire reason the status list above exists. The reassuring sentence is
+# what made the incident invisible for the life of the fix.
+#
+# The Content-Type header is load-bearing and NOT decoration. `respond` with a
+# body and no Content-Type defaults the response to `text/plain; charset=utf-8`
+# (measured, Caddy 2.11.4), so the browser paints the raw `<!doctype html>…`
+# source of this page instead of rendering it. Setting it changes only HOW the
+# 503 renders — the STATUS stays 503 + Retry-After on every path, assets
+# included, and a healthy upstream never enters this handler at all.
 #
 # deploy/instance-deploy.sh injects this automatically (idempotent, validated,
-# auto-reverting). For a hand-managed Caddyfile, paste the block below into each
-# site and `caddy reload`. The renderers in internal/caddyfile/caddyfile.go and
-# internal/cli/setup/caddy.go bake the same block into every provisioned box.
+# auto-reverting) and repairs an already-armed box that still carries the bare
+# form. For a hand-managed Caddyfile, paste the block below into each site and
+# `caddy reload`.
+#
+# WHAT THE OTHER RENDERERS ACTUALLY EMIT, as of 2026-09-17 — this file used to
+# claim they "bake the same block", and they do not. `MaintenanceHandler`
+# (internal/caddyfile/caddyfile.go), its four call sites
+# (caddyfile.go's reverse-proxy blocks, internal/cli/setup/caddy.go,
+# internal/provisioner/attach_domain.go), and the provisioning asset
+# internal/cli/setup/assets/deploy.sh + its byte-identical twin at the repo root
+# ALL still emit the BARE form. A box provisioned by `bp setup` and never
+# touched by instance-deploy.sh keeps it indefinitely, and deploy/site-deploy.sh
+# then arms a `handle_path /sites/<slug>/*` file_server route into that same
+# block — the exact nesting the incident above describes.
+#
+# `deploy/caddy-handle-errors-scope-check.sh` is the standing predicate over
+# EVERY tracked file (not a list of renderers anyone has to remember to update).
+# It names those sites on every run under a dated stand-down that expires
+# 2026-09-24; a bare emission anywhere else reds immediately.
+#
+# NOT A DEFECT, DO NOT "FIX": caddyfile.go's isStatic() branch deliberately
+# omits MaintenanceHandler entirely, so a static site's own 404 surfaces. That
+# half is correctly fenced.
 #
 # Example site block:
 #
@@ -24,6 +54,7 @@
 #       reverse_proxy localhost:4000
 #       handle_errors 502 503 504 {
 #           header Retry-After "15"
+#           header Content-Type "text/html; charset=utf-8"
 #           respond 503 {
 #               body <<BARKPARK_MAINTENANCE
 #   <!doctype html> … BARKPARK_MAINTENANCE
@@ -33,6 +64,7 @@
 #   }
 handle_errors 502 503 504 {
 	header Retry-After "15"
+	header Content-Type "text/html; charset=utf-8"
 	respond 503 {
 		body <<BARKPARK_MAINTENANCE
 <!doctype html>

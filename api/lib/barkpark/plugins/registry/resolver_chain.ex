@@ -19,8 +19,10 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
        that register without an Application config entry continue to work.
 
   Whichever source provides the names, each name is resolved to its
-  registered entry via `Registry.lookup/1`; plugins listed in config but
-  never registered are silently skipped (with a debug log line).
+  registered entry by `Barkpark.Content.PluginLoadOrder.plugins/3`; an entry
+  that is not a registered plugin (an unknown name, a loadable module that
+  never registered, a malformed entry) is skipped with a `Logger.warning`
+  naming it.
   """
 
   require Logger
@@ -61,6 +63,12 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
   # capabilities are deliberately NOT filtered: an installed plugin's
   # data-integrity gates and public rendering always run.
   @surfacing_callbacks [:resolve_desk_items, :resolve_top_menu_entries, :resolve_doc_actions]
+
+  # Upper bound on the "is this plugin enabled in some OTHER workspace?" scan
+  # (task-e34595f816cd4bd2). The disabled-tab affordance is a courtesy, not a
+  # correctness gate, so it is better to under-report on a huge tenant roster
+  # than to make every Studio nav render walk it.
+  @elsewhere_scan_limit 50
 
   # ─── Resolver chain core ────────────────────────────────────────────────
   #
@@ -181,42 +189,22 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
         # `register/2`, and routing through `lookup/1` (a `GenServer.call` to
         # self) deadlocks the registry — "process attempted to call itself" — on
         # any boot with `:barkpark, :plugins` configured (e.g. BARKPARK_PLUGINS).
-        by_name = Map.new(Registry.all(), &{&1.name, &1})
-
-        configured
-        |> Enum.map(&plugin_name_of/1)
-        |> Enum.reject(&is_nil/1)
-        |> Enum.flat_map(fn name ->
-          case Map.fetch(by_name, name) do
-            {:ok, entry} ->
-              [entry]
-
-            :error ->
-              Logger.debug(
-                "Barkpark.Plugins.Registry: plugin #{inspect(name)} listed in " <>
-                  ":barkpark, :plugins but not registered — skipping"
-              )
-
-              []
-          end
-        end)
+        #
+        # Entries are interpreted by `Barkpark.Content.PluginLoadOrder.plugins/3`
+        # (task-3fbd48182b1d35ea): this is a plugin-RECORD reader, so a loadable
+        # module that is not registered is skipped — and, like every other
+        # skipped entry, logged by name at warning level (it was a `debug` line,
+        # invisible at the default level, before).
+        #
+        # Quiet INSIDE the Registry process: there this runs from
+        # `refresh_snapshot/1` mid-registration, and with a configured
+        # `BARKPARK_PLUGINS="a,b"` boot, "b" is simply not registered YET while
+        # "a" registers. Every other caller warns.
+        Barkpark.Content.PluginLoadOrder.plugins(configured, Registry.all(), __MODULE__,
+          warn: self() != Process.whereis(Registry)
+        )
     end
   end
-
-  # The Application config entry can be a bare module atom, a `{name, module}`
-  # tuple, or a string plugin name. We only need the name to look up the
-  # registered entry — module form gets reverse-mapped via `Registry.all/0`.
-  defp plugin_name_of(name) when is_binary(name), do: name
-
-  defp plugin_name_of({name, _module}) when is_binary(name), do: name
-
-  defp plugin_name_of(module) when is_atom(module) do
-    Enum.find_value(Registry.all(), fn entry ->
-      if entry.module == module, do: entry.name
-    end)
-  end
-
-  defp plugin_name_of(_), do: nil
 
   # Per-plugin resolver dispatch. Three paths:
   #
@@ -349,9 +337,12 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
   # output is sorted by `{order, label}` regardless of registration order.
   @doc false
   def compute_top_menu_entries(baseline, ctx) do
-    :resolve_top_menu_entries
-    |> reduce_resolvers(baseline, ctx)
-    |> Enum.map(&normalize_top_menu_entry/1)
+    surfaced =
+      :resolve_top_menu_entries
+      |> reduce_resolvers(baseline, ctx)
+      |> Enum.map(&normalize_top_menu_entry/1)
+
+    (surfaced ++ disabled_top_menu_entries(ctx))
     |> Enum.sort_by(fn e -> {e.order, e.label} end)
   end
 
@@ -361,9 +352,147 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
       path: to_string(entry[:path] || entry["path"] || "/"),
       icon: entry[:icon] || entry["icon"],
       order: entry[:order] || entry["order"] || 100,
-      active_when: entry[:active_when] || entry["active_when"]
+      active_when: entry[:active_when] || entry["active_when"],
+      # The disabled signal the surfacing filter used to destroy. Every entry
+      # carries the pair so nav.ex reads ONE shape: an entry the current
+      # workspace surfaces is `disabled: false, reason: nil`; a
+      # disabled-here-but-enabled-elsewhere entry carries `true` + the
+      # human sentence naming the workspace that DOES enable it.
+      disabled: false,
+      reason: nil
     }
   end
+
+  # ─── Disabled-but-enabled-elsewhere top-menu entries ────────────────────
+  #
+  # task-e34595f816cd4bd2. `enablement_filtered_plugins/2` DROPS a plugin the
+  # current workspace does not surface, so its tab used to VANISH — which
+  # reads as a broken app, not a scoping decision. This adds the entries back
+  # in an explicit disabled state, for exactly one population:
+  #
+  #   * the plugin is NOT surfaced by the current workspace, AND
+  #   * some OTHER workspace DOES surface it (its override says enabled, or
+  #     it has no override there and its declaration default is enabled).
+  #
+  # DELIBERATE SCOPE (the row is about "enabled elsewhere"):
+  #
+  #   * A plugin disabled EVERYWHERE — the off-by-default roster
+  #     (onixedit/tickets/pulse/frt/github) on a stock install — still
+  #     vanishes. Nothing is "missing" for the user to be confused about, and
+  #     surfacing five permanently-dead tabs would undo the leak fix
+  #     (snav-w1-gating-determinism).
+  #   * A ctx with NO `:workspace_id` produces NOTHING. That keeps the
+  #     registration path (`refresh_snapshot/1` drives `ctx = %{}`) and the
+  #     cached workspace-less snapshot byte-identical, and — load-bearing —
+  #     Repo-free: the "enabled elsewhere" predicate is the only Repo read in
+  #     this chain beyond `Enablement.effective/1`, and it never runs there.
+  #   * Routing is untouched: a disabled plugin's deep link still resolves
+  #     (non-surfacing callbacks were never filtered).
+  #
+  # Fails CLOSED: any raise/throw/exit resolves to `[]` — i.e. exactly
+  # today's vanish behaviour — so a DB hiccup can never break the top bar.
+  @doc false
+  @spec disabled_top_menu_entries(map()) :: [map()]
+  def disabled_top_menu_entries(ctx) do
+    case ctx_workspace_id(ctx) do
+      nil -> []
+      workspace_id -> do_disabled_top_menu_entries(workspace_id, ctx)
+    end
+  rescue
+    _ -> []
+  catch
+    _, _ -> []
+  end
+
+  defp do_disabled_top_menu_entries(workspace_id, ctx) do
+    effective = Barkpark.Plugins.Enablement.effective(workspace_id)
+
+    hidden =
+      load_ordered_plugins()
+      |> Enum.reject(&Barkpark.Plugins.Enablement.enabled?(effective, &1.name))
+
+    case hidden do
+      [] ->
+        []
+
+      hidden ->
+        elsewhere = enabled_elsewhere(Enum.map(hidden, & &1.name), workspace_id)
+
+        {additive, additive_arity, default, lift_kind} =
+          Map.fetch!(@resolver_callbacks, :resolve_top_menu_entries)
+
+        for entry <- hidden,
+            workspace_label = Map.get(elsewhere, entry.name),
+            is_binary(workspace_label),
+            raw <-
+              entry
+              |> apply_resolver(
+                :resolve_top_menu_entries,
+                additive,
+                additive_arity,
+                default,
+                lift_kind,
+                [],
+                ctx
+              )
+              |> List.wrap(),
+            is_map(raw) do
+          raw
+          |> normalize_top_menu_entry()
+          |> Map.merge(%{
+            disabled: true,
+            reason: "Disabled in this workspace — enabled in #{workspace_label}"
+          })
+        end
+    end
+  end
+
+  # For each hidden plugin name, the label of the FIRST other workspace that
+  # surfaces it (nil/absent when none does). One `list_workspaces/0` read per
+  # collect, never per plugin; bounded by @elsewhere_scan_limit so a large
+  # tenant roster cannot turn a nav render into an unbounded scan.
+  defp enabled_elsewhere(hidden_names, workspace_id) do
+    defaults = Barkpark.Plugins.Enablement.effective(nil)
+
+    others =
+      Barkpark.Tenancy.list_workspaces()
+      |> Enum.reject(&(&1.id == workspace_id))
+      |> Enum.take(@elsewhere_scan_limit)
+      |> Enum.map(&{&1.name || &1.slug, Barkpark.Tenancy.workspace_plugin_settings(&1)})
+
+    for name <- hidden_names,
+        label =
+          Enum.find_value(others, fn {label, overrides} ->
+            if enabled_in_overrides?(overrides, defaults, name), do: label
+          end),
+        is_binary(label),
+        into: %{} do
+      {name, label}
+    end
+  end
+
+  # One workspace's verdict on one plugin: its override when the override
+  # carries a boolean `enabled`, else the declaration default. Mirrors
+  # `Enablement.effective/1`'s merge for the single field we need, without a
+  # per-workspace `effective/1` (which would be one Repo.get each).
+  defp enabled_in_overrides?(overrides, defaults, name) when is_map(overrides) do
+    case override_enabled_flag(Map.get(overrides, name)) do
+      flag when is_boolean(flag) -> flag
+      _ -> Barkpark.Plugins.Enablement.enabled?(defaults, name)
+    end
+  end
+
+  defp enabled_in_overrides?(_overrides, defaults, name),
+    do: Barkpark.Plugins.Enablement.enabled?(defaults, name)
+
+  defp override_enabled_flag(override) when is_map(override) do
+    case Map.fetch(override, "enabled") do
+      {:ok, flag} -> flag
+      :error -> Map.get(override, :enabled)
+    end
+  end
+
+  defp override_enabled_flag(_), do: nil
 
   # ─── Duplicate-form warning ─────────────────────────────────────────────
 

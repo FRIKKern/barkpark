@@ -57,8 +57,28 @@ else
   fi
 fi
 
+# COUNT THE LIST BEFORE READING IT. `total` below counts ITERATIONS of a loop
+# whose input is fd 0; every child in that body shares that fd, and one that
+# reads stdin DRAINS it — the loop then ends early, with no error, and the tally
+# line prints "1 open PR(s)" in exactly the same words as a full sweep. MEASURED
+# 2026-09-21: a 3-PR list with one stdin-reading child in the renew path swept 1
+# of 3 and exited 0. `enumerated` is what the ENUMERATION handed over, so the
+# identity below can tell a complete sweep from a truncated one.
+#
+# No `</dev/null` on the renew invocation, deliberately: that call is the only
+# place scripts/task-lease-sweep.test.sh can plant a draining child (through
+# TASK_LEASE_SWEEP_RENEW), and a control arm that can still fire is worth more
+# than a belt that makes these braces untestable. The identity is the fix — it
+# notices a short sweep whoever caused it, including a future child nobody
+# remembered reads fd 0.
+#
+# `awk`, not `wc -l`: wc counts NEWLINES, so a final line with no trailing
+# newline would be invisible to the count while `|| [ -n "$line" ]` makes the
+# loop process it — the identity would then refuse a perfectly good sweep.
+enumerated="$(awk 'NF { n++ } END { print n+0 }' "$LIST")"
+
 total=0; renewed=0; skipped=0; declined=0; unknown=0; auth=0; unmeasured=0
-while IFS= read -r line; do
+while IFS= read -r line || [ -n "$line" ]; do
   [ -n "$line" ] || continue
   total=$((total + 1))
   num="$(printf '%s' "$line" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])' 2>/dev/null)" || { unmeasured=$((unmeasured + 1)); echo "task-lease-sweep: CANNOT MEASURE — malformed PR line: $(printf '%s' "$line" | cut -c1-120)" >&2; continue; }
@@ -75,6 +95,15 @@ while IFS= read -r line; do
     *) unknown=$((unknown + 1)); echo "PR #${num}: rc ${rc}, unclassified — $(printf '%s' "$out" | tail -1 | cut -c1-160)" ;;
   esac
 done < "$LIST"
+
+# THE COUNT IDENTITY. This is the only thing that can tell "swept 40 of 40" from
+# "swept 1 of 40". It runs BEFORE the tally line, because a truncated tally is
+# not a smaller true answer — it is a wrong one, and printing it first would put
+# the false number in the log above the refusal.
+if [ "$total" -ne "$enumerated" ]; then
+  echo "task-lease-sweep: CANNOT MEASURE — the loop walked ${total} of the ${enumerated} open PR(s) the list handed it. Something drained the loop's stdin (fd 0 is shared with every child in the body) or the list changed under it; the per-PR tally below would be a wrong number, not a smaller one, so it is not printed." >&2
+  exit 2
+fi
 
 echo "task-lease-sweep: ${total} open PR(s): ${renewed} renewed, ${skipped} skipped, ${declined} declined, ${unknown} unclassified, ${unmeasured} unmeasured, ${auth} token-refused"
 [ "$auth" -gt 0 ] && exit 1

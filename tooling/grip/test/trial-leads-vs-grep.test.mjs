@@ -335,10 +335,20 @@ const EXCLUDE_PROBE = "ZZQ_GRIP_REPOWIDE_EXCLUDE_PROBE_ZZQ";
 // directory to REPO_WIDE_EXCLUDES without extending this fixture reds here,
 // which is the point: a new exclude that nothing plants a file in is an exclude
 // nothing tests.
-const EXPECTED_EXCLUDES = [".git", "node_modules", "_build", "deps", ".turbo", "dist", "build"];
+const EXPECTED_EXCLUDES = [
+  ".git", "node_modules", "_build", "deps", ".turbo", "dist", "build",
+  // `.claude` and `worktrees` joined the set for a MEASURED reason, not tidiness:
+  // agents nest full checkouts of this repo under `.claude/worktrees/`, so without
+  // them the single repo-wide grep walked the tree once per nested worktree (PID
+  // 17091, 38:30 and still running). The BASENAME spelling is deliberate — see
+  // trial-leads-worktree-exclude.test.mjs, which pins it and plants the nested
+  // shape. They are listed HERE too because this fixture is the set-equality pin:
+  // an exclude nothing plants a file in is an exclude nothing tests.
+  ".claude", "worktrees",
+];
 
 // One file per excluded directory carrying ONE match, plus a kept directory
-// carrying TWO. Correct answer: 2. Un-excluded answer: 9.
+// carrying TWO. Correct answer: 2. Un-excluded answer: 11.
 function makeExcludeFixture() {
   const root = mkdtempSync(join(tmpdir(), "grip-repowide-"));
   mkdirSync(join(root, "kept"), { recursive: true });
@@ -357,15 +367,15 @@ test("REPO_WIDE_EXCLUDES is exactly the vendored/build set the fixture plants fi
 test("the repo-wide grep counts kept files and EXCLUDES every vendored/build dir", () => {
   const root = makeExcludeFixture();
   try {
-    // the exclusion is real: 9 matches exist, 7 of them inside excluded dirs
+    // the exclusion is real: 11 matches exist, 9 of them inside excluded dirs
     const excluded = runGrepCount(EXCLUDE_PROBE, root, { excludeDirs: REPO_WIDE_EXCLUDES });
     assert.equal(excluded.count, 2, "only the two matches under kept/ are counted");
 
     // the CONTROL that makes the number above mean something: without the
-    // exclude list the same corpus yields 9, so a count of 2 is the excludes
+    // exclude list the same corpus yields 11, so a count of 2 is the excludes
     // working, not the fixture being empty or the probe being unfindable.
     const unfiltered = runGrepCount(EXCLUDE_PROBE, root, { excludeDirs: [] });
-    assert.equal(unfiltered.count, 9, "all 9 planted matches are reachable when nothing is excluded");
+    assert.equal(unfiltered.count, 11, "all 11 planted matches are reachable when nothing is excluded");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

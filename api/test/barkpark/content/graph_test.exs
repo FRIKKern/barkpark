@@ -638,10 +638,19 @@ defmodule Barkpark.Content.GraphTest do
           "owned_node",
           %{"_id" => id, "title" => "secret-#{id}"},
           @dataset,
-          user_ctx(uid)
+          # CLASS (c) DECLARATION (task-e6523cc7154304f0): the caller_context is
+          # here for the OWNER stamp; the write names no workspace and this
+          # block tests the owner-ACL, not tenancy.
+          [instance_wide: true] ++ user_ctx(uid)
         )
 
-      {:ok, doc} = Content.publish_document(id, "owned_node", @dataset, user_ctx(uid))
+      {:ok, doc} =
+        Content.publish_document(
+          id,
+          "owned_node",
+          @dataset,
+          [instance_wide: true] ++ user_ctx(uid)
+        )
 
       # Prove publish carried owner_id onto the published row (no force-stamp).
       assert doc.owner_id == uid

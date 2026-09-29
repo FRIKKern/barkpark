@@ -2,7 +2,8 @@ defmodule Barkpark.RateLimiterAsyncIsolationTest do
   @moduledoc """
   THE RATCHET for `Barkpark.RateLimiter`'s whole-node ETS seam.
 
-  `:barkpark_rate_limiter` is a `:named_table` (rate_limiter.ex:26/50-56): node
+  `:barkpark_rate_limiter` is a `:named_table` (`@table` and the
+  `:ets.new(@table, [:named_table, ...])` call in rate_limiter.ex): node
   state, not process state. The SQL sandbox does not own it, nothing rolls it
   back, and before this task nothing in `api/test/support` reset it. A bucket one
   test spent stayed spent for every test after it, and the suite's own keys are

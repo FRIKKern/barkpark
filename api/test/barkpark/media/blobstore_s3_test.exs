@@ -374,6 +374,24 @@ defmodule Barkpark.Media.Blobstore.S3Test do
     assert url =~ "response-content-disposition=attachment"
   end
 
+  test "serve_strategy/2 signs a caller's :response_cache_control as response-cache-control" do
+    put_media_storage([])
+    rel = unique_rel("private.png")
+
+    assert {:redirect, url} = S3.serve_strategy(rel, response_cache_control: "no-store")
+    assert url =~ "X-Amz-Signature="
+
+    assert url
+           |> URI.parse()
+           |> Map.fetch!(:query)
+           |> URI.decode_query()
+           |> Map.get("response-cache-control") == "no-store"
+
+    # absent opt -> absent param (the bucket default is only ever a caller's choice)
+    assert {:redirect, bare} = S3.serve_strategy(rel, [])
+    refute bare =~ "response-cache-control"
+  end
+
   test "serve_strategy/2 with :public_base_url emits an unsigned CDN URL only for :public callers" do
     put_media_storage(public_base_url: "https://media.example.com/")
     rel = unique_rel("hero.webp")

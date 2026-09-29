@@ -87,10 +87,12 @@ defmodule BarkparkWeb.GraphPhantomIdExposureTest do
               "type" => "arrayOf",
               "of" => %{"type" => "reference", "refType" => "ledger"}
             },
-            # A PortableDoc body. Any unknown type-tag parses as a permissive v1
-            # leaf (SchemaDefinition.parse_field_type/3 catch-all), which is what
-            # a real PortableDoc field is on the wire.
-            %{"name" => "body", "type" => "portableDoc"}
+            # A PortableDoc body, declared as the built-in `portableDocument`
+            # field type (SchemaDefinition.parse_field_type/3 reads it as a
+            # permissive v1 leaf). Since E3.6 (named object types) an UNKNOWN
+            # type-tag is refused at apply — "portableDoc" was such a tag and
+            # this fixture red on main until E1.11 renamed it.
+            %{"name" => "body", "type" => "portableDocument"}
           ]
         },
         @dataset,

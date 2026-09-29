@@ -30,22 +30,41 @@ defmodule Barkpark.Tenancy.WorkspaceBundleJanitorTest do
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf(dir) end)
 
+    # FREEZE the clock for this test process. `seed/3` stamps an mtime relative
+    # to "now" and `Janitor.sweep/1` re-reads the clock at
+    # workspace_bundle_janitor.ex:238 unless it is handed `:now`. Two reads
+    # straddling a second boundary make an at-threshold file strictly older
+    # between the stamp and the sweep, and the cutoff is strictly older-than —
+    # so "a file exactly at the threshold is kept" flipped intermittently and
+    # reddened an unrelated console PR (#18032) that touched no api/ file.
+    #
+    # Freezing it in `setup` rather than patching the one failing call is
+    # deliberate: every test in this file stamps against the same clock the
+    # sweep reads, so a test added later inherits the fix instead of
+    # re-discovering the race.
+    Process.put(:janitor_test_now, System.os_time(:second))
+
     {:ok, dir: dir}
   end
 
-  # Seed a file whose mtime is `age_seconds` in the past.
+  # The single clock this file measures against — both the mtime stamps and the
+  # sweep's cutoff derive from it, so no assertion can straddle a second boundary.
+  defp frozen_now, do: Process.get(:janitor_test_now)
+
+  # Seed a file whose mtime is `age_seconds` before the frozen now.
   defp seed(dir, name, age_seconds) do
     path = Path.join(dir, name)
     File.write!(path, "x")
 
     if age_seconds > 0 do
-      File.touch!(path, System.os_time(:second) - age_seconds)
+      File.touch!(path, frozen_now() - age_seconds)
     end
 
     path
   end
 
-  defp sweep(dir), do: Janitor.sweep(dir: dir, max_age_seconds: @max_age)
+  defp sweep(dir),
+    do: Janitor.sweep(dir: dir, max_age_seconds: @max_age, now: frozen_now())
 
   describe "sweep/1 — exactly the abandoned files, and nothing else" do
     test "removes the stale spill while the fresh one and an unrelated file survive", %{dir: dir} do
@@ -130,7 +149,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleJanitorTest do
       # it correctly decided to keep.
       path = seed(dir, "bp-ws-spill-11-fresh.copy", 10)
       :ok = Janitor.own(path)
-      File.touch!(path <> ".owner", System.os_time(:second) - (@max_age + 6000))
+      File.touch!(path <> ".owner", frozen_now() - (@max_age + 6000))
 
       assert {:ok, %{removed: []}} = sweep(dir)
 
@@ -233,7 +252,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleJanitorTest do
       scratch = Archive.scratch_path(dir)
       File.mkdir_p!(scratch)
       File.write!(Path.join(scratch, "member.copy"), "payload")
-      File.touch!(scratch, System.os_time(:second) - (@max_age + 600))
+      File.touch!(scratch, frozen_now() - (@max_age + 600))
 
       survivor = seed(dir, "unrelated.txt", @max_age + 600)
 
@@ -252,7 +271,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleJanitorTest do
       # rather than the directory going quietly uncollectable.
       legacy = Path.join(dir, "members-#{System.unique_integer([:positive])}")
       File.mkdir_p!(legacy)
-      File.touch!(legacy, System.os_time(:second) - (@max_age + 600))
+      File.touch!(legacy, frozen_now() - (@max_age + 600))
 
       assert {:ok, second} = sweep(dir)
 

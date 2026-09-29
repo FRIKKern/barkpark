@@ -381,8 +381,82 @@ defmodule Barkpark.Tasks.LandedTest do
           ]
         })
 
+      # THE DOOR IS NAMED (task-c5ca82cb0a49ab53). The refusal is the same
+      # refusal, but it now says WHICH arm produced it: the flag short-circuited
+      # and the prose was never read. Without this tag the 409 told the caller
+      # its wording said nothing about being merge-gated — a claim about an arm
+      # this row did not take, and false on its face for THIS criterion.
+      assert {:error, {:criterion_not_merge_shaped, :vetoed}} =
+               Tasks.record_landing(doc.id, note: "landed", criterion: 0)
+    end
+  end
+
+  # ── 5a. The two NOT-MERGE-SHAPED doors (task-c5ca82cb0a49ab53) ────────────
+  #
+  # `merge_shaped?/1` says NO for two structurally different reasons and until
+  # this split both produced one sentence — a sentence that was FALSE for the
+  # first of them. They are proved SEPARATELY and on purpose: a single test
+  # asserting "some refusal came back" would stay green if the two collapsed
+  # back into one message, which is the regression, not a simplification, since
+  # the remedies differ (fix the FIELD vs. mark the row / stamp it as work).
+  describe "the not-merge-shaped refusal names WHICH door" do
+    test "EXPLICIT merge_gate:false is :vetoed — the flag decided, the prose was never read",
+         %{scope: scope} do
+      doc =
+        task!(scope, %{
+          "acceptance_criteria" => [
+            %{
+              "criterion" =>
+                "MERGE-GATED in prose, declared not a gate: PR merged to main is not what seals it",
+              "met" => false,
+              "merge_gate" => false
+            }
+          ]
+        })
+
+      assert {:error, {:criterion_not_merge_shaped, :vetoed}} =
+               Tasks.record_landing(doc.id, note: "landed", criterion: 0)
+
+      # The CONTROL that makes the tag mean something: this row's wording is
+      # emphatically merge-shaped on its own. Only the flag refuses it, so any
+      # message claiming the wording is silent is describing another row.
+      assert Barkpark.Tasks.Criteria.merge_gated?(%{
+               "criterion" => hd(criteria(doc))["criterion"]
+             }) == true
+    end
+
+    test "a FLAGLESS row with no marker wording keeps the bare reason", %{scope: scope} do
+      doc =
+        task!(scope, %{
+          "acceptance_criteria" => [%{"criterion" => "the gate is green", "met" => false}]
+        })
+
       assert {:error, :criterion_not_merge_shaped} =
                Tasks.record_landing(doc.id, note: "landed", criterion: 0)
+    end
+
+    test "the two doors are DISTINCT values — one cannot stand in for the other",
+         %{scope: scope} do
+      vetoed =
+        task!(scope, %{
+          "acceptance_criteria" => [
+            %{
+              "criterion" => "MERGE-GATED: PR merged to main",
+              "merge_gate" => false,
+              "met" => false
+            }
+          ]
+        })
+
+      flagless =
+        task!(scope, %{
+          "acceptance_criteria" => [%{"criterion" => "the gate is green", "met" => false}]
+        })
+
+      {:error, a} = Tasks.record_landing(vetoed.id, note: "landed", criterion: 0)
+      {:error, b} = Tasks.record_landing(flagless.id, note: "landed", criterion: 0)
+
+      refute a == b, "collapsing the doors back into one reason re-lands the false sentence"
     end
   end
 

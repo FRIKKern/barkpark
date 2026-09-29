@@ -20,6 +20,10 @@
 # §3  the ALWAYS set: non-empty, derived, and pinned entries exist
 # §4  PAST-DEFECT REPLAY — real merged fixes, replayed through the selector
 # §5  refusals: unknown flags, empty ALWAYS set
+# §6  a stdin-reading child cannot truncate the changed-path list
+# §7  a sink-invariant closure is refused (the discriminating control)
+# §8  the closure is walked here from direct compile edges: parser, walker,
+#     cycle, and a test only the closure can reach
 set -uo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,7 +34,8 @@ SEL="$HERE/elixir-impacted-tests.sh"
 # and the by-name/convention mappers, which is what the fail-safe polarity is
 # made of; the xref hop is exercised for real on every PR run of the mix-test
 # job and its failure arm is asserted at §1e by pointing the selector at a
-# directory where `mix` cannot succeed.
+# directory where `mix` cannot succeed. §6-§8 put a stub `mix` on PATH to
+# drive the closure instrument itself.
 export BP_IMPACTED_NO_XREF=1
 
 PASS=0
@@ -105,8 +110,6 @@ assert_all "a .heex template under api/lib selects ALL" "api/lib/barkpark_web/co
 assert_all "api/assets/** selects ALL" "api/assets/sheet-grid/grid.mjs"
 assert_all "the workflow itself (COMPILE set) selects ALL" ".github/workflows/elixir.yml"
 assert_all "design/** (COMPILE set) selects ALL" "design/status-manifest.json"
-assert_all "a TEST-set tree the census names no reader for selects ALL" "cloud/test/barkpark_cloud/accounts_test.exs"
-assert_all "internal/taskboard/** (TEST set, no census reader) selects ALL" "internal/taskboard/board.go"
 
 # §1f — CLASS 3 branches (b) and (c). Neither can produce an empty selection:
 # the ALWAYS set rides regardless, and any api/ path in the same diff is still
@@ -137,6 +140,100 @@ done
 # being covered by any PR that only regenerates it.
 assert_selects "docs/openapi.json selects the test that guards it" "docs/openapi.json" "test/barkpark/api/openapi_test.exs"
 
+# §1g — BRANCH (d1) vs (d2): the one-hop extension of the census.
+#
+# (d1) `cloud/test/**` used to land in (d) and select ALL — 1,892 api test
+# files for a PR that edits no api file, measured at 12.8 median minutes per
+# run over the 2026-09-18..20 window. It is in the TEST set because
+# async_global_seam_guard_test.exs requires scripts/async_env_seam_scan.exs and
+# that scanner reads `Path.join(repo_root(), "cloud/test")`. The census
+# resolves the api-side literal (the script) and not the script's own literal
+# (the tree), so the reader was knowable and unnamed. The selector now takes
+# that one hop.
+#
+# THE TWO ASSERTIONS ARE DIFFERENT QUESTIONS, and the second is the one that
+# matters: "not ALL" only says the widening was silenced; "contains the reader
+# the hop is FOR" says the narrowing landed on the right files. A selector that
+# emitted only the ALWAYS set here would pass the first and fail the second.
+# ONE selector run, THREE questions. Each narrowing run is ~20 s of the
+# REQUIRED Elixir gate's own selftest step, so re-invoking the selector once
+# per assertion would spend the minutes this change exists to save.
+ct_path="cloud/test/barkpark_cloud/accounts_test.exs"
+ct_err="$(mktemp "${TMPDIR:-/tmp}/bp-ct-err.XXXXXX")"
+ct_out="$(printf '%s\n' "$ct_path" | bash "$SEL" --select 2>"$ct_err")"
+ct_n="$(printf '%s\n' "$ct_out" | sed '/^$/d' | awk 'END{print NR}')"
+if is_all "$ct_out"; then
+  bad "a cloud/test-only change NO LONGER selects ALL" "still ALL"
+elif [ -z "$ct_out" ]; then
+  bad "a cloud/test-only change NO LONGER selects ALL" "EMPTY — the failure this file exists to catch"
+else
+  ok "a cloud/test-only change NO LONGER selects ALL ($ct_n of $(cd "$ROOT/api" && find test -name '*_test.exs' | awk 'END{print NR}') api test files)"
+fi
+if grep -qxF -- "test/barkpark/async_global_seam_guard_test.exs" <<<"$ct_out"; then
+  ok "…and it selects the seam guard, the api test that actually reads cloud/test"
+else
+  bad "…and it selects the seam guard, the api test that actually reads cloud/test" "absent from $ct_n files"
+fi
+
+# DERIVED, NOT LISTED — and proved by a SECOND INSTRUMENT rather than by
+# re-reading the selector's own answer. The harness recomputes the one hop with
+# its own pipeline (census -> source files -> their quoted on-disk path
+# literals -> back to the readers) and asserts the selector's derived reader
+# set is exactly that. A hard-coded list inside the selector would diverge from
+# this join the first time the tree moved; a snapshot of today's answer would
+# not.
+tmp_ext_rows="$(mktemp "${TMPDIR:-/tmp}/bp-ext-rows.XXXXXX")"
+bash "$HERE/elixir-path-escape-check.sh" --list-escapes 2>/dev/null \
+  | awk -F'\t' '{print $1 "\t" $2}' | LC_ALL=C sort -u >"$tmp_ext_rows" || true
+# The selector follows every existing ancestor, including a root like "cloud".
+# The independent join must include those roots too, not only slash-bearing literals.
+ext_expect="$(
+  cut -f1 "$tmp_ext_rows" | LC_ALL=C sort -u | while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    [ "$s" = "scripts/elixir-path-escape-check.sh" ] && continue
+    [ -f "$ROOT/$s" ] || continue
+    grep -ohaE '"[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_.-]+)*"' -- "$ROOT/$s" </dev/null 2>/dev/null \
+      | tr -d '"' | LC_ALL=C sort -u | while IFS= read -r t; do
+        [ -n "$t" ] || continue
+        [ -e "$ROOT/$t" ] || continue
+        case "$ct_path" in "$t"|"$t"/*) ;; *) continue ;; esac
+        awk -F'\t' -v s="$s" '$1 == s { print $2 }' "$tmp_ext_rows"
+      done
+  done | LC_ALL=C sort -u
+)"
+rm -f -- "$tmp_ext_rows"
+ext_got="$(sed -n 's/.*DERIVED readers are: //p' "$ct_err" | tr ' ' '\n' | sed '/^$/d' | LC_ALL=C sort -u)"
+rm -f -- "$ct_err"
+if [ -z "$ext_expect" ]; then
+  bad "the independent one-hop join finds a reader for cloud/test" "it found NONE — the control itself is measuring nothing"
+elif [ "$ext_got" = "$ext_expect" ]; then
+  ok "the selector's derived readers for cloud/test EQUAL an independently computed one-hop join ($(printf '%s\n' "$ext_expect" | awk 'END{print NR}') reader(s))"
+else
+  bad "the selector's derived readers EQUAL an independent one-hop join" "selector: [$(printf '%s' "$ext_got" | tr '\n' ' ')] independent: [$(printf '%s' "$ext_expect" | tr '\n' ' ')]"
+fi
+
+# (d2) THE MUTATION CONTROL, and the reason this block is not just three greens
+# in a row. The danger of naming readers is SILENCING A CORRECT WIDENING, so a
+# TEST-set path that the census and its one-hop extension BOTH fail to name
+# must still select ALL. internal/taskboard/board.go is the sharpest specimen
+# available: three of its SIBLINGS (components.go, tokens_gen.go, testdata/)
+# are censused, so a derivation that widened from a file to its directory —
+# the most likely wrong way to build this — would narrow it. It must not.
+assert_all "(d2) internal/taskboard/board.go — a TEST-set path whose SIBLINGS are censused but which nothing reads — still selects ALL" "internal/taskboard/board.go"
+assert_all "(d2) cmd/barkpark/testdata/** with no censused reader still selects ALL" "cmd/barkpark/testdata/nothing-reads-this.json"
+assert_all "(d2) web/node_modules/** still selects ALL" "web/node_modules/left-pad/index.js"
+
+# THE OTHER HALF OF THE MUTATION: the paths that MUST keep widening for a
+# reason that has nothing to do with the census. The gate scripts and the
+# workflow are in the COMPILE set and are answered by branch (a) BEFORE any
+# census lookup, so the hop cannot reach them.
+assert_all "(a) scripts/elixir-impacted-tests.sh still selects ALL" "scripts/elixir-impacted-tests.sh"
+assert_all "(a) scripts/elixir-path-escape-check.sh still selects ALL" "scripts/elixir-path-escape-check.sh"
+assert_all "(a) a cloud/test change PLUS a gate-script change still selects ALL" "cloud/test/barkpark_cloud/accounts_test.exs
+scripts/elixir-path-escape-check.sh"
+assert_all "(a) a cloud/test change PLUS an api/ non-narrowable path still selects ALL" "cloud/test/barkpark_cloud/accounts_test.exs
+api/mix.lock"
+
 # §1b — the empty diff. Same polarity as the elixir.yml dispatcher's own empty
 # arm: rare but legal, and a narrow answer from no information is the unsafe one.
 out="$(printf '' | bash "$SEL" --select 2>/dev/null)"
@@ -146,10 +243,16 @@ if is_all "$out"; then ok "an EMPTY changed-path set selects ALL"; else bad "an 
 # This is the case a per-path selector gets wrong: it narrows on the good paths
 # and quietly drops the one it did not understand.
 lib_leaf=""
-for cand in $(cd "$ROOT/api" && ls lib/barkpark/*.ex 2>/dev/null | head -20); do
-  # a leaf: something with a convention test, so §2 has a target
+for cand in $(cd "$ROOT/api" && ls lib/barkpark/*.ex 2>/dev/null | head -60); do
+  # a leaf: something with a convention test, so §2 has a target — and NOT a
+  # RULE 4 door, which selects ALL by design and would make every §2 assertion
+  # below read as a regression. The predicate is asked, never hard-coded: the
+  # first candidate on this tree (lib/barkpark/access.ex) IS a door, and the
+  # next file to become one must not silently turn §2 red.
   t="test/${cand#lib/}"; t="${t%.ex}_test.exs"
-  [ -f "$ROOT/api/$t" ] && { lib_leaf="api/$cand"; lib_leaf_test="$t"; break; }
+  [ -f "$ROOT/api/$t" ] || continue
+  bash "$SEL" --is-door "api/$cand" >/dev/null 2>&1 && continue
+  lib_leaf="api/$cand"; lib_leaf_test="$t"; break
 done
 if [ -z "$lib_leaf" ]; then
   bad "harness setup: found no api/lib/barkpark/*.ex with a convention test" "the whole of §2 cannot run"
@@ -219,6 +322,247 @@ while IFS= read -r f; do
   fi
 done <<<"$(cd "$ROOT/api" && ls lib/barkpark/*.ex 2>/dev/null | head -40)"
 [ "$crossed" -eq 1 ] || bad "the BY-NAME net reaches a non-convention caller" "no fixture found — the mapper may be dead"
+
+echo
+echo "=== §2b  RULE 3 — the web-surface hop (the #17153 blind spot)"
+#
+# THE DEFECT THIS SECTION EXISTS FOR. #17153 changed api/lib/barkpark/tasks/landed.ex,
+# the selector narrowed to 263 of 1676 files, the required gate went green, and
+# main reddened at test/barkpark_web/controllers/tasks_landed_test.exs:115. That
+# test is a `use BarkparkWeb.ConnCase` HTTP contract test: it reaches the changed
+# context over the ROUTER and names no module the closure or the by-name test
+# grep could see.
+#
+# Both arms below are needed. The positive one alone is satisfied by a rule that
+# selects the whole controllers/ tree; the negative one alone is satisfied by a
+# rule that selects nothing.
+
+# ── the real specimen, on the real tree ────────────────────────────────────
+# THE #17153 SPECIMEN IS NOW ALSO A RULE 4 DOOR. lib/barkpark/tasks/landed.ex
+# returns `{:error, :…_required}`, so RULE 4 (added for #18085) claims it first
+# and the selection is ALL — a strict SUPERSET of what RULE 3 would have
+# selected, so the #17153 defect is still caught, but this arm can no longer
+# measure RULE 3 through it. Asked of the predicate, never assumed: if landed.ex
+# stops being a door the original assertion comes straight back.
+specimen_lib="api/lib/barkpark/tasks/landed.ex"
+specimen_test="test/barkpark_web/controllers/tasks_landed_test.exs"
+specimen_is_door=0
+if bash "$SEL" --is-door "$specimen_lib" >/dev/null 2>&1; then specimen_is_door=1; fi
+
+if [ ! -f "$ROOT/${specimen_lib}" ] || [ ! -f "$ROOT/api/${specimen_test}" ]; then
+  bad "the #17153 specimen is still in the tree" "$specimen_lib / $specimen_test — the arm below cannot run"
+elif [ "$specimen_is_door" -eq 1 ]; then
+  assert_all "the #17153 specimen is now a RULE 4 door — it selects ALL, a superset of RULE 3's answer" "$specimen_lib"
+else
+  # The PRECONDITION, asserted rather than assumed: if the contract test ever
+  # starts naming the module, the by-name net reaches it and this arm stops
+  # measuring RULE 3 while still passing. Red on that instead.
+  if grep -qF 'Tasks.Landed' "$ROOT/api/${specimen_test}" 2>/dev/null; then
+    bad "the specimen contract test names NO module of the changed context" \
+        "$specimen_test now names Tasks.Landed — the by-name net reaches it, so this arm no longer measures the web-surface hop"
+  else
+    ok "precondition: $specimen_test names no module of the changed context (so only RULE 3 can reach it)"
+    assert_selects "a changed context selects its web surface's ConnCase contract test" "$specimen_lib" "$specimen_test"
+  fi
+fi
+
+# ── a DERIVED real-tree specimen, so RULE 3 stays measured on the real tree ─
+# Found by the definition of the rule rather than by a remembered filename: a
+# NON-door lib module whose selection contains a web test that (i) is not in the
+# ALWAYS set, (ii) names none of the module's modules, and (iii) is therefore
+# reachable ONLY by the lib->lib hop. The first hit wins; the search is bounded.
+always_for_r3="$(bash "$SEL" --print-always 2>/dev/null)"
+r3_lib=""; r3_test=""
+while IFS= read -r cand; do
+  [ -n "$cand" ] || continue
+  bash "$SEL" --is-door "api/$cand" >/dev/null 2>&1 && continue
+  cand_mods="$(sed -nE 's/^[[:space:]]*defmodule[[:space:]]+([A-Za-z0-9_.]+).*/\1/p' "$ROOT/api/$cand")"
+  [ -n "$cand_mods" ] || continue
+  cand_out="$(sel "api/$cand")"
+  is_all "$cand_out" && continue
+  while IFS= read -r wt; do
+    [ -n "$wt" ] || continue
+    grep -qxF -- "$wt" <<<"$always_for_r3" && continue
+    named=0
+    while IFS= read -r m; do
+      [ -n "$m" ] || continue
+      grep -qF -- "$m" "$ROOT/api/$wt" 2>/dev/null && named=1
+    done <<<"$cand_mods"
+    [ "$named" -eq 1 ] && continue
+    r3_lib="api/$cand"; r3_test="$wt"; break
+  done <<<"$(grep '^test/barkpark_web/' <<<"$cand_out" || true)"
+  [ -n "$r3_lib" ] && break
+done <<<"$(cd "$ROOT/api" && find lib/barkpark -name '*.ex' -not -path 'lib/barkpark_web/*' | LC_ALL=C sort | head -60)"
+
+if [ -z "$r3_lib" ]; then
+  bad "a RULE-3-only specimen exists on the real tree" "none found in 60 candidates — the lib->lib hop may be dead on the real tree"
+else
+  ok "derived RULE-3-only specimen: $r3_lib -> $r3_test (not in ALWAYS, names no module of the change)"
+  assert_selects "the derived specimen's web test IS selected by the lib->lib hop" "$r3_lib" "$r3_test"
+
+  # ── the negative control: a FAMILY, not the directory ────────────────────
+  # A rule that answered "every web test" would satisfy the arm above and buy
+  # nothing. Count what the specimen actually drags out of test/barkpark_web/
+  # beyond the ALWAYS set, and compare it against the directory.
+  web_total="$(cd "$ROOT/api" && find test/barkpark_web -name '*_test.exs' | awk 'END{print NR}')"
+  sel_out="$(sel "$r3_lib")"
+  web_sel="$(grep -c '^test/barkpark_web/' <<<"$sel_out" || true)"
+  if [ "${web_total:-0}" -gt 0 ] && [ "${web_sel:-0}" -gt 0 ] && [ "$web_sel" -lt "$web_total" ]; then
+    ok "the derived specimen selects $web_sel of $web_total web tests — a family, not the directory"
+  else
+    bad "the derived specimen selects a strict subset of test/barkpark_web/" "got $web_sel of $web_total"
+  fi
+fi
+
+# ── a synthetic tree, because the real one cannot be mutated ───────────────
+# lib/barkpark/widgets/gizmo.ex  <- the changed context
+# lib/barkpark_web/controllers/gizmo_controller.ex  <- names it (the lib->lib hop)
+# test/barkpark_web/controllers/gizmo_wire_test.exs <- names NEITHER module
+# test/barkpark_web/controllers/unrelated_thing_test.exs <- must stay out
+mkdir -p "$tmp/api4/lib/barkpark/widgets" "$tmp/api4/lib/barkpark_web/controllers" "$tmp/api4/test/barkpark_web/controllers"
+printf 'defmodule Barkpark.Widgets.Gizmo do\n  def record(_), do: :ok\nend\n' >"$tmp/api4/lib/barkpark/widgets/gizmo.ex"
+printf 'defmodule BarkparkWeb.GizmoController do\n  alias Barkpark.Widgets.Gizmo\n  def create(c, _), do: Gizmo.record(c)\nend\n' >"$tmp/api4/lib/barkpark_web/controllers/gizmo_controller.ex"
+printf 'defmodule BarkparkWeb.GizmoWireTest do\n  use BarkparkWeb.ConnCase, async: true\n  test "POST /v1/gizmos", %%{conn: conn} do\n    assert conn\n  end\nend\n' >"$tmp/api4/test/barkpark_web/controllers/gizmo_wire_test.exs"
+printf 'defmodule BarkparkWeb.UnrelatedThingTest do\n  use BarkparkWeb.ConnCase, async: true\nend\n' >"$tmp/api4/test/barkpark_web/controllers/unrelated_thing_test.exs"
+
+# the planted contract test names neither module — assert it, or the fixture is
+# proving the by-name net instead of RULE 3
+if grep -qE 'Barkpark\.Widgets\.Gizmo|GizmoController' "$tmp/api4/test/barkpark_web/controllers/gizmo_wire_test.exs"; then
+  bad "the planted contract test names no module" "the fixture would be caught by the by-name net — it proves nothing about RULE 3"
+else
+  ok "the planted contract test names neither the context nor its controller"
+fi
+
+synth_out="$(printf 'api/lib/barkpark/widgets/gizmo.ex\n' | BP_IMPACTED_XREF_DIR="$tmp/api4" bash "$SEL" --select 2>/dev/null)"
+if is_all "$synth_out"; then
+  bad "the planted ConnCase contract test is selected" "the synthetic tree selected ALL"
+elif grep -qxF 'test/barkpark_web/controllers/gizmo_wire_test.exs' <<<"$synth_out"; then
+  ok "a planted ConnCase contract test for a lib module IS selected (the lib->lib hop, then the name family)"
+else
+  bad "the planted ConnCase contract test is selected" "not in the $(printf '%s\n' "$synth_out" | awk 'END{print NR}')-file selection"
+fi
+if grep -qxF 'test/barkpark_web/controllers/unrelated_thing_test.exs' <<<"$synth_out"; then
+  bad "an unrelated controller test in the SAME directory stays out" "unrelated_thing_test.exs was dragged in — the rule is a directory scan, not a family"
+else
+  ok "an unrelated controller test in the same directory stays out"
+fi
+
+# a lib module NO web surface names must add no web tests at all
+printf 'defmodule Barkpark.Widgets.Hermit do\nend\n' >"$tmp/api4/lib/barkpark/widgets/hermit.ex"
+herm_out="$(printf 'api/lib/barkpark/widgets/hermit.ex\n' | BP_IMPACTED_XREF_DIR="$tmp/api4" bash "$SEL" --select 2>/dev/null)"
+if is_all "$herm_out"; then
+  bad "a lib module no web surface names drags in no controller test" "it selected ALL"
+elif grep -q '^test/barkpark_web/controllers/' <<<"$herm_out"; then
+  bad "a lib module no web surface names drags in no controller test" "it selected $(grep -c '^test/barkpark_web/controllers/' <<<"$herm_out")"
+else
+  ok "a lib module NO web surface names drags in no controller test (the hop is a hop, not a default)"
+fi
+
+echo
+echo "=== §2c  RULE 4 — the fail-closed door (the #18085 blind spot)"
+#
+# THE DEFECT THIS SECTION EXISTS FOR. #18085 (head 02d74f815, job 103713658033)
+# changed api/lib/barkpark/content/write_scope.ex so an unresolved write from an
+# attributable caller REFUSES. The selector narrowed to 563 test files, the
+# required Elixir gate went 4/4 green, it merged, and main reddened on the same
+# base at api/test/barkpark/search/indx_engine_scope_test.exs with
+# MatchError {:error, :workspace_scope_required} — a test that calls
+# Content.create_document/4 and reaches the door at RUNTIME without naming it.
+#
+# Four arms, and all four are needed. (a) is satisfied by a script hard-wired to
+# ALL, so (b) and (c) are the negative controls that make it mean something;
+# (d) is the census bound, without which RULE 4 could eat the whole selector and
+# every other case in this file would still pass.
+
+door_lib="api/lib/barkpark/content/write_scope.ex"
+door_test="test/barkpark/search/indx_engine_scope_test.exs"
+
+# ── the PRECONDITION, asserted rather than assumed ─────────────────────────
+# If the failing test ever starts naming the door module, the ordinary by-name
+# net reaches it and this section stops measuring RULE 4 while still passing.
+if [ ! -f "$ROOT/$door_lib" ] || [ ! -f "$ROOT/api/$door_test" ]; then
+  bad "the #18085 specimen is still in the tree" "$door_lib / api/$door_test — §2c cannot run"
+elif grep -qF 'Barkpark.Content.WriteScope' "$ROOT/api/$door_test" 2>/dev/null; then
+  bad "the specimen test names NO module of the door it passes through" \
+      "$door_test now names Barkpark.Content.WriteScope — the by-name net reaches it, so this section no longer measures RULE 4"
+else
+  ok "precondition: $door_test names no module of the door it calls through (so only RULE 4 can reach it)"
+
+  # (a) the predicate classifies the real door
+  if bash "$SEL" --is-door "$door_lib" >/dev/null 2>&1; then
+    ok "the predicate classifies $door_lib as a door"
+  else
+    bad "the predicate classifies $door_lib as a door" "--is-door exited non-zero"
+  fi
+
+  assert_all "a change confined to the door selects ALL" "$door_lib"
+
+  # ── THE REPLAY of #18085's OWN twelve-path diff, not a stand-in ──────────
+  # The camouflage that made the original miss invisible is in this list: five
+  # sibling TEST files were edited and therefore selected, so the selection
+  # looked complete while the one unedited test the change broke never ran.
+  replay_18085="api/lib/barkpark/content/tag_registry.ex
+api/lib/barkpark/content/write_scope.ex
+api/lib/barkpark/plugins/bootstrap.ex
+api/lib/barkpark/plugins/tickets/thread.ex
+api/lib/mix/tasks/onix.import.ex
+api/test/barkpark/audit_test.exs
+api/test/barkpark/content/graph_test.exs
+api/test/barkpark/content/mutation_echo_test.exs
+api/test/barkpark/content/owner_scoped_test.exs
+api/test/barkpark/content/write_scope_classified_door_test.exs
+api/test/barkpark_web/controllers/listen_controller_test.exs
+api/test/barkpark_web/live/bulldocs_live_test.exs"
+  replay_out="$(sel "$replay_18085")"
+  if is_all "$replay_out"; then
+    ok "REPLAY #18085: its twelve-path diff selects ALL — $door_test runs"
+  elif grep -qxF -- "$door_test" <<<"$replay_out"; then
+    ok "REPLAY #18085: $door_test is in the narrowed selection"
+  else
+    bad "REPLAY #18085: the selection reaches $door_test" \
+        "it is NOT in the $(printf '%s\n' "$replay_out" | awk 'END{print NR}')-file selection — the original miss is unfixed"
+  fi
+fi
+
+# ── (b)(c) the MUTATION MATRIX, on a synthetic tree ───────────────────────
+# Three modules that differ ONLY in the property RULE 4 keys on. Without the
+# middle one, a rule that answered ALL for any lib file would pass.
+mkdir -p "$tmp/api5/lib/barkpark/gate" "$tmp/api5/test/barkpark/gate"
+printf 'defmodule Barkpark.Gate.Refuser do\n  def check(_), do: {:error, :workspace_scope_required}\nend\n' >"$tmp/api5/lib/barkpark/gate/refuser.ex"
+printf 'defmodule Barkpark.Gate.Polite do\n  def check(_), do: {:error, :nope}\nend\n' >"$tmp/api5/lib/barkpark/gate/polite.ex"
+printf 'defmodule Barkpark.Gate.Declared do\n  # @impact door — refuses with a vocabulary the derived arm does not know\n  def check(_), do: {:error, :nope}\nend\n' >"$tmp/api5/lib/barkpark/gate/declared.ex"
+printf 'defmodule Barkpark.Gate.PoliteTest do\n  use ExUnit.Case\nend\n' >"$tmp/api5/test/barkpark/gate/polite_test.exs"
+
+synth_door() { printf '%s\n' "$1" | BP_IMPACTED_XREF_DIR="$tmp/api5" bash "$SEL" --select 2>/dev/null; }
+
+out="$(synth_door api/lib/barkpark/gate/refuser.ex)"
+if is_all "$out"; then ok "a module returning a policy refusal selects ALL (the derived arm)"; else bad "a module returning a policy refusal selects ALL" "got $(printf '%s\n' "$out" | awk 'END{print NR}') files"; fi
+
+out="$(synth_door api/lib/barkpark/gate/declared.ex)"
+if is_all "$out"; then ok "a module carrying '@impact door' selects ALL even with no known refusal atom (the declared arm)"; else bad "a module carrying '@impact door' selects ALL" "got $(printf '%s\n' "$out" | awk 'END{print NR}') files"; fi
+
+# THE NEGATIVE CONTROL. Same tree, same shape, no refusal vocabulary and no
+# declaration: it must still narrow, or RULE 4 is just `echo ALL`.
+out="$(synth_door api/lib/barkpark/gate/polite.ex)"
+if is_all "$out"; then
+  bad "an ordinary lib module is NOT a door" "it selected ALL — RULE 4 is not keyed on the refusal vocabulary at all"
+elif [ -z "$out" ]; then
+  bad "an ordinary lib module is NOT a door" "it selected EMPTY"
+else
+  ok "an ordinary lib module in the same tree still NARROWS ($(printf '%s\n' "$out" | awk 'END{print NR}') files) — RULE 4 is keyed on the refusal, not on being a lib file"
+fi
+
+# ── (d) THE CENSUS BOUND. A door class that grew to most of lib would make the
+# selector an expensive `echo ALL`, and every arm above would still pass.
+doors_n="$(bash "$SEL" --doors 2>/dev/null | sed '/^$/d' | awk 'END{print NR}')"
+lib_n="$(cd "$ROOT/api" && find lib -name '*.ex' | awk 'END{print NR}')"
+if [ "${doors_n:-0}" -eq 0 ]; then
+  bad "the door census is non-empty" "it named none — RULE 4 is inert and §2c's real-tree arm cannot be measuring it"
+elif [ "$doors_n" -lt $((lib_n / 7)) ]; then
+  ok "the door census is $doors_n of $lib_n lib modules (< 15%, so narrowing still buys something)"
+else
+  bad "the door census is under 15% of lib" "$doors_n of $lib_n — RULE 4 has eaten the selection"
+fi
 
 echo
 echo "=== §3  THE ALWAYS SET"
@@ -358,6 +702,366 @@ else
   rc=$?
   [ "$rc" -eq 2 ] && ok "an unknown flag is refused with exit 2" || bad "an unknown flag is refused with exit 2" "got rc=$rc"
 fi
+
+# A `mix` stand-in for the sections that run the closure instrument for real
+# (§6, §7, §8). The selector asks for ONE whole-app graph —
+# `mix xref graph --label compile --only-direct --format dot --output -` — and
+# walks it itself (task-26088fc6682c9dcb). Every stub REFUSES (exit 3) any
+# other invocation, so a selector that drifted back to `--sink`, or dropped
+# `--only-direct`, fails the §7 CONTROL instead of passing on a stub that
+# answered a question it was not asked.
+#
+#   varying   — the shape a working graph has: the hub (lib/barkpark/plugin.ex)
+#               has `use Barkpark.Plugin` dependents, the leaf
+#               (lib/barkpark/tasks/landed.ex) has none. Prefixed with the
+#               `Compiling 1 file (.ex)` banner a real run can print on stdout.
+#   invariant — hub and leaf have the IDENTICAL dependent set: a closure that
+#               does not depend on the file asked about (the fault measured on
+#               CI's Elixir 1.18.4 / OTP 27 pin, task-37b4448cb9ccb000).
+#   inverted  — varies, but the leaf's closure is BIGGER than the hub's.
+#   plain     — the OLD instrument's output (`--format plain`, compile-connected
+#               tree lines): not the graph this parser reads, so zero edges.
+#   cycle     — a chain THREE hops deep (z1 -> m2 -> a3) with a CYCLE in it
+#               (z1 <-> m2), plus an export edge and a runtime edge that must
+#               NOT be followed. The names sort AGAINST the hop order, so a
+#               walker that makes one pass over the sorted edges instead of
+#               iterating to a fixed point finds z1 only.
+#   gear      — the synthetic by-name-invisible tree of §8 (gear.ex is used by
+#               sprocket.ex), plus the hub/leaf controls.
+#   gear-cut  — the same, WITHOUT the sprocket -> gear edge (§8's control).
+# `greedy` adds a child that drains stdin (§6's mutation).
+write_mix_stub() {
+  local out="$1" shape="$2" greedy="${3:-}"
+  {
+    echo '#!/usr/bin/env bash'
+    [ "$greedy" = greedy ] && echo 'cat >/dev/null 2>&1 || true'
+    cat <<'STUB'
+case " $* " in *" xref graph "*"--label compile "*"--only-direct"*"--format dot"*) ;; *) echo "stub mix: unexpected invocation: $*" >&2; exit 3 ;; esac
+e() { printf '  "%s" -> "%s" [label="(%s)"]\n' "$1" "$2" "${3:-compile}"; }
+echo 'digraph "xref graph" {'
+STUB
+    case "$shape" in
+      varying)
+        cat <<'STUB'
+echo "Compiling 1 file (.ex)"
+echo '  "lib/barkpark/plugins/media.ex"'
+e lib/barkpark/plugins/media.ex lib/barkpark/plugin.ex
+e lib/barkpark/plugins/quiz.ex lib/barkpark/plugin.ex
+e lib/barkpark/content/lifecycle_view.ex lib/barkpark/content/lifecycle.ex
+STUB
+        ;;
+      invariant)
+        cat <<'STUB'
+e lib/barkpark_web/router.ex lib/barkpark/plugin.ex
+e lib/barkpark_web/router.ex lib/barkpark/tasks/landed.ex
+e lib/barkpark/tasks/events.ex lib/barkpark/plugin.ex
+e lib/barkpark/tasks/events.ex lib/barkpark/tasks/landed.ex
+STUB
+        ;;
+      inverted)
+        cat <<'STUB'
+e lib/barkpark/plugins/media.ex lib/barkpark/plugin.ex
+e lib/barkpark_web/router.ex lib/barkpark/tasks/landed.ex
+e lib/barkpark/tasks/events.ex lib/barkpark/tasks/landed.ex
+STUB
+        ;;
+      plain)
+        # the old instrument's shape: no dot edge on any line
+        cat <<'STUB'
+printf '%s\n' "lib/barkpark/plugins/media.ex" "\`-- lib/barkpark/plugin.ex (compile)" "lib/barkpark_web/router.ex" "\`-- lib/barkpark_web/router/plugins.ex (compile)"
+STUB
+        ;;
+      cycle)
+        cat <<'STUB'
+e lib/x/z1.ex lib/barkpark/plugin.ex
+e lib/x/m2.ex lib/x/z1.ex
+e lib/x/z1.ex lib/x/m2.ex
+e lib/x/a3.ex lib/x/m2.ex
+e lib/x/self.ex lib/x/self.ex
+e lib/x/exported.ex lib/barkpark/plugin.ex export
+echo '  "lib/x/runtime.ex" -> "lib/barkpark/plugin.ex"'
+e lib/x/unrelated.ex lib/x/other.ex
+STUB
+        ;;
+      gear|gear-cut)
+        echo 'e lib/barkpark/plugins/media.ex lib/barkpark/plugin.ex'
+        [ "$shape" = gear ] && echo 'e lib/barkpark/widgets/sprocket.ex lib/barkpark/widgets/gear.ex'
+        ;;
+    esac
+    echo 'echo "}"'
+  } >"$out"
+  chmod +x "$out"
+}
+
+echo
+echo "=== §6  A CHILD THAT READS STDIN MUST NOT TRUNCATE THE CHANGED-PATH LIST"
+# THE DEFECT THIS SECTION EXISTS FOR (task-627ab62e43790c0e). The classify loop
+# was fed `done <<EOF $changed EOF`, putting the changed-path list on the loop
+# body's fd 0. `compile_closure`/`xref_probe` start `mix` inside that body; on
+# the runner the BEAM drains the pipe bash 5.x backs a here-document with, so
+# `read` hit EOF and every path after the first lib file went UNCLASSIFIED —
+# with no non-zero status, no stderr, and no `ALL`. #19303 (e58d8bbcd) narrowed
+# to 596 files that way, the required Elixir gate went green, and the nightly
+# found 31 failures 23 hours later.
+#
+# WHY §1-§5 COULD NOT SEE IT: every case above runs under BP_IMPACTED_NO_XREF=1
+# (line ~34), so no child process is ever started inside the loop and the loop's
+# fd is never at risk. The harness was structurally blind to the one failure
+# mode the selector exists to prevent. This section is the only one that starts
+# a real child, so it must NOT inherit that export.
+sec6_dir="$(mktemp -d "${TMPDIR:-/tmp}/bp-impacted-sec6.XXXXXX")"
+# Two `mix` stand-ins, identical but for ONE line: whether the child reads stdin.
+# That single-line difference IS the mutation. Both print a graph whose hub and
+# leaf closures DIFFER (see write_mix_stub): one where they were identical would
+# be refused by the discriminating control (§7) before §6 measured anything.
+write_mix_stub "$sec6_dir/mix-quiet" varying
+write_mix_stub "$sec6_dir/mix-greedy" varying greedy
+chmod +x "$sec6_dir/mix-quiet" "$sec6_dir/mix-greedy"
+
+# A lib file FIRST (so a child runs), then a changed test file that
+# `is_narrowable_test` selects unconditionally. If the list is truncated, that
+# second path silently disappears — which is exactly the shape to catch.
+sec6_input='api/lib/barkpark/content/lifecycle.ex
+api/test/barkpark/tasks/queue_test.exs'
+sec6_want='test/barkpark/tasks/queue_test.exs'
+
+sec6_run() {
+  mkdir -p "$sec6_dir/bin" && cp "$sec6_dir/$1" "$sec6_dir/bin/mix"
+  printf '%s\n' "$sec6_input" | \
+    env -u BP_IMPACTED_NO_XREF \
+        BP_IMPACTED_ROOT="$ROOT" \
+        PATH="$sec6_dir/bin:$PATH" \
+        bash "$SEL" --select 2>/dev/null
+}
+
+if [ ! -f "$ROOT/api/lib/barkpark/content/lifecycle.ex" ] || [ ! -f "$ROOT/api/$sec6_want" ]; then
+  bad "§6 fixtures are present" "lifecycle.ex or $sec6_want is gone — §6 measured NOTHING"
+else
+  # THE CONTROL, AND IT IS NOT OPTIONAL. Without it a selector that answered
+  # ALL to everything would pass the greedy case below while measuring nothing.
+  sec6_quiet="$(sec6_run mix-quiet)"
+  if is_all "$sec6_quiet"; then
+    bad "§6 control: a quiet child still narrows" "got ALL — §6's greedy arm can no longer mean anything"
+  elif grep -qxF -- "$sec6_want" <<<"$sec6_quiet"; then
+    ok "§6 control: a child that does NOT read stdin leaves the list intact ($sec6_want selected)"
+  else
+    bad "§6 control: a quiet child keeps $sec6_want" "it is missing even with a non-draining child"
+  fi
+
+  # THE MUTATION. Same input, same script, one greedy child. Two answers are
+  # acceptable and they are the two SAFE ones: the list survived (the fd fix
+  # held), or the selector noticed it did not and widened to ALL (the count
+  # identity held). The one answer that must never occur is the one CI gave:
+  # a narrow selection that quietly lacks the path it never read.
+  sec6_greedy="$(sec6_run mix-greedy)"
+  if is_all "$sec6_greedy"; then
+    ok "§6 a stdin-reading child is caught and widens to ALL (the count identity held)"
+  elif grep -qxF -- "$sec6_want" <<<"$sec6_greedy"; then
+    ok "§6 a stdin-reading child cannot reach the list ($sec6_want still selected)"
+  else
+    bad "§6 a stdin-reading child must not silently truncate the changed-path list" \
+        "the selection NARROWED to $(grep -c . <<<"$sec6_greedy") files and $sec6_want — a path handed in on stdin — is not among them. This is the #19303 fault: a green gate over code it never ran."
+  fi
+fi
+rm -rf -- "$sec6_dir"
+
+echo
+echo "=== §7  A SINK-INVARIANT xref IS REFUSED, NOT NARROWED ON (task-37b4448cb9ccb000)"
+# THE DEFECT. `mix xref graph --sink S --label compile-connected` printed the
+# SAME 10-line graph (md5 6d8d306d06f1628f5a38755f53898b71) for landed.ex,
+# media.ex, accounts.ex and plugin.ex on CI's own pin, Elixir 1.18.4 / OTP 27.
+# The repo.ex positive control passed it, because it only asks for `.ex` in the
+# output. The selector then narrowed every lib change on a constant.
+#
+# The instrument is now the script's own walk over direct compile edges (§8),
+# and the SAME controls guard it: a graph in which the hub and the leaf have
+# the same closure is a constant, whatever produced it.
+#
+# THREE ARMS, one stub each (write_mix_stub): invariant must be REFUSED by name,
+# varying must be TRUSTED (the control — without it, a probe hard-wired to DEAD
+# passes the first arm while measuring nothing), inverted must be refused too.
+sec7_dir="$(mktemp -d "${TMPDIR:-/tmp}/bp-impacted-sec7.XXXXXX")"
+sec7_input='api/lib/barkpark/content/lifecycle.ex'
+sec7_run() {
+  # $1 = stub shape; stdout -> $sec7_dir/out, stderr -> $sec7_dir/err
+  mkdir -p "$sec7_dir/bin"
+  write_mix_stub "$sec7_dir/bin/mix" "$1"
+  printf '%s\n' "$sec7_input" | \
+    env -u BP_IMPACTED_NO_XREF \
+        BP_IMPACTED_ROOT="$ROOT" \
+        PATH="$sec7_dir/bin:$PATH" \
+        bash "$SEL" --select >"$sec7_dir/out" 2>"$sec7_dir/err"
+}
+sec7_probe_rc() {
+  mkdir -p "$sec7_dir/bin"
+  write_mix_stub "$sec7_dir/bin/mix" "$1"
+  env -u BP_IMPACTED_NO_XREF BP_IMPACTED_ROOT="$ROOT" PATH="$sec7_dir/bin:$PATH" \
+    bash "$SEL" --xref-probe >/dev/null 2>&1
+}
+sec7_named='the compile closure is SINK-INVARIANT: lib/barkpark/plugin.ex and lib/barkpark/tasks/landed.ex have the IDENTICAL closure'
+
+if [ ! -f "$ROOT/api/lib/barkpark/content/lifecycle.ex" ] || [ ! -f "$ROOT/api/lib/barkpark/plugin.ex" ] || [ ! -f "$ROOT/api/lib/barkpark/tasks/landed.ex" ]; then
+  bad "§7 fixtures are present" "lifecycle.ex, plugin.ex or landed.ex is gone — §7 measured NOTHING"
+else
+  # CONTROL: a per-sink answer narrows.
+  sec7_run varying
+  sec7_out="$(cat "$sec7_dir/out")"
+  if is_all "$sec7_out" || [ -z "$sec7_out" ]; then
+    bad "§7 control: a sink-VARYING xref is trusted and narrows" "got '$(head -c 200 "$sec7_dir/out")' / stderr: $(head -3 "$sec7_dir/err" | tr '\n' ' ')"
+  else
+    ok "§7 control: a sink-VARYING xref is trusted and narrows ($(grep -c . <<<"$sec7_out") files)"
+  fi
+  if sec7_probe_rc varying; then ok "§7 control: --xref-probe says OK for a sink-varying xref"; else bad "§7 control: --xref-probe says OK for a sink-varying xref" "it exited non-zero"; fi
+
+  # THE ARM: one graph for every sink -> ALL, and the refusal names both sinks.
+  sec7_run invariant
+  sec7_out="$(cat "$sec7_dir/out")"
+  if ! is_all "$sec7_out"; then
+    bad "§7 a SINK-INVARIANT xref falls back to ALL" "it NARROWED to $(grep -c . <<<"$sec7_out") files on a closure that does not depend on the changed file"
+  elif ! grep -qF -- "narrowing unavailable: running ALL" "$sec7_dir/err"; then
+    bad "§7 a SINK-INVARIANT xref falls back to ALL, naming both sinks" "ALL, but stderr lacks the fallback line 'narrowing unavailable: running ALL' (main ruling 2026-09-24)"
+  elif grep -qF -- "$sec7_named" "$sec7_dir/err"; then
+    ok "§7 a SINK-INVARIANT xref falls back to ALL, naming both sinks"
+  else
+    bad "§7 a SINK-INVARIANT xref falls back to ALL, naming both sinks" "ALL, but stderr lacks the named line: $(head -3 "$sec7_dir/err" | tr '\n' ' ')"
+  fi
+  if sec7_probe_rc invariant; then bad "§7 --xref-probe reports DEAD for a sink-invariant xref" "it exited 0 (OK)"; else ok "§7 --xref-probe reports DEAD for a sink-invariant xref"; fi
+
+  # A leaf whose closure is not smaller than the hub's does not discriminate either.
+  sec7_run inverted
+  sec7_out="$(cat "$sec7_dir/out")"
+  if is_all "$sec7_out" && grep -qF -- 'the compile closure does not discriminate' "$sec7_dir/err"; then
+    ok "§7 a leaf closure BIGGER than the hub's falls back to ALL"
+  else
+    bad "§7 a leaf closure BIGGER than the hub's falls back to ALL" "got $(grep -c . <<<"$sec7_out") lines / stderr: $(head -3 "$sec7_dir/err" | tr '\n' ' ')"
+  fi
+fi
+rm -rf -- "$sec7_dir"
+
+echo
+echo "=== §8  THE CLOSURE IS WALKED HERE, FROM DIRECT COMPILE EDGES (task-26088fc6682c9dcb)"
+# The parser and the walker, each against a stub whose TRUE answer is known.
+# Every arm is a question the old `--sink` instrument could not have answered
+# correctly: two hops, a cycle, an edge kind that must not be followed, and a
+# test that ONLY the closure can reach.
+sec8_dir="$(mktemp -d "${TMPDIR:-/tmp}/bp-impacted-sec8.XXXXXX")"
+mkdir -p "$sec8_dir/bin"
+sec8_closure() {
+  # $1 = stub shape, $2 = lib path; closure on stdout, stderr -> $sec8_dir/err
+  write_mix_stub "$sec8_dir/bin/mix" "$1"
+  env -u BP_IMPACTED_NO_XREF BP_IMPACTED_ROOT="$ROOT" PATH="$sec8_dir/bin:$PATH" \
+    bash "$SEL" --closure "$2" 2>"$sec8_dir/err"
+}
+
+# (a)(b)(c) ONE run over the cycle stub, three questions. Run under a watchdog:
+# a walker that loops on a cycle must FAIL this arm, not hang the gate.
+write_mix_stub "$sec8_dir/bin/mix" cycle
+env -u BP_IMPACTED_NO_XREF BP_IMPACTED_ROOT="$ROOT" PATH="$sec8_dir/bin:$PATH" \
+  bash "$SEL" --closure lib/barkpark/plugin.ex >"$sec8_dir/cycle.out" 2>"$sec8_dir/err" &
+sec8_pid=$!
+sec8_waited=0
+while kill -0 "$sec8_pid" 2>/dev/null && [ "$sec8_waited" -lt 60 ]; do
+  sleep 1
+  sec8_waited=$((sec8_waited + 1))
+done
+if kill -0 "$sec8_pid" 2>/dev/null; then
+  kill "$sec8_pid" 2>/dev/null
+  wait "$sec8_pid" 2>/dev/null
+  bad "§8 a CYCLE in the compile graph terminates" "the walker was still running after 60 s"
+else
+  wait "$sec8_pid"
+  sec8_rc=$?
+  sec8_want='lib/barkpark/plugin.ex
+lib/x/a3.ex
+lib/x/m2.ex
+lib/x/z1.ex'
+  sec8_got="$(LC_ALL=C sort "$sec8_dir/cycle.out")"
+  if [ "$sec8_rc" -eq 0 ] && [ "$sec8_got" = "$sec8_want" ]; then
+    ok "§8 a CYCLE (z1 <-> m2) terminates, and the closure is exactly {z1, m2, a3 (three hops), the sink}"
+  else
+    bad "§8 a CYCLE terminates with the exact closure" "rc=$sec8_rc, got: $(tr '\n' ' ' <<<"$sec8_got") / stderr: $(head -3 "$sec8_dir/err" | tr '\n' ' ')"
+  fi
+  # the label filter is the parser's: export and runtime edges are not compile edges
+  if grep -qxF 'lib/x/exported.ex' "$sec8_dir/cycle.out" || grep -qxF 'lib/x/runtime.ex' "$sec8_dir/cycle.out"; then
+    bad "§8 an EXPORT or RUNTIME edge is not followed" "found in the closure: $(grep -xE 'lib/x/(exported|runtime)\.ex' "$sec8_dir/cycle.out" | tr '\n' ' ')"
+  else
+    ok "§8 an EXPORT edge and a RUNTIME edge into the sink are NOT followed"
+  fi
+fi
+
+# (d) a file on a cycle with itself and a file nothing depends on.
+sec8_self="$(sec8_closure cycle lib/x/self.ex)"
+if [ "$sec8_self" = "lib/x/self.ex" ]; then ok "§8 a self-edge terminates and adds nothing but the sink"; else bad "§8 a self-edge terminates and adds nothing but the sink" "got: $(tr '\n' ' ' <<<"$sec8_self")"; fi
+sec8_leaf="$(sec8_closure varying lib/barkpark/tasks/landed.ex)"
+if [ "$sec8_leaf" = "lib/barkpark/tasks/landed.ex" ]; then ok "§8 the leaf's closure is the leaf alone"; else bad "§8 the leaf's closure is the leaf alone" "got: $(tr '\n' ' ' <<<"$sec8_leaf")"; fi
+
+# (e) the parser skips the banner and the node declarations of a real run.
+sec8_hub="$(sec8_closure varying lib/barkpark/plugin.ex | LC_ALL=C sort)"
+if [ "$sec8_hub" = 'lib/barkpark/plugin.ex
+lib/barkpark/plugins/media.ex
+lib/barkpark/plugins/quiz.ex' ]; then
+  ok "§8 the hub's closure names its dependents, past a Compiling banner and node lines"
+else
+  bad "§8 the hub's closure names its dependents" "got: $(tr '\n' ' ' <<<"$sec8_hub") / stderr: $(head -3 "$sec8_dir/err" | tr '\n' ' ')"
+fi
+
+# (f) THE OLD INSTRUMENT'S OUTPUT is not a graph to this parser: zero edges ->
+# refused by name, --select falls back to ALL. Without this, a mix whose dot
+# flag moved would parse to an empty graph and every closure would read "leaf".
+write_mix_stub "$sec8_dir/bin/mix" plain
+sec8_sel="$(printf 'api/lib/barkpark/content/lifecycle.ex\n' | env -u BP_IMPACTED_NO_XREF BP_IMPACTED_ROOT="$ROOT" PATH="$sec8_dir/bin:$PATH" bash "$SEL" --select 2>"$sec8_dir/err")"
+if is_all "$sec8_sel" && grep -qF 'printed NO parseable compile edge' "$sec8_dir/err"; then
+  ok "§8 a graph in the wrong format (zero parseable edges) falls back to ALL, by name"
+else
+  bad "§8 a graph in the wrong format falls back to ALL, by name" "got $(grep -c . <<<"$sec8_sel") lines / stderr: $(head -2 "$sec8_dir/err" | tr '\n' ' ')"
+fi
+if env -u BP_IMPACTED_NO_XREF BP_IMPACTED_ROOT="$ROOT" PATH="$sec8_dir/bin:$PATH" bash "$SEL" --xref-probe >/dev/null 2>&1; then
+  bad "§8 --xref-probe reports DEAD on a wrong-format graph" "it exited 0"
+else
+  ok "§8 --xref-probe reports DEAD on a wrong-format graph"
+fi
+
+# (g) THE MUTATION THAT MAKES THE CLOSURE MEAN SOMETHING in --select. A
+# synthetic tree where sprocket.ex `use`s gear.ex and the only test of the
+# dependent names ONLY the dependent: the by-name net, the convention map and
+# RULE 3 cannot reach it from gear.ex. With the edge, --select must select it;
+# with the edge CUT (the control), it must not. A selector that ignored the
+# closure passes neither-or-both, never this pair.
+g="$sec8_dir/tree"
+mkdir -p "$g/api/lib/barkpark/widgets" "$g/api/lib/barkpark/tasks" "$g/api/lib/barkpark/plugins" "$g/api/test/barkpark/widgets"
+printf 'defmodule Barkpark.Plugin do\nend\n' >"$g/api/lib/barkpark/plugin.ex"
+printf 'defmodule Barkpark.Tasks.Landed do\nend\n' >"$g/api/lib/barkpark/tasks/landed.ex"
+printf 'defmodule Barkpark.Widgets.Gear do\n  defmacro __using__(_), do: quote(do: def(teeth, do: 12))\nend\n' >"$g/api/lib/barkpark/widgets/gear.ex"
+printf 'defmodule Barkpark.Widgets.Sprocket do\n  use Barkpark.Widgets.Gear\nend\n' >"$g/api/lib/barkpark/widgets/sprocket.ex"
+printf 'defmodule Barkpark.Widgets.SprocketTest do\n  use ExUnit.Case\n  test "teeth", do: assert(Barkpark.Widgets.Sprocket.teeth() == 12)\nend\n' >"$g/api/test/barkpark/widgets/sprocket_test.exs"
+sec8_want_test='test/barkpark/widgets/sprocket_test.exs'
+sec8_gear() {
+  write_mix_stub "$sec8_dir/bin/mix" "$1"
+  printf 'api/lib/barkpark/widgets/gear.ex\n' | \
+    env -u BP_IMPACTED_NO_XREF BP_IMPACTED_ROOT="$ROOT" BP_IMPACTED_XREF_DIR="$g/api" PATH="$sec8_dir/bin:$PATH" \
+    bash "$SEL" --select 2>"$sec8_dir/err"
+}
+if grep -qF 'Gear' "$g/api/$sec8_want_test"; then
+  bad "§8 precondition: the dependent's test does not name the changed module" "it does — the by-name net would reach it and this arm would measure nothing"
+else
+  sec8_with="$(sec8_gear gear)"
+  sec8_cut="$(sec8_gear gear-cut)"
+  if is_all "$sec8_with" || is_all "$sec8_cut"; then
+    bad "§8 the gear/sprocket arm narrows" "with-edge: $(head -1 <<<"$sec8_with"), cut: $(head -1 <<<"$sec8_cut") / stderr: $(head -2 "$sec8_dir/err" | tr '\n' ' ')"
+  else
+    if grep -qxF -- "$sec8_want_test" <<<"$sec8_with"; then
+      ok "§8 a change to gear.ex selects the test of its COMPILE DEPENDENT sprocket.ex, which names only sprocket"
+    else
+      bad "§8 a change to gear.ex selects the test of its compile dependent" "$sec8_want_test is not in the $(grep -c . <<<"$sec8_with")-file selection"
+    fi
+    if grep -qxF -- "$sec8_want_test" <<<"$sec8_cut"; then
+      bad "§8 control: with the edge CUT, the dependent's test is NOT selected" "it is — something other than the closure reached it, so the arm above measured nothing"
+    else
+      ok "§8 control: with the sprocket -> gear edge CUT, the same test is NOT selected"
+    fi
+  fi
+fi
+rm -rf -- "$sec8_dir"
 
 echo
 echo "=== $PASS passed, $FAIL failed"

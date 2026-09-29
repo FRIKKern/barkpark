@@ -129,6 +129,39 @@ defmodule BarkparkCloud.PlatformDelivery do
   @transitions ~w(forward rollback diverged noop unknown)
   @unknown_transition "unknown"
 
+  # The `serving_since_basis` vocabulary (W29). WHICH CLOCK produced this row's
+  # `serving_since` — a fact the recorder has always known and never written.
+  #
+  #   * "process_start"     — the cp leg, HISTORICALLY. /health's `serving_since`
+  #     WAS the BEAM's own start instant, so a bare restart that deployed
+  #     nothing moved it FORWARD and a lag measured against it was an UPPER
+  #     BOUND that read SMALLER than the truth. Every row already stamped with
+  #     this word means exactly that and still does — which is the whole reason
+  #     the word is on the row rather than inferred later.
+  #
+  #     THAT IS NO LONGER WHAT /health EMITS.
+  #     `clk-bl-cloud-health-serving-since-is-boot-local` made the plane's
+  #     `serving_since` durable (`BarkparkCloud.Health.ServingMemory`: one row
+  #     per sha in the plane's own Postgres, unmoved by a restart). The RECORDER
+  #     that stamps this column is `.github/workflows/deploy.yml`, which is
+  #     outside that change's fence and still writes "process_start" for the cp
+  #     leg. So a cp row stamped today under-describes a value that is now as
+  #     durable as the instance leg's. Correcting the recorder — a new word here
+  #     plus the deploy.yml line that writes it — is a deploy-lane follow-up; it
+  #     is NOT done by widening this list alone, because a word no writer emits
+  #     measures nothing.
+  #   * "deploy_flip_mtime" — the instance leg. The mtime of
+  #     `/opt/barkpark/.instance-deploy-last`, which IS the flip instant.
+  #
+  # Both words are taken from what the two producers already SAY (deploy.yml:
+  # "(basis: process start, not the flip instant)" and "(basis: mtime of
+  # .instance-deploy-last, the flip instant)"), not invented here.
+  #
+  # NO DEFAULT, EVER. NULL means "the recorder did not write a basis" — every
+  # row older than this column — and is NOT a third basis. Defaulting would mint
+  # a derivation nobody measured for the whole history of the table.
+  @serving_since_bases ~w(process_start deploy_flip_mtime)
+
   # The write columns, in the order the wire carries them. `insert_all/3` takes a
   # bare map, so this list is what turns a validated changeset back into a row.
   @columns [
@@ -139,6 +172,7 @@ defmodule BarkparkCloud.PlatformDelivery do
     :queued_seconds,
     :build_seconds,
     :serving_since,
+    :serving_since_basis,
     :target,
     :carried,
     :queued_self_seconds,
@@ -176,6 +210,11 @@ defmodule BarkparkCloud.PlatformDelivery do
 
     field :build_seconds, :integer
     field :serving_since, :utc_datetime_usec
+
+    # WHICH derivation produced `serving_since` on this row (W29). Nullable with
+    # NO default: a NULL says the recorder wrote no basis, never a third one.
+    field :serving_since_basis, :string
+
     field :target, :string, default: @default_target
 
     # NO DEFAULT (D422). An omitted `carried` must read `nil` — "nobody measured
@@ -198,6 +237,19 @@ defmodule BarkparkCloud.PlatformDelivery do
   @doc "The `target` vocabulary: which leg delivered this sha."
   @spec targets() :: [binary()]
   def targets, do: @targets
+
+  @doc """
+  The `serving_since_basis` vocabulary: WHICH CLOCK produced this row's
+  `serving_since`.
+
+  `"process_start"` (cp) is the BEAM's own start instant — an UPPER BOUND that a
+  bare restart moves forward — and `"deploy_flip_mtime"` (instance) is the mtime
+  of `/opt/barkpark/.instance-deploy-last`, the flip instant itself. A NULL is
+  neither: it says no basis was recorded, which is every row older than the
+  column.
+  """
+  @spec serving_since_bases() :: [binary()]
+  def serving_since_bases, do: @serving_since_bases
 
   @doc """
   The `transition` vocabulary: how `previous_sha` relates to `sha`.
@@ -246,6 +298,7 @@ defmodule BarkparkCloud.PlatformDelivery do
     |> reject_null_sha(:sha)
     |> reject_null_sha(:previous_sha)
     |> validate_inclusion(:target, @targets)
+    |> validate_inclusion(:serving_since_basis, @serving_since_bases)
     |> validate_number(:queued_seconds, greater_than_or_equal_to: 0)
     |> validate_number(:build_seconds, greater_than_or_equal_to: 0)
     |> validate_number(:queued_self_seconds, greater_than_or_equal_to: 0)
@@ -266,6 +319,7 @@ defmodule BarkparkCloud.PlatformDelivery do
     |> Map.update("sha", nil, &downcase/1)
     |> Map.update("previous_sha", nil, &downcase/1)
     |> Map.update("transition", nil, &downcase/1)
+    |> Map.update("serving_since_basis", nil, &downcase/1)
   end
 
   defp normalize(_other), do: %{}
@@ -477,6 +531,7 @@ defmodule BarkparkCloud.PlatformDelivery do
       queued_stall_seconds: d.queued_stall_seconds,
       build_seconds: d.build_seconds,
       serving_since: iso(d.serving_since),
+      serving_since_basis: d.serving_since_basis,
       target: d.target,
       carried: d.carried,
       previous_sha: d.previous_sha,

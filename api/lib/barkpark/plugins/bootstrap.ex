@@ -171,6 +171,37 @@ defmodule Barkpark.Plugins.Bootstrap do
         {{:ok, 0}, %{names: [], detail: :no_callback}}
 
       true ->
+        # ── DISPOSITION: THIS RESCUE STAYS A LOGGED DEGRADATION ──────────────
+        # task-a6ef8e3b2c78054f criterion 4 asked for the call to be recorded
+        # either way. It is: a plugin raising in `register_schemas/1` is
+        # logged and skipped, and boot continues. It does NOT become a boot
+        # refusal. Three reasons, in order of weight:
+        #
+        #   1. The repo's own contract is that with all plugins off Barkpark
+        #      still works. A plugin that can halt the host's boot inverts
+        #      that: it makes every optional plugin a mandatory one.
+        #   2. The blast radius of refusing is worse than degrading. A
+        #      self-hoster whose pinned image carries a plugin that raises on
+        #      a bad data file gets a container that will not start and no
+        #      Studio to disable the plugin from. Degrading leaves an
+        #      administrable system with a missing document type.
+        #   3. The real cost of the degradation was never the degradation —
+        #      it was that NOTHING ASSERTED ON IT. compose-smoke's green arm
+        #      certified a release in which six of nine plugins were dead
+        #      (PR #13708). That is now closed at the gate:
+        #      `scripts/compose-smoke.sh`'s `assert_plugin_census` reads
+        #      `Barkpark.Plugins.Census` over `rpc` and REDS on any non-"ok"
+        #      plugin. Silence in the log is acceptable precisely because it
+        #      is no longer silence in CI.
+        #
+        # WHAT WOULD REVERSE THIS. The rescue is sound only while a failed
+        # registration merely OMITS a document type. If a partial
+        # registration could ever leave persisted data inconsistent — a
+        # half-applied schema migration, an upsert that drops fields — then
+        # continuing is worse than refusing and this becomes a raise. The
+        # `upsert_schemas/3` reduce_while below halts on the first error and
+        # persists nothing further, which is what keeps that condition false
+        # today.
         try do
           schemas = module.register_schemas([])
 
@@ -253,7 +284,13 @@ defmodule Barkpark.Plugins.Bootstrap do
   end
 
   defp do_upsert(plugin_name, attrs, dataset, scope) do
-    case Content.upsert_schema(attrs, dataset) do
+    # CLASS (c), the seeded-Default ruling (task-e6523cc7154304f0): a plugin's
+    # schema registration is INSTANCE-WIDE by design — it runs at boot, carries
+    # no principal and no request, and every tenant on this box needs the row.
+    # `instance_wide: true` DECLARES that, so the seeded Default is a caller's
+    # choice rather than WriteScope's silent fallback. (The per-scope copy is
+    # stamped afterwards by `stamp_scope/2`.)
+    case Content.upsert_schema(attrs, dataset, instance_wide: true) do
       {:ok, %SchemaDefinition{} = saved} ->
         stamp_scope(saved, scope)
 
@@ -284,7 +321,7 @@ defmodule Barkpark.Plugins.Bootstrap do
     end
   end
 
-  # ─── The pull-provenance guard (PDS-D21/D22) ───────────────────────────
+  # ─── The pull-provenance guard (PDS-D21/PDS-D22) ───────────────────────────
   #
   # WHAT THE CLOBBER ACTUALLY IS. `Content.upsert_schema/2` reads first via
   # `get_schema/3`. `Content.Scope.scope_to_workspace_global/1` really is
@@ -313,7 +350,7 @@ defmodule Barkpark.Plugins.Bootstrap do
   # slot; both would be dead weight. A blanket never-update stays rejected: it
   # would freeze legitimate plugin schema evolution on every un-pulled install.
   #
-  # THE PREDICATE ITSELF LIVES IN `Barkpark.Tenancy` (PDS-D125/D126) — it is
+  # THE PREDICATE ITSELF LIVES IN `Barkpark.Tenancy` (PDS-D125/PDS-D126) — it is
   # shared with `Content.TagRegistry`, the OTHER boot-time schema writer, which
   # asks the same question and answers it differently (it guards the update but
   # still inserts when absent, because it must fail the boot closed on a missing

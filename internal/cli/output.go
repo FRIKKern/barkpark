@@ -16,6 +16,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
+	"golang.org/x/term"
 )
 
 // writer wraps the CLI's stdout/stderr with resolved output settings. It is the
@@ -64,6 +65,40 @@ type writer struct {
 	// apart: no credential (go get one) versus a credential the server
 	// rejected (getting another one changes nothing).
 	credentialSent bool
+
+	// requestedColumns are the column names the caller NAMED with `--fields`
+	// (or that a built-in projects on the caller's behalf, e.g. `scaffy ls
+	// --remote`), in the order given; empty when the table's columns are
+	// inferred from the payload. renderRows honours it so a projected column
+	// renders as empty cells rather than vanishing when no row on the page
+	// happens to carry a value — see pickColumns. Per-invocation, like
+	// lastErrorCode: one writer per bp run, set on the dispatch that resolved
+	// the projection and read only by the table renderer.
+	requestedColumns []string
+
+	// kvWrapWidth pins the terminal width renderKV wraps long values against,
+	// in display cells. Zero means "ask the terminal" (terminalWidth); it exists
+	// so a test can render at a fixed window without owning a pty, and so a
+	// future --width flag has one place to land. Per-invocation, like the fields
+	// above: one writer per bp run.
+	kvWrapWidth int
+}
+
+// terminalWidth reports the width of the attached terminal in columns, or 0
+// when there is none to ask. It sizes the writer's OWN stdout rather than the
+// process's: a writer bound to a bytes.Buffer (every test) or to a pipe is not
+// an *os.File, answers 0, and so renders unwrapped deterministically regardless
+// of what the surrounding process is attached to.
+func (w *writer) terminalWidth() int {
+	f, ok := w.stdout.(*os.File)
+	if !ok {
+		return 0
+	}
+	n, _, err := term.GetSize(int(f.Fd()))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 func newWriter(stdout, stderr io.Writer) *writer {

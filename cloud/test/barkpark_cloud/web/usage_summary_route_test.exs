@@ -221,6 +221,47 @@ defmodule BarkparkCloud.Web.UsageSummaryRouteTest do
       assert meter["quota"] == 3
       assert meter["warn_at"] == 2
     end
+
+    # cch-w49-bl — THE past_due SPLIT, RUN-PROVEN rather than source-argued.
+    # `Usage.instance_quota/1` reaches the ceiling through
+    # `Billing.active_subscription/1` (billing.ex — `status == "active"` ONLY),
+    # while GET /v1/subscription reads `Billing.live_subscription/1` (active OR
+    # past_due). The two therefore DISAGREE for a dunning team, and the console's
+    # billing screen sees both answers at once: a paid plan name with NO
+    # derivable ceiling behind it. That is the omit arm the billing render must
+    # take — so the split is pinned here, from BOTH routes in one test, instead
+    # of being read off the source.
+    test "a past_due team → quota nil, while /v1/subscription still reports the paid plan" do
+      {user, team} = user_with_team()
+      sub = subscribe(team, "supporter")
+
+      {:ok, _} =
+        sub
+        |> Ecto.Changeset.change(%{
+          status: "past_due",
+          grace_ends_at: DateTime.add(DateTime.utc_now(), 7, :day)
+        })
+        |> Repo.update()
+
+      _bp = checkable_instance(team)
+      forbid_instance_http()
+
+      token = session_token(user)
+
+      meter = summary(call(:get, "/v1/usage/summary", token: token))["team"]["instances"]
+
+      # The live count is still honest — it is the CEILING that has no answer.
+      assert meter["value"] == 1
+      assert meter["quota"] == nil
+      assert meter["warn_at"] == nil
+
+      # …and the SAME team, on the SAME token, is told it is on the paid plan.
+      plan_conn = call(:get, "/v1/subscription", token: token)
+      assert plan_conn.status == 200
+      shown = Jason.decode!(plan_conn.resp_body)["subscription"]
+      assert shown["plan"] == "supporter"
+      assert shown["status"] == "past_due"
+    end
   end
 
   describe "auth" do

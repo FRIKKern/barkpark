@@ -51,7 +51,7 @@ set -uo pipefail
 
 SRC="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 SRC="$(cd "$SRC" && pwd)"
-for f in Makefile .githooks/post-merge scripts/deploy-rebuild.sh; do
+for f in Makefile .githooks/post-merge scripts/deploy-rebuild.sh scripts/lib/bp-curl.sh; do
   [ -f "$SRC/$f" ] || { echo "FATAL: $SRC/$f is missing — cannot test a tree without the subjects."; exit 2; }
 done
 
@@ -177,10 +177,14 @@ ARM_N=0
 new_tree() {
   ARM_N=$((ARM_N+1))
   T="$ROOT/arm$ARM_N"
-  mkdir -p "$T/scripts" "$T/.githooks" "$T/api/_build/prod" "$T/.git"
+  mkdir -p "$T/scripts/lib" "$T/.githooks" "$T/api/_build/prod" "$T/.git"
   cp "$SRC/Makefile" "$T/Makefile"
   cp "$SRC/.githooks/post-merge" "$T/.githooks/post-merge"
   cp "$SRC/scripts/deploy-rebuild.sh" "$T/scripts/deploy-rebuild.sh"
+  # make deploy's own probe sources this (429 backoff, task-c2f96f8121c64601);
+  # the recipe reaches it by a path relative to -C, so the sandbox must carry it
+  # or the probe degrades to `|| echo 000` and every happy arm reds.
+  cp "$SRC/scripts/lib/bp-curl.sh" "$T/scripts/lib/bp-curl.sh"
   chmod +x "$T/.githooks/post-merge" "$T/scripts/deploy-rebuild.sh"
   echo OLD > "$T/api/_build/prod/marker"
   DANGER="$T/danger.log"; : > "$DANGER"
@@ -337,7 +341,14 @@ echo "--- happy (everything answers 200) rc=$rc ---"; grep '^>>' "$OUT" || true
 assert_rc  "happy: make deploy exits 0 when every claim was measured" "$rc" 0
 assert_has "happy: deploy-rebuild says it restarted AND answered"     "$OUT" "restarted and answering"
 assert_has "happy: the receipt cites the recorded hook outcome"       "$OUT" "recorded outcome: rebuilt"
-assert_has "happy: the receipt cites the measured status code"        "$OUT" "/api/schemas -> HTTP 200"
+# /status.json, NOT /api/schemas. #17772 (8970ea272) moved deploy-rebuild.sh's
+# health probe off the sunset /api/schemas route (BP_HEALTH_URL, deploy-rebuild.sh
+# :210-215) and this assertion kept quoting the old path, so the receipt it reads
+# ("API is live (/status.json -> HTTP 200)") no longer matched and this harness
+# reddened every completed main run (measured 2026-09-13, run 34753745582: FAILED
+# 1 of 54). The assertion's subject is unchanged — the receipt must cite a status
+# code somebody MEASURED — only the URL it measures moved.
+assert_has "happy: the receipt cites the measured status code"        "$OUT" "/status.json -> HTTP 200"
 if [ ! -s "$DANGER" ]; then ok "happy: no nested make/go escaped the stub PATH"; else bad "happy: escape recorded: $(cat "$DANGER")"; fi
 
 # ─────────────────────────────────────────────────────────────────────────────

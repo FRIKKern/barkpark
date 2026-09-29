@@ -13,8 +13,21 @@ defmodule Barkpark.Quiz do
 
   alias Barkpark.Quiz.Room
 
-  @doc "Resolve-or-start the room for `pin`."
+  @doc """
+  Resolve-or-start the room for `pin` as an INTERNAL caller — no spawn budget
+  is spent. Every reachable door must pass its transport context instead
+  (`ensure_room/2`); `Barkpark.Quiz.SpawnBudgetTest` fails if one does not.
+  """
   defdelegate ensure_room(pin), to: Room, as: :ensure
+
+  @doc """
+  Resolve-or-start the room for `pin`, billing a NEW spawn to the principal
+  behind `source` (a `%Plug.Conn{}` or a socket `connect_info` map).
+
+  `{:error, :spawn_budget}` when that principal has opened too many rooms in
+  the last hour — see `Barkpark.Quiz.SpawnBudget`.
+  """
+  defdelegate ensure_room(pin, source), to: Room, as: :ensure
 
   @doc """
   Add (or refresh) a player in a live room; returns `{:ok, snapshot}`, or

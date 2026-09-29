@@ -28,6 +28,7 @@ defmodule Barkpark.TasksClaimTest do
   use Barkpark.DataCase, async: false
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Content.{Document, MutationEvent}
 
   @dataset "production"
@@ -679,7 +680,7 @@ defmodule Barkpark.TasksClaimTest do
 
       # Subscribe AFTER creation so the create_document broadcast cannot
       # satisfy the assertion below.
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      subscribe_task_stream!()
 
       assert {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "w-ps", scope)
 
@@ -706,7 +707,7 @@ defmodule Barkpark.TasksClaimTest do
       phase_id = uniq("phase-ps-q")
       task = mk_task!(uniq("ps-q"), scope, %{"parent_id" => phase_id})
 
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      subscribe_task_stream!()
 
       claim_opts = scope ++ [phase_id: phase_id, dataset: @dataset]
       assert {:ok, %Document{} = claimed} = Tasks.claim("w-psq", claim_opts)
@@ -734,7 +735,7 @@ defmodule Barkpark.TasksClaimTest do
 
       {:ok, claimed} = Tasks.claim_by_id(blocker.doc_id, "w-psc", scope)
 
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      subscribe_task_stream!()
 
       assert {:ok, closed} =
                Tasks.close(blocker.id, "w-psc",
@@ -762,7 +763,7 @@ defmodule Barkpark.TasksClaimTest do
       phase_id = uniq("phase-ps-lbl")
       task = mk_task!(uniq("ps-lbl"), scope, %{"parent_id" => phase_id})
 
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      subscribe_task_stream!()
 
       assert {:ok, relabeled} = Tasks.relabel_by_id(task.id, ["file-claim:a.ex"], [])
       assert_receive {:document_changed, msg}, 1_000
@@ -840,5 +841,18 @@ defmodule Barkpark.TasksClaimTest do
         end
       end)
     end
+  end
+
+  # The task stream, on the topic that CARRIES THE PAYLOAD (task-5d0615ee60143cc8).
+  # These rows are written in the instance-default workspace, and
+  # `Content.Broadcast` now strips `:doc`/`:document` from a WORKSPACE-OWNED
+  # document's frame on the global `documents:<dataset>` topic — the global topic
+  # has no workspace component, so every co-dataset tenant subscribes to it. The
+  # full frame rides `documents:ws:<id>:<dataset>`, which is where an assertion
+  # about the payload belongs (tasks_claim_test's own reconcile arm already
+  # subscribed there).
+  defp subscribe_task_stream! do
+    {ws, _project} = TenancyFixtures.ensure_default_scope!()
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, Broadcast.workspace_list_topic(@dataset, ws.id))
   end
 end

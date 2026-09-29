@@ -1,5 +1,5 @@
 defmodule Barkpark.Content.ErrorsTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   alias Barkpark.Content.Errors
 
   setup do

@@ -39,6 +39,9 @@ defmodule BarkparkWeb.BulldocsFormController do
   @max_list_item 500
   @rate_capacity 20
   @rate_refill_per_sec 1 / 60
+  # Seconds until the bucket refills ONE token — the value the code-keyed
+  # "rate_limited" hint promises on the `retry-after` header (see the 429 arm).
+  @rate_retry_after_seconds max(1, ceil(1 / @rate_refill_per_sec))
 
   def submit(conn, %{"slug" => slug} = params) do
     with :ok <- rate_limit(conn),
@@ -54,7 +57,18 @@ defmodule BarkparkWeb.BulldocsFormController do
         conn |> put_status(201) |> json(%{ok: true})
 
       {:error, :rate_limited} ->
-        envelope(conn, 429, "rate_limited", "too many submissions from this address")
+        # THE 429 MUST CARRY THE REMEDY ITS OWN HINT NAMES
+        # (task-57081836b628df35). `envelope/4` stamps through
+        # `Content.Errors.stamp/2`, so this body picks up the code-keyed
+        # "rate_limited" hint — "Back off and retry after the Retry-After
+        # header's value" — and the response carried no such header. The wait is
+        # computable from the bucket (one token per `1 / @rate_refill_per_sec`
+        # seconds), so the header is published instead of the hint un-named.
+        conn
+        |> put_resp_header("retry-after", Integer.to_string(@rate_retry_after_seconds))
+        |> envelope(429, "rate_limited", "too many submissions from this address", %{
+          retry_after: @rate_retry_after_seconds
+        })
 
       {:error, :not_found} ->
         envelope(conn, 404, "not_found", "paper not found")
@@ -73,13 +87,15 @@ defmodule BarkparkWeb.BulldocsFormController do
   # Error envelopes stay inside the ratified public vocabulary
   # (Content.Errors.known_codes/0 — the ErrorCodeCoverage contract): the code
   # is canonical, the MESSAGE carries the per-cause detail.
-  defp envelope(conn, status, code, message) do
+  defp envelope(conn, status, code, message, details \\ nil) do
+    env =
+      %{code: code, message: message}
+      |> then(fn env -> if details, do: Map.put(env, :details, details), else: env end)
+      |> Barkpark.Content.Errors.stamp(conn)
+
     conn
     |> put_status(status)
-    |> json(%{
-      ok: false,
-      error: Barkpark.Content.Errors.stamp(%{code: code, message: message}, conn)
-    })
+    |> json(%{ok: false, error: env})
   end
 
   # ── guards ─────────────────────────────────────────────────────────────────

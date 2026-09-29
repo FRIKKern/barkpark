@@ -139,6 +139,12 @@ defmodule Barkpark.Tasks.Events do
     * `:payload` — `true` adds the typed payload stamp (`:payload`) to each row
       that has one; see the moduledoc. Defaults to `false`, in which case the
       projection and the returned maps are byte-for-byte what they always were.
+    * `:doc_id` — when a non-nil binary, restrict to the events of that ONE
+      task. The per-row audit narrowing (`bp task events <id>`,
+      `GET /v1/tasks/events?doc_id=…`): one row's whole mutation history in
+      commit order, without paging the global backlog to find it. Composes
+      with `since`/`limit`/`payload` — it is another where-clause on the same
+      keyset query, so the cursor contract is unchanged. nil → unscoped.
     * `:workspace_id` — when a non-nil binary, restrict to events whose own
       denormalised `workspace_id` matches — the SAME row-local tenant boundary
       `EventLog.replay_since/4` enforces (never an INNER JOIN to `documents`, so
@@ -157,6 +163,7 @@ defmodule Barkpark.Tasks.Events do
     since = max(since, 0)
     workspace_id = Keyword.get(opts, :workspace_id)
     payload? = Keyword.get(opts, :payload, false) == true
+    doc_id = Keyword.get(opts, :doc_id)
 
     rows =
       from(e in MutationEvent,
@@ -164,6 +171,7 @@ defmodule Barkpark.Tasks.Events do
         order_by: [asc: e.id],
         limit: ^limit
       )
+      |> maybe_scope_doc(doc_id)
       |> maybe_scope_workspace(workspace_id)
       |> select_shape(payload?)
       |> Repo.all()
@@ -234,6 +242,30 @@ defmodule Barkpark.Tasks.Events do
 
   defp clamp_limit(n) when is_integer(n), do: n |> min(@max_limit) |> max(1)
   defp clamp_limit(_), do: @default_limit
+
+  # ─── THE PER-DOC NARROWING (tlv-bl-events-actor-attribution) ─────────────
+  #
+  # `mutation_events.doc_id` is the task the event is about, and it is already
+  # projected onto every feed row — so an auditor asking "what happened to THIS
+  # row" was reduced to replaying the global stream and filtering client-side.
+  # On a ledger whose backlog is 81,564+ events at a 500-row page that is ~163
+  # requests to answer a one-row question, and the answer is only as complete
+  # as the caller's patience: a sweep that stops early reads an absence it
+  # manufactured. This clause is that filter, pushed to Postgres.
+  #
+  # It composes rather than replaces: `since` still bounds the keyset, so
+  # `--since <last id> <doc_id>` is a per-row TAIL, and the cursor a caller
+  # resumes from is still the global monotonic PK.
+  #
+  # Deliberately NOT a new route: the feed's shape, scoping, clamp and cursor
+  # contract are all owned here, and a `/v1/tasks/:doc_id/events` twin would
+  # have to re-derive every one of them (and would mount ahead of
+  # `/tasks/:doc_id`'s own family). A where-clause has no second contract to
+  # drift.
+  defp maybe_scope_doc(query, doc_id) when is_binary(doc_id) and doc_id != "",
+    do: from(e in query, where: e.doc_id == ^doc_id)
+
+  defp maybe_scope_doc(query, _), do: query
 
   defp maybe_scope_workspace(query, ws_id) when is_binary(ws_id),
     do: from(e in query, where: e.workspace_id == ^ws_id)

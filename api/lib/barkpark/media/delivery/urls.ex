@@ -110,12 +110,12 @@ defmodule Barkpark.Media.Delivery.Urls do
   @spec put_file_cache_headers(Plug.Conn.t(), String.t(), String.t() | nil) :: Plug.Conn.t()
   def put_file_cache_headers(conn, full_path, visibility)
 
-  def put_file_cache_headers(conn, full_path, "public") do
+  def put_file_cache_headers(conn, full_path, "public" = visibility) do
     etag = etag_for(full_path)
 
     conn =
       conn
-      |> Plug.Conn.put_resp_header("cache-control", @public_cache)
+      |> Plug.Conn.put_resp_header("cache-control", file_cache_control(visibility))
       |> Plug.Conn.put_resp_header("etag", etag)
 
     if if_none_match_hit?(conn, etag) do
@@ -127,9 +127,23 @@ defmodule Barkpark.Media.Delivery.Urls do
 
   # Fail-closed catch-all: "token", "private", nil, and every unknown value.
   # Returns BEFORE any ETag/304 machinery — the full body is always sent.
-  def put_file_cache_headers(conn, _full_path, _visibility) do
-    Plug.Conn.put_resp_header(conn, "cache-control", @no_store_cache)
+  def put_file_cache_headers(conn, _full_path, visibility) do
+    Plug.Conn.put_resp_header(conn, "cache-control", file_cache_control(visibility))
   end
+
+  @doc """
+  The D12 `cache-control` VALUE for an asset's bytes, by `bp_visibility`.
+
+  The one place the rule lives. `put_file_cache_headers/3` sets it on the
+  local-file arm; the object-storage arm of `MediaController.serve/2` bakes the
+  SAME value into the presigned URL as `response-cache-control`, so the bucket
+  serves the bytes under the policy the local path would have sent.
+  `"public"` → `#{@public_cache}`; anything else (fail-closed) →
+  `#{@no_store_cache}`.
+  """
+  @spec file_cache_control(String.t() | nil) :: String.t()
+  def file_cache_control("public"), do: @public_cache
+  def file_cache_control(_visibility), do: @no_store_cache
 
   # ── If-None-Match conformance (charter http-edge-truth D11) ───────────────
   # ONE matcher for the whole app: `BarkparkWeb.Http.IfNoneMatch.match?/2`

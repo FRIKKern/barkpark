@@ -89,16 +89,136 @@
 # 0.00 MiB, which reads to a threshold check as the quietest possible box and
 # PASSES. A vacuous zero must never authorise a measurement. Both legs refuse.
 #
+# WHY --window HAS NO DEFAULT (pds-bl-sampler-window-default-retired-engine).
+# This file used to default --window to 130 s, documented as "the canonical
+# export's wall time, so a control taken with the default is length-paired with
+# the canonical acquisition". That pairing claim is DEAD. The 130 s was measured
+# in wave 7 against the IN-MEMORY export engine (send_resp materialising the
+# whole tar as one BEAM binary), which wave 11 replaced with the streaming spill
+# engine now deployed. The deployed engine has never completed the full
+# canonical export, so its wall time is UNMEASURED — that is the open blocker
+# pds-bl-w13-export-duration-unmeasured, and until it is paid nobody, including
+# this script, knows whether the streaming engine is faster or slower than the
+# retired one.
+#
+# An inherited 130 s is worse than no number. A window shorter than the
+# acquisition it is paired with does not refuse: it closes early and reports an
+# ordinary-looking, too-LOW control, which flatters whatever measurement it is
+# placed beside. Nor does the launcher rescue the caller — scripts/pds-crown-
+# launch.sh never invokes this sampler (the ride-along is manual by
+# construction) and its own poll loop can wait hours before the export fires, so
+# no default can be length-paired with an event whose start time is unknown.
+#
+# The honest move is therefore NOT to substitute a guessed replacement. It is to
+# refuse to supply one: the caller must state the window, and owns the pairing
+# claim. Same anti-vacuous rule as PDS-D220a — a figure nobody measured must
+# never authorise a measurement. Until the blocker is paid, pass a generously
+# large window and truncate at ANALYSIS time using the transcript's own
+# idle_window_requested_s vs idle_window_s (both are on the machine line).
+#
 # USAGE
 #
-#   scripts/pds-idle-sampler.sh [--window <seconds>] [--label <text>]
+#   scripts/pds-idle-sampler.sh --window <seconds> [--label <text>]
 #                               [--out <file>]
+#   scripts/pds-idle-sampler.sh --selftest
 #
-#   --window   window length in seconds (default 130 — the canonical export's
-#              wall time, so a control taken with the default is length-paired
-#              with the canonical acquisition).
+#   --window   window length in seconds. REQUIRED — there is no default, and
+#              omitting it is a misconfiguration (exit 3), not an inherited
+#              number. See WHY --window HAS NO DEFAULT below.
 #   --label    free text recorded in the output (e.g. "beside-climb-w13").
 #   --out      also write the machine-readable line to this file.
+#   --selftest run the built-in three-arm harness (below). Touches NO host: it
+#              re-runs this script against a fake `ssh` on a shimmed PATH in a
+#              mktemp work dir, so it is safe on any laptop and in CI.
+#
+#              WHERE IT RUNS. It is an arm of the `pds-harnesses` leg in
+#              .github/shell-harness-legs.json, executed by the `harness`
+#              matrix job of .github/workflows/shell-harnesses.yml through
+#              scripts/shell-harness-run.sh. The leg is dispatched for this
+#              file by the roster row `pds-harnesses scripts/pds-*.sh`, so an
+#              edit HERE runs it. Before that wiring it ran in no job at all,
+#              which is how a guard decays in silence.
+#
+# WHAT SURVIVES AN EARLY KILL (the defect this section documents)
+#
+# This instrument's ONLY product is the sample series in its work dir. It used
+# to register `trap cleanup EXIT INT TERM` with a cleanup() that `rm -rf`'d that
+# work dir UNCONDITIONALLY — so on an early TERM the logs were deleted BEFORE
+# the main body's peak arithmetic read them, the run fell through to the
+# PDS-D220a zero-sample refusal, and a window that had collected 34 real
+# non-zero readings reported itself as `peak 0 kB (MAX over 0 readings)` and
+# blamed a lost ssh session. That diagnosis was false twice over: the samples
+# existed, and the killer was an operator. The failure was TOTAL — no operator
+# could recover the partial series afterwards.
+#
+# So the three signals are no longer treated alike:
+#
+#   * EXIT (the run finished, refused, or died on its own terms) — the work dir
+#     is REMOVED. A cleanup that never cleans up is not a fix either; the tidy
+#     path still tidies, and the preflight prints the path it will remove.
+#   * INT / TERM (somebody else ended this run) — the samplers are killed, the
+#     partial series is READ and REPORTED, the work dir is PRESERVED at the path
+#     printed on the way out, and a `PDS_IDLE_SAMPLE_PARTIAL` line is emitted.
+#     The prefix differs from the complete run's `PDS_IDLE_SAMPLE` on purpose:
+#     a partial control must not be ingestible as a measurement (PDS-D220a's
+#     rule — a figure nobody finished must never authorise a measurement).
+#     Exit is 130 (INT) / 143 (TERM), never 0 and never the 2 that would read as
+#     "this instrument refused".
+#
+#   PDS_IDLE_KEEP_WORK_DIR=1 preserves the work dir on the clean path too, for
+#   an operator who wants the raw series after a completed window.
+#
+# DETACHED LAUNCH — python3 fork+setsid+execvp, NEVER `& disown` (PDS-D243)
+#
+# A sampler riding beside a hours-long climb outlives the shell that started it,
+# and `& disown` is the form PDS-D243 MEASURED as fragile: the child keeps the
+# launcher's process group, survives a turn end and `kill -HUP -<pgid>`, and
+# DIES to `kill -TERM -<pgid>` — which is what a closing tmux pane sends. It
+# would vanish with `sampler_launched: yes` already recorded and nothing
+# collected. `setsid(1)` does not exist on macOS either (PDS-D243 again), so the
+# recipe is python3, exactly the form `cmd_arm` uses:
+#
+#   python3 - <<'PY'
+#   import os, sys
+#   if os.fork() == 0:
+#       os.setsid()
+#       fd = os.open('/tmp/pds-idle-sampler-w16.log',
+#                    os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+#       os.dup2(fd, 1); os.dup2(fd, 2)
+#       os.close(0)
+#       os.execvp('scripts/pds-idle-sampler.sh',
+#                 ['scripts/pds-idle-sampler.sh',
+#                  '--window', '21600',
+#                  '--label', 'beside-climb',
+#                  '--out', '/tmp/pds-idle-sampler-w16.out'])
+#   PY
+#
+# Then PROVE the detach rather than assuming it — the launched process must be
+# its own session leader:
+#
+#   $ ps -p <pid> -o pid=,ppid=,pgid=,stat=,comm=
+#   62913     1 62913 Ss   /usr/bin/env
+#
+# `pgid == pid` and `STAT` starting `Ss` is the session leader; `ppid=1` is the
+# reparenting. Anything else (a pgid equal to the launching shell's) is the
+# `& disown` shape and IS reaped by a pane close. The same recipe, with the same
+# `ps -p` proof, is recorded live at docs/ledgers/pds-w15-fire-record.md.
+#
+# SELFTEST — three arms, no host touched
+#
+#   `--selftest` builds a fake `ssh` on a shimmed PATH and runs this script
+#   three times in a mktemp work dir:
+#     ARM 1 (RED when the preservation is reverted) — kill a running window with
+#           TERM mid-flight; the run MUST report a non-zero sample count, MUST
+#           NOT blame the ssh session, and its work dir MUST still hold the logs.
+#     ARM 2 (RED if the cleanup stops cleaning) — let a window finish; the run
+#           MUST exit 0, MUST print the complete `PDS_IDLE_SAMPLE` line, and its
+#           work dir MUST be gone.
+#     ARM 3 (the keep-flag control) — a finished window under
+#           PDS_IDLE_KEEP_WORK_DIR=1 MUST exit 0 AND keep its work dir, so arm 2
+#           is proving the cleanup ran rather than that the dir never existed.
+#   PDS_IDLE_SELFTEST_TARGET=<path> points the harness at ANOTHER copy of this
+#   script — that is how arm 1 is shown to red against the pre-fix version.
 #
 # ENV (all optional, mirroring the paired-control instrument's names)
 #
@@ -107,11 +227,16 @@
 #   PDS_SOURCE_SSH       default root@157.180.90.121
 #   PDS_SOURCE_SSH_KEY   default $HOME/.ssh/barkpark_indx
 #   PDS_RUN_ID           default a UTC stamp + pid
+#   PDS_IDLE_KEEP_WORK_DIR  set to 1 to keep the work dir on the clean path too
 #
 #   No token is read and none is needed: nothing is fetched.
 #
 # EXIT: 0 measured · 2 refused (SSH unavailable, no comm-anchored BEAM, or a leg
-#       that logged nothing — PDS-D220a) · 3 misconfigured.
+#       that logged nothing — PDS-D220a) · 3 misconfigured (this includes a
+#       MISSING --window: see WHY --window HAS NO DEFAULT above) ·
+#       130 / 143 TERMINATED BY INT / TERM — NOT a refusal and NOT a failure of
+#       this instrument: the partial series is preserved and reported on the way
+#       out (see WHAT SURVIVES AN EARLY KILL above).
 
 set -eu
 
@@ -142,7 +267,11 @@ SOURCE_SSH_KEY="${PDS_SOURCE_SSH_KEY:-$HOME/.ssh/barkpark_indx}"
 RUN_ID="${PDS_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 
 SAMPLE_HZ=1                       # stated in the output; see PDS-D114
-IDLE_SECONDS=130                  # the canonical export's wall time
+# NO DEFAULT. The empty string is the "caller said nothing" sentinel, refused
+# below. The old value (130 s) was the RETIRED in-memory engine's wall time and
+# the deployed streaming engine's is unmeasured — pds-bl-w13-export-duration-
+# unmeasured. See WHY --window HAS NO DEFAULT in the header.
+IDLE_SECONDS=""
 LABEL="unlabelled"
 OUT_FILE=""
 
@@ -158,12 +287,216 @@ refuse() { printf '%s: REFUSED — %s\n' "$SELF" "$*" >&2; exit 2; }
 
 IDLE_SAMPLER_PID=""
 IDLE_MEM_SAMPLER_PID=""
-cleanup() {
+
+# THE THREE SIGNALS ARE NOT ALIKE. `trap cleanup EXIT INT TERM` with an
+# unconditional `rm -rf "$WORK_DIR"` deleted the ONLY product this instrument
+# has — idle-rss.log and idle-memavail.log — before the main body's arithmetic
+# read them. On an early TERM the body then resumed after `wait`, found an empty
+# (deleted) log, and fired the PDS-D220a zero-sample refusal: a run with 34 real
+# readings printed `MAX over 0 readings` and blamed a lost ssh session. Both
+# halves of that were false, and the loss was unrecoverable.
+#
+# EXIT keeps the tidy behaviour. INT and TERM get their own handler, which reads
+# and reports the partial series and PRESERVES the dir. TERMINATED_BY is the
+# one-way latch the EXIT handler reads to decide whether to remove anything; it
+# is set BEFORE the report is printed so that a second signal arriving mid-report
+# still lands on a preserving cleanup.
+TERMINATED_BY=""
+
+kill_samplers() {
   [ -n "$IDLE_SAMPLER_PID" ] && kill "$IDLE_SAMPLER_PID" 2>/dev/null || true
   [ -n "$IDLE_MEM_SAMPLER_PID" ] && kill "$IDLE_MEM_SAMPLER_PID" 2>/dev/null || true
+}
+
+cleanup() {
+  kill_samplers
+  # Preserve on a signal, and on an explicit operator request. Otherwise tidy —
+  # a cleanup that never cleans up is its own defect.
+  if [ -n "$TERMINATED_BY" ] || [ "${PDS_IDLE_KEEP_WORK_DIR:-0}" = 1 ]; then
+    return 0
+  fi
   rm -rf "$WORK_DIR" 2>/dev/null || true
 }
-trap cleanup EXIT INT TERM
+
+# The partial report. Everything it quotes is read from the logs AFTER the
+# samplers are killed and BEFORE anything is removed — that ordering is the
+# whole fix. The helpers it calls (samples_in/peak_kb_of/min_f2_of/max_f2_of)
+# are defined further down; a trap handler resolves its callees at FIRE time, so
+# a signal arriving before they exist cannot reach this function either, because
+# a signal before the window has nothing to preserve.
+on_signal() { # <signal name> <exit code>
+  sig="$1"; code="$2"
+  TERMINATED_BY="$sig"
+  trap '' INT TERM            # a second signal must not re-enter this report
+  kill_samplers
+
+  part_t1="$(date +%s)"
+  part_wall=0
+  [ -n "${IDLE_T0:-}" ] && part_wall=$((part_t1 - IDLE_T0))
+
+  part_samples=0; part_peak=0; part_mem_samples=0; part_mem_min=0; part_mem_max=0
+  if [ -f "$IDLE_LOG" ]; then
+    part_samples="$(samples_in "$IDLE_LOG")"
+    part_peak="$(peak_kb_of "$IDLE_LOG")"
+  fi
+  if [ -f "$IDLE_MEM_LOG" ]; then
+    part_mem_samples="$(samples_in "$IDLE_MEM_LOG")"
+    part_mem_min="$(min_f2_of "$IDLE_MEM_LOG")"
+    part_mem_max="$(max_f2_of "$IDLE_MEM_LOG")"
+  fi
+
+  printf '\n%s: TERMINATED BY SIG%s after %s s of the %s s window.\n' \
+    "$SELF" "$sig" "$part_wall" "${IDLE_SECONDS:-unset}" >&2
+  printf '      This is an OPERATOR- OR SHELL-INITIATED STOP. It is NOT an ssh\n' >&2
+  printf '      failure and NOT a refusal by this instrument, and the samples\n' >&2
+  printf '      already collected are PRESERVED, not deleted.\n' >&2
+  printf '      rss samples ........ %s (peak %s kB)\n' "$part_samples" "$part_peak" >&2
+  printf '      memavail samples ... %s (min %s kB, max %s kB)\n' \
+    "$part_mem_samples" "$part_mem_min" "$part_mem_max" >&2
+  printf '      preserved at ....... %s\n' "$WORK_DIR" >&2
+  printf '                           idle-rss.log, idle-memavail.log — the raw\n' >&2
+  printf '                           series, readable now that nothing removed it.\n' >&2
+
+  # A DIFFERENT PREFIX, deliberately. `PDS_IDLE_SAMPLE` means a window that
+  # closed on its own terms; a consumer grepping that prefix must never ingest a
+  # truncated control as a measurement (PDS-D220a). Partial lines announce
+  # themselves in the key, not in a field a parser can drop.
+  part_line="PDS_IDLE_SAMPLE_PARTIAL run_id=$RUN_ID label=$LABEL status=terminated_by_signal signal=$sig partial=yes sample_hz=$SAMPLE_HZ units=kB_div_1024 idle_peak_kb=$part_peak idle_samples=$part_samples idle_window_requested_s=${IDLE_SECONDS:-0} idle_window_s=$part_wall idle_memavail_samples=$part_mem_samples idle_memavail_min_kb=$part_mem_min idle_memavail_max_kb=$part_mem_max work_dir_preserved=$WORK_DIR threshold_applied=none"
+  printf '%s\n' "$part_line"
+  [ -n "$OUT_FILE" ] && printf '%s\n' "$part_line" >"$OUT_FILE" 2>/dev/null || true
+
+  exit "$code"
+}
+
+trap cleanup EXIT
+trap 'on_signal INT 130' INT
+trap 'on_signal TERM 143' TERM
+
+# ── the built-in selftest — THREE ARMS, NO HOST TOUCHED ──────────────────────
+#
+# This instrument's product is a file it deletes on the way out, which is
+# precisely why the deletion policy needs a check that RUNS. The harness shims a
+# fake `ssh` onto PATH (so nothing is contacted, nothing is authenticated and no
+# real work dir is ever named) and drives THIS script to each of the three exits
+# that matter: killed mid-window, finished, and finished under the keep flag.
+#
+# ARM 1 is the RED arm for this row's fix: point PDS_IDLE_SELFTEST_TARGET at a
+# pre-fix copy of the script and it fails, because that copy exits 2 with the
+# "lost its ssh session" refusal instead of 143 with a preserved series.
+# ARM 2 is the quiet arm: a cleanup that stopped cleaning up would red it.
+# ARM 3 is ARM 2's control — it proves the work dir EXISTS to be removed, so a
+# green ARM 2 cannot be bought by never creating one.
+selftest_ssh_shim() { # <path to write>
+  cat >"$1" <<'SHIM'
+#!/usr/bin/env bash
+# fake ssh — answers exactly the commands pds-idle-sampler.sh issues.
+cmd=""
+for a in "$@"; do cmd="$a"; done
+case "$cmd" in
+  true) exit 0 ;;
+  *"for i in "*)
+    ticks="$(printf '%s' "$cmd" | sed -n 's/.*seq 1 \([0-9][0-9]*\).*/\1/p')"
+    [ -n "$ticks" ] || ticks=5
+    i=0
+    while [ "$i" -lt "$ticks" ]; do
+      case "$cmd" in
+        *"rss="*) printf '%s %s %s\n' "$(date +%s)" 4242 $((123456 + i)) ;;
+        *)        printf '%s %s\n'    "$(date +%s)" $((4000000 - i * 10)) ;;
+      esac
+      i=$((i + 1))
+      sleep 1
+    done ;;
+  *rev-parse*)                 printf 'selftestshaselftestsha\n' ;;
+  *"pgrep -o -x"*)             printf '4242\n' ;;
+  *"pgrep -x beam.smp | tr"*)  printf '4242 \n' ;;
+  *"pgrep -x beam.smp"*)       printf '123456\n' ;;
+  *"ps -o rss= -p"*)           printf '  123456\n' ;;
+  *MemAvailable*)              printf '4000000\n' ;;
+  *) exit 0 ;;
+esac
+SHIM
+  chmod +x "$1"
+}
+
+selftest_fail() { printf '  ARM %s FAILED: %s\n' "$1" "$2" >&2; SELFTEST_RC=1; }
+
+run_selftest() {
+  SELFTEST_RC=0
+  target="${PDS_IDLE_SELFTEST_TARGET:-$PDS_SELF_DIR/$SELF}"
+  t="$(mktemp -d "${TMPDIR:-/tmp}/pds-idle-selftest.XXXXXX")"
+  mkdir -p "$t/bin"
+  selftest_ssh_shim "$t/bin/ssh"
+  : >"$t/fake.key"
+
+  say "pds-idle-sampler selftest — target $target"
+  say "  harness $t (fake ssh on PATH; no host is contacted)"
+
+  # ARM 1 — killed mid-window. The samples must survive and be reported.
+  (
+    PATH="$t/bin:$PATH" PDS_SOURCE_SSH="selftest@fake" PDS_SOURCE_SSH_KEY="$t/fake.key" \
+    PDS_RUN_ID="selftest-arm1" bash "$target" --window 30 --label selftest-kill
+  ) >"$t/arm1.out" 2>&1 &
+  arm1_pid=$!
+  sleep 6
+  kill -TERM "$arm1_pid" 2>/dev/null || true
+  arm1_rc=0; wait "$arm1_pid" || arm1_rc=$?
+
+  [ "$arm1_rc" = 143 ] || selftest_fail 1 "expected exit 143 (TERM), got $arm1_rc — see $t/arm1.out"
+  grep -q 'TERMINATED BY SIGTERM' "$t/arm1.out" \
+    || selftest_fail 1 "no TERMINATED BY SIGTERM line — see $t/arm1.out"
+  grep -q 'lost its ssh session' "$t/arm1.out" \
+    && selftest_fail 1 "a kill was blamed on the ssh session — see $t/arm1.out"
+  arm1_samples="$(sed -n 's/.*PDS_IDLE_SAMPLE_PARTIAL .*idle_samples=\([0-9]*\).*/\1/p' "$t/arm1.out" | head -1)"
+  [ -n "$arm1_samples" ] && [ "$arm1_samples" -gt 0 ] 2>/dev/null \
+    || selftest_fail 1 "killed run reported '${arm1_samples:-no}' samples, not a positive count — see $t/arm1.out"
+  arm1_dir="$(sed -n 's/.*work_dir_preserved=\([^ ]*\).*/\1/p' "$t/arm1.out" | head -1)"
+  if [ -n "$arm1_dir" ] && [ -s "$arm1_dir/idle-rss.log" ]; then
+    arm1_lines="$(awk 'NF{n++} END{print n+0}' "$arm1_dir/idle-rss.log")"
+    say "  ARM 1 ok — exit $arm1_rc, reported $arm1_samples samples, $arm1_lines lines survive in $arm1_dir"
+    rm -rf "$arm1_dir" 2>/dev/null || true
+  else
+    selftest_fail 1 "the work dir was not preserved (${arm1_dir:-none named}) — see $t/arm1.out"
+  fi
+
+  # ARM 2 — a finished window still tidies up after itself.
+  arm2_rc=0
+  PATH="$t/bin:$PATH" PDS_SOURCE_SSH="selftest@fake" PDS_SOURCE_SSH_KEY="$t/fake.key" \
+    PDS_RUN_ID="selftest-arm2" bash "$target" --window 5 --label selftest-clean \
+    >"$t/arm2.out" 2>&1 || arm2_rc=$?
+  arm2_dir="$(sed -n 's/^ *work dir  *\([^ ]*\).*/\1/p' "$t/arm2.out" | head -1)"
+  [ "$arm2_rc" = 0 ] || selftest_fail 2 "expected exit 0, got $arm2_rc — see $t/arm2.out"
+  grep -q '^PDS_IDLE_SAMPLE ' "$t/arm2.out" \
+    || selftest_fail 2 "no complete PDS_IDLE_SAMPLE line — see $t/arm2.out"
+  if [ -z "$arm2_dir" ]; then
+    selftest_fail 2 "the run never printed its work dir — see $t/arm2.out"
+  elif [ -d "$arm2_dir" ]; then
+    selftest_fail 2 "the work dir $arm2_dir SURVIVED a clean exit — cleanup stopped cleaning up"
+  else
+    say "  ARM 2 ok — exit 0, complete machine line, $arm2_dir removed"
+  fi
+
+  # ARM 3 — ARM 2's control: the dir exists unless something removes it.
+  arm3_rc=0
+  PATH="$t/bin:$PATH" PDS_SOURCE_SSH="selftest@fake" PDS_SOURCE_SSH_KEY="$t/fake.key" \
+    PDS_RUN_ID="selftest-arm3" PDS_IDLE_KEEP_WORK_DIR=1 \
+    bash "$target" --window 5 --label selftest-keep >"$t/arm3.out" 2>&1 || arm3_rc=$?
+  arm3_dir="$(sed -n 's/^ *work dir  *\([^ ]*\).*/\1/p' "$t/arm3.out" | head -1)"
+  [ "$arm3_rc" = 0 ] || selftest_fail 3 "expected exit 0, got $arm3_rc — see $t/arm3.out"
+  if [ -n "$arm3_dir" ] && [ -s "$arm3_dir/idle-rss.log" ]; then
+    say "  ARM 3 ok — exit 0, PDS_IDLE_KEEP_WORK_DIR=1 kept $arm3_dir with its series"
+    rm -rf "$arm3_dir" 2>/dev/null || true
+  else
+    selftest_fail 3 "PDS_IDLE_KEEP_WORK_DIR=1 did not keep a populated work dir (${arm3_dir:-none named})"
+  fi
+
+  if [ "$SELFTEST_RC" = 0 ]; then
+    say "SELFTEST PASS — 3 arms"
+    rm -rf "$t" 2>/dev/null || true
+  else
+    say "SELFTEST FAIL — transcripts kept in $t"
+  fi
+  exit "$SELFTEST_RC"
+}
 
 # ── args ─────────────────────────────────────────────────────────────────────
 
@@ -172,16 +505,29 @@ while [ $# -gt 0 ]; do
     --window) IDLE_SECONDS="${2:-}"; shift 2 || die "--window needs a value" ;;
     --label)  LABEL="${2:-}"; shift 2 || die "--label needs a value" ;;
     --out)    OUT_FILE="${2:-}"; shift 2 || die "--out needs a value" ;;
-    # 1,114p — through the EXIT legend. The parent instrument stops at 80 and
+    --selftest) RUN_SELFTEST=1; shift ;;
+    # 1,231p — through the EXIT legend. The parent instrument stops at 80 and
     # drops its own exit codes; an operator whose sampler REFUSED mid-climb needs
     # to read "2 = refused" without opening the file.
-    -h|--help) sed -n '1,114p' "$0"; exit 0 ;;
+    -h|--help) sed -n '1,231p' "$0"; exit 0 ;;
     *) die "unknown argument '$1' (try --help). This instrument takes no --path: it fetches nothing." ;;
   esac
 done
 
+if [ "${RUN_SELFTEST:-0}" = 1 ]; then
+  run_selftest
+fi
+
+# The MISSING case is split out from the MALFORMED case on purpose: they are
+# different operator errors and the missing one needs to say what it is refusing
+# to guess. Refused here, before the first ssh, so a caller who forgot the flag
+# learns it in under a second rather than after a window has already run.
+if [ -z "$IDLE_SECONDS" ]; then
+  die "--window is REQUIRED and has no default. This instrument used to default to 130 s, described as the canonical export's wall time — that figure was measured on the RETIRED in-memory export engine (wave 7), not on the streaming spill engine deployed since wave 11, whose full-export duration is UNMEASURED (open blocker: pds-bl-w13-export-duration-unmeasured). A window shorter than the acquisition it is paired with does not refuse; it closes early and reports a real-looking, too-LOW control. Rather than guess a replacement, this instrument makes you state the window and own the pairing claim. Until that blocker is paid: pass a generously large window and truncate at ANALYSIS time using idle_window_requested_s vs idle_window_s on the machine line."
+fi
+
 case "$IDLE_SECONDS" in
-  ''|*[!0-9]*) die "--window must be a whole number of seconds (got '$IDLE_SECONDS')" ;;
+  *[!0-9]*) die "--window must be a whole number of seconds (got '$IDLE_SECONDS')" ;;
 esac
 [ "$IDLE_SECONDS" -ge 5 ] || die "--window must be at least 5 s to produce a usable control"
 
@@ -280,6 +626,10 @@ say "PDS IDLE SAMPLER — PAIRED CONTROL ONLY, RIDES BESIDE A LIVE CLIMB (PDS-D2
 rule
 info "run id          $RUN_ID"
 info "label           $LABEL"
+info "work dir        $WORK_DIR"
+info "                REMOVED on a clean exit (PDS_IDLE_KEEP_WORK_DIR=1 keeps it), PRESERVED if this"
+info "                run is interrupted — the samples are this instrument's only product and an"
+info "                early kill used to delete them before the arithmetic read them"
 info "source          $SOURCE_BASE  (workspace $SOURCE_WS) — recorded for provenance; NOTHING is fetched"
 info "acquisition     none. No HTTP request is issued and no token is read."
 info "exclusion       none taken. This observes over ssh (pgrep/ps/awk) and allocates nothing on"
@@ -429,7 +779,9 @@ say "  BEAM RSS DRIFT (per process — the frozen procedure's quantity)"
 say "    baseline t=0 ......... ${IDLE_BASELINE_KB} kB   (one-shot ps, strictly pre-window — PDS-D185)"
 say "    peak ................. ${IDLE_PEAK_KB} kB   (MAX across ${BEAM_N} slot(s), ${IDLE_SAMPLES} readings)"
 say "    drift ................ ${IDLE_PEAK_KB} − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB / 1024 = $(mib "$IDLE_DELTA_KB") MiB"
-say "    window ............... ${IDLE_WALL} s at ${SAMPLE_HZ} Hz · rate ${IDLE_RATE} MiB/s"
+say "    window ............... ${IDLE_WALL} s measured of ${IDLE_SECONDS} s requested, at ${SAMPLE_HZ} Hz · rate ${IDLE_RATE} MiB/s"
+say "                           (a measured window SHORTER than the requested one means"
+say "                            the sampler closed early; pair the two before quoting this)"
 say "    diagnostic ........... max across all slots at t=0 = ${IDLE_BASELINE_SET_KB} kB"
 if [ "$IDLE_DRIFT_SIGN" = negative_suspect ]; then
 say "    SIGN ................. NEGATIVE. The baseline is a one-shot on the PRIMARY"
@@ -461,7 +813,7 @@ say "    Both figures are kB/1024 (MiB), never /1000, and both are LOWER BOUNDS:
 say "    a spike between 1 Hz ticks is invisible (PDS-D114)."
 say ""
 
-MACHINE_LINE="PDS_IDLE_SAMPLE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acquisition=none sample_hz=$SAMPLE_HZ units=kB_div_1024 selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_t0_kb=$MEM_AVAIL_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_baseline_set_kb=$IDLE_BASELINE_SET_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_drift_sign=$IDLE_DRIFT_SIGN idle_memavail_min_kb=$IDLE_MEMAVAIL_MIN_KB idle_memavail_max_kb=$IDLE_MEMAVAIL_MAX_KB idle_memavail_range_kb=$IDLE_MEMAVAIL_RANGE_KB idle_memavail_range_mib=$IDLE_MEMAVAIL_RANGE_MIB idle_memavail_samples=$IDLE_MEMAVAIL_SAMPLES threshold_applied=none"
+MACHINE_LINE="PDS_IDLE_SAMPLE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acquisition=none sample_hz=$SAMPLE_HZ units=kB_div_1024 selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_t0_kb=$MEM_AVAIL_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_baseline_set_kb=$IDLE_BASELINE_SET_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_window_requested_s=$IDLE_SECONDS idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_drift_sign=$IDLE_DRIFT_SIGN idle_memavail_min_kb=$IDLE_MEMAVAIL_MIN_KB idle_memavail_max_kb=$IDLE_MEMAVAIL_MAX_KB idle_memavail_range_kb=$IDLE_MEMAVAIL_RANGE_KB idle_memavail_range_mib=$IDLE_MEMAVAIL_RANGE_MIB idle_memavail_samples=$IDLE_MEMAVAIL_SAMPLES threshold_applied=none"
 
 say "$MACHINE_LINE"
 say ""

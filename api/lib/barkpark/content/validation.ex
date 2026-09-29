@@ -110,12 +110,215 @@ defmodule Barkpark.Content.Validation do
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Content.SchemaDefinition.{Field, Parsed}
 
-  @doc "Validate content map against a schema's fields. Returns {:ok, content} or {:error, errors}."
+  @doc """
+  Validate content map against a schema's fields. Returns {:ok, content} or
+  {:error, errors}. Only ERROR-level rules can produce an error — a rule map
+  (or list entry) carrying `"level": "warning"` never reaches this verdict; read
+  those through `check/3`.
+  """
   def validate(content, title, schema) do
+    case run(content, title, schema, :error) do
+      errors when errors == %{} -> {:ok, content}
+      errors -> {:error, errors}
+    end
+  end
+
+  @doc """
+  Both verdicts at once — Sanity's error/warning validation levels (Gyldendal
+  parity E1.6, task-cd8e10ca44ccb932 criterion 3).
+
+  A field's `"validation"` is a rule MAP or a LIST of rule maps. Each map
+  carries the v1 checks (`required`, `min`, `max`, `pattern`) plus, optionally:
+
+    * `"level": "warning"` — the map's findings are WARNINGS: surfaced
+      inline and in the publish bar, never blocking a save or a publish.
+      Absent or anything else means `error`, byte-identical to before.
+    * `"message": "…"` — replaces the generated wording of every finding the
+      map produces (Sanity's `.warning("…")` / `.error("…")` argument).
+
+  Sanity's `shortDescription` → `{"max": 200, "level": "warning", "message":
+  "Over 200 tegn blir klippet på kortet."}`; a required field that also warns
+  past a length → `[{"required": true}, {"max": 200, "level": "warning"}]`.
+
+  Returns `%{errors: %{field => [msg]}, warnings: %{field => [msg]}}`. The
+  `errors` half is exactly what `validate/3` reports.
+  """
+  @spec check(map() | nil, String.t() | nil, map() | nil) :: %{
+          errors: map(),
+          warnings: map()
+        }
+  def check(content, title, schema) do
+    %{
+      errors: run(content, title, schema, :error),
+      warnings: run(content, title, schema, :warning)
+    }
+  end
+
+  @doc """
+  The same walk as `check/3`, read as a TREE (Gyldendal parity E1.11,
+  task-34ea5ee00dfb7a99): keyed by top-level field, then by subfield name or
+  row index, with `:__self__` for a node's own findings — the shape the
+  composite and array components index by, so a rule on `seo.description` or
+  `banners[1].title` renders under THAT input instead of as a JSON-pointer
+  under the top-level field.
+
+      %{"seo" => %{"description" => ["Beskrivelsen bør være under 300 tegn."]},
+        "banners" => %{1 => %{"title" => ["Required"]}, __self__: ["Maks 3 kort tillatt."]},
+        "title" => ["Required"]}
+
+  A top-level leaf is a plain list, byte-identical to `check/3`. A flat
+  (legacy) schema answers exactly `check/3`. The wire shape of `validate/3`
+  and `check/3` is untouched — the API's 422 `details` and the advisories keep
+  the flat `%{field => ["/path: msg"]}` keying.
+  """
+  @spec check_tree(map() | nil, String.t() | nil, map() | nil) :: %{
+          errors: map(),
+          warnings: map()
+        }
+  def check_tree(content, title, schema) do
+    %{
+      errors: run_tree(content, title, schema, :error),
+      warnings: run_tree(content, title, schema, :warning)
+    }
+  end
+
+  @doc """
+  Every finding in a `check_tree/3` half (or a flat `check/3` half), counted —
+  the publish bar's number.
+  """
+  @spec leaf_count(map() | list() | nil) :: non_neg_integer()
+  def leaf_count(list) when is_list(list), do: length(list)
+
+  def leaf_count(map) when is_map(map),
+    do: map |> Map.values() |> Enum.map(&leaf_count/1) |> Enum.sum()
+
+  def leaf_count(_), do: 0
+
+  defp run_tree(content, title, schema, level) do
+    schema = schema_map(schema)
+
     if flat_mode?(schema) do
-      validate_flat(content, title, schema)
+      run(content, title, schema, level)
     else
-      validate_v2(content, title, schema)
+      case SchemaDefinition.parse(schema) do
+        {:ok, %Parsed{fields: fields}} ->
+          Enum.reduce(fields, %{}, fn %Field{} = field, acc ->
+            value =
+              if field.name == "title", do: title, else: fetch_field(content || %{}, field.name)
+
+            top_path = "/" <> (field.name || "")
+
+            case walk_field(field, value, top_path, level) do
+              [] ->
+                acc
+
+              pairs ->
+                Enum.reduce(pairs, acc, fn {path, msg}, acc ->
+                  segments = tree_segments(top_path, path)
+                  Map.put(acc, field.name, put_finding(Map.get(acc, field.name), segments, msg))
+                end)
+            end
+          end)
+
+        {:error, _} ->
+          # Same fallback `validate_v2/4` takes (and logs) — flat verdicts.
+          run(content, title, schema, level)
+      end
+    end
+  end
+
+  # "/banners/1/title" under "/banners" → [1, "title"]; the top path itself → [].
+  defp tree_segments(top_path, path) do
+    path
+    |> String.replace_prefix(top_path, "")
+    |> String.split("/", trim: true)
+    |> Enum.map(fn seg ->
+      case Integer.parse(seg) do
+        {i, ""} -> i
+        _ -> seg
+      end
+    end)
+  end
+
+  defp put_finding(nil, [], msg), do: [msg]
+  defp put_finding(list, [], msg) when is_list(list), do: list ++ [msg]
+
+  defp put_finding(map, [], msg) when is_map(map),
+    do: Map.update(map, :__self__, [msg], &(&1 ++ [msg]))
+
+  defp put_finding(node, [seg | rest], msg) do
+    map =
+      case node do
+        nil -> %{}
+        list when is_list(list) -> %{__self__: list}
+        map when is_map(map) -> map
+      end
+
+    Map.put(map, seg, put_finding(Map.get(map, seg), rest, msg))
+  end
+
+  # One pass of the (flat or v2) walker at ONE level. The walkers below take
+  # the level and read only the rule maps declared at it, so a warning-level
+  # `required` warns and an error-level `required` blocks, from the same
+  # field, in two independent passes.
+  defp run(content, title, schema, level) do
+    schema = schema_map(schema)
+
+    result =
+      if flat_mode?(schema) do
+        validate_flat(content, title, schema, level)
+      else
+        validate_v2(content, title, schema, level)
+      end
+
+    case result do
+      {:ok, _} -> %{}
+      {:error, errors} -> errors
+    end
+  end
+
+  @doc """
+  The rule map for `level` (`:error` | `:warning`) out of a field's raw
+  `"validation"` value. A single map belongs to its own level (default
+  `:error`); a list is split by each entry's level and the entries at the
+  requested level are merged (a later entry's key wins). Anything else is `%{}`.
+  """
+  @spec rules_at(any(), :error | :warning) :: map()
+  def rules_at(rules, level) when is_map(rules) do
+    if rule_level(rules) == level, do: rules, else: %{}
+  end
+
+  def rules_at(rules, level) when is_list(rules) do
+    rules
+    |> Enum.filter(&(is_map(&1) and rule_level(&1) == level))
+    |> Enum.reduce(%{}, &Map.merge(&2, stringify_keys(&1)))
+  end
+
+  def rules_at(_, _), do: %{}
+
+  defp rule_level(%{} = rules) do
+    case Map.get(rules, "level") || Map.get(rules, :level) do
+      l when l in ["warning", "warn", :warning, :warn] -> :warning
+      _ -> :error
+    end
+  end
+
+  defp stringify_keys(map) when is_map(map) do
+    Map.new(map, fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+      {k, v} -> {k, v}
+    end)
+  end
+
+  # `"message"` on a rule map replaces every generated finding the map produced
+  # with that one sentence (one finding, not one per check — Sanity's chain
+  # argument names the field's problem, not each predicate).
+  defp apply_message([], _rules), do: []
+
+  defp apply_message(msgs, rules) when is_list(msgs) do
+    case Map.get(rules, "message") || Map.get(rules, :message) do
+      m when is_binary(m) and m != "" -> [m]
+      _ -> msgs
     end
   end
 
@@ -138,6 +341,24 @@ defmodule Barkpark.Content.Validation do
     end
   end
 
+  # A stored `%SchemaDefinition{}` (what `Content.get_schema/2` and the
+  # Studio's `editor_schema` carry) is read as the plain map the parser
+  # expects. Before this (Gyldendal parity E1.11) the struct reached
+  # `SchemaDefinition.parse/1`, which raised on its Ecto metadata, and the
+  # `rescue` in `flat_mode?/1` answered TRUE — so every v2 schema was
+  # validated FLAT from the Studio and the API door, and no rule inside a
+  # composite or an arrayOf row ever ran there.
+  defp schema_map(%SchemaDefinition{} = schema) do
+    %{
+      "name" => schema.name,
+      "kind" => schema.kind,
+      "fields" => schema.fields || [],
+      "validations" => Map.get(schema, :validations) || []
+    }
+  end
+
+  defp schema_map(schema), do: schema
+
   # ── flat_mode dispatch ────────────────────────────────────────────────────
 
   defp flat_mode?(nil), do: true
@@ -150,14 +371,14 @@ defmodule Barkpark.Content.Validation do
 
   # ── flat_mode (legacy v1 — DO NOT TIGHTEN BEHAVIOUR) ──────────────────────
 
-  defp validate_flat(content, title, schema) do
+  defp validate_flat(content, title, schema, level) do
     fields = schema_fields(schema)
 
     errors =
       fields
       |> Enum.reduce(%{}, fn field, acc ->
         field_name = get_in_field(field, "name")
-        rules = get_in_field(field, "validation") || %{}
+        rules = rules_at(get_in_field(field, "validation"), level)
 
         # Title field is stored at top level, not in content
         value = if field_name == "title", do: title, else: Map.get(content || %{}, field_name)
@@ -184,6 +405,11 @@ defmodule Barkpark.Content.Validation do
     Map.get(schema, :fields) || Map.get(schema, "fields") || []
   end
 
+  # The v1 `String.to_atom` on a schema-declared field key — waived INLINE so
+  # the waiver binds by AST adjacency and survives line moves; the baseline
+  # row it replaces (`validation.ex:286`) went stale the first time a function
+  # was added above it (E1.11).
+  # sobelow_skip ["DOS.StringToAtom"]
   defp get_in_field(field, key) when is_map(field) do
     Map.get(field, key) || Map.get(field, String.to_atom(key))
   end
@@ -192,10 +418,10 @@ defmodule Barkpark.Content.Validation do
 
   # ── v2 path (recursive) ───────────────────────────────────────────────────
 
-  defp validate_v2(content, title, schema) do
+  defp validate_v2(content, title, schema, level) do
     case SchemaDefinition.parse(schema) do
       {:ok, %Parsed{} = parsed} ->
-        validate_parsed(content, title, parsed)
+        validate_parsed(content, title, parsed, level)
 
       {:error, reason} ->
         # Defensive fallback — if a schema fails to parse for some reason,
@@ -208,11 +434,11 @@ defmodule Barkpark.Content.Validation do
             "falling back to flat_mode — composite/arrayOf/localizedText checks are DISABLED"
         )
 
-        validate_flat(content, title, schema)
+        validate_flat(content, title, schema, level)
     end
   end
 
-  defp validate_parsed(content, title, %Parsed{fields: fields}) do
+  defp validate_parsed(content, title, %Parsed{fields: fields}, level) do
     errors_by_top =
       Enum.reduce(fields, %{}, fn %Field{} = field, acc ->
         value =
@@ -223,7 +449,7 @@ defmodule Barkpark.Content.Validation do
           end
 
         top_path = "/" <> (field.name || "")
-        pairs = walk_field(field, value, top_path)
+        pairs = walk_field(field, value, top_path, level)
 
         case pairs do
           [] ->
@@ -248,41 +474,41 @@ defmodule Barkpark.Content.Validation do
   # walk_field returns [{path :: String.t(), msg :: String.t()}]
 
   # composite — recurse into named subfields
-  defp walk_field(%Field{type: "composite", fields: kids} = f, value, path) do
-    rules = field_rules(f)
+  defp walk_field(%Field{type: "composite", fields: kids} = f, value, path, level) do
+    rules = field_rules(f, level)
 
     cond do
       blank?(value) and required?(rules) ->
-        [{path, "Required"}]
+        Enum.map(apply_message(["Required"], rules), &{path, &1})
 
       is_nil(value) ->
         []
 
       not is_map(value) ->
-        [{path, "expected an object"}]
+        shape(level, [{path, "expected an object"}])
 
       true ->
         Enum.flat_map(kids || [], fn %Field{} = child ->
           child_value = fetch_field(value, child.name)
 
-          walk_field(child, child_value, path <> "/" <> (child.name || ""))
+          walk_field(child, child_value, path <> "/" <> (child.name || ""), level)
         end)
     end
   end
 
   # arrayOf — iterate elements with index-prefixed paths
-  defp walk_field(%Field{type: "arrayOf", of: of} = f, value, path) do
-    rules = field_rules(f)
+  defp walk_field(%Field{type: "arrayOf", of: of} = f, value, path, level) do
+    rules = field_rules(f, level)
 
     cond do
       blank?(value) and required?(rules) ->
-        [{path, "Required"}]
+        Enum.map(apply_message(["Required"], rules), &{path, &1})
 
       is_nil(value) ->
         []
 
       not is_list(value) ->
-        [{path, "expected a list"}]
+        shape(level, [{path, "expected a list"}])
 
       is_nil(of) ->
         # Schema lacks an `of` shape descriptor — defer to v2 schema parser
@@ -290,34 +516,41 @@ defmodule Barkpark.Content.Validation do
         []
 
       true ->
-        value
-        |> Enum.with_index()
-        |> Enum.flat_map(fn {item, idx} ->
-          walk_field(of, item, path <> "/" <> Integer.to_string(idx))
-        end)
+        # The array's OWN length rule (Sanity's `Rule.max(3)` on an array —
+        # Gyldendal parity E1.11: «Maks 3 kort tillatt.»), then every row.
+        own = Enum.map(apply_message(check_list_bounds(value, rules), rules), &{path, &1})
+
+        rows =
+          value
+          |> Enum.with_index()
+          |> Enum.flat_map(fn {item, idx} ->
+            walk_field(of, item, path <> "/" <> Integer.to_string(idx), level)
+          end)
+
+        own ++ rows
     end
   end
 
   # codelist — shape only (string, non-empty, no whitespace). Membership
   # checks against the registry are deferred to the rendering layer (W2.4).
-  defp walk_field(%Field{type: "codelist"} = f, value, path) do
-    rules = field_rules(f)
+  defp walk_field(%Field{type: "codelist"} = f, value, path, level) do
+    rules = field_rules(f, level)
 
     cond do
       blank?(value) and required?(rules) ->
-        [{path, "Required"}]
+        Enum.map(apply_message(["Required"], rules), &{path, &1})
 
       is_nil(value) ->
         []
 
       not is_binary(value) ->
-        [{path, "codelist value must be a string"}]
+        shape(level, [{path, "codelist value must be a string"}])
 
       value == "" ->
-        [{path, "codelist value cannot be empty"}]
+        shape(level, [{path, "codelist value cannot be empty"}])
 
       Regex.match?(~r/\s/, value) ->
-        [{path, "codelist value cannot contain whitespace"}]
+        shape(level, [{path, "codelist value cannot contain whitespace"}])
 
       true ->
         []
@@ -329,53 +562,90 @@ defmodule Barkpark.Content.Validation do
   defp walk_field(
          %Field{type: "localizedText", languages: langs, format: fmt} = f,
          value,
-         path
+         path,
+         level
        ) do
-    rules = field_rules(f)
+    rules = field_rules(f, level)
 
     cond do
       blank?(value) and required?(rules) ->
-        [{path, "Required"}]
+        Enum.map(apply_message(["Required"], rules), &{path, &1})
 
       is_nil(value) ->
         []
 
       not is_map(value) ->
-        [{path, "localizedText must be a map of language → text"}]
+        shape(level, [{path, "localizedText must be a map of language → text"}])
 
       true ->
-        Enum.flat_map(value, fn {lang, text} ->
-          lang_str = if is_atom(lang), do: Atom.to_string(lang), else: lang
-          sub_path = path <> "/" <> to_string(lang_str)
-
-          cond do
-            not is_binary(lang_str) ->
-              [{path, "language key must be a string"}]
-
-            is_list(langs) and langs != [] and lang_str not in langs ->
-              [{sub_path, "language '#{lang_str}' is not in declared languages"}]
-
-            fmt == :rich ->
-              cond do
-                is_map(text) -> []
-                is_binary(text) -> []
-                true -> [{sub_path, "rich text must be a map or string"}]
-              end
-
-            true ->
-              if is_binary(text), do: [], else: [{sub_path, "text must be a string"}]
-          end
-        end)
+        shape(level, localized_shape_findings(value, langs, fmt, path))
     end
   end
 
   # primitive leaf — apply v1-style rules from raw["validation"]
-  defp walk_field(%Field{} = f, value, path) do
-    rules = field_rules(f)
+  defp walk_field(%Field{} = f, value, path, level) do
+    rules = field_rules(f, level)
     msgs = validate_field(value, rules, f.raw || %{})
-    msgs = msgs ++ check_numeric_bounds(value, rules)
+    msgs = apply_message(msgs ++ check_numeric_bounds(value, rules), rules)
     Enum.map(msgs, fn m -> {path, m} end)
   end
+
+  # The array's own length rule (v2 walker only; flat mode is frozen).
+  defp check_list_bounds(list, rules) when is_list(list) do
+    n = length(list)
+
+    []
+    |> then(fn acc ->
+      case rules do
+        %{"min" => min} when is_number(min) and n < min ->
+          ["Must have at least #{min} items" | acc]
+
+        _ ->
+          acc
+      end
+    end)
+    |> then(fn acc ->
+      case rules do
+        %{"max" => max} when is_number(max) and n > max ->
+          ["Must have at most #{max} items" | acc]
+
+        _ ->
+          acc
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp localized_shape_findings(value, langs, fmt, path) do
+    Enum.flat_map(value, fn {lang, text} ->
+      lang_str = if is_atom(lang), do: Atom.to_string(lang), else: lang
+      sub_path = path <> "/" <> to_string(lang_str)
+
+      cond do
+        not is_binary(lang_str) ->
+          [{path, "language key must be a string"}]
+
+        is_list(langs) and langs != [] and lang_str not in langs ->
+          [{sub_path, "language '#{lang_str}' is not in declared languages"}]
+
+        fmt == :rich ->
+          cond do
+            is_map(text) -> []
+            is_binary(text) -> []
+            true -> [{sub_path, "rich text must be a map or string"}]
+          end
+
+        true ->
+          if is_binary(text), do: [], else: [{sub_path, "text must be a string"}]
+      end
+    end)
+  end
+
+  # A malformed VALUE (a list where an object was declared, a codelist that
+  # is not a string) is a shape finding, not a rule: it belongs to the error
+  # pass only, so the warning pass never duplicates it.
+  defp shape(:error, findings), do: findings
+  defp shape(_level, _findings), do: []
 
   # v2-ONLY numeric min/max. The shared `check_min`/`check_max` below are
   # `is_binary`-guarded (they measure String.length), so a NUMBER leaf never
@@ -404,11 +674,11 @@ defmodule Barkpark.Content.Validation do
 
   defp number_max(errors, _value, _rules), do: errors
 
-  defp field_rules(%Field{raw: raw}) when is_map(raw) do
-    Map.get(raw, "validation") || Map.get(raw, :validation) || %{}
+  defp field_rules(%Field{raw: raw}, level) when is_map(raw) do
+    rules_at(Map.get(raw, "validation") || Map.get(raw, :validation), level)
   end
 
-  defp field_rules(_), do: %{}
+  defp field_rules(_, _level), do: %{}
 
   defp required?(%{"required" => true}), do: true
   defp required?(%{required: true}), do: true
@@ -447,6 +717,7 @@ defmodule Barkpark.Content.Validation do
     |> check_max(value, rules, field)
     |> check_pattern(value, rules)
     |> Enum.reverse()
+    |> apply_message(rules)
   end
 
   defp check_required(errors, value, %{"required" => true}) do

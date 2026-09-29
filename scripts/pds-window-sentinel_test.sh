@@ -6,7 +6,7 @@
 # WHAT IT PINS (PDS-D717 — leg (ii) retired):
 #   - THE POSITIVE CONTROL: a draw that the FOUR-leg predicate REFUSED on leg
 #     (ii) alone now FIRES. The values are wave 10's own, from the curve quoted
-#     in scripts/pds-pull-proof.crown-transcript-w10.txt §4 (elapsed 30:15:
+#     in docs/ledgers/pds-pull-proof.crown-transcript-w10.txt §4 (elapsed 30:15:
 #     VmSwap 511832 kB, RSS 310116 kB, MemAvailable 2719 MiB). Under the old
 #     predicate that draw stood down with `ii:vmswap(511832>100000kB)`; under
 #     PDS-D717 it fires. This is the whole change, shown on the exact data that

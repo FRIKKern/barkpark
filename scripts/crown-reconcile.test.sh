@@ -37,6 +37,12 @@
 #         (w6) a TRUNCATED page cannot manufacture a ghost: the same
 #              row is rc 2 UNJUDGEABLE on a filled page and rc 1
 #              WRONG on a page that saw the whole window         → 2, then 1
+#         (w1c) …and the CAP that ends that exclusion is a DURATION,
+#              so it must end at the instant the rows were READ, not
+#              at the window cut minutes earlier. One row, two clocks:
+#              inside the cap at the cut, past it at the read     → 1
+#              with both controls held down — a young row is still
+#              deferred and a long-hung row is still accused  → 0, then 1
 #   (d) WINDOW EMPTY: nothing to compare is never a green            → exit 2
 #   (u) QUIET WINDOW: an empty window on a VERIFIED crown — serving
 #       sha recorded, re-ask list PRESENT-EMPTY, zero in-window rows —
@@ -157,6 +163,16 @@ SHA_C="cccccccccccccccccccccccccccccccccccccccc"
 SHA_D="dddddddddddddddddddddddddddddddddddddddd"
 
 # ── fixture builders ─────────────────────────────────────────────────────────
+# EVERY run fixture states an `updated_at`, because the live Actions run listing
+# always does and crown-reconcile's second alibi constraint
+# (dr-w29-s1-followup-run-id-alibi-is-self-reported) is checked against the
+# created..updated SPAN. A fixture that omitted it would exercise the REFUSAL
+# path on every arm below and make each of them measure the wrong thing.
+RUN_SPAN_SECONDS=600
+iso_plus() { # <iso> <seconds>
+  jq -rn --arg t "$1" --argjson d "$2" \
+    '(($t | sub("\\.[0-9]+"; "") | sub("Z?$"; "Z") | fromdateiso8601) + $d) | todateiso8601'
+}
 runs_json() { # <name> <sha:created>...
   local out="$TMP/$1.json"; shift
   local first=1
@@ -166,8 +182,8 @@ runs_json() { # <name> <sha:created>...
     for spec in "$@"; do
       [ "$first" = 1 ] || printf ','
       first=0
-      printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}' \
-        "$n" "${spec%%:*}" "${spec#*:}"
+      printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s","updated_at":"%s"}' \
+        "$n" "${spec%%:*}" "${spec#*:}" "$(iso_plus "${spec#*:}" "$RUN_SPAN_SECONDS")"
       n=$((n + 1))
     done
     printf ']}'
@@ -196,7 +212,7 @@ with_inflight() { # <name> <in-flight-sha> <in-flight-created> <sha:created>...
   base="$(runs_json "$name-completed" "$@")"
   out="$TMP/$name.json"
   jq --arg sha "$isha" --arg created "$icreated" \
-    '.workflow_runs += [{id: 9001, head_sha: $sha, conclusion: null, status: "in_progress", created_at: $created}]' \
+    '.workflow_runs += [{id: 9001, head_sha: $sha, conclusion: null, status: "in_progress", created_at: $created, updated_at: $created}]' \
     "$base" > "$out" 2>/dev/null
   fixture_ok "$out"
   echo "$out"
@@ -211,7 +227,8 @@ runs_add() { # <name> <base-json> <id> <sha> <status> <conclusion|null> <created
   jq --argjson id "$3" --arg sha "$4" --arg st "$5" --arg cc "$6" --arg cr "$7" \
     '.workflow_runs += [{id: $id, head_sha: $sha, status: $st,
                          conclusion: (if $cc == "null" then null else $cc end),
-                         created_at: $cr}]' "$2" > "$out" 2>/dev/null
+                         created_at: $cr,
+                         updated_at: ((($cr | sub("\\.[0-9]+"; "") | sub("Z?$"; "Z") | fromdateiso8601) + 600) | todateiso8601)}]' "$2" > "$out" 2>/dev/null
   fixture_ok "$out"
   echo "$out"
 }
@@ -232,12 +249,12 @@ runs_filled() { # <name> <first-id> <shaA:created> <shaB:created> <filler-sha> <
   local a="${3%%:*}" acr="${3#*:}" b="${4%%:*}" bcr="${4#*:}"
   {
     printf '{"truncated":true,"workflow_runs":['
-    printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}' "$base" "$a" "$acr"
-    printf ',{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}' "$((base + 1))" "$b" "$bcr"
+    printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s","updated_at":"%s"}' "$base" "$a" "$acr" "$(iso_plus "$acr" "$RUN_SPAN_SECONDS")"
+    printf ',{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s","updated_at":"%s"}' "$((base + 1))" "$b" "$bcr" "$(iso_plus "$bcr" "$RUN_SPAN_SECONDS")"
     local i=2
     while [ "$i" -lt 100 ]; do
-      printf ',{"id":%d,"head_sha":"%s","conclusion":null,"status":"in_progress","created_at":"%s"}' \
-        "$((base + i))" "$fsha" "$fcreated"
+      printf ',{"id":%d,"head_sha":"%s","conclusion":null,"status":"in_progress","created_at":"%s","updated_at":"%s"}' \
+        "$((base + i))" "$fsha" "$fcreated" "$fcreated"
       i=$((i + 1))
     done
     printf ']}'
@@ -510,6 +527,92 @@ run_cr 0 "$SHA_C was SERVED by run 2, whose own head sha is $SHA_B" \
   --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_SERVED" --health-fixture "$HEALTH_BASE"
 not_saw "WRONG:" "a row whose delivering run is real is never accused over its sha"
 
+section "(c2c) MUTATION: the delivering_run_id is REAL but WRONG — the alibi is self-reported"
+# THE HOLE, IN ONE SENTENCE (dr-w29-s1-followup-run-id-alibi-is-self-reported).
+# `delivering_run_id` is written by the recorder ABOUT ITSELF (GITHUB_RUN_ID), so
+# the (c2) arm above only asks "does the run this row names exist and deliver?".
+# It never asks "could THAT run have written THIS row?". A plausible-but-wrong id
+# — a run that delivered something else, a retry's id, a transposed digit landing
+# on a real deploy — is waved through by (c2): the row exists, the run exists,
+# nothing compares them.
+#
+# This row is that shape and NOTHING else. It names run 1, which is a REAL
+# delivering run in this very fixture (the base arm above clears rows against
+# it), and its sha is $SHA_C, a served sha — so (c) cannot catch it either, and
+# (c2b) proves a served sha alone is never an accusation. The ONLY thing wrong
+# with it is the pair: run 1 ran $IN1..$IN1+600s and this row was first seen at
+# $IN2, 20 minutes after that run ended. Under the self-reported alibi alone
+# this whole file is RECONCILED (rc 0).
+CROWN_REALWRONGRUN="$(crown_json crown-realwrongrun \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$IN2" 1)")"
+run_cr 1 "a row first seen at $IN2 names run 1, a REAL delivering run that had ended by then" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_REALWRONGRUN" --health-fixture "$HEALTH_BASE"
+saw "ALIBI-WINDOW: 1 crown row(s)" "the second constraint fires by name, so the reader sees WHICH alibi failed"
+saw "$SHA_C" "it names the row whose stated deliverer could not have written it"
+saw "AFTER it ended" "it says which side of the run's span the row fell on"
+saw "alibi-window=1" "the verdict line carries the new class, so a log grep finds it"
+saw "WRONG: 1 of 4" "an alibi failure is counted INTO WRONG — it is a statement about the pair, not a deferral"
+
+# THE CONTROL, AND IT IS THE WHOLE POINT. Same fixture, same run id, same sha —
+# only the row's own first_seen_at moves back inside run 1's span. If this arm
+# reds, the constraint is not measuring the PAIR, it is just accusing $SHA_C.
+CROWN_REALRIGHTRUN="$(crown_json crown-realrightrun \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$IN1" 1)")"
+run_cr 0 "the SAME row, first seen INSIDE run 1's span, is clean" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_REALRIGHTRUN" --health-fixture "$HEALTH_BASE"
+not_saw "ALIBI-WINDOW" "moving one instant inside the span is the ONLY difference between this and the red above"
+
+# THE SKEW ALLOWANCE IS REAL AND IT IS BOUNDED. A row a few seconds ahead of its
+# run's start is inter-clock jitter and must clear; the constant is read back out
+# of the script so a later widening to a comfortable value reds here.
+ALIBI_SKEW="$(sed -n 's/^ALIBI_SKEW_SECONDS=\([0-9]*\).*/\1/p' "$CR" | head -1)"
+case "${ALIBI_SKEW:-}" in
+  ''|*[!0-9]*) bad "ALIBI_SKEW_SECONDS could not be read out of $CR — the band assertion below would be vacuous" ;;
+  *) if [ "$ALIBI_SKEW" -ge 1 ] && [ "$ALIBI_SKEW" -le 120 ]; then
+       ok "the run-interval tolerance is ${ALIBI_SKEW}s — inside the 1..120s band a same-provider clock pair justifies"
+     else
+       bad "ALIBI_SKEW_SECONDS is ${ALIBI_SKEW}s — outside the 1..120s band; a tolerance wide enough to be comfortable re-admits the neighbouring run"
+     fi ;;
+esac
+IN1_MINUS="$(iso_plus "$IN1" -30)"
+CROWN_SKEWED="$(crown_json crown-skewed \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$IN1_MINUS" 1)")"
+run_cr 0 "a row 30s AHEAD of its run's created_at clears — that is clock jitter, not a wrong id" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_SKEWED" --health-fixture "$HEALTH_BASE"
+not_saw "ALIBI-WINDOW" "the ${ALIBI_SKEW}s allowance is applied at the START of the span too, not only the end"
+
+section "(c2d) NO SPAN, NO VERDICT — an absent updated_at REFUSES rather than clears"
+# The second constraint's own failure mode. A run listing with no `updated_at`
+# leaves nothing to compare the row against — and the wrong answer is the
+# COMFORTING one: falling back to bare membership would silently restore the very
+# hole (c2c) closes, and every run would look green again. The other wrong answer
+# is accusing over a missing field. Refuse: a named class, in neither direction,
+# subtracted from the WRONG denominator, rc 2.
+RUNS_NOSPAN="$(jq 'del(.workflow_runs[].updated_at)' "$RUNS_BASE" > "$TMP/runs-nospan.json" && echo "$TMP/runs-nospan.json")"
+fixture_ok "$RUNS_NOSPAN"
+if grep -q 'updated_at' "$RUNS_NOSPAN"; then
+  bad "the no-span fixture still carries updated_at — the refusal arm below would be vacuous"
+else
+  ok "the no-span fixture genuinely states no updated_at on any run"
+fi
+run_cr 2 "with no run span on the page, a row naming a real delivering run is DEFERRED, not cleared" \
+  --runs-fixture "$RUNS_NOSPAN" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+saw "ALIBI-INTERVAL-UNREADABLE" "the refusal is a named class, not a silent clear"
+not_saw "RECONCILED:" "an unreadable span never greens — the comforting direction is the one this arm forbids"
+# …and the SAME fixture with the span restored is green, so the red above is the
+# missing field and nothing else about this fixture.
+run_cr 0 "the same rows with the run spans present reconcile" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+
 section "(c3) NO delivering_run_id at all — the head sha is the FALLBACK, not dead"
 CROWN_NORUNID_OK="$(crown_json crown-norunid-ok \
   "$(row "$SHA_A" cp false "$IN1" omit)" \
@@ -579,9 +682,9 @@ LIVE_SHA2="c47ced9291264e75149a7adbda46ce1532d947c3"
 LIVE_PRIOR="f74939277c283668f461a92989820bcecb05733b"
 RUNS_LIVE="$TMP/runs-live.json"
 printf '%s' '{"workflow_runs":[
-  {"id":32726853417,"head_sha":"'"$LIVE_SHA"'","status":"in_progress","conclusion":null,"created_at":"2026-08-24T12:23:37Z"},
-  {"id":32726835915,"head_sha":"'"$LIVE_SHA2"'","status":"in_progress","conclusion":null,"created_at":"2026-08-24T12:23:24Z"},
-  {"id":32723174205,"head_sha":"'"$LIVE_PRIOR"'","status":"completed","conclusion":"success","created_at":"2026-08-24T11:41:52Z"}]}' \
+  {"id":32726853417,"head_sha":"'"$LIVE_SHA"'","status":"in_progress","conclusion":null,"created_at":"2026-08-24T12:23:37Z","updated_at":"2026-08-24T12:23:37Z"},
+  {"id":32726835915,"head_sha":"'"$LIVE_SHA2"'","status":"in_progress","conclusion":null,"created_at":"2026-08-24T12:23:24Z","updated_at":"2026-08-24T12:23:24Z"},
+  {"id":32723174205,"head_sha":"'"$LIVE_PRIOR"'","status":"completed","conclusion":"success","created_at":"2026-08-24T11:41:52Z","updated_at":"2026-08-24T11:51:52Z"}]}' \
   > "$RUNS_LIVE"
 fixture_ok "$RUNS_LIVE"
 # EVERY run on this page states its legs, including the two that were in flight.
@@ -702,6 +805,136 @@ run_cr 1 "run 3 has been in_progress for the whole 8h this row has existed" \
 saw "WRITTEN-IN-FLIGHT-EXPIRED: 1 crown row(s)" "a hung run is named and its deferral is ended, not renewed"
 saw "WRONG: 1 of 4" "and the row is ACCUSED — the exclusion cannot be held open forever"
 not_saw "WRITTEN-IN-FLIGHT: " "an expired row is never also reported as still deferred"
+
+section "(w1c) THE CAP IS A DURATION — IT ENDS WHEN THE ROWS WERE READ, NOT AT THE WINDOW CUT"
+# Sibling of (p2) on the serving arm, and the same defect one axis over. The cap
+# above is charged as `NOW_EPOCH - rowat`, and NOW_EPOCH is sampled ONCE, before
+# the run-list paging, before every per-run jobs call and before the crown row
+# read. crown-reconcile's median body is 556s (task-b0c12a9316203c0f), so by the
+# time a row is judged, that subtraction understates its age by ~9 minutes.
+#
+# THE DIRECTION MATTERS, AND THE FILING HAD IT BACKWARDS. A stale base makes
+# every row look YOUNGER, never older, so it cannot under-count the in-flight
+# population — it OVER-counts it. The population that moves when the base goes
+# live is exactly: rows whose true age at the read is between the cap and the
+# cap plus the body length. Under the stale clock each of those keeps an alibi it
+# has already outlived and is silently deferred again; under the live clock its
+# deferral ENDS and it is accused, which is what the cap was written to do. The
+# fix is therefore STRICTER, and this probe is a green that becomes a red.
+#
+# Every existing probe in (w) is structurally blind to it for the same reason
+# section (p2) gave: they pin `--now`, which makes the gap ZERO by construction.
+# `--rows-at` is the harness setting the row-read instant independently.
+ROWS_GAP=600                          # the measured body: the rows land 600s after the cut
+ROWS_MARGIN=300                       # …and this row sits 300s INSIDE the cap at the cut
+if [ -z "${CAP:-}" ] || [ -n "$(printf '%s' "${CAP:-x}" | tr -d '0-9')" ]; then
+  bad "SERVING_INFLIGHT_CAP_SECONDS is not derivable from $CR — the two-clock probe below would not know what it straddles"
+else
+  _now_epoch=$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$NOW" +%s 2>/dev/null || date -u -d "$NOW" +%s)
+  # The row: CAP-300 old at the window cut (INSIDE the cap), CAP+300 old at the
+  # row read (PAST it). One row, one page, two clocks — the only difference.
+  _straddle=$((_now_epoch - CAP + ROWS_MARGIN))
+  STRADDLE_AT="$(date -u -r "$_straddle" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$_straddle" +%Y-%m-%dT%H:%M:%SZ)"
+  ROWS_LATE="$(date -u -r $((_now_epoch + ROWS_GAP)) +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$((_now_epoch + ROWS_GAP))" +%Y-%m-%dT%H:%M:%SZ)"
+  RUNS_W1C="$(runs_add runs-w1c "$RUNS_BASE" 3 "$SHA_C" in_progress null "$STRADDLE_AT")"
+  CROWN_W1C="$(crown_json crown-w1c \
+    "$(row "$SHA_A" cp false "$IN1" 1)" \
+    "$(row "$SHA_A" instance false "$IN1" 1)" \
+    "$(row "$SHA_B" instance false "$IN2" 2)" \
+    "$(row "$SHA_C" cp false "$STRADDLE_AT" 3)")"
+
+  # (w1c-a) THE DEFECT. Inside the cap when the window was cut, past it when the
+  # rows were actually read. A live clock ends the deferral; the stale one renews
+  # an alibi the row has already outlived.
+  run_cr 1 "a row past the cap AT THE ROW READ is accused, not deferred on a clock ${ROWS_GAP}s stale" \
+    --runs-fixture "$RUNS_W1C" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W1C" \
+    --health-fixture "$HEALTH_BASE" --rows-at "$ROWS_LATE"
+  saw "WRITTEN-IN-FLIGHT-EXPIRED: 1 crown row(s)" "the cap is charged to the instant the rows were read"
+  saw "WRONG: 1 of 4" "and the row it no longer alibis is ACCUSED"
+  not_saw "WRITTEN-IN-FLIGHT: " "a row past the cap is never also reported as still deferred"
+  # MUTATION ANCHOR. Revert `_inflight_age` to NOW_EPOCH and THIS probe goes
+  # green-when-it-should-be-red (exit 0, WRITTEN-IN-FLIGHT) while (w1c-c) below
+  # STAYS red — a patch that only reds (w1c-c) has proved nothing, and the pair
+  # is the proof.
+
+  # (w1c-b) THE CONTROL THAT MUST STAY DEFERRED. A live clock is not a licence to
+  # accuse everything: a row minutes old is inside the cap under BOTH clocks and
+  # is still excluded. Without this, (w1c-a) would be indistinguishable from
+  # deleting the exclusion.
+  _young=$((_now_epoch - 60))
+  YOUNG_AT="$(date -u -r "$_young" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$_young" +%Y-%m-%dT%H:%M:%SZ)"
+  RUNS_W1C_Y="$(runs_add runs-w1c-young "$RUNS_BASE" 3 "$SHA_C" in_progress null "$YOUNG_AT")"
+  CROWN_W1C_Y="$(crown_json crown-w1c-young \
+    "$(row "$SHA_A" cp false "$IN1" 1)" \
+    "$(row "$SHA_A" instance false "$IN1" 1)" \
+    "$(row "$SHA_B" instance false "$IN2" 2)" \
+    "$(row "$SHA_C" cp false "$YOUNG_AT" 3)")"
+  run_cr 0 "a row 60s old is inside the cap under either clock and stays deferred" \
+    --runs-fixture "$RUNS_W1C_Y" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W1C_Y" \
+    --health-fixture "$HEALTH_BASE" --rows-at "$ROWS_LATE"
+  saw "WRITTEN-IN-FLIGHT: 1 of 4" "the fresh clock does not accuse a row the cap still covers"
+  not_saw "WRITTEN-IN-FLIGHT-EXPIRED" "and it does not manufacture an expiry out of the ${ROWS_GAP}s gap"
+
+  # (w1c-c) THE CONTROL THAT MUST STAY RED. A row genuinely hours past the cap is
+  # past it under BOTH clocks and is accused either way. This is the arm that a
+  # mutation back to NOW_EPOCH does NOT move — which is precisely what makes
+  # (w1c-a) a measurement rather than a coincidence.
+  run_cr 1 "a row 8h past the cap is accused under either clock" \
+    --runs-fixture "$RUNS_W1B" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W1B" \
+    --health-fixture "$HEALTH_BASE" --rows-at "$ROWS_LATE"
+  saw "WRITTEN-IN-FLIGHT-EXPIRED: 1 crown row(s)" "the genuinely hung row is still named"
+  saw "WRONG: 1 of 4" "and still accused — the live clock disarms nothing"
+fi
+
+# (w1c-d) The dial must never be reachable on a live run, for the same reason
+# --runlist-at and --serving-at are not: an operator who could pin the row-read
+# instant could dial a row into or out of the in-flight cap by hand.
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$SANDBOX_PATH" \
+  CROWN_STATE_FILE="$TMP/state-rows-live.txt" \
+  bash "$CR" --now "$NOW" --rows-at "$NOW" 2>&1)"
+rc=$?
+printf '%s\n' "$out" > "$TMP/last.out"
+if [ "$rc" = "3" ]; then
+  ok "--rows-at on a live run is a CONFIGURATION fault (exit 3), not a dial"
+else
+  bad "--rows-at was accepted on a live run (exit $rc) — the row-read clock would be pinnable by hand"
+fi
+saw "FIXTURE-ONLY handle" "and it says why it refused"
+
+# (w1c-e) STRUCTURAL: a LIVE run must take the rows arm's clock from the real
+# clock. No fixture probe can observe the live branch (every probe pins `--now`),
+# so this reads the branch back out of the script — the one place the regression
+# would hide is an edit that quietly restores `ROWS_NOW_EPOCH="$NOW_EPOCH"` as
+# the unconditional default.
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+if grep -qF 'ROWS_AT_OVERRIDE" ] && [ "$FIXTURE_MODE" != "1" ]' "$CR"; then
+  ok "--rows-at is guarded to fixture mode in the script itself"
+else
+  bad "--rows-at is no longer fenced to fixture mode — a live run could pin its own row-read clock"
+fi
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+if grep -qE '^    ROWS_NOW_EPOCH="\$\(date -u \+%s\)"$' "$CR"; then
+  ok "a live run samples the rows arm's clock at the row read"
+else
+  bad "the live branch no longer takes a fresh clock — the rows arm is back on the stale NOW_EPOCH"
+fi
+# The stale subtraction itself, named: `_inflight_age` is what the CAP reads, and
+# an edit that puts NOW_EPOCH back there restores the over-lenient cap exactly.
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+if grep -qF '_inflight_age=$((ROWS_NOW_EPOCH - rowat))' "$CR"; then
+  ok "the rows arm's in-flight age is measured against the rows arm's clock"
+else
+  bad "the rows arm's in-flight age is no longer measured against ROWS_NOW_EPOCH — the stale cap returns"
+fi
+# AND THE WINDOW STAYS FROZEN. The dividing line this family is built on: a
+# duration that ends at "now" takes a live now; the window the two sides are cut
+# from must NOT move, or the run list and the crown stop describing one instant.
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+if grep -qF 'CUTOFF_EPOCH=$((NOW_EPOCH - WINDOW_HOURS * 3600))' "$CR"; then
+  ok "the window is still cut from NOW_EPOCH — only the durations moved"
+else
+  bad "the window cut no longer uses NOW_EPOCH — the two sides of the comparison can drift apart"
+fi
 
 section "(w2) time-keyed — the SAME fixture, red without the gap and green with it"
 # The run is not on the page AT ALL: id 9001 is above every id there, which is a
@@ -1111,6 +1344,114 @@ saw "300s in the FUTURE" "it says how far ahead the reported instant is"
 saw "SERVING-UNRECORDED" "and the missing row is accused rather than excused"
 not_saw "SERVING GRACE:" "no grace is granted off a clock that disagrees"
 
+section "(p2) THE CLOCK THE SKEW ARM SUBTRACTS WITH MUST BE THE SERVING ARM'S OWN"
+# Live run 34573248644 (2026-09-11) printed:
+#   SERVING-CLOCK-SKEW: ... serving_since 2026-09-11T07:20:55.971304Z, which is
+#   488s in the FUTURE
+# and paged. 07:20:55 minus that run's own 07:12:47 banner instant is 488s TO
+# THE SECOND — the "skew" was the script's own runtime, not a property of the
+# control plane, whose clock a later probe found correct to sub-second. NOW_EPOCH
+# is sampled once before the run-list paging, the per-run jobs reads and the crown
+# read; the serving arm then asks "is the box ahead of NOW?" against a clock that
+# is by then minutes old. Every probe in section (p) and (r) above is structurally
+# blind to this: they pin `--now`, which makes the gap ZERO by construction.
+#
+# `--serving-at` is the harness setting the two instants independently. WINDOW is
+# cut at NOW; the serving arm runs 540s later, which is the measured body length.
+SERVING_LATE="2026-08-09T12:09:00Z"    # the serving arm's real instant, 540s after NOW
+SINCE_MID="2026-08-09T12:08:00Z"       # the box came up DURING the body: 480s after
+                                       # NOW, but 60s BEFORE the serving arm reads it
+HEALTH_MID="$(health_json health-midbody "$SHA_D" "$SINCE_MID")"
+
+# (p2a) THE DEFECT. A restart inside the script's own body is a young process, not
+# a clock fault. It must reach the GRACE arm — the accusation is deferred, not
+# dropped — and the gate must not go red.
+run_cr 4 "a restart DURING the script's own body is not a clock fault" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" \
+  --health-fixture "$HEALTH_MID" --serving-at "$SERVING_LATE"
+not_saw "SERVING-CLOCK-SKEW" "the plane is not accused of a clock fault for the reader's staleness"
+saw "SERVING GRACE:" "it takes the grace arm a live clock would have taken"
+not_saw "RECONCILED:" "and a deferral is still not a green"
+# MUTATION ANCHOR. Revert the serving arm's `age` to NOW_EPOCH and THIS probe goes
+# red (exit 1, SERVING-CLOCK-SKEW) while (p2b) below stays red — a patch that reds
+# only (p2b) has proved nothing, and the pair is the proof.
+
+# (p2a2) THE SAME DEFECT PAST THE GRACE WINDOW. (p2a)'s gap is 540s, the measured
+# body length. A body LONGER than SERVING_GRACE_SECONDS is the harder regime: the
+# stale clock then reports a future distance bigger than the entire grace, so no
+# widening of the grace could ever have rescued it — only a live clock can. The
+# grace is charged against the box's age as the SERVING ARM sees it (60s here),
+# never against the window cut, so this must still be rc 4.
+GRACE_S="$(sed -n 's/^SERVING_GRACE_SECONDS=\([0-9][0-9]*\).*/\1/p' "$CR" | head -1)"
+if [ -z "$GRACE_S" ]; then
+  bad "SERVING_GRACE_SECONDS is not derivable from $CR — the over-the-grace probe below would not know what it is over"
+else
+  # NOW + grace + 300s, so the gap EXCEEDS the grace by construction however the
+  # constant is later retuned; the box came up 60s before the serving arm reads it.
+  _late_epoch=$(( $(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$NOW" +%s 2>/dev/null || date -u -d "$NOW" +%s) + GRACE_S + 300 ))
+  SERVING_VLATE="$(date -u -r "$_late_epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$_late_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+  SINCE_VLATE="$(date -u -r $((_late_epoch - 60)) +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$((_late_epoch - 60))" +%Y-%m-%dT%H:%M:%SZ)"
+  HEALTH_VLATE="$(health_json health-past-grace "$SHA_D" "$SINCE_VLATE")"
+  run_cr 4 "a body LONGER than the grace still grants the grace, off the serving arm's own clock" \
+    --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" \
+    --health-fixture "$HEALTH_VLATE" --serving-at "$SERVING_VLATE"
+  not_saw "SERVING-CLOCK-SKEW" "a gap wider than the whole grace is still the reader's staleness, not a clock fault"
+  saw "SERVING GRACE:" "and the grace is charged against the box's age at the serving arm, not against the window cut"
+fi
+
+# (p2b) THE CONTROL THAT MUST STAY RED. Ahead of the SERVING ARM'S OWN clock by
+# more than the epsilon is a real disagreement, and it still pages. Without this
+# probe (p2a) would be indistinguishable from disarming the arm.
+SINCE_AHEAD="2026-08-09T12:11:00Z"     # 120s ahead of the serving arm itself
+HEALTH_AHEAD="$(health_json health-ahead-of-serving "$SHA_D" "$SINCE_AHEAD")"
+run_cr 1 "ahead of the SERVING arm's own clock is still a fault" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" \
+  --health-fixture "$HEALTH_AHEAD" --serving-at "$SERVING_LATE"
+saw "SERVING-CLOCK-SKEW" "a genuine future stamp is not disarmed by the fresh clock"
+saw "120s in the FUTURE" "and it is measured against the serving arm's instant, not the window cut"
+saw "SERVING-UNRECORDED" "and the missing row is still accused"
+
+# (p2c) The dial must never be reachable on a live run, for the same reason
+# --runlist-at is not: an operator who could pin the serving arm's clock could
+# dial a serving_since into or out of the future by hand.
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$SANDBOX_PATH" \
+  CROWN_STATE_FILE="$TMP/state-serving-live.txt" \
+  bash "$CR" --now "$NOW" --serving-at "$SERVING_LATE" 2>&1)"
+rc=$?
+printf '%s\n' "$out" > "$TMP/last.out"
+if [ "$rc" = "3" ]; then
+  ok "--serving-at on a live run is a CONFIGURATION fault (exit 3), not a dial"
+else
+  bad "--serving-at was accepted on a live run (exit $rc) — the serving clock would be pinnable by hand"
+fi
+saw "FIXTURE-ONLY handle" "and it says why it refused"
+
+# (p2d) STRUCTURAL: a LIVE run must take the serving arm's clock from the real
+# clock. No fixture probe can observe the live branch (every probe pins `--now`),
+# so this reads the branch back out of the script — the one place the regression
+# would hide is an edit that quietly restores `SERVING_NOW_EPOCH="$NOW_EPOCH"` as
+# the unconditional default.
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+if grep -qF 'SERVING_AT_OVERRIDE" ] && [ "$FIXTURE_MODE" != "1" ]' "$CR"; then
+  ok "--serving-at is guarded to fixture mode in the script itself"
+else
+  bad "--serving-at is no longer fenced to fixture mode — a live run could pin its own serving clock"
+fi
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+if grep -qE '^  SERVING_NOW_EPOCH="\$\(date -u \+%s\)"$' "$CR"; then
+  ok "a live run samples the serving arm's clock at the serving arm"
+else
+  bad "the live branch no longer takes a fresh clock — the serving arm is back on the stale NOW_EPOCH"
+fi
+# The stale subtraction itself, named: `age` is what the SKEW arm reads, and an
+# edit that puts NOW_EPOCH back there reintroduces run 34573248644 exactly.
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text; expansion here would aim it at nothing
+if grep -qF 'age=$((SERVING_NOW_EPOCH - ${since_epoch:-0}))' "$CR"; then
+  ok "the serving arm's age is measured against the serving arm's clock"
+else
+  bad "the serving arm's age is no longer measured against SERVING_NOW_EPOCH — the 488s false skew returns"
+fi
+
 section "(r) A DEPLOY THAT IS STILL RUNNING IS NOT A CLOCK FAULT, AND NOT A PAGE"
 # The two live stamps that bracket this whole arm: run 31332764821 reported the
 # serving_since 3s ahead of now on an NTP-healthy plane (inter-host jitter), and
@@ -1379,8 +1720,18 @@ saw "BEHIND: 1 of 2" "after the writer existed, a missing row is BEHIND again"
 
 section "(m2) a window of NOTHING BUT pre-writer runs has no denominator"
 RUNS_ALL_PRE="$(runs_json runs-all-pre "$SHA_A:$PRE" "$SHA_B:$PRE")"
+# The rows are stamped at PRE too, INSIDE the spans of the runs they name. Using
+# CROWN_BASE here (rows first seen hours after runs that had already ended) makes
+# this fixture state an impossible pair, and the run-interval alibi constraint
+# correctly calls that WRONG (exit 1) — which is a true verdict about a fixture
+# that never meant to say it, and it would hide the empty-denominator refusal
+# this section is actually about.
+CROWN_ALL_PRE="$(crown_json crown-all-pre \
+  "$(row "$SHA_A" cp false "$PRE" 1)" \
+  "$(row "$SHA_A" instance false "$PRE" 1)" \
+  "$(row "$SHA_B" instance false "$PRE" 2)")"
 run_cr 2 "every delivering run in the window predates the recorder" \
-  --runs-fixture "$RUNS_ALL_PRE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_BASE"
+  --runs-fixture "$RUNS_ALL_PRE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_ALL_PRE" --health-fixture "$HEALTH_BASE"
 saw "PREDATE the recorder's birth" "an all-exempt window is refused, not rounded to reconciled"
 not_saw "RECONCILED:" "it never claims reconciliation over an empty BEHIND denominator"
 
@@ -1572,7 +1923,13 @@ esac
 SH
 cat > "$FAKE/curl" <<'SH'
 #!/usr/bin/env bash
-cat "$CR_FAKE_HEALTH"
+# Honours -o the way curl does (the subject now reads the health body through
+# scripts/lib/bp-curl.sh, which captures the status with -w and the body with
+# -o) and answers 200 as the status.
+out=""; prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+if [ -n "$out" ]; then cat "$CR_FAKE_HEALTH" > "$out"; else cat "$CR_FAKE_HEALTH"; fi
+printf 200
 SH
 cat > "$FAKE/ssh" <<'SH'
 #!/usr/bin/env bash
@@ -1580,10 +1937,29 @@ cat > "$FAKE/ssh" <<'SH'
 # scripts/crown-reconcile.sh's own remote.sh emits. CR_FAKE_VIA empty means the
 # refusal shape — a code and an error name, and NO body and NO sentence, so any
 # naming downstream is the script's own.
+#
+# THE ENVELOPE IS STAMPED WITH THE SHA IT WAS ASKED ABOUT, because the live route
+# stamps it (`GET /v1/deliveries` answers `sha:` beside `deliveries:`) and the
+# subject now CHECKS it. A fake that omitted the stamp would make that check
+# vacuous here and leave it unmeasured everywhere.
+#   CR_FAKE_SHA_ECHO  — stamp THIS sha instead of the one asked about, which is
+#                       the crosstalk shape: a 200 carrying another sha's rows.
+#   CR_FAKE_ENVELOPE  — emit a body whose `.deliveries` is not an array at all.
 echo "CR_HTTP=$CR_FAKE_HTTP"
 if [ -n "${CR_FAKE_VIA:-}" ]; then
   echo "CR_VIA=$CR_FAKE_VIA"
-  echo "CR_BODY={\"deliveries\":$(cat "$CR_FAKE_ROWS")}"
+  if [ -n "${CR_FAKE_ENVELOPE:-}" ]; then
+    echo "CR_BODY=$CR_FAKE_ENVELOPE"
+    exit 0
+  fi
+  asked="$(printf '%s ' "$@" | grep -oE 'sha=[0-9a-f]{40}' | head -1)"
+  asked="${asked#sha=}"
+  [ -n "${CR_FAKE_SHA_ECHO:-}" ] && asked="$CR_FAKE_SHA_ECHO"
+  if [ -n "$asked" ]; then
+    echo "CR_BODY={\"deliveries\":$(cat "$CR_FAKE_ROWS"),\"sha\":\"$asked\"}"
+  else
+    echo "CR_BODY={\"deliveries\":$(cat "$CR_FAKE_ROWS"),\"sha\":null}"
+  fi
 else
   echo "CR_ERROR=http_${CR_FAKE_HTTP}_worker_principal"
 fi
@@ -1606,6 +1982,7 @@ run_fake() { # <expected-rc> <label> <http> <via>
     CR_FAKE_RUNS="$RUNS_FAKE" CR_FAKE_JOBS="$TMP/jobs-fake.json" \
     CR_FAKE_ROWS="$TMP/rows-fake.json" CR_FAKE_HEALTH="$HEALTH_FAKE" \
     CR_FAKE_HTTP="$http" CR_FAKE_VIA="$via" CROWN_STATE_FILE="$state" \
+    CR_FAKE_SHA_ECHO="${CR_FAKE_SHA_ECHO:-}" CR_FAKE_ENVELOPE="${CR_FAKE_ENVELOPE:-}" \
     bash "$CR" --now "$NOW" --window-hours 24 2>&1)"
   rc=$?
   printf '%s\n' "$out" > "$TMP/last.out"
@@ -1638,6 +2015,42 @@ saw "NO substitute reader" "the sentence states the rule it enforced"
 not_saw "answered by postgres-container" "the deleted reader is not a name this script can print"
 not_saw "read by postgres-container" "and it cannot ride a green sentence either"
 not_saw "answered by route" "the transport did not decide the answer — the three runs report DIFFERENT outcomes"
+
+section "(o1b) AN ANSWER THAT ANSWERS ANOTHER QUESTION IS REFUSED, NEVER READ AS ZERO ROWS"
+# THE ROW THIS ARM OWNS: task-797898cb365506b5. On 2026-09-16 crown-reconcile
+# printed "BEHIND: … delivered, never recorded" on main FIVE times inside 23
+# minutes (runs 35150456276, 35150479314, 35152425747, 35152522140, 35152536095)
+# and every red cleared itself minutes later with nothing fixed. Each of the five
+# accused a DIFFERENT sha, and all five were ALREADY IN THE CROWN when they were
+# accused — probed against the live route the next morning: 3635e345d recorded
+# 2026-09-16T13:03:07Z, d03949d90 13:41:09Z, 9dbd4ab9c 07:56:39Z, f703ffa87
+# 16:02:04Z, baf2c2538 19:25:04Z. Not a late write and not a shifting
+# denominator: concurrent runs' reads were colliding on the control plane's fixed
+# `/tmp/cr-body.json`, so a reader could read ANOTHER reader's body — HTTP 200,
+# valid JSON, the wrong sha's rows — and the BEHIND arm turned that into an
+# accusation. The collision is fixed in the remote reader ((o2b) below); this arm
+# is the second door, and it is the one that would have made the first red say
+# what was actually wrong.
+#
+# CONTROL FIRST, so "it refuses" is a difference and not the only thing this
+# fake can produce.
+run_fake 0 "an envelope stamped with the sha that was asked about is read normally" 200 route
+saw "RECONCILED" "the control run reaches a green — the identity check is not a blanket refusal"
+not_saw "does not answer the question" "and nothing is refused when the answer matches the question"
+
+CR_FAKE_SHA_ECHO="$SHA_B" \
+  run_fake 2 "a 200 whose envelope is stamped with ANOTHER sha is REFUSED" 200 route
+saw "does not answer the question" "the refusal says the answer did not answer the question"
+saw "COULD NOT FULLY READ" "…and it lands in SILENCE (rc 2), not in a verdict about the crown"
+not_saw "delivered, never recorded" "THE WHOLE POINT: crosstalk is never printed as a missing row"
+not_saw "BEHIND:" "…and never counted into BEHIND"
+unset CR_FAKE_SHA_ECHO
+
+CR_FAKE_ENVELOPE='{"deliveries":{"sha":"x"},"sha":"'"$SHA_A"'"}' \
+  run_fake 2 "a 200 whose .deliveries is not an array is an UNREAD, not an empty crown" 200 route
+saw "not a readable delivery envelope" "the refusal names the shape it could not parse"
+not_saw "delivered, never recorded" "an unparseable body never becomes an accusation either"
+unset CR_FAKE_ENVELOPE
 
 section "(o2) THE REMOTE READER ITSELF — a 401 names the principal and NEVER reaches psql"
 # (o) drives the script with `ssh` faked, so it proves what the LOCAL half does
@@ -1741,6 +2154,78 @@ if grep -qE 'psql|platform_deliveries' "$TMP/remote-code.sh"; then
   grep -nE 'psql|platform_deliveries' "$TMP/remote-code.sh" >&2
 else
   ok "no executable line of the remote reader mentions psql or platform_deliveries — the detour is deleted, not skipped"
+fi
+
+section "(o2b) TWO READERS ON ONE BOX MUST NOT READ EACH OTHER'S BODY"
+# THE OUTAGE THIS ARM OWNS is the same one (o1b) names, at its source. The reader
+# used to write its response to the FIXED path `/tmp/cr-body.json` on the control
+# plane. crown-reconcile.yml's concurrency group is per-SHA on main
+# (`crown-reconcile-${{ github.sha }}`), so several runs reconcile at once — five
+# overlapped inside three minutes on 2026-09-16 — and each makes ~55 sequential
+# ssh reads to the SAME box. Two of them land between each other's `curl -o` and
+# `tr -d` and one reads the other's body: HTTP 200, valid JSON, the WRONG sha.
+#
+# The fake curl below reproduces exactly that interleaving: it writes the body
+# for the sha it was asked about, and THEN plants another reader's body at the
+# old fixed path, which is what a concurrent `curl -o /tmp/cr-body.json` does.
+# Against the reader as it stands the plant is inert. Against the reader with its
+# body path put back to `/tmp/cr-body.json` the plant IS the output, this arm
+# reds, and the red says so.
+RFAKE2="$TMP/rfake2"; mkdir -p "$RFAKE2"
+cat > "$RFAKE2/docker" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"name=cloud-control_plane_"*) echo "cp-container-in-effigy" ;;
+  *"printenv WORKER_TOKEN"*)     echo "worker-token-in-effigy" ;;
+esac
+SH
+cat > "$RFAKE2/curl" <<'SH'
+#!/usr/bin/env bash
+out=""; prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+asked="$(printf '%s ' "$@" | grep -oE 'sha=[0-9a-f]{40}' | head -1)"; asked="${asked#sha=}"
+[ -n "$out" ] && printf '{"deliveries":[],"sha":"%s"}' "$asked" > "$out"
+# The OTHER reader's curl, landing after ours. Only meaningful if our body path
+# is the shared one — which is the property under test.
+[ -n "${CR_CROSSTALK:-}" ] && printf '{"deliveries":[],"sha":"%s"}' "$CR_CROSSTALK" > "$CR_SHARED_PATH"
+printf 200
+SH
+chmod +x "$RFAKE2/docker" "$RFAKE2/curl"
+# The literal path the old reader used. Named once, here, so this arm cannot
+# drift away from the thing it is testing.
+CR_SHARED_PATH="/tmp/cr-body.json"
+
+remote_run2() { # <crosstalk-sha-or-empty>
+  rm -f "$CR_SHARED_PATH"
+  PATH="$RFAKE2:$SANDBOX_PATH" CR_CROSSTALK="$1" CR_SHARED_PATH="$CR_SHARED_PATH" \
+    bash "$REMOTE_SH" "sha=$SHA_A" > "$TMP/last.out" 2>&1
+  rm -f "$CR_SHARED_PATH"
+}
+
+# CONTROL: with nobody else on the box the reader reports its own body.
+remote_run2 ""
+saw "CR_HTTP=200" "the reader reports the code it got"
+saw "\"sha\":\"$SHA_A\"" "with no concurrent reader it returns the body for the sha it asked about"
+
+# THE ARM: another reader writes the shared path between our write and our read.
+remote_run2 "$SHA_B"
+saw "\"sha\":\"$SHA_A\"" "a concurrent write to the OLD fixed path does not change what this reader returns"
+not_saw "\"sha\":\"$SHA_B\"" "THE WHOLE POINT: the reader never hands back another reader's body"
+
+# …and the static half, because "it happens not to collide today" is not the
+# claim. Comments are stripped first (the fix's own rationale names the old path)
+# and the strip is proven non-empty so this cannot pass by grepping nothing.
+grep -v '^[[:space:]]*#' "$REMOTE_SH" > "$TMP/remote-code2.sh"
+if [ -s "$TMP/remote-code2.sh" ]; then
+  ok "the reader has code left after its comments are stripped — the check below is not vacuous"
+else
+  bad "stripping comments emptied the reader — the shared-path check below would pass on nothing"
+fi
+if grep -qF -- "-o $CR_SHARED_PATH" "$TMP/remote-code2.sh" || grep -qF -- "-o \"$CR_SHARED_PATH\"" "$TMP/remote-code2.sh"; then
+  bad "the remote reader still writes its body to the SHARED path $CR_SHARED_PATH — concurrent runs read each other"
+  grep -nF -- "$CR_SHARED_PATH" "$TMP/remote-code2.sh" >&2
+else
+  ok "no executable line of the remote reader writes its body to the shared path $CR_SHARED_PATH"
 fi
 
 section "(o3) THE CONTAINER IS FOUND BY A STABLE IDENTITY, NOT A MOVING IMAGE TAG"
@@ -2306,12 +2791,14 @@ saw "2 of them DELIVERED" "the cancelled-but-delivering run is still counted as 
 saw "1 delivered nothing" "the cancelled-before-any-leg run is still counted as NONDELIVERING"
 saw "1 were CANCELLED_NONDELIVERING" "the superseded push is named, not pooled under 'a docs-only merge'"
 saw "1 of the 2 that DELIVERED are CANCELLED_DELIVERING" "the delivered-then-cancelled run is named in the OTHER direction too"
+saw "CANCEL RATE, LIVE: 2 of the 3 completed run(s) in this window were CANCELLED (66.7%)" "the SUM of both classes prints over the population, so deploy.yml never has to quote a frozen 344-of-1,378"
 
 # NON-VACUITY: an ordinary window with NO cancelled run prints the clause with
 # zeroes, so the two counts above are a measurement and not a constant.
 run_cr 0 "the base window, where nothing was cancelled" $(base_args)
 saw "0 were CANCELLED_NONDELIVERING" "with nothing cancelled the count is 0, so the arm above measured something"
 saw "0 of the 2 that DELIVERED are CANCELLED_DELIVERING" "…in both directions"
+saw "CANCEL RATE, LIVE: 0 of the 2 completed run(s) in this window were CANCELLED (0.0%)" "and the rate is 0.0% when nothing was cancelled — a measurement, not a constant"
 
 # MUTATION: drop the split. The clause is the only place these two classes are
 # ever said, so silencing its `say` is exactly "the split was dropped".
@@ -2326,6 +2813,18 @@ CR_ALT=""
 not_saw "CANCELLED_NONDELIVERING" "without the split the superseded push is anonymous again — the assertions above are differences, not defaults"
 not_saw "CANCELLED_DELIVERING" "…and so is the delivered-then-cancelled run"
 
+# MUTATION: drop the summed rate. It is the only line that states cancelled over
+# the POPULATION, which is the shape deploy.yml's comment froze.
+# shellcheck disable=SC2016  # the anchor is a LITERAL of the script's own text
+mutate_cr drop-cancel-rate \
+  'say "  CANCEL RATE, LIVE:' \
+  ': "  CANCEL RATE, LIVE:'
+CR_ALT="$MUT_OUT"
+run_cr 0 "the same fixture, against a script whose summed cancel rate was dropped" \
+  --runs-fixture "$RUNS_Y" --jobs-fixture "$JOBS_Y" --crown-fixture "$CROWN_Y" --health-fixture "$HEALTH_BASE"
+CR_ALT=""
+not_saw "CANCEL RATE, LIVE" "without the line the rate is unstated again — the two assertions above are differences, not defaults"
+
 section "(z) the run listing PAGES to the window start — 101 rows is a COUNT, not a floor"
 # `per_page=100` with no `page=` was ONE page read as if it were the 24h window,
 # and it was short on 7 of 24 active days in the 30-day sample (2026-09-02: 246
@@ -2339,11 +2838,11 @@ runs_bulk() { # <name> <first-id> <count> <sha:created> <filler-sha> <filler-cre
     printf '{'
     [ "$trunc" = "true" ] && printf '"truncated":true,'
     printf '"workflow_runs":['
-    printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}' "$base" "$a" "$acr"
+    printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s","updated_at":"%s"}' "$base" "$a" "$acr" "$(iso_plus "$acr" "$RUN_SPAN_SECONDS")"
     local i=1
     while [ "$i" -lt "$count" ]; do
-      printf ',{"id":%d,"head_sha":"%s","conclusion":null,"status":"in_progress","created_at":"%s"}' \
-        "$((base + i))" "$fsha" "$fcreated"
+      printf ',{"id":%d,"head_sha":"%s","conclusion":null,"status":"in_progress","created_at":"%s","updated_at":"%s"}' \
+        "$((base + i))" "$fsha" "$fcreated" "$fcreated"
       i=$((i + 1))
     done
     printf ']}'

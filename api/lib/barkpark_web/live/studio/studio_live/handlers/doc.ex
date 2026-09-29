@@ -5,6 +5,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
   """
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Content
   alias BarkparkWeb.ScopeHelpers
@@ -18,12 +19,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
       content = Content.build_content(socket.assigns.editor_form, socket.assigns[:editor_schema])
       title = Map.get(socket.assigns.editor_form, "title", doc.title)
 
-      case Content.validate_document(type, title, content, socket.assigns.dataset) do
-        {:error, errs} ->
+      # Errors gate the publish; warnings (schema `"level": "warning"`, Gyldendal
+      # parity E1.6) ride along in the assign so the bar still shows them after
+      # a successful publish — Sanity's warning nags, it never blocks.
+      %{errors: errs, warnings: warns} =
+        case socket.assigns[:editor_schema] do
+          # No resolved schema: the pre-existing dataset lookup, errors only.
+          nil ->
+            case Content.validate_document(type, title, content, socket.assigns.dataset) do
+              {:error, errs} -> %{errors: errs, warnings: %{}}
+              _ -> %{errors: %{}, warnings: %{}}
+            end
+
+          schema ->
+            # The tree reading (E1.11): nested errors gate the publish just
+            # like top-level ones, nested warnings only nag.
+            Barkpark.Content.Validation.check_tree(content, title, schema)
+        end
+
+      # The workspace's language, once, before any render site (E7, #87).
+      errs = BarkparkWeb.StudioLocale.localize_findings(errs)
+      warns = BarkparkWeb.StudioLocale.localize_findings(warns)
+
+      socket = assign(socket, validation_warnings: warns)
+
+      case errs do
+        errs when errs != %{} ->
           {:noreply,
            socket
            |> assign(validation_errors: errs)
-           |> put_flash(:error, "Fix validation errors before publishing")}
+           |> put_flash(:error, gettext("Fix validation errors before publishing"))}
 
         _ ->
           opts = Shared.hook_opts(socket)
@@ -42,7 +67,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
           )
       end
     else
-      {:noreply, socket}
+      # Same rule as the refusal arms above: an ERROR arm of this case already
+      # flashes, so a press that never ran must not answer with silence.
+      {:noreply, put_flash(socket, :error, "Nothing to publish — open a document first")}
     end
   end
 
@@ -65,7 +92,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
         {:noreply, assign(socket, show_unpublish_guard: true, unpublish_refs: refs)}
       end
     else
-      {:noreply, socket}
+      {:noreply, put_flash(socket, :error, "Nothing to unpublish — open a document first")}
     end
   end
 
@@ -121,7 +148,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
           {:noreply, put_flash(socket, :error, "Failed to duplicate")}
       end
     else
-      {:noreply, socket}
+      {:noreply, put_flash(socket, :error, "Nothing to duplicate — open a document first")}
     end
   end
 end

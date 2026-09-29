@@ -22,6 +22,7 @@ defmodule BarkparkCloud.Web.RouterAppTokenPerUserRateLimitTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
+  alias BarkparkCloud.RateLimitWindow
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -48,6 +49,10 @@ defmodule BarkparkCloud.Web.RouterAppTokenPerUserRateLimitTest do
   end
 
   defp exhaust(method, token) do
+    # The limiter window is the CALENDAR minute, so the whole loop must land
+    # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+    RateLimitWindow.align!()
+
     for _ <- 1..10 do
       conn = call(method, "/v1/barkparks/#{Ecto.UUID.generate()}/app-token", token)
       assert conn.status == 404

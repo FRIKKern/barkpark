@@ -83,18 +83,39 @@ const EXPECT = [
   { f: "loadSessions", p: '"/v1/account/sessions"', v: "guarded",
     proof: [/!r\.ok/],
     why: "failure paints its own line — distinct from 'No active sessions.'" },
+  { f: "loadSecurityLog", p: '"/v1/me/security-events"', v: "guarded",
+    proof: [/!r\.ok/, /load your security log/],
+    why: "cloud-console-user-security-log: a failed read says so — it must NEVER paint the empty-trail sentence, which reads as 'nothing has changed on your account'" },
   { f: "loadProviders", p: '"/v1/providers"', v: "guarded",
     proof: [/data-providers-retry/],
     why: "cch-w67-s4: !ok arm speaks + Retry; the roster/empty state renders only from a 200" },
-  { f: "loadProviderIdentity", p: '"/v1/providers/" + encodeURIComponent(kind) + "/overview"', v: "guarded",
-    proof: [/providerIdentityModel\(r\.ok && r\.data \? r\.data : null\)/],
-    why: "a null model paints the honest couldn't-read state, never a blank" },
+  // console-w28: the PATH moved /overview -> /identity (the purpose-built D899
+  // route: @connectable_kinds, zero upstream calls) and the !ok arm gained a
+  // branch, so this row is RE-STATED, not deleted. Same function, same verdict,
+  // a proof that matches the arm as it now reads.
+  { f: "loadProviderIdentity", p: '"/v1/providers/" + encodeURIComponent(kind) + "/identity"', v: "guarded",
+    proof: [/providerIdentityModel\(r\.ok \? d : \(d && d\.error \? d : null\)\)/],
+    why: "the !ok arm hands the model the server's error body when there is one (so a 502 credential_unreadable keeps its own sentence) and null otherwise; both paint an honest stated state, never a blank" },
   { f: "loadCapabilityMatrix", p: '"/v1/providers/capabilities"', v: "guarded",
     proof: [/capabilityMatrixModel\(r\.ok && r\.data \? r\.data : null\)/],
     why: "a null model renders the matrix's own unknown state" },
   { f: "loadGithub", p: '"/v1/github/installation"', v: "guarded",
     proof: [/data-github-retry/],
     why: "cch-w67-s4: only a 200 may claim a configuration state; failure speaks + Retry" },
+  // cch-w73-bl — THE INSTALL RETURN LEG'S ONE AUTHORITY READ. At boot loadMe()
+  // is still in flight, so githubInstallWriteAuthority() answers "unknown" on a
+  // first read and a fence that decided there would never fire. This is the ONE
+  // re-ask that buys a determinate answer, bounded by the `reasked` flag.
+  // SANCTIONED, not guarded, and the asymmetry is deliberate: a read that FAILS
+  // leaves the band "unknown", and unknown RECORDS. The installation_id is spent
+  // and unrepeatable — there is no control to re-arm and no retry that can
+  // recover it — so withholding the POST because /v1/me broke would destroy a
+  // real admin's install to avoid one refused request. The plane is the gate;
+  // the fence only withholds on a DETERMINATE refuse. The proof pins that
+  // mechanism: the answer is absorbed and the leg re-decides exactly once.
+  { f: "resolveGithubInstallReturn", p: '"/v1/me"', v: "sanctioned",
+    proof: [/absorbMe\(r\);/, /resolveGithubInstallReturn\(id, true\);/],
+    why: "a failed read leaves the band unknown, and unknown RECORDS (comment at site) — the router's require_team_admin is the enforcer; the fence withholds only on a determinate refuse" },
   { f: "loadNotifications", p: '"/v1/notifications/settings"', v: "guarded",
     proof: [/Couldn\\'t load settings/],
     why: "failure paints its own empty-state headline" },
@@ -142,6 +163,11 @@ const EXPECT = [
   { f: "loadOverview", p: '"/v1/barkparks"', v: "guarded",
     proof: [/markRefreshStale\(\)/],
     why: "full-load failure paints the error state; a background failure marks staleness, never blanks" },
+  // cch-w49-bl: the SECOND reader of this envelope. The billing screen asks for
+  // the ceiling it used to state from a client constant.
+  { f: "loadBillingCeiling", p: '"/v1/usage/summary"', v: "sanctioned",
+    proof: [/if \(!r\.ok\) return billingQuota;/],
+    why: "a failed read leaves the cache and the loaded flag alone, so the ceiling line stays OMITTED — an unanswered ceiling and an absent one are the same silence, never a number" },
   { f: "loadOverview", p: '"/v1/usage/summary"', v: "sanctioned",
     proof: [/res\[0\]\.ok && res\[0\]\.data && res\[0\]\.data\.usage\) \? res\[0\]\.data\.usage : null/],
     why: "null usage renders the slots meter's unknown state — never a fabricated quota" },
@@ -191,6 +217,9 @@ const EXPECT = [
   { f: "loadSiteDomains", p: '"/v1/sites/" + encodeURIComponent(site.id) + "/domain-status"', v: "sanctioned",
     proof: [/restoreDomainRecheck\(b\)/],
     why: "SANCTIONED-SILENT: paints no sentence on failure — button-restore only. Never pin this guarded (wave-68 correction 5)" },
+  { f: "loadSiteForms", p: '"/v1/sites/" + encodeURIComponent(site.id) + "/forms"', v: "guarded",
+    proof: [/status: "fault", fault: r/, /error === "forms_unsupported"/],
+    why: "N-08: a failed read paints 'Couldn't load the form inbox' + Retry and forms_unsupported its own state — neither is ever an empty inbox" },
   { f: "loadSites", p: '"/v1/sites"', v: "guarded",
     proof: [/!r\.ok/, /res\[1\] === null/, /data-sites-fleet-retry/],
     why: "cch-w67-s4: sites !ok arm speaks; the fleet leg reads fleetFault only under res[1]===null and banners what the rows can't say" },
@@ -274,9 +303,17 @@ const EXPECT = [
   { f: "newRenderOAuth", p: '"/v1/auth/oauth/providers"', v: "guarded",
     proof: [/data-oauth-retry/],
     why: "cch-w67-s4: the /new twin of renderOAuthButtons' arm" },
-  { f: "newAskLaunchAuthority", p: '"/v1/me"', v: "guarded",
+  // cch-r16-w11 RENAMED THE ENCLOSING FUNCTION, not the read. /new's one
+  // /v1/me moved from newAskLaunchAuthority into newAskMe when the theater
+  // steps (ready, failed) came to need the same answer for their own
+  // team-admin writes: one latch, one request per page-load, two repaint
+  // callbacks. The VERDICT is unchanged and so is the proof — absorbMe(r) is
+  // still the only thing done with the answer — and both consumers still fail
+  // CLOSED on an unknown: the launch step withholds the form (newLaunchOffer)
+  // and the theater steps withhold the live hook (adminWriteControlHtml).
+  { f: "newAskMe", p: '"/v1/me"', v: "guarded",
     proof: [/absorbMe\(r\)/],
-    why: "an unknown authority withholds the launch form and renders the one exit (newLaunchOffer, fail-closed)" },
+    why: "an unknown authority withholds the launch form and renders the one exit (newLaunchOffer, fail-closed); on the theater steps it withholds the elevated write's mount hook (adminWriteControlHtml, fail-closed)" },
   // cch-w49-s7 — /new's ONLY read of the plane's billing declaration. SANCTIONED,
   // not guarded: the absence of an answer is the ANSWER this screen already
   // commits to. capCache is LEFT UNTOUCHED on a non-200, billingCheckoutCapability
@@ -486,22 +523,40 @@ for (const { row } of foundKeyed) {
 }
 
 // ── refusals: a broken instrument never reports a clean tree ────────────────
-if (overruns.length) {
-  console.error("FAIL(2): the function walk is corrupted — overlapping top-level extents: " + overruns.join(", "));
+
+// ── THE ONE REFUSAL VOCABULARY (cch-w63-bl) ─────────────────────────────────
+// EVERY exit-2 path in this file ends with exactly ONE line, on STDERR:
+//
+//     !! UNKNOWN CENSUS (exit 2): REFUSED TO MEASURE — <reason>
+//
+// It is the same shape __preview__/exit-vocabulary.mjs already emits for the
+// browser instruments, so ONE reader covers the whole console fence. Before
+// this, six of console-unit's nine exit-2 sites spoke a private vocabulary
+// (BARE `FAIL(2):` lines with no prefix at all) that no `!!`-anchored capture could see — a gate that CAPTURES the
+// refusing instrument's own summary line would have replaced a wrong sentence
+// with NO sentence, in the wave about silence.
+//
+// THE READER IS scripts/console-refusal-capture.mjs, and its unit test
+// ENUMERATES this file from source: a new exit-2 path that does not go through
+// `refuse2` reds that test. Do not add one.
+const REFUSAL_NAME = "UNKNOWN CENSUS";
+const refuse2 = (reason) => {
+  process.stderr.write(`!! ${REFUSAL_NAME} (exit 2): REFUSED TO MEASURE — ${reason}\n`);
   process.exit(2);
+};
+
+if (overruns.length) {
+  refuse2("the function walk is corrupted — overlapping top-level extents: " + overruns.join(", "));
 }
 if (!found.length) {
-  console.error("FAIL(2): zero api(\"GET\") call sites found — the extractor is broken, not the tree clean.");
-  process.exit(2);
+  refuse2("zero api(\"GET\") call sites found — the extractor is broken, not the tree clean.");
 }
 if (controlsMissing.length) {
-  console.error("FAIL(2): a positive control is missing from the source: " + controlsMissing.join(" "));
-  process.exit(2);
+  refuse2("a positive control is missing from the source: " + controlsMissing.join(" "));
 }
 if (controlBreaches.length) {
-  console.error("FAIL(2): a positive control now holds a GET call site: " + controlBreaches.join(" ") +
+  refuse2("a positive control now holds a GET call site: " + controlBreaches.join(" ") +
     " — the census can no longer prove it discriminates.");
-  process.exit(2);
 }
 
 // ── THE SET DIFF. Never a count. ────────────────────────────────────────────

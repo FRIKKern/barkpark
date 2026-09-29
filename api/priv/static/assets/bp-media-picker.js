@@ -41,11 +41,24 @@
 // when an asset is set (nothing to remove otherwise). While an upload is in
 // flight (`busy`) every item is DISABLED — the exact mirror of the default
 // chrome, whose _setBusy disables its Upload/Browse/Remove buttons.
-function bpMediaPickerMenuItems({ hasValue, canUpload, busy } = {}) {
+// Gyldendal parity E7: the server stamps the workspace-locale strings on the
+// element as `data-strings` (JSON); every key falls back to the English
+// literal so an element without the attribute renders byte-identically.
+function bpMediaPickerStrings(el) {
+  try {
+    const raw = el && el.dataset ? el.dataset.strings : null;
+    return raw ? JSON.parse(raw) : {};
+  } catch (_e) {
+    return {};
+  }
+}
+
+function bpMediaPickerMenuItems({ hasValue, canUpload, busy, strings } = {}) {
+  const t = (k, fallback) => (strings && typeof strings[k] === "string" ? strings[k] : fallback);
   const items = [];
-  if (canUpload !== false) items.push({ id: "upload", label: "Upload file" });
-  items.push({ id: "browse", label: "Browse library" });
-  if (hasValue) items.push({ id: "remove", label: "Remove image", destructive: true });
+  if (canUpload !== false) items.push({ id: "upload", label: t("upload", "Upload file") });
+  items.push({ id: "browse", label: t("browse", "Browse library") });
+  if (hasValue) items.push({ id: "remove", label: t("remove", "Remove image"), destructive: true });
   if (busy) for (const item of items) item.disabled = true;
   return items;
 }
@@ -75,8 +88,36 @@ function bpMediaFocalFromClick(rect, clientX, clientY) {
   };
 }
 
+// A pixel dimension is a positive integer (the asset document's fileInfo
+// carries them as strings — "1600" — the stored value as numbers); anything
+// else reads as "unknown" (null). Gyldendal parity E1.7.
+function bpDimension(v) {
+  const n = typeof v === "string" ? parseInt(v, 10) : v;
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+// The blur placeholder is a data: URI (or any non-empty string the site can
+// hand to next/image as blurDataURL); anything else is null.
+function bpLqip(v) {
+  return typeof v === "string" && v !== "" ? v : null;
+}
+
+// The CANONICAL assetId spelling is the bare blob id (Gyldendal friction 78):
+// the migration wrote every cover that way, `Barkpark.Media.get_file/2` and the
+// rendition URLs take it, and the asset document is `asset-<blob id>`. The
+// asset browser hands us the DOCUMENT id (`drafts.asset-<id>` / `asset-<id>`),
+// so a fresh pick used to store a second spelling beside the migrated one.
+// Strip both prefixes on the way in; a value already bare is untouched.
+function bpCanonicalAssetId(id) {
+  if (typeof id !== "string") return "";
+  let v = id.trim();
+  if (v.startsWith("drafts.")) v = v.slice("drafts.".length);
+  if (v.startsWith("asset-")) v = v.slice("asset-".length);
+  return v;
+}
+
 function bpParseMediaValue(raw) {
-  const empty = { url: "", assetId: "", alt: "", focalX: null, focalY: null };
+  const empty = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null };
   if (!raw || typeof raw !== "string") return empty;
   const trimmed = raw.trim();
   if (trimmed.startsWith("{")) {
@@ -84,10 +125,13 @@ function bpParseMediaValue(raw) {
       const o = JSON.parse(trimmed);
       return {
         url: o.url || "",
-        assetId: o.assetId || o.id || "",
+        assetId: bpCanonicalAssetId(o.assetId || o.id || ""),
         alt: typeof o.alt === "string" ? o.alt : "",
         focalX: bpFocalCoord(o.focalX),
-        focalY: bpFocalCoord(o.focalY)
+        focalY: bpFocalCoord(o.focalY),
+        width: bpDimension(o.width),
+        height: bpDimension(o.height),
+        lqip: bpLqip(o.lqip)
       };
     } catch (_e) {
       return Object.assign({}, empty, { url: trimmed });
@@ -98,18 +142,30 @@ function bpParseMediaValue(raw) {
 
 // The stored value. A bare URL stays a bare URL and {url, assetId} stays
 // two keys — alt / focalX / focalY are written ONLY when set, so every value
-// this picker ever wrote keeps round-tripping byte-identically.
+// this picker ever wrote keeps round-tripping byte-identically. The
+// denormalised metadata (width / height / lqip, Gyldendal parity E1.7) rides
+// the same rule: written when known, so a value that carried it (the
+// migration wrote every cover with all three) is never stripped of it by an
+// alt-text or focal-point edit, and a fresh pick carries the dimensions the
+// asset document knows. lqip for a fresh pick is filled server-side on save
+// (Barkpark.Media.ImageMetadata) — the picker never invents one.
 function bpSerializeMediaValue(url, assetId, extra) {
   const e = extra || {};
   const alt = typeof e.alt === "string" ? e.alt : "";
   const fx = bpFocalCoord(e.focalX);
   const fy = bpFocalCoord(e.focalY);
-  const rich = alt !== "" || fx != null || fy != null;
+  const w = bpDimension(e.width);
+  const h = bpDimension(e.height);
+  const lqip = bpLqip(e.lqip);
+  const rich = alt !== "" || fx != null || fy != null || w != null || h != null || lqip != null;
   if (!assetId && !rich) return url || "";
   const o = { url: url || "", assetId: assetId || "" };
   if (alt !== "") o.alt = alt;
   if (fx != null) o.focalX = fx;
   if (fy != null) o.focalY = fy;
+  if (w != null) o.width = w;
+  if (h != null) o.height = h;
+  if (lqip != null) o.lqip = lqip;
   return JSON.stringify(o);
 }
 
@@ -119,10 +175,11 @@ class BpMediaPicker extends HTMLElement {
     this._mounted = false;
     this._value = "";
     this._busy = false;
-    this._meta = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, mime: "" };
+    this._meta = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null, mime: "" };
   }
 
   connectedCallback() {
+    this._strings = bpMediaPickerStrings(this);
     if (this._mounted) return;
     this._mounted = true;
 
@@ -141,6 +198,9 @@ class BpMediaPicker extends HTMLElement {
       this._meta.alt = parsed.alt;
       this._meta.focalX = parsed.focalX;
       this._meta.focalY = parsed.focalY;
+      this._meta.width = parsed.width;
+      this._meta.height = parsed.height;
+      this._meta.lqip = parsed.lqip;
     }
 
     this._render();
@@ -185,6 +245,11 @@ class BpMediaPicker extends HTMLElement {
     }
   }
 
+  _t(key, fallback) {
+    const strings = this._strings || {};
+    return typeof strings[key] === "string" ? strings[key] : fallback;
+  }
+
   disconnectedCallback() {
     this._mounted = false;
     this._closeContextMenu();
@@ -214,6 +279,9 @@ class BpMediaPicker extends HTMLElement {
       this._meta.alt = parsed.alt;
       this._meta.focalX = parsed.focalX;
       this._meta.focalY = parsed.focalY;
+      this._meta.width = parsed.width;
+      this._meta.height = parsed.height;
+      this._meta.lqip = parsed.lqip;
     }
     this._renderPreview();
   }
@@ -247,7 +315,10 @@ class BpMediaPicker extends HTMLElement {
       this._value = bpSerializeMediaValue(this._meta.url, this._meta.assetId, {
         alt: this._meta.alt,
         focalX: this._meta.focalX,
-        focalY: this._meta.focalY
+        focalY: this._meta.focalY,
+        width: this._meta.width,
+        height: this._meta.height,
+        lqip: this._meta.lqip
       });
     }
   }
@@ -272,16 +343,16 @@ class BpMediaPicker extends HTMLElement {
       ? '<input class="bp-mp-file" type="file" accept="image/*" hidden />'
       : '<div class="bp-mp-actions">' +
         '<label class="bp-mp-upload btn btn-sm">' +
-        "<span>Upload</span>" +
+        '<span>' + this._t("upload_button", "Upload") + '</span>' +
         '<input type="file" accept="image/*" hidden />' +
         "</label>" +
-        '<button type="button" class="bp-mp-browse btn btn-sm">Browse library</button>' +
-        '<button type="button" class="bp-mp-clear btn btn-destructive btn-sm">Remove</button>' +
+        '<button type="button" class="bp-mp-browse btn btn-sm">' + this._t("browse", "Browse library") + '</button>' +
+        '<button type="button" class="bp-mp-clear btn btn-destructive btn-sm">' + this._t("remove", "Remove") + '</button>' +
         "</div>";
 
     const altHtml = this._wantsAlt()
-      ? '<label class="bp-mp-alt-row"><span class="bp-mp-alt-label">Alt text</span>' +
-        '<input class="bp-mp-alt" type="text" placeholder="Describe the image for people who cannot see it" /></label>'
+      ? '<label class="bp-mp-alt-row"><span class="bp-mp-alt-label">' + this._t("alt", "Alt text") + '</span>' +
+        '<input class="bp-mp-alt" type="text" placeholder="' + this._t("alt_placeholder", "Describe the image for people who cannot see it") + '" /></label>'
       : "";
 
     this.innerHTML =
@@ -325,7 +396,7 @@ class BpMediaPicker extends HTMLElement {
     // doctrine-sanctioned discoverability affordance (rule 5: hover tooltips +
     // context menus). Never set in the default variant (byte-identical render).
     if (ghost && !this.title) {
-      this.title = "Right-click for image options";
+      this.title = this._t("options", "Right-click for image options");
     }
 
     // Empty-state card = click/keyboard target for the file dialog.
@@ -421,7 +492,7 @@ class BpMediaPicker extends HTMLElement {
 
   _clearValue() {
     this._value = "";
-    this._meta = { url: "", assetId: "", alt: "", width: null, height: null, mime: "" };
+    this._meta = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null, mime: "" };
     this._renderPreview();
     this._emit();
   }
@@ -458,7 +529,7 @@ class BpMediaPicker extends HTMLElement {
     );
     // busy mirrors default chrome's _setBusy: items stay VISIBLE but disabled
     // while an upload is in flight — never a menu item that silently no-ops.
-    const items = bpMediaPickerMenuItems({ hasValue, canUpload: true, busy: this._busy });
+    const items = bpMediaPickerMenuItems({ hasValue, canUpload: true, busy: this._busy, strings: this._strings });
 
     // Focus-restore anchor: whatever was focused before the menu opened (the
     // empty-state card, usually) so Escape lands the keyboard user back where
@@ -666,7 +737,7 @@ class BpMediaPicker extends HTMLElement {
       });
       this._setClearVisible(true);
     } else {
-      const label = this._busy ? "Uploading…" : "No image selected — drop a file, or click to upload";
+      const label = this._busy ? this._t("uploading", "Uploading…") : this._t("empty", "No image selected — drop a file, or click to upload");
       this._previewEl.innerHTML =
         '<div class="bp-mp-empty" role="button" tabindex="0" aria-label="Add image">' +
         label +
@@ -698,12 +769,15 @@ class BpMediaPicker extends HTMLElement {
     const keptAlt = this._meta.alt && this._meta.alt !== "" ? this._meta.alt : file.alt || "";
     this._meta = {
       url: file.url || "",
-      assetId: file.assetId || "",
+      assetId: bpCanonicalAssetId(file.assetId || ""),
       alt: keptAlt,
       focalX: null,
       focalY: null,
-      width: file.width || null,
-      height: file.height || null,
+      width: bpDimension(file.width),
+      height: bpDimension(file.height),
+      // A new image has no placeholder yet — the save path derives it from
+      // the asset (a stale lqip of the OLD pixels would be worse than none).
+      lqip: null,
       mime: file.mime || file.mimeType || ""
     };
     this._commitValue();
@@ -711,15 +785,57 @@ class BpMediaPicker extends HTMLElement {
     this._renderPreview();
     if (this._altInput) this._altInput.value = this._meta.alt || "";
     this._emit();
+    if (this._meta.assetId && (this._meta.width == null || this._meta.height == null)) {
+      this._resolveDimensions(this._meta.assetId);
+    }
+  }
+
+  // Width / height from the asset document's fileInfo when the pick source
+  // (library hit, upload receipt) did not carry them. Re-commits and re-emits
+  // so the hidden input — and the draft — hold the dimensions. Silent on any
+  // failure: the server back-fills on save anyway (ImageMetadata).
+  async _resolveDimensions(assetId) {
+    const docId = assetId.startsWith("asset-") ? assetId : "asset-" + assetId;
+    const headers = { Accept: "application/json" };
+    const tok = this._token();
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+    else headers["x-requested-with"] = "bp-media-picker";
+    try {
+      const url =
+        this._scopePrefix() +
+        "/v1/data/doc/" +
+        encodeURIComponent(this._dataset()) +
+        "/mediaAsset/" +
+        encodeURIComponent(docId);
+      const r = await fetch(url, { credentials: "same-origin", headers: headers });
+      if (!r.ok) return;
+      const body = await r.json();
+      const doc = (body && body.result) || body || {};
+      const fi = doc.fileInfo || (doc.content && doc.content.fileInfo) || {};
+      // The pick may have moved on while we waited — only decorate the same asset.
+      if (this._meta.assetId !== assetId) return;
+      const w = bpDimension(fi.width);
+      const h = bpDimension(fi.height);
+      if (w == null || h == null) return;
+      this._meta.width = w;
+      this._meta.height = h;
+      this._commitValue();
+      this._emit();
+    } catch (_e) {
+      /* dimensions optional here; the save path back-fills */
+    }
   }
 
   _selectAsset(detail) {
     if (!detail) return;
+    const fi = (detail.asset && detail.asset.fileInfo) || {};
     this._select({
       url: detail.url,
-      assetId: detail.id,
+      assetId: bpCanonicalAssetId(detail.id),
       mime: detail.mime,
-      alt: detail.title || ""
+      alt: detail.title || "",
+      width: fi.width,
+      height: fi.height
     });
   }
 
@@ -757,11 +873,15 @@ class BpMediaPicker extends HTMLElement {
       // The scoped v1 mirror wraps the asset in {"result": …}; the flat
       // /media/upload returns it bare. Same field names either way.
       const data = body.result || body;
+      const fi = (data.asset && data.asset.fileInfo) || data.fileInfo || {};
       this._select({
         url: data.url,
         mime: data.mimeType,
-        assetId: data.assetDocId || "",
-        alt: ""
+        // The upload receipt names the asset DOCUMENT; store the canonical blob id.
+        assetId: bpCanonicalAssetId(data.assetDocId || ""),
+        alt: "",
+        width: fi.width || data.width,
+        height: fi.height || data.height
       });
     } catch (_e) {
       this._setError("Upload failed — check your connection and try again.");
@@ -779,6 +899,7 @@ customElements.define("bp-media-picker", BpMediaPicker);
 if (typeof window !== "undefined") {
   window.__bpMediaPickerTestHook = {
     menuItems: bpMediaPickerMenuItems,
+    strings: bpMediaPickerStrings,
     showsActions: bpMediaPickerShowsActions,
     parseValue: bpParseMediaValue,
     serializeValue: bpSerializeMediaValue,

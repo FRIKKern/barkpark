@@ -59,6 +59,30 @@ defmodule BarkparkWeb.Studio.ApiTesterLivePlaygroundKitTest do
     live(conn, "/w/#{@ws_slug}/p/#{@proj_slug}/d/#{@dataset}/studio/api-tester")
   end
 
+  defp mount_media(conn, raw) do
+    conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
+    live(conn, "/w/#{@ws_slug}/p/#{@proj_slug}/d/#{@dataset}/studio/media")
+  end
+
+  describe "the top-bar api-tester action group is gated on current_path" do
+    # The POSITIVE arm lives in the kit test below (`phx-change="token-change"`
+    # is asserted on the api-tester mount). Alone it is satisfied by an
+    # ALWAYS-ON gate, which would paint a Token field and a "Run all" button
+    # over every Studio surface, wired to a handler those LiveViews do not
+    # implement. This is the disjoint negative half.
+    test "a NON-api-tester studio surface renders no Token field or Run all",
+         %{conn: conn, admin_raw: raw} do
+      {:ok, _view, html} = mount_media(conn, raw)
+
+      refute html =~ ~s(phx-change="token-change")
+      refute html =~ ~s(phx-click="run-all")
+      # The group's own label text. NOT the `studio-bar-actions` CLASS — that
+      # string is also a selector in the inline stylesheet every studio page
+      # ships, so refuting it is true of no page and would red always.
+      refute html =~ ~s(<label class="studio-bar-actions-label">)
+    end
+  end
+
   describe "playground rides the Controls kit" do
     test "a :select query param renders bp_select — themed, value-match selected, no class-less native select",
          %{conn: conn, admin_raw: raw} do
@@ -82,7 +106,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLivePlaygroundKitTest do
       refute html =~ ~r/<input name="type"[^>]*type="text"(?![^>]*form-input)/
 
       # The `token-change` handler is NOT orphaned: the top-bar Token field
-      # (layouts/studio.html.heex, shown while nav_section == :api_tester)
+      # (layouts/studio.html.heex, shown while
+      # Studio.Section.from_path/2 reads the api-tester surface off current_path)
       # dispatches it, so the handler must stay. Pin the live wiring.
       assert html =~ ~s(phx-change="token-change")
       assert html =~ ~s(name="token")

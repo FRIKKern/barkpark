@@ -92,15 +92,28 @@
 // ── TWO HONEST LIMITS (stated, not hidden) ───────────────────────────────────
 // L1 COVERAGE IS CORPUS-BOUND. The actor set is DERIVED (a scenario whose own
 //    GET /v1/me answers role === "member"), not typed — but it can only be as
-//    wide as the committed corpus, which is 10 of 111 scenarios today. The
+//    wide as the committed corpus, which is 12 of 128 scenarios today (this
+//    sentence was UNGUARDED and had rotted to "10 of 111" — nothing recounts
+//    it, so re-read it against the actor-set line the sweep PRINTS). The
 //    count is PINNED so corpus growth is NAMED rather than silently absorbed.
 // L2 ROUTE ATTRIBUTION IN THE HOOK TABLE IS TYPED, NOT DERIVED. UNACCOUNTED and
 //    DEAD ROW guard completeness in BOTH directions, but a row naming the WRONG
-//    route is caught by nothing here. Deriving hook -> handler -> api() is
-//    exactly D505's refuted problem and this file does not promise it. Each
-//    row's fence cites the __binding_census.mjs PIN row it was read from; the
-//    census remains the owner of route -> fence truth, and shipping a SECOND
-//    derived table that could disagree with it is deliberately not done.
+//    ROUTE is caught by nothing here. Deriving hook -> handler -> api() is
+//    exactly D505's refuted problem and this file does not promise it.
+//    ONE SHAPE OF IT IS NOW CAUGHT (task-60c35a2da304c080): a row typed
+//    `route: null` whose bound handler reaches api()/fetch() reds in the
+//    route-null read (section 3c; the reader and its limits sit above
+//    maskSource). It is a source read, bounded by the binding shapes and hop
+//    depth it names, and it says nothing about a routed row naming the WRONG
+//    route — only that a routed row's handler reaches the network at all.
+//    THE FENCE IS NO LONGER TYPED THOUGH (cch-w50-bl). A row names a route and
+//    the fence is LOOKED UP in __route_fence.mjs, the one route -> fence table,
+//    which __binding_census.mjs imports too and re-reads against its own PIN.
+//    Until this wave every row carried a hand-typed `fence:` beside a PROSE
+//    citation of the census row it had been read from — two tables that could
+//    disagree, with nothing in the tree able to notice. A route this file names
+//    that the shared table does not carry now answers `unknown`, and unknown is
+//    still never a pass: it reds as UNFENCED.
 //
 // ── BLIND SPOTS, NAMED ───────────────────────────────────────────────────────
 // B1 the static shell beyond the launch pair: index.html authors ~24 buttons.
@@ -116,6 +129,36 @@
 //    green, which is how wave 48's crown failed. It is reported, never counted.
 // B4 text content is not modelled by the shim's flat parse, so a control is
 //    identified by tag/id/class/data-attrs and never by its label.
+// B5 [data-vf-reprovision] — the FOURTH offer site of the three verbs cch-w38-s1
+//    fenced, and the one this sweep CANNOT cover. verifyNoteHtml's no_admin_token
+//    arm is reached only from runVerifyNow, i.e. only after a CLICK on
+//    [data-vf-run] issues POST /verify and collects a 404. This sweep BOOTS
+//    scenarios; it never drives them. MEASURED over all 128 committed scenarios
+//    (boot + a scan of every registry entry's innerHTML): `data-vf-reprovision`
+//    renders in ZERO of them — `verify-no-credentials`, the fixture that exists
+//    for it, included. So no member fixture can make it reachable HERE, and the
+//    three WATCHED rows below deliberately stop at three. It is NOT uncovered in
+//    the tree: smoke.mjs's `verify-no-credentials` expectation clicks through to
+//    it and asserts the live control plus its handler, and __app.test.mjs's
+//    cch-w38-s1 offer table pins its member arm. Declaring the boundary is the
+//    honest option; silently counting three of four as "the sites" is not.
+// B6 #new-vercel-claim — the launch wizard's one-click Vercel deploy (POST
+//    /v1/barkparks/:*/vercel-deploy, Auth.require_team_admin), fenced in app.js
+//    by cch-r16-w11 alongside its two neighbours and the ONE of the three this
+//    sweep cannot cover. It renders only when GET /v1/barkparks/:id/bootstrap
+//    answers a `vercel` envelope, and THAT read is itself
+//    `Auth.require_team_admin` at the router — a member's read 403s before the
+//    control is ever composed. MEASURED over all 131 committed scenarios (boot
+//    + a scan of every registry entry's innerHTML): `id="new-vercel-claim"`
+//    renders in ZERO of them, for owner and member alike, because the corpus's
+//    catch-all serves `{}` for that read and no fixture mints the envelope.
+//    An `assert: true` WATCHED row would therefore be unlosable and an
+//    `assert: false` one would report a member zero the fence did not cause. It
+//    is NOT uncovered in the tree: __app.test.mjs pins vercelClaimHtml's bytes
+//    on BOTH bands (grant paints `id="new-vercel-claim"`, refuse paints the
+//    hookless disabled-and-explained wrapper), where the band is an ARGUMENT
+//    rather than a consequence of a sibling read. Declaring the boundary is the
+//    honest option; minting a fixture the server cannot serve a member is not.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -124,6 +167,7 @@ import { fileURLToPath } from "node:url";
 import { bootScenario, makeDom, flush } from "./smoke.mjs";
 import { SCENARIOS, SCENARIO_NAMES, route } from "./scenarios.mjs";
 import { parseStaticControlIds } from "./breakpoint-sweep.mjs";
+import { F_CLIENT, F_UNKNOWN, ELEVATED, fenceForRoute, overlayGapReport, pinHatchReport } from "../__route_fence.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_HTML = path.join(HERE, "..", "index.html");
@@ -218,51 +262,125 @@ export function hookKey(c) {
   return c.tag;
 }
 
-// ── the fence vocabulary ─────────────────────────────────────────────────────
-// ELEVATED = above plain team membership. Anything else is member-reachable.
-// `unknown` exists ONLY so an author can be forced to answer: a routed row
-// carrying it is an UNFENCED red, never a pass.
-const F_MEMBER = "member";        // any team member may call it
-const F_SELF = "self";            // self-scoped (your own account/token)
-const F_CLIENT = "client";        // no route at all — navigation, clipboard, disclosure
-const F_ADMIN = "elevated:team_admin";
-const F_UNKNOWN = "unknown";
-const ELEVATED = new Set([F_ADMIN]);
+// ── the fence vocabulary — IMPORTED, not restated (cch-w50-bl) ──────────────
+// The words AND the answers come from __route_fence.mjs. This file used to
+// declare the five constants itself and then type one of them onto every row by
+// hand; the census declared the same five and its own overlay. `fenceForRoute`
+// is that module's derivation: the router's Auth.require_* tier, RAISED by the
+// inline-cond overlay for the routes whose refusal of a non-admin lives in a
+// `cond` (POST /v1/fleet/supports is the measured specimen — require_user_or_pat
+// at the router, so a tier-only read calls it member-reachable and the console
+// would offer a member a write the server refuses).
 
 // ── THE HOOK TABLE ───────────────────────────────────────────────────────────
 // One row per hook identity a member-actor screen can render. `route` is the
 // route the hook calls (null for client-only), `fence` is that route's tier,
 // `source` cites where the fence was read from — the __binding_census.mjs PIN
 // row, or the markup itself for client-only controls. See LIMIT L2: these are
-// TYPED, and a row naming the wrong route is caught by nothing here.
+// TYPED. A `route: null` row whose bound handler calls the server is caught by
+// the route-null read (section 3c); a routed row naming the wrong route is
+// still caught by nothing here.
 const HOOKS = [
-  { key: "a", route: null, fence: F_CLIENT, what: "breadcrumb / bare in-app link", source: "markup: hash navigation" },
-  { key: "a.inst-tab", route: null, fence: F_CLIENT, what: "instance detail tab", source: "markup: hash navigation" },
-  { key: "a.nav-link.nav-sub", route: null, fence: F_CLIENT, what: "instance section nav", source: "markup: hash navigation" },
-  { key: "a.site-open", route: null, fence: F_CLIENT, what: "open the live site URL", source: "markup: target=_blank anchor" },
-  { key: "a.btn.btn-ghost.btn-sm.site-open", route: null, fence: F_CLIENT, what: "Visit button in the site detail head", source: "markup: target=_blank anchor" },
-  { key: "button.copy-btn[data-copy]", route: null, fence: F_CLIENT, what: "copy a CLI command / id to the clipboard", source: "markup: data-copy delegate" },
-  { key: "button#inst-open-studio", route: null, fence: F_CLIENT, what: "open Studio in a new tab", source: "markup: window.open" },
-  { key: "button#inst-cli-toggle", route: null, fence: F_CLIENT, what: "disclose the bp CLI lifecycle rail", source: "markup: aria-controls disclosure" },
-  { key: "button.deploy-console-toggle", route: null, fence: F_CLIENT, what: "expand a deploy's build console", source: "markup: local disclosure" },
-  { key: "button.actfilter-chip[data-notif-del-axis][data-notif-del-value]", route: null, fence: F_CLIENT, what: "deliveries filter chip", source: "markup: client-side filter" },
-  { key: "input#notif-del-event", route: null, fence: F_CLIENT, what: "deliveries event filter input", source: "markup: client-side filter" },
-  { key: "button#notif-del-load-more", route: "GET /v1/notifications/deliveries", fence: F_MEMBER, what: "paginate deliveries", source: "census: read path; the inline-cond overlay records the deliveries route as a self-scope NARROWING, never a refusal" },
-  { key: "button#site-new-btn", route: "POST /v1/sites", fence: F_MEMBER, what: "open the create-site modal", source: "census PIN: openCreateSiteModal — any member may create a site" },
-  { key: "button#site-deploy", route: "POST /v1/sites/:*/deploy", fence: F_MEMBER, what: "deploy the site", source: "census PIN: runDeploy / createAndDeploy, ruling (a)" },
-  { key: "button#site-rollback", route: "POST /v1/sites/:*/rollback", fence: F_MEMBER, what: "roll the site back", source: "census PIN: runSiteRollback, ruling (a)" },
-  { key: "button.btn.btn-ghost.btn-sm.dep-promote[data-dep-id][data-kind]", route: "POST /v1/sites/:*/deployments/:*/promote", fence: F_MEMBER, what: "promote a deployment", source: "census PIN: runPromote, ruling (a)" },
-  { key: "button#site-delete", route: "DELETE /v1/sites/:*", fence: F_MEMBER, what: "delete the site (destroy-tier confirm)", source: "census PIN: runSiteDelete — with_team_site {:ability,\"write\"} and a session carries [\"root\"], ruling (a); the INSTANCE Decommission is a different, higher band" },
-  { key: "button#site-env-edit", route: "POST /v1/sites/:*/env", fence: F_MEMBER, what: "edit site env vars", source: "census PIN: openSiteEnvModal — team-scoped member action" },
-  { key: "select#site-theme-select", route: "PATCH /v1/sites/:*", fence: F_MEMBER, what: "pin the deploy theme", source: "census PIN: loadSite, ruling (a)" },
-  { key: "button.btn.btn-primary.btn-sm[data-vf-run]", route: "POST /v1/barkparks/:*/verify", fence: F_MEMBER, what: "run verification now", source: "census PIN: runVerifyNow — team-scoped member action" },
-  { key: "button.btn.btn-ghost.btn-sm.token-revoke[data-id][data-name]", route: "DELETE /v1/tokens/:*", fence: F_SELF, what: "revoke your own token", source: "census PIN: confirmRevokeToken — self-scope" },
-  { key: "button.btn.btn-ghost.btn-sm[data-life-retry]", route: null, fence: F_CLIENT, what: "retry the lifecycle read that failed", source: "markup: re-issues the same GET the view already made" },
+  { key: "a", route: null, what: "breadcrumb / bare in-app link", source: "markup: hash navigation" },
+  { key: "a.inst-tab", route: null, what: "instance detail tab", source: "markup: hash navigation" },
+  { key: "a.nav-link.nav-sub", route: null, what: "instance section nav", source: "markup: hash navigation" },
+  { key: "a.site-open", route: null, what: "open the live site URL", source: "markup: target=_blank anchor" },
+  { key: "a.btn.btn-ghost.btn-sm.site-open", route: null, what: "Visit button in the site detail head", source: "markup: target=_blank anchor" },
+  { key: "button.copy-btn[data-copy]", route: null, what: "copy a CLI command / id to the clipboard", source: "markup: data-copy delegate" },
+  // task-60c35a2da304c080: this row used to read `route: null, source: "markup:
+  // window.open"`. The window.open is REAL but it is the first line of
+  // openStudio, which then POSTs the studio-link route — wireInstanceHeaderActions
+  // binds #inst-open-studio to openStudio(bp.id, openBtn), the SAME function the
+  // #new-open-studio and .fleet-open-studio rows below cite. The route-null read
+  // (section 3c) is what now reds a row shaped like the old one.
+  { key: "button#inst-open-studio", route: "POST /v1/barkparks/:*/studio-link", what: "open Studio from the instance detail header", source: "census PIN: openStudio — bound by wireInstanceHeaderActions; Auth.require_user at the router, pinned `member`; the SAME function #new-open-studio's and .fleet-open-studio's rows cite" },
+  { key: "button#inst-cli-toggle", route: null, what: "disclose the bp CLI lifecycle rail", source: "markup: aria-controls disclosure" },
+  { key: "button.deploy-console-toggle", route: null, what: "expand a deploy's build console", source: "markup: local disclosure" },
+  // task-60c35a2da304c080, found by the route-null read on its first run over
+  // the whole table: this chip and the event input below were typed `route:
+  // null, "client-side filter"`, but neither filters on the client. The chip's
+  // click is wireNotifDeliveryFilters' delegated listener and the input's
+  // change/Enter is its `commit`; both set notifDeliveryFilter and call
+  // loadNotifDeliveries, which RE-ISSUES the deliveries read with the filter in
+  // the query string. Same route #notif-del-load-more's row already names, so
+  // the fence answer is the shared table's self-scope read (not elevated).
+  { key: "button.actfilter-chip[data-notif-del-axis][data-notif-del-value]", route: "GET /v1/notifications/deliveries", what: "deliveries filter chip — re-queries the log with the chosen axis", source: "handler: wireNotifDeliveryFilters' delegated click -> loadNotifDeliveries -> api GET; the inline-cond overlay records the deliveries route as a self-scope NARROWING, never a refusal" },
+  // cch-w36-bl: the ACTIVITY feed's filter chips are NOT a HOOKS row — they are
+  // a WATCHED one (see WATCHED below, id `activity-filter-chip`). A HOOKS row
+  // here would be a DEAD ROW every run, exactly as the /new wizard's fenced
+  // verbs are: on the fixed tree a refused member renders no chip at all, so the
+  // table would claim a control the member corpus never paints. The claim worth
+  // making is an ABSENCE against a positive control, and that is the WATCHED
+  // arm's shape.
+  { key: "input#notif-del-event", route: "GET /v1/notifications/deliveries", what: "deliveries event filter input — re-queries the log on change / Enter", source: "handler: wireNotifDeliveryFilters' commit -> loadNotifDeliveries -> api GET; same self-scope read as the chip above" },
+  { key: "button#notif-del-load-more", route: "GET /v1/notifications/deliveries", what: "paginate deliveries", source: "census: read path; the inline-cond overlay records the deliveries route as a self-scope NARROWING, never a refusal" },
+  { key: "button#site-new-btn", route: "POST /v1/sites", what: "open the create-site modal", source: "census PIN: openCreateSiteModal — any member may create a site" },
+  { key: "button#site-deploy", route: "POST /v1/sites/:*/deploy", what: "deploy the site", source: "census PIN: runDeploy / createAndDeploy, ruling (a)" },
+  { key: "button#site-rollback", route: "POST /v1/sites/:*/rollback", what: "roll the site back", source: "census PIN: runSiteRollback, ruling (a)" },
+  { key: "button.btn.btn-ghost.btn-sm.dep-promote[data-dep-id][data-kind]", route: "POST /v1/sites/:*/deployments/:*/promote", what: "promote a deployment", source: "census PIN: runPromote, ruling (a)" },
+  { key: "button#site-delete", route: "DELETE /v1/sites/:*", what: "delete the site (destroy-tier confirm)", source: "census PIN: runSiteDelete — with_team_site {:ability,\"write\"} and a session carries [\"root\"], ruling (a); the INSTANCE Decommission is a different, higher band" },
+  { key: "button#site-env-edit", route: "POST /v1/sites/:*/env", what: "edit site env vars", source: "census PIN: openSiteEnvModal — team-scoped member action" },
+  { key: "select#site-theme-select", route: "PATCH /v1/sites/:*", what: "pin the deploy theme", source: "census PIN: loadSite, ruling (a)" },
+  { key: "button.btn.btn-primary.btn-sm[data-vf-run]", route: "POST /v1/barkparks/:*/verify", what: "run verification now", source: "census PIN: runVerifyNow — team-scoped member action" },
+  { key: "button.btn.btn-ghost.btn-sm.token-revoke[data-id][data-name]", route: "DELETE /v1/tokens/:*", what: "revoke your own token", source: "census PIN: confirmRevokeToken — self-scope" },
+  // task-cf8ef8a2da25e3aa: this row was `route: null` and exempted in
+  // ROUTE_NULL_DECLARED while __route_fence.mjs lacked the route; the fence now
+  // carries it (Auth.require_user, member), so the row names the read it issues.
+  { key: "button.btn.btn-ghost.btn-sm[data-life-retry]", route: "GET /v1/providers/capabilities", what: "retry the lifecycle read that failed", source: "handler: the Retry re-enters wireLifecycleActions -> api GET /v1/providers/capabilities, the read the view already made; require_user at the router, member-readable" },
+  // ── cch-r16-w11: the /new LAUNCH WIZARD's own controls, which entered this
+  // sweep's view with `theater-ready-github-member` and `theater-failed-member`
+  // — the first member actors ever to reach either theater screen. Every row
+  // here was named because the sweep REFUSED on it as UNACCOUNTED; none was
+  // written ahead of a refusal.
+  //
+  // The two ROUTED ones are member-level at the router and the census reads
+  // them that way, which is why they are rows here rather than findings: a
+  // member legitimately opens Studio on their own team's instance and
+  // legitimately tells us their site URL. The elevated pair on these same two
+  // screens (POST /v1/github/repos, POST /v1/barkparks/:*/retry) are NOT rows —
+  // they are WATCHED below, because adminWriteControlHtml's refusal arm drops
+  // their hooks entirely and a HOOKS row keyed on the live shape would be a
+  // dead row on every run.
+  { key: "button#new-open-studio", route: "POST /v1/barkparks/:*/studio-link", what: "open Studio from the launch wizard's ready hero", source: "census PIN: openStudio — Auth.require_user at the router, pinned `member`" },
+  { key: "button#new-site-url-btn", route: "POST /v1/barkparks/:*/site-url", what: "wire revalidation to the deployed site URL", source: "census PIN: newSubmitSiteUrl — Auth.require_user at the router, pinned `member`" },
+  { key: "input#new-site-url", route: null, what: "the site-URL field its own button submits", source: "markup: a text input; the write is newSubmitSiteUrl's, one row above" },
+  { key: "input#new-gh-name", route: null, what: "the repo-name field beside Create GitHub repo", source: "markup: a text input; the write is POST /v1/github/repos, which is WATCHED — and the fence DISABLES this field on the refusal arm, so a member cannot type into a form whose button is gone" },
+  { key: "a#new-vercel", route: null, what: "the vercel.com/new/clone handoff (the fallback path, no platform token)", source: "markup: target=_blank anchor to vercel.com — leaves our origin entirely, calls nothing of ours" },
+  { key: "a.btn.btn-block.btn-ghost", route: null, what: "the ready hero's secondary View affordance (\"View instance\" on /new)", source: "markup: an href into the dashboard — hash/path navigation" },
+  { key: "button#new-console-toggle", route: null, what: "expand/collapse the launch wizard's provisioning console", source: "markup: local disclosure — flips newState.consoleCollapsed and re-renders bytes the boot already fetched, no api() call on the path" },
+  // cch-w38-s1-fu: the provision timeline's console disclosure, which entered
+  // this sweep's view with `instance-failed-member` — the first member fixture
+  // on a FAILED box. It is client-only in the strictest sense: the toggle flips
+  // `instanceConsoleCollapsed` and re-renders bytes the boot already fetched,
+  // issuing no request at all. It is NOT an aria-controls disclosure (it toggles
+  // its own sibling by re-render, not by pointing at a container), which is why
+  // it needs its own row rather than riding #inst-cli-toggle's.
+  { key: "button.bp-console-toggle[data-tl-console-toggle]", route: null, what: "expand/collapse the provisioning console tail", source: "markup: local disclosure — flips instanceConsoleCollapsed and re-renders, no api() call on the path" },
+  // cch-w47-rv-bl: the FLEET LIST's own two controls, which entered this sweep's
+  // view with `fleet-archives-member` — the first member actor ever to render
+  // #fleet-body. Neither is new to the console; both are new to the MEMBER
+  // corpus, and the sweep refused on both as UNACCOUNTED before these rows.
+  // Each is named from wireFleetRows (app.js), the one function that binds them,
+  // not from the shape the reader printed.
+  { key: "div.fleet-row[data-id]", route: null, what: "drill into an instance's detail view", source: "markup: wireFleetRows sets location.hash = #instance/<id> — hash navigation, no api() call on the path" },
+  { key: "button.btn.btn-primary.btn-sm.fleet-open-studio[data-id]", route: "POST /v1/barkparks/:*/studio-link", what: "open Studio from a fleet row", source: "census PIN: openStudio — Auth.require_user at the router, pinned `member`; the SAME function #new-open-studio's row above cites, bound here by wireFleetRows" },
   // The two DISABLED shapes. They still need rows — accounting is not
   // conditional on being enabled — and their fence is recorded as elevated so
   // that the day one of them renders ENABLED to a member, it is a FINDING and
   // not a silent new key.
-  { key: "button.btn.btn-ghost.btn-sm", route: "POST /v1/instances/:*/lifecycle", fence: F_ADMIN, what: "instance lifecycle verb, drawn disabled-and-explained for a member (D428)", source: "census: the lifecycle band is team_admin; a member gets the disabled ghost with the grant sentence" },
+  // ROUTE RE-POINTED (this row and the one below). Both used to type
+  // `POST /v1/instances/:*/lifecycle`, which is a BAND LABEL and not a router
+  // route: the census PIN has never carried a row on it, so the "census:" prose
+  // each row cited could not have been checked by anyone, and the shared table
+  // had to record the pair as pin:null. This key is adminWriteControlHtml's
+  // disabled arm, whose grant arm mounts the instance-admin band's writes; of
+  // those, DELETE /v1/barkparks/:* is the one the shared table carries and the
+  // PIN pins twice (runDecommission, removeInstance — the header's Retry
+  // removal is drawn by THIS arm). Every write in the band is
+  // require_current_team_admin, so the fence ANSWER is unchanged
+  // (elevated:team_admin, before and after) — what changed is that the answer
+  // is now derived from a route the census re-reads.
+  { key: "button.btn.btn-ghost.btn-sm", route: "DELETE /v1/barkparks/:*", what: "instance-admin write, drawn disabled-and-explained for a member (D428) — adminWriteControlHtml's hookless disabled arm", source: "census PIN: removeInstance / runDecommission, both require_current_team_admin; re-read by the shared table's PIN cross-arm" },
   // cch-w46-bl RE-KEYED THIS ROW, and the re-key IS the fix landing. `button.btn.btn-sm`
   // was the GENERIC COLLIDING KEY this row's filing names as the harm: the CLI rail's
   // refused arm emitted a bare `<button class="btn btn-sm" type="button" disabled>` with
@@ -282,9 +400,341 @@ const HOOKS = [
   // The row ABOVE keeps its class-only key on purpose: `button.btn.btn-ghost.btn-sm` is
   // adminWriteControlHtml's disabled arm, which is still hookless and belongs to a later
   // PR. The two rows differing is the honest state of the tree today, not an oversight.
-  { key: "button.btn.btn-sm[data-life-verb]", route: "POST /v1/instances/:*/lifecycle", fence: F_ADMIN, what: "the CLI rail's lifecycle verb, drawn disabled for a member — one identity whether offered or refused (cch-w46-bl)", source: "same band as the row above" },
+  //
+  // ROUTE RE-POINTED for the same reason as the row above, and read off the
+  // rail's own model: lifecycleActionsModel gives every verb but decommission a
+  // CLI chip (capability true) or a server-gap disabled control (capability
+  // false), neither of which calls anything; decommissionAction is the ONE verb
+  // the authority answer decides, and its live arm's click runs
+  // confirmDecommission -> runDecommission, which issues DELETE
+  // /v1/barkparks/:<id>. So the write this row watches for is that route, not a
+  // lifecycle endpoint the console never calls. The row is KEPT rather than
+  // deleted: the affordance is not a routeless CLI chip, it is the refused arm
+  // of a real console write, and the day it renders ENABLED to a member it must
+  // still be a finding.
+  { key: "button.btn.btn-sm[data-life-verb]", route: "DELETE /v1/barkparks/:*", what: "the CLI rail's lifecycle verb, drawn disabled for a member — one identity whether offered or refused (cch-w46-bl); decommission is the one verb on this arm with a route", source: "census PIN: runDecommission — api(\"DELETE\", \"/v1/barkparks/\" + id), require_current_team_admin" },
 ];
+// THE DERIVATION, applied once to every row that names a route (cch-w50-bl).
+// A client-only row (route null) is `client`; a routed row gets the shared
+// table's answer, and a route that table does not carry gets `unknown` — which
+// the UNFENCED arm below reds on. Assigning here rather than at each use keeps
+// every downstream reader (findings text, the WATCHED report, the AUTHORITY
+// verdict) reading ONE value that was looked up ONCE.
+for (const h of HOOKS) h.fence = h.route ? fenceForRoute(h.route) : F_CLIENT;
 const HOOK_BY_KEY = new Map(HOOKS.map((h) => [h.key, h]));
+
+// ── THE ROUTE-NULL HANDLER READ (task-60c35a2da304c080) ─────────────────────
+// LIMIT L2 below this table used to be total: a row naming the WRONG route was
+// caught by nothing. One wrong-route shape IS cheap to catch, and it is the one
+// that shipped: `button#inst-open-studio` sat here as `route: null, source:
+// "markup: window.open"` while wireInstanceHeaderActions bound it to openStudio,
+// whose body POSTs /v1/barkparks/:*/studio-link — the route the #new-open-studio
+// and .fleet-open-studio rows already named for the same function. A route:null
+// row is a CLAIM that the control calls nothing of ours, and that claim can be
+// read against app.js's source.
+//
+// WHAT IT READS, AND HOW DEEP — stated because every word is a limit:
+//   1. LOOKUP. For each row, every string literal passed to $( / querySelector(
+//      / querySelectorAll( / closest( / getElementById( whose selector list
+//      holds a compound (the subject compound — the last one in a descendant
+//      chain) that is a SUBSET of the row's key: its tag, #id, .classes and
+//      [data-attrs] all present on the key. A compound that carries only
+//      utility classes (`btn`, `btn-*`) is ignored — `.btn` would bind every
+//      button in the tree to every row.
+//   2. BINDING. A lookup binds a handler only through one of these shapes:
+//      `closest(…)` (the handler is the innermost enclosing function — the
+//      delegated listener); `NAME = lookup; … NAME.addEventListener(evt, H)` or
+//      `NAME.on<evt> = H` inside the same enclosing function;
+//      `lookup.forEach(function (NAME) { … NAME.addEventListener(evt, H) })`;
+//      or `lookup.addEventListener(evt, H)` chained. H is a function literal or
+//      a name resolved to a `function NAME(` / `var NAME = function` body (of
+//      several definitions, the one in the innermost scope holding the use).
+//      A lookup that only READS the control (`$("#new-site-url").value` inside
+//      the submit handler of a DIFFERENT control) binds nothing, by design.
+//   3. REACH. The bound handler body is scanned for a bare `api(` or `fetch(`
+//      call; then every bare `name(` call in it that resolves to a function
+//      defined in app.js is followed, to ROUTE_NULL_DEPTH hops. Depth 1 is what
+//      the shipped defect needed (handler -> openStudio -> api); 3 is what the
+//      table's own ROUTED rows need to be seen (handler -> confirmX -> runX ->
+//      api is two hops), and they are this read's positive control. Measured
+//      when it landed: the flagged route:null set was the same four rows at
+//      every depth from 1 to 6, so 3 buys the control without buying a false
+//      positive. Bodies are read TEXTUALLY with comments and string contents
+//      masked, so a nested closure's api() counts as the enclosing function's.
+//   NOT READ: a binding through any other shape (a handler table, a
+//   dispatcher keyed on a data-attribute VALUE, an element passed to a helper
+//   that binds it); a call through a method (`obj.fn(`) or through a variable
+//   holding a function; anything past ROUTE_NULL_DEPTH; hash navigation (a
+//   `location.hash =` that makes the ROUTER issue a read is not a call in the
+//   body, and rows like `div.fleet-row[data-id]` rely on exactly that). A row
+//   whose control has no located binding is PRINTED as unread, never passed as
+//   clean. The reader's own precondition — the masker balances every brace and
+//   paren in app.js — is asserted before a verdict is taken.
+const ROUTE_NULL_DEPTH = 3;
+const APP_JS = path.join(HERE, "..", "app.js");
+
+// route:null rows whose bound handler DOES reach the network and that are kept
+// null on purpose, each with the reason. SYMMETRIC like KNOWN and CONCEALED: an
+// entry whose handler stops reaching api()/fetch() reds, so an exemption cannot
+// outlive the call it excused.
+// EMPTY SINCE task-cf8ef8a2da25e3aa, and KEPT: its one entry
+// ([data-life-retry], held null because __route_fence.mjs lacked GET
+// /v1/providers/capabilities) was retired by adding that route to the fence and
+// naming it on the row. The list and both of its guard arms stay — an
+// undeclared route:null row that reaches api()/fetch() still reds by name, and
+// the next legitimate exemption needs a place to be written with its reason.
+// An empty exemption list under a working guard is the healthy state.
+const ROUTE_NULL_DECLARED = [];
+
+// Comments -> spaces; string / template / regex CONTENTS -> "x" (delimiters
+// kept). Same length and same newlines as the input, so every offset into the
+// masked text is an offset into the source.
+export function maskSource(src) {
+  const out = src.split("");
+  const n = src.length;
+  let i = 0;
+  let prev = ""; // last significant character outside a comment
+  let prevWord = "";
+  const REGEX_AFTER = "(,=:[!&|?{};+-*%<>~^";
+  const REGEX_WORDS = new Set(["return", "typeof", "case", "in", "of", "delete", "void", "throw", "new", "else", "do"]);
+  const blank = (a, b) => { for (let k = a; k < b; k++) if (out[k] !== "\n") out[k] = " "; };
+  const fill = (a, b) => { for (let k = a; k < b; k++) if (out[k] !== "\n") out[k] = "x"; };
+  while (i < n) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (c === "/" && d === "/") {
+      let j = src.indexOf("\n", i); if (j === -1) j = n;
+      blank(i, j); i = j; continue;
+    }
+    if (c === "/" && d === "*") {
+      let j = src.indexOf("*/", i + 2); j = j === -1 ? n : j + 2;
+      blank(i, j); i = j; continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      while (j < n && src[j] !== c) { if (src[j] === "\\") j++; j++; }
+      fill(i + 1, j); i = j + 1; prev = c; prevWord = ""; continue;
+    }
+    if (c === "/" && (prev === "" || REGEX_AFTER.indexOf(prev) !== -1 || REGEX_WORDS.has(prevWord))) {
+      let j = i + 1;
+      let inClass = false;
+      while (j < n && src[j] !== "\n") {
+        if (src[j] === "\\") { j += 2; continue; }
+        if (src[j] === "[") inClass = true;
+        else if (src[j] === "]") inClass = false;
+        else if (src[j] === "/" && !inClass) break;
+        j++;
+      }
+      fill(i + 1, j); i = j + 1;
+      while (i < n && /[a-z]/.test(src[i])) i++;
+      prev = "/"; prevWord = ""; continue;
+    }
+    if (/[A-Za-z_$]/.test(c)) {
+      let j = i; while (j < n && /[\w$]/.test(src[j])) j++;
+      prevWord = src.slice(i, j); prev = src[j - 1]; i = j; continue;
+    }
+    if (!/\s/.test(c)) { prev = c; prevWord = ""; }
+    i++;
+  }
+  return out.join("");
+}
+
+function matchClose(masked, openAt) {
+  const open = masked[openAt];
+  const close = open === "{" ? "}" : open === "(" ? ")" : "]";
+  let depth = 0;
+  for (let k = openAt; k < masked.length; k++) {
+    if (masked[k] === open) depth++;
+    else if (masked[k] === close) { depth--; if (depth === 0) return k; }
+  }
+  return -1;
+}
+
+// Every function in the file: declarations, `var NAME = function`, `NAME =
+// function`, and anonymous literals. {name|null, bodyStart, bodyEnd, at}.
+function indexFunctions(masked) {
+  const fns = [];
+  const re = /\bfunction\b\s*([A-Za-z_$][\w$]*)?\s*\(/g;
+  let m;
+  while ((m = re.exec(masked)) !== null) {
+    const paren = m.index + m[0].length - 1;
+    const pe = matchClose(masked, paren);
+    if (pe === -1) continue;
+    const bs = masked.indexOf("{", pe);
+    const be = bs === -1 ? -1 : matchClose(masked, bs);
+    if (be === -1) continue;
+    let name = m[1] || null;
+    if (!name) {
+      const before = masked.slice(Math.max(0, m.index - 80), m.index);
+      const a = /([A-Za-z_$][\w$]*)\s*=\s*$/.exec(before);
+      if (a) name = a[1];
+    }
+    fns.push({ name, at: m.index, bodyStart: bs, bodyEnd: be });
+  }
+  return fns;
+}
+
+function innermostFn(fns, off) {
+  let best = null;
+  for (const f of fns) if (f.bodyStart < off && off < f.bodyEnd && (!best || f.bodyStart > best.bodyStart)) best = f;
+  return best;
+}
+
+// Lexical, not global: of the definitions of `name`, the ones whose own
+// enclosing scope CONTAINS the call site, innermost scope first (a `var go =
+// function` inside a forEach callback beats every other `go` in the file). A
+// name with no definition in scope of the call answers every definition —
+// over-reading, which can only make this guard red more, never pass more.
+function resolveNamed(fns, name, near) {
+  const defs = fns.filter((f) => f.name === name);
+  if (!defs.length || near === undefined) return defs;
+  const scopeOf = (f) => innermostFn(fns, f.at);
+  const inScope = defs.filter((f) => { const s = scopeOf(f); return !s || (s.bodyStart < near && near < s.bodyEnd); });
+  if (!inScope.length) return defs;
+  const depth = (f) => { const s = scopeOf(f); return s ? s.bodyStart : -1; };
+  const innermost = Math.max(...inScope.map(depth));
+  return inScope.filter((f) => depth(f) === innermost);
+}
+
+function parseCompound(sel) {
+  const s = sel.trim();
+  const m = /^([a-zA-Z][\w-]*)?/.exec(s);
+  const c = { tag: m[1] ? m[1].toLowerCase() : "", id: "", classes: [], attrs: [] };
+  const re = /#([\w-]+)|\.([\w-]+)|\[([\w-]+)[^\]]*\]/g;
+  let t;
+  while ((t = re.exec(s.slice(m[0].length))) !== null) {
+    if (t[1]) c.id = t[1]; else if (t[2]) c.classes.push(t[2]); else if (t[3]) c.attrs.push(t[3].toLowerCase());
+  }
+  return c;
+}
+
+const UTILITY_CLASS = (c) => c === "btn" || c.startsWith("btn-");
+function compoundFitsKey(comp, key) {
+  const k = parseCompound(key);
+  if (comp.tag && comp.tag !== k.tag) return false;
+  if (comp.id && comp.id !== k.id) return false;
+  if (comp.classes.some((c) => k.classes.indexOf(c) === -1)) return false;
+  if (comp.attrs.some((a) => k.attrs.indexOf(a) === -1)) return false;
+  // Something must IDENTIFY: an id, an attribute, or a non-utility class.
+  return !!(comp.id || comp.attrs.length || comp.classes.some((c) => !UTILITY_CLASS(c)));
+}
+
+function literalFitsKey(kind, lit, key) {
+  if (kind === "getElementById") return compoundFitsKey(parseCompound("#" + lit), key);
+  return lit.split(",").some((part) => {
+    const chain = part.trim().split(/\s*[\s>+~]\s*/).filter(Boolean);
+    return chain.length ? compoundFitsKey(parseCompound(chain[chain.length - 1]), key) : false;
+  });
+}
+
+// The handler expression starting at `at` (just after `addEventListener("x", `
+// or `onx =`): a function literal's body, or a name resolved to its body.
+function handlerAt(masked, fns, at) {
+  const rest = masked.slice(at, at + 200);
+  const lit = /^\s*function\b/.exec(rest);
+  if (lit) {
+    const f = fns.find((x) => x.at === at + rest.indexOf("function"));
+    return f ? [{ label: "an inline function", fn: f }] : [];
+  }
+  const nm = /^\s*([A-Za-z_$][\w$]*)\s*[),;]/.exec(rest);
+  if (nm) return resolveNamed(fns, nm[1], at).map((f) => ({ label: nm[1], fn: f }));
+  return [];
+}
+
+function bindingsFrom(masked, fns, name, from, to) {
+  const out = [];
+  const esc = name.replace(/\$/g, "\\$");
+  const re = new RegExp("\\b" + esc + "\\s*\\.\\s*(?:addEventListener\\(\\s*\"x+\"\\s*,|on[a-z]+\\s*=(?!=))", "g");
+  re.lastIndex = from;
+  let m;
+  while ((m = re.exec(masked)) !== null && m.index < to) out.push(...handlerAt(masked, fns, m.index + m[0].length));
+  return out;
+}
+
+// All handlers bound to a control whose hook key is `key`.
+function handlersForKey(src, masked, fns, key) {
+  const found = [];
+  const re = /(\$|\.querySelectorAll|\.querySelector|\.closest|\.getElementById)\(\s*(["'])/g;
+  let m;
+  while ((m = re.exec(masked)) !== null) {
+    const q = m.index + m[0].length - 1;
+    const qe = masked.indexOf(m[2], q + 1);
+    if (qe === -1) continue;
+    const lit = src.slice(q + 1, qe);
+    const kind = m[1].replace(/^\./, "");
+    if (!literalFitsKey(kind, lit, key)) continue;
+    const callOpen = m.index + m[1].length;
+    const callEnd = matchClose(masked, callOpen);
+    if (callEnd === -1) continue;
+    const scope = innermostFn(fns, m.index);
+    const scopeEnd = scope ? scope.bodyEnd : masked.length;
+    const where = kind + "(\"" + lit + "\")";
+    if (kind === "closest") {
+      if (scope) found.push({ where, label: "the delegated listener around it", fn: scope });
+      continue;
+    }
+    const after = masked.slice(callEnd + 1, callEnd + 200);
+    const chained = /^\s*\.\s*addEventListener\(\s*"x+"\s*,/.exec(after);
+    if (chained) {
+      for (const h of handlerAt(masked, fns, callEnd + 1 + chained[0].length)) found.push({ where, ...h });
+      continue;
+    }
+    const each = /^\s*\.\s*forEach\(\s*function\s*\(\s*([A-Za-z_$][\w$]*)/.exec(after);
+    if (each) {
+      const cb = fns.find((f) => f.at === callEnd + 1 + after.indexOf("function"));
+      if (cb) for (const h of bindingsFrom(masked, fns, each[1], cb.bodyStart, cb.bodyEnd)) found.push({ where, ...h });
+      continue;
+    }
+    const before = masked.slice(Math.max(0, m.index - 120), m.index);
+    const asg = /([A-Za-z_$][\w$]*)\s*=\s*(?:[A-Za-z_$][\w$.]*\s*)?$/.exec(before);
+    if (asg) for (const h of bindingsFrom(masked, fns, asg[1], callEnd, scopeEnd)) found.push({ where, ...h });
+  }
+  return found;
+}
+
+const CALL_RE = /(^|[^\w$.])([A-Za-z_$][\w$]*)\s*\(/g;
+const NOT_CALLS = new Set(["if", "for", "while", "switch", "catch", "function", "return", "typeof", "api", "fetch"]);
+// The first api()/fetch() the body reaches within `depth` hops, as a path, or null.
+function reachesNetwork(src, masked, fns, fn, depth, seen = new Set()) {
+  const body = masked.slice(fn.bodyStart, fn.bodyEnd);
+  const direct = /(^|[^\w$.])(api|fetch)\s*\(/.exec(body);
+  if (direct) {
+    const at = fn.bodyStart + direct.index + direct[1].length;
+    return [src.slice(at, Math.min(src.indexOf("\n", at), at + 90)).trim()];
+  }
+  if (depth <= 0) return null;
+  seen.add(fn);
+  CALL_RE.lastIndex = 0;
+  let m;
+  const names = new Map();
+  while ((m = CALL_RE.exec(body)) !== null) {
+    if (!NOT_CALLS.has(m[2]) && !names.has(m[2])) names.set(m[2], fn.bodyStart + m.index + m[1].length);
+  }
+  for (const [name, callAt] of names) {
+    for (const f of resolveNamed(fns, name, callAt)) {
+      if (seen.has(f) || f.name !== name) continue;
+      const sub = reachesNetwork(src, masked, fns, f, depth - 1, seen);
+      if (sub) return [name + "()", ...sub];
+    }
+  }
+  return null;
+}
+
+// Per row: the located handlers and, for each, the network path it reaches.
+export function readHookHandlers(src, rows, depth = ROUTE_NULL_DEPTH) {
+  const masked = maskSource(src);
+  const balance = (o, c) => masked.split(o).length - masked.split(c).length;
+  const precondition = { braces: balance("{", "}"), parens: balance("(", ")") };
+  const fns = indexFunctions(masked);
+  const report = rows.map((row) => {
+    const handlers = handlersForKey(src, masked, fns, row.key).map((h) => ({
+      where: h.where, label: h.label, fnName: h.fn.name,
+      path: reachesNetwork(src, masked, fns, h.fn, depth),
+    }));
+    return { row, handlers, reaching: handlers.filter((h) => h.path) };
+  });
+  return { precondition, fnCount: fns.length, report };
+}
 
 // ── watched JS-emitted controls, read ONLY through their mount (H4) ──────────
 // `assert: true` means the corpus contains a PRIVILEGED arm that renders it, so
@@ -294,23 +744,132 @@ const HOOK_BY_KEY = new Map(HOOKS.map((h) => [h.key, h]));
 const WATCHED = [
   {
     id: "site-github", mount: "site-body", scenario: "site-member", twin: "rollback",
-    route: "POST /v1/sites/:*/github/connect", fence: F_ADMIN, assert: true,
+    route: "POST /v1/sites/:*/github/connect", assert: true,
     minted: "cch-w48-s2 (#10446) — siteDetailHtml emits #site-github only when the instance-band authority answers \"grant\"",
   },
   {
     id: "github-disconnect", mount: "github-card", scenario: "providers-member", twin: "providers-connected",
-    route: "DELETE /v1/github/installation", fence: F_ADMIN, assert: false,
+    route: "DELETE /v1/github/installation", assert: false,
     minted: "cch-w48-s3 — githubCardHtml omits #github-disconnect unless providerCanWrite()",
     why_not: "D535: zero /v1/github handlers in the corpus, so EVERY actor paints the \"Not configured\" arm and the control is absent for owner and member alike. Asserting absence here would pass on a DOM that never rendered it",
   },
+  // ── cch-w38-s1-fu (task-8cf413b005cbcd40): THE THREE VERBS #12996 FENCED ───
+  // These are the reason this row exists. Each `scenario` is a MEMBER fixture
+  // committed in the same commit, and each `twin` is the OWNER fixture that has
+  // stood beside it since cch-w45-bl — so `assert: true` is earned: the
+  // privileged arm demonstrably paints the control, which makes the member's
+  // ZERO a losable measurement rather than a statement about markup nobody
+  // renders (BLIND SPOT B3's whole argument).
+  //
+  // WHY A WATCHED ROW AND NOT A HOOKS ROW. adminWriteControlHtml's refusal arm
+  // DROPS `liveAttrs` entirely, so on the fenced tree there is no `#inst-update`
+  // and no `[data-tl-retry]` in the bytes at all — a HOOKS row keyed on the live
+  // shape would be a DEAD ROW every single run. The WATCHED arm is the one that
+  // asserts an ABSENCE against a positive control, which is exactly the shape of
+  // this claim. It is also the arm that names the ROUTE in its failure text, so
+  // a revert reds saying which verb came back.
+  //
+  // `sel` (added with these rows) is the mount-scoped selector. The first two
+  // controls carry an id; the timeline's Retry carries only `data-tl-retry`, a
+  // bare data attribute — one of the shim's four legal element-level selector
+  // shapes, so `[data-tl-retry]` answers over the mount's parsed kids the same
+  // way `#id` does. Defaulting `sel` to `"#" + id` keeps #site-github and
+  // #github-disconnect byte-identical to what they asserted before.
+  //
+  // THE FENCE STRING WAS `unknown` FOR TWO OF THE THREE (and for #new-gh-create
+  // and #new-retry below), and the WATCHED arm printed it without failing.
+  // task-56a094e7a4c17250 recorded POST /v1/barkparks/:*/self-update, POST
+  // /v1/barkparks/:*/retry and POST /v1/github/repos in __route_fence.mjs, each
+  // tier read off its router clause and bound to the census PIN rows that
+  // already carried it, and section 6 now reds a WATCHED row whose fence is
+  // `unknown` (or member-reachable) by name. The `fenceNote` column those rows
+  // carried ("__route_fence.mjs carries no row for this route") is gone with
+  // the gap it described.
+  {
+    id: "inst-update", sel: "#inst-update", mount: "instance-body",
+    scenario: "instance-behind-member", twin: "instance-behind",
+    route: "POST /v1/barkparks/:*/self-update", assert: true,
+    minted: "cch-w38-s1 (#12996) — instanceOverviewHtml routes the behind-box Update CTA through adminWriteControlHtml(authority, …, \"primary\"), whose refusal arm drops the id",
+  },
+  {
+    id: "inst-remove-retry", sel: "#inst-remove-retry", mount: "instance-body",
+    scenario: "instance-remove-failed-member", twin: "instance-remove-failed",
+    route: "DELETE /v1/barkparks/:*", assert: true,
+    minted: "cch-w38-s1 (#12996) — the removeFailed fold's Retry removal goes through adminWriteControlHtml, whose refusal arm drops the id",
+  },
+  {
+    id: "tl-retry", sel: "[data-tl-retry]", mount: "instance-body",
+    scenario: "instance-failed-member", twin: "failed",
+    route: "POST /v1/barkparks/:*/retry", assert: true,
+    minted: "cch-w38-s1 (#12996) — instanceTimelineHtml takes an `authority` argument and draws Retry setup through adminWriteControlHtml(…, \"dock\"), whose refusal arm drops both the data attribute and the .bp-tl-retry dock",
+  },
+  // ── cch-r16-w11: THE LAUNCH WIZARD'S TWO MEASURABLE ELEVATED WRITES ────────
+  // Both mount into #new-body, the /new document's one body registry entry, and
+  // both are drawn by adminWriteControlHtml — so the refusal arm drops the id
+  // and the member's count is a real ZERO against a twin that paints 1.
+  //
+  // WHY THE THIRD ROW OF THIS SLICE IS NOT HERE. POST
+  // /v1/barkparks/:*/vercel-deploy is offered by #new-vercel-claim, which
+  // renders only when GET /v1/barkparks/:id/bootstrap answers a `vercel`
+  // envelope — and that read is `Auth.require_team_admin` at the router, so a
+  // member's read 403s and NO actor in this corpus paints the control. An
+  // `assert: true` row on it would be unlosable and an `assert: false` one
+  // would report a member zero that the fence did not cause. It is fenced in
+  // app.js all the same and its bytes are pinned BOTH ways in __app.test.mjs,
+  // where the band is an argument rather than a consequence of a sibling read.
+  // Written up as BLIND SPOT B6 rather than faked into a row.
+  {
+    id: "new-gh-create", sel: "#new-gh-create", mount: "new-body",
+    scenario: "theater-ready-github-member", twin: "theater-ready-github",
+    route: "POST /v1/github/repos", assert: true,
+    minted: "cch-r16-w11 — newGithubHtml takes an `authority` argument and draws Create GitHub repo through adminWriteControlHtml(…, \"wizard\"), whose refusal arm drops the id (and disables the name field beside it)",
+  },
+  {
+    id: "new-retry", sel: "#new-retry", mount: "new-body",
+    scenario: "theater-failed-member", twin: "theater-failed",
+    route: "POST /v1/barkparks/:*/retry", assert: true,
+    minted: "cch-r16-w11 — newRenderFailed reads newWriteAuthority() and draws Retry setup through adminWriteControlHtml(…, \"wizard-block\"), whose refusal arm drops the id; this is the THIRD offer site of the verb #12996 fenced twice",
+  },
+  // ── cch-w36-bl: THE ACTIVITY FILTER ROW, and the first WATCHED row whose
+  // route is a READ ─────────────────────────────────────────────────────────
+  // Every row above withholds a WRITE. This one withholds an axis of controls
+  // over a READ the server refuses — GET /v1/audit is team-admin-only
+  // (Auth.require_current_team_admin; now carried by __route_fence.mjs), and
+  // each chip re-issues exactly that GET through activityQuery. Offering them
+  // to a refused member is offering thirteen controls that can only 403.
+  //
+  // `assert: true` IS EARNED, and by the strongest twin in this table: the
+  // member `activity-denied` and the owner `activity` differ in exactly two
+  // fixture fields (me()'s role argument and auditDenied), so the twin's
+  // non-zero is not a different screen — it is the SAME screen, un-refused.
+  // A member ZERO here is therefore a losable measurement, never a statement
+  // about markup nobody renders (BLIND SPOT B3's argument).
+  //
+  // WHAT IT GUARDS, AND WHY IT IS NOT A MEMORY OF ITS OWN FIX. This sweep is
+  // what FOUND the defect: `activity-denied` landed and the sweep reported 13
+  // findings ("a control rendered to a MEMBER … the server will refuse"),
+  // because paintActivityFilters ran before the read and a second painter
+  // (ensureActivityActors, on roster arrival) repainted after it. The fix is a
+  // state flag every painter reads, and this row is what reds if that flag is
+  // removed, inverted, or out-raced again by a third painter.
+  {
+    id: "activity-filter-chip", sel: "[data-actfilter-axis]",
+    mount: "activity-filters", scenario: "activity-denied", twin: "activity",
+    route: "GET /v1/audit", assert: true,
+    minted: "cch-w36-bl — paintActivityFilters renders the empty string while activityDenied is set, so a refused trail carries no filter row",
+  },
 ];
+for (const w of WATCHED) {
+  if (!w.sel) w.sel = "#" + w.id;
+  w.fence = fenceForRoute(w.route);
+}
 
 // ── the static shell's launch pair (H5) ──────────────────────────────────────
 // Their fence is a `.hidden` PROPERTY app.js sets, which NO byte reflects — the
 // exact case the union predicate exists for.
 const STATIC_LAUNCH = ["overview-launch", "fleet-launch"];
 const LAUNCH_ROUTE = "POST /v1/launch";
-const LAUNCH_FENCE = F_ADMIN; // inline-cond overlay: go_live/1 refuses non-admins inside a cond
+const LAUNCH_FENCE = fenceForRoute(LAUNCH_ROUTE); // the overlay is what raises it: go_live/1 refuses non-admins inside a cond
 
 // ── CONCEALED: hidden containers with no pointer at them ─────────────────────
 // The openability rule reads `aria-controls` and NOTHING else, so a JS-only
@@ -357,7 +916,15 @@ const KNOWN = [
 // ── PINS ─────────────────────────────────────────────────────────────────────
 // Derived-but-pinned, so corpus growth is NAMED rather than silently absorbed
 // (LIMIT L1). Update them in the same commit that grows the corpus.
-const PIN_MEMBER_SCENARIOS = 9;
+// 14 -> 15, and the corpus 132 -> 133 (cch-w36-bl): `activity-denied`, a plain
+// MEMBER on #activity whose GET /v1/audit is refused — the first member actor
+// ever to reach the Activity screen, and the first fixture of any role able to
+// render loadActivity's refusal arm. It is a member actor, so BOTH pins move:
+// the second case the note above allows (the member slice itself moved). Both
+// numbers were RE-DERIVED by RUNNING this sweep and reading what it PRINTED
+// ("the member-actor corpus is 15, pinned at 14" and "the committed corpus grew
+// to 133 scenario(s), pinned at 132"), never by adding one.
+const PIN_MEMBER_SCENARIOS = 16;
 // 114 -> 115: cch-w37-bl-operator-retry-click-undriven added `operator-me-recovers`
 // (the one-shot /v1/me fault whose retry smoke.mjs clicks). RE-DERIVED by running
 // this sweep, not by adding one: its actor is an OPERATOR, so the member slice
@@ -439,9 +1006,138 @@ const PIN_MEMBER_SCENARIOS = 9;
 // and renderCurrentPlan both sit behind renderBilling's own owner fence. 124 was
 // RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the committed
 // corpus grew to 124 scenario(s), pinned at 123"), never by adding one.
-const PIN_TOTAL_SCENARIOS = 124;
+// 124 -> 125 (cch-w39-s2-fu): `account-modal-me-unreadable`, the corpus's first
+// fixture that puts the ACCOUNT MODAL in front of a /v1/me that never lands, so
+// modal-oracle can measure the unknown two-factor arm's Retry in a browser. The
+// member slice STAYS at 9 — the case the note above forbids bumping: this
+// fixture's `me` is the corpus's ordinary OWNER (`me("Guerrilla")`), and its
+// meFault means `meRole()` reads the 500 body and answers null, so it cannot
+// enter the member set by construction. 125 was RE-DERIVED by RUNNING this
+// sweep and reading what it PRINTED ("the committed corpus grew to 125
+// scenario(s), pinned at 124"), never by adding one.
+// 125 -> 128, and the member slice 9 -> 12 (cch-w38-s1-fu, task-8cf413b005cbcd40):
+// `instance-behind-member`, `instance-remove-failed-member` and
+// `instance-failed-member` — the MEMBER arm of the three instance states
+// cch-w45-bl committed as OWNERS. This is the SECOND time the member slice
+// itself moves (the first was cch-w53-bl's deletion), and it is the case the
+// note above permits: all three fixtures answer role="member" on their own
+// GET /v1/me, so the actor-set line moves by exactly the same three.
+// WHY THEY HAD TO EXIST. The comment on those owner fixtures says the member
+// arm "is already pinned in __app.test.mjs's cch-w38-s1 eleven-offer table" —
+// a unit-level pin over a hand-built markup string. THIS instrument, the only
+// one that reads what a member is offered from RENDERED BYTES, could reach
+// none of the three: measured over the 125-scenario corpus at 661e87d9f3,
+// `id="inst-update"`, `id="inst-remove-retry"` and `data-tl-retry` each had
+// exactly ONE producer and its actor was an owner. So the sweep exited 0 with
+// 0 findings over the fenced tree AND over a tree with #12996's three app.js
+// hunks reverted — for that defect, an unlosable green. With these three
+// committed the reverted tree reds by name (section 6's WATCHED arm).
+// Both numbers were RE-DERIVED by RUNNING this sweep and reading what it
+// PRINTED ("the member-actor corpus is 12, pinned at 9" and "the committed
+// corpus grew to 128 scenario(s), pinned at 125"), never by adding three.
+// cch-w48-s1-followup added `new-launch-me-unreadable`, the /new launch step in
+// front of a /v1/me that 500s, so smoke.mjs can measure that step's own
+// [data-me-retry] in a browser. The member slice STAYED at 12, the same case the
+// note above forbids bumping: its `me` is the ordinary owner fixture
+// (`me("Ada's Lab")`) and its meFault makes `meRole()` read the 500 body and
+// answer null, so it cannot enter the member set by construction. That took the
+// corpus to 129 on main.
+// 129 -> 132, and the member slice 12 -> 14 (cch-r16-w11): `theater-ready-github`
+// (owner), `theater-ready-github-member` and `theater-failed-member` — the first
+// actors of ANY role to reach the /new ready screen with GitHub connected, and
+// the first plain MEMBERS to reach either theater screen at all. Two of the
+// three are member actors, which is why BOTH pins move; this is the second case
+// the note above allows (the member slice itself moved). Both numbers were
+// RE-DERIVED, AFTER the rebase onto the main that carries #18064, by RUNNING
+// this sweep and reading what it PRINTED ("the member-actor corpus is 14,
+// pinned at 12" and "the committed corpus grew to 132 scenario(s), pinned at
+// 129"), never by adding three and two.
+// 133 -> 134 (cch-w34-bl-preview-scenario-for-a-failed-sites-read):
+// `instance-sites-unreadable`, the first fixture able to fail the /v1/sites
+// read. Its actor is an OWNER, so the member slice does not move and
+// PIN_MEMBER_SCENARIOS stays where it is — the first case the note above
+// allows. RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the
+// committed corpus grew to 134 scenario(s), pinned at 133"), never by adding one.
+// 134 -> 135 (cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority):
+// `members-self-role-drift`, the first fixture in which the acting user's ROSTER
+// role and their resolved `team_authority` disagree. Its actor is an OWNER (the
+// roster row is the thing that says "member", and `meRole()` reads the /v1/me
+// envelope, not the roster), so the member slice does not move and
+// PIN_MEMBER_SCENARIOS stays where it is — the same case `instance-sites-
+// unreadable` above set. RE-DERIVED by RUNNING this sweep and reading what it
+// PRINTED ("the committed corpus grew to 137 scenario(s), pinned at 135") and
+// the actor-set line, which still says 15, never by adding one. The two new
+// scenarios are `cch-w45`'s unknown-arm fixtures (`instance-suspended-me-
+// unreadable`, `instance-behind-me-unreadable`); neither declares role
+// "member", and the actor-set line the sweep PRINTED still reads 15, so the
+// member slice is unmoved and PIN_MEMBER_SCENARIOS stays at 15.
+// 137 -> 138 (cch-w20-bl): `overview-attention-long-name`, the corpus's first
+// fixture to hand `.attention-name` a string its own column cannot seat, so the
+// first able to prove that ellipsis ENGAGES instead of never being needed. The
+// member slice STAYS at 15 — the case the note above forbids bumping: its `me`
+// is the ordinary OWNER (`me("Acme Inc", …)`, copied verbatim from
+// `overview-attention`), so it cannot answer role="member" by construction.
+// 138 was RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the
+// committed corpus grew to 138 scenario(s), pinned at 137") and the actor-set
+// line, which still says 15 — never by adding one.
+// 138 -> 139, and the member slice 15 -> 16 (cch-w47-rv-bl): `fleet-archives-
+// member`, the corpus's FIRST member x archives fixture — a plain member on
+// #fleet with bundles in the store, which is the actor the Archives panel's
+// refuse arm is about and which no scenario had ever booted. Its `me` passes
+// "member" as the third argument, so BOTH pins move; this is the second case
+// the note above allows (the member slice itself moved). Both numbers were
+// RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the member-
+// actor corpus is 16, pinned at 15" and "the committed corpus grew to 139
+// scenario(s), pinned at 138"), never by adding one to each.
+//
+// IT ALSO BROUGHT #fleet-body INTO THE MEMBER SWEEP'S VIEW FOR THE FIRST TIME.
+// Every member fixture before it entered on a settings tab, an instance detail
+// or a /new theater, so the fleet LIST's own two controls had never been
+// accounted for a member actor and the sweep REFUSED on both as UNACCOUNTED.
+// Their rows are in HOOKS above, each named from the wiring rather than from
+// the shape (see wireFleetRows in app.js).
+//
+// 139 -> 141 (task-5ffdec2b609404bc): `tokens-revoke-confirm` and
+// `cmdk-palette`, the first two scenarios in this corpus to ask for a dialog
+// OTHER than the account modal — the modal seam stopped being shoot.sh's
+// `account-modal*` name convention and became a scenarios.mjs `modal` field.
+// The member slice STAYS at 16 — the case the note above forbids bumping: each
+// is its HOST scenario's fixture deep-copied (`tokens-revoke`, `mixed-fleet`)
+// with ONE field added, and both hosts' actors are OWNERS, so neither can
+// answer role="member" by construction. 140 was RE-DERIVED by RUNNING this
+// sweep and reading what it PRINTED ("the committed corpus grew to 141
+// scenario(s), pinned at 139") and the actor-set line, which still says 16 —
+// never by adding one.
+//
+// 141 -> 143 (task-499cab525e65018b): `instance-pin-version` and
+// `instance-update-conflict`, the first scenarios to render the pin form and the
+// pin-conflict sheet — the two openModal call sites PR #19581's enumeration
+// found with NO scenario at all. The member slice STAYS at 16 for the same
+// reason as the pair above: both are `instance-behind`'s fixture, whose actor is
+// an OWNER, so neither can answer role="member" by construction. 143 was
+// RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the committed
+// corpus grew to 143 scenario(s), pinned at 141") and the actor-set line, which
+// still says 16 — never by adding one.
+// 143 -> 144 (pdf-bl-fleet-group-route): `fleet-group-view`, the first scenario
+// to reach the PDF-D11 group tab — the surface the parent slice shipped with no
+// route at all. The member slice STAYS at 16: its actor is the corpus's OWNER
+// `me("Acme Inc", ...)`, so it cannot answer role="member" by construction. 144
+// was RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the
+// committed corpus grew to 144 scenario(s), pinned at 143") and the actor-set
+// line, which still says 16 — never by adding one.
+// 144 -> 146 (task-679663d0bee42b15): `new-launch-limit-reached` and
+// `new-launch-forbidden`, the Launch press driven into each of go_live's two
+// 403 slugs. The member slice STAYS at 16: both actors are `new-launch`'s OWNER
+// `me("Ada's Lab")` — the forbidden one is the owner whose role the SERVER no
+// longer honours, which is the only actor the post-hoc toast can reach, since a
+// member's /new step withholds the form. 146 was RE-DERIVED by RUNNING this
+// sweep and reading what it PRINTED ("the committed corpus grew to 146
+// scenario(s), pinned at 144") and the actor-set line, which still says 16 —
+// never by adding two.
+const PIN_TOTAL_SCENARIOS = 146;
 // FLOOR, not an equality: an added control must not force a table churn, but a
-// corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
+// corpus that suddenly enumerates almost nothing is vacuous and reds. 134
+// today (also unguarded prose; it read 66 while the sweep printed 69).
 const FLOOR_CONTROLS = 60;
 const FLOOR_MOUNTS = 20;
 
@@ -605,6 +1301,62 @@ async function surveyScenarioUncached(name) {
   return { name, registry, mounts, controls, concealedContainers, openable };
 }
 
+function routeNullRead() {
+  const bad = [];
+  const { precondition, report } = readHookHandlers(fs.readFileSync(APP_JS, "utf8"), HOOKS);
+  if (precondition.braces !== 0 || precondition.parens !== 0) {
+    bad.push("ROUTE-NULL READ REFUSED: the masker leaves app.js unbalanced (braces " + precondition.braces +
+      ", parens " + precondition.parens + "), so every handler body it cut is suspect. A literal or comment shape " +
+      "the masker does not know entered app.js — teach maskSource, do not loosen this.");
+    out("  FAIL route-null     — precondition: masked app.js is unbalanced (braces " + precondition.braces +
+      ", parens " + precondition.parens + ")\n");
+    return bad;
+  }
+  const routed = report.filter((e) => e.row.route);
+  const nulls = report.filter((e) => !e.row.route);
+  const routedSeen = routed.filter((e) => e.handlers.length);
+  const blind = routedSeen.filter((e) => !e.reaching.length);
+  for (const e of blind) {
+    bad.push("ROUTE-NULL READ BLIND on routed row " + e.row.key + " (" + e.row.route + "): the reader located " +
+      e.handlers.length + " handler(s) (" + e.handlers.map((h) => h.where + " -> " + (h.fnName || h.label)).join("; ") +
+      ") and none reaches api()/fetch() within " + ROUTE_NULL_DEPTH + " hop(s). Either the reader went blind to a " +
+      "binding shape — then its verdict on the route:null rows means nothing — or this row names a route its " +
+      "handler never calls.");
+  }
+  if (!routedSeen.length) {
+    bad.push("ROUTE-NULL READ VACUOUS: it located a handler for NONE of the " + routed.length + " routed row(s), so " +
+      "\"no route:null row reaches the network\" would be a green over a reader that sees nothing.");
+  }
+  const flagged = nulls.filter((e) => e.reaching.length);
+  const declared = new Map(ROUTE_NULL_DECLARED.map((d) => [d.key, d]));
+  for (const e of flagged) {
+    const h = e.reaching[0];
+    const line = e.row.key + " — " + h.where + " -> " + (h.fnName || h.label) + " -> " + h.path.join(" -> ");
+    if (declared.has(e.row.key)) continue;
+    bad.push("ROUTE-NULL ROW CALLS THE SERVER " + line + ". The row says `route: null` (" + JSON.stringify(e.row.source) +
+      "), but the handler bound to this control reaches the network, so its fence was never looked up. Name the " +
+      "route the call issues, and the handler function it was read from, in the row's `source`.");
+  }
+  for (const d of ROUTE_NULL_DECLARED) {
+    const e = nulls.find((x) => x.row.key === d.key);
+    if (!e) bad.push("ROUTE_NULL_DECLARED names " + d.key + ", which is no longer a route:null row. Delete the entry.");
+    else if (!e.reaching.length) {
+      bad.push("ROUTE_NULL_DECLARED NO LONGER REPRODUCES " + d.key + ": its handler no longer reaches api()/fetch() " +
+        "within " + ROUTE_NULL_DEPTH + " hop(s). Delete the entry rather than leaving a stale exemption standing.");
+    }
+  }
+  const unread = nulls.filter((e) => !e.handlers.length).map((e) => e.row.key);
+  const ok = !bad.length;
+  out("  " + (ok ? "ok  " : "FAIL") + " route-null      — " + nulls.length + " route:null row(s): " +
+    (nulls.length - unread.length) + " with a located handler, " + flagged.length + " reaching api()/fetch() within " +
+    ROUTE_NULL_DEPTH + " hop(s) (" + (flagged.length - flagged.filter((e) => declared.has(e.row.key)).length) +
+    " undeclared); positive control: " + (routedSeen.length - blind.length) + " of " + routedSeen.length +
+    " located routed row(s) reach the network\n" +
+    "                    unread (no listener located — markup-only or read by another control's handler): " +
+    (unread.join(", ") || "none") + "\n");
+  return bad;
+}
+
 // ── the host boundary, guarded in a CHILD process ────────────────────────────
 // This sweep can only exist because smoke.mjs became importable. That boundary
 // has two halves and BOTH are load-bearing: `node smoke.mjs` must still run the
@@ -750,7 +1502,9 @@ async function main() {
       }
       if (row.fence === F_UNKNOWN) {
         broken.push("UNFENCED " + name + " → " + c.key + " (" + (row.route || "no route recorded") +
-          "): the row's fence is `unknown`, and unknown is never a pass.");
+          "): the row's fence is `unknown` — __route_fence.mjs carries no entry for " + row.route +
+          ", so nothing derived a tier for it. Record the route in the shared table (and bind it to its census PIN " +
+          "row) or fix the route this row names. Unknown is never a pass.");
         continue;
       }
       const elevated = ELEVATED.has(row.fence);
@@ -784,6 +1538,44 @@ async function main() {
         "blessing a defect that no longer exists.");
     }
   }
+
+  // 3b — THE SHARED FENCE TABLE'S OWN HEALTH (cch-w50-bl). Every fence above
+  // was LOOKED UP, so this file no longer holds an opinion that could quietly
+  // disagree with the census — but a lookup inherits the shared derivation's
+  // faults too, and the worst of them is fail-open: read a route's
+  // Auth.require_* tier ALONE and POST /v1/fleet/supports answers `member`,
+  // because its refusal of a non-admin session lives in a `cond`. The overlay is
+  // what catches that, so this sweep asserts the overlay is still DOING it —
+  // per route, by name, in both directions (a route typed as needing the raise
+  // that no longer gets one, and a route that gets one nobody typed). Delete an
+  // overlay row and BOTH instruments red: the census in (2n), this file here.
+  const fenceGap = overlayGapReport();
+  out("  " + (fenceGap.ok ? "ok  " : "FAIL") + " route-fence     — a require_*-only derivation under-fences " +
+    fenceGap.lines.length + " route(s); the shared inline-cond overlay catches them" +
+    (fenceGap.lines.length ? ":\n" + fenceGap.lines.map((l) => "                    " + l).join("\n") : "") + "\n");
+  for (const b of fenceGap.bad) broken.push("SHARED FENCE TABLE: " + b);
+
+  // 3b — THE PIN HATCH. Every routed hook row above resolves through the shared
+  // table, so a table row that names no census PIN key is a hook fence nothing
+  // re-reads. The hatch is legal for READS alone (the PIN is a write call-site
+  // census), and this arm is the predicate that says so — it is what replaced
+  // the two lifecycle rows' band label with a route the census pins.
+  const hatch = pinHatchReport();
+  out("  " + (hatch.ok ? "ok  " : "FAIL") + " pin-hatch       — " + hatch.reads.length +
+    " PIN-less route(s) in the shared table, all reads" +
+    (hatch.reads.length ? " (" + hatch.reads.map((r) => r.key).join(", ") + ")" : "") + "\n");
+  for (const b of hatch.bad) broken.push("SHARED FENCE TABLE: " + b);
+
+  // 3c — THE ROUTE-NULL READ (task-60c35a2da304c080). See the block above
+  // maskSource for what it reads and how deep. Three verdicts:
+  //   · precondition — the masker balances app.js's braces and parens, or no
+  //     body boundary it drew means anything;
+  //   · positive control — every ROUTED row whose handler the reader locates
+  //     must reach api()/fetch(); a routed row it cannot see through means the
+  //     reader went blind (or that row names a route its handler never calls);
+  //   · the claim — a route:null row whose located handler reaches the network
+  //     reds, unless ROUTE_NULL_DECLARED says why.
+  broken.push(...routeNullRead());
 
   // 4 — the floor. The only remaining defence against a corpus that renders
   // nothing and passes.
@@ -820,34 +1612,53 @@ async function main() {
 
   // 6 — the WATCHED JS-emitted controls, read ONLY through their mount.
   for (const w of WATCHED) {
+    // THE FENCE STRING IS A VERDICT, NOT A LABEL (task-56a094e7a4c17250). A
+    // WATCHED row claims the server REFUSES a member this route, so the shared
+    // table must say so: `unknown` means no tier was derived for the route at
+    // all, and a member-reachable fence means the row watches for the absence
+    // of a control the server would honour. Either is a guard failure by name,
+    // on every row, asserted or not. Before this, four rows printed `[unknown]`
+    // and passed on the member-zero/twin-nonzero comparison alone.
+    if (w.fence === F_UNKNOWN) {
+      broken.push("UNFENCED WATCHED " + w.sel + " → " + w.route + ": the row's fence is `unknown` — " +
+        "__route_fence.mjs carries no entry for this route, so nothing derived the refusal this row watches " +
+        "for. Record the route in the shared table from its router clause (and bind it to its census PIN row), " +
+        "or fix the route this row names. Unknown is never a pass.");
+    } else if (!ELEVATED.has(w.fence)) {
+      broken.push("WATCHED " + w.sel + " → " + w.route + " is fenced `" + w.fence + "` by __route_fence.mjs, " +
+        "which is member-reachable. A WATCHED row asserts the server refuses a member this write; the table " +
+        "says it does not. One of them is wrong — read the router clause and fix that one.");
+    }
     const memberSurvey = await surveyScenario(w.scenario);
     const mountEl = memberSurvey.registry.has(w.mount) ? memberSurvey.registry.get(w.mount) : null;
     // NEVER getElementById / $(): both AUTO-CREATE the element, which makes
     // absence and offered-ness indistinguishable. This reads the mount's own
     // parsed kids, which can answer [].
-    const hereN = mountEl ? mountEl.querySelectorAll("#" + w.id).length : -1;
+    const hereN = mountEl ? mountEl.querySelectorAll(w.sel).length : -1;
     if (!w.assert) {
-      out("  note #" + w.id + " watched but NOT asserted (" + w.route + "): " + w.why_not +
+      out("  note " + w.sel + " watched but NOT asserted (" + w.route + "): " + w.why_not +
         ". Member arm renders " + hereN + "; reported, never counted.\n");
       continue;
     }
     const twinSurvey = await surveyScenario(w.twin);
     const twinMount = twinSurvey.registry.has(w.mount) ? twinSurvey.registry.get(w.mount) : null;
-    const twinN = twinMount ? twinMount.querySelectorAll("#" + w.id).length : -1;
-    const ok = hereN === 0 && twinN >= 1;
-    out("  " + (ok ? "ok  " : "FAIL") + " #" + w.id.padEnd(15) + " — " + w.route + " · scoped through registry.get(\"" +
-      w.mount + "\").querySelectorAll(\"#" + w.id + "\"): member " + w.scenario + " → " + hereN + ", privileged " +
+    const twinN = twinMount ? twinMount.querySelectorAll(w.sel).length : -1;
+    const ok = hereN === 0 && twinN >= 1 && ELEVATED.has(w.fence);
+    out("  " + (ok ? "ok  " : "FAIL") + " " + w.sel.padEnd(16) + " — " + w.route + " [" + w.fence + "] · scoped through registry.get(\"" +
+      w.mount + "\").querySelectorAll(\"" + w.sel + "\"): member " + w.scenario + " → " + hereN + ", privileged " +
       w.twin + " → " + twinN + "\n");
     if (twinMount === null) {
-      broken.push("#" + w.id + ": the mount #" + w.mount + " is not in the privileged twin's registry either — there " +
+      broken.push(w.sel + ": the mount #" + w.mount + " is not in the privileged twin's registry either — there " +
         "is no positive control, so \"absent for a member\" is unlosable here.");
     } else if (twinN < 1) {
-      broken.push("#" + w.id + ": the PRIVILEGED actor " + w.twin + " does not render it either, so the member's " +
+      broken.push(w.sel + ": the PRIVILEGED actor " + w.twin + " does not render it either, so the member's " +
         "absence proves nothing. The fence (" + w.minted + ") may have been reverted into an omit-for-everyone.");
     } else if (hereN !== 0) {
-      broken.push("#" + w.id + " IS OFFERED TO A MEMBER on " + w.scenario + " (" + w.route + ", " + w.fence + "). " +
-        "The fence that withheld it — " + w.minted + " — is gone: the privileged arm renders " + twinN + " and the " +
-        "member arm now renders " + hereN + ". The server refuses this write; the console must not offer it.");
+      broken.push(w.sel + " IS OFFERED TO A MEMBER on " + w.scenario + " — the write behind it is " + w.route +
+        " (" + w.fence + "). " +
+        "The fence that withheld it — " + w.minted + " — is gone: the privileged arm " + w.twin + " renders " +
+        twinN + " and the member arm now renders " + hereN + ". The server refuses this write; the console must " +
+        "not offer it.");
     }
   }
 
@@ -866,6 +1677,21 @@ async function main() {
   for (const name of members) {
     const boot = bootScenario(name, {});
     await flush();
+    // cch-r16-w11 — THE SHELL GATE, and it is a precondition, not an excuse.
+    // #overview-launch and #fleet-launch are authored INSIDE #app-shell, and
+    // their fence is a `.hidden` PROPERTY applyRoute sets during the dashboard
+    // boot. The /new document never boots the dashboard at all: renderNewFlow
+    // calls showNewScreen(), which hides #app-shell outright, and nothing ever
+    // reaches the property. This scan reads each button's own hidden union and
+    // NOT its ancestors (the shim's registry is flat), so without this gate
+    // every /new member scenario reports both buttons "visible and enabled"
+    // — a finding about a control inside a container the page does not show.
+    // MEASURED, not assumed: smoke.mjs asserts `reg.get("app-shell").hidden ===
+    // true` on /new, and the same three scenarios reported both buttons before
+    // this gate and neither after, while the dashboard member scenarios (whose
+    // #app-shell is visible) are unmoved either way.
+    const shell = boot.registry.has("app-shell") ? boot.registry.get("app-shell") : null;
+    if (shell && elementHiddenUnion(shell).hidden) continue;
     for (const id of STATIC_LAUNCH) {
       if (missing.indexOf(id) !== -1) continue;
       // registry.has(), never byId(): byId AUTO-CREATES and would manufacture a
@@ -921,8 +1747,10 @@ async function main() {
   return bad ? 1 : 0;
 }
 
-// Importable (nothing imports it today; the guard keeps that door honest and
-// matches breakpoint-sweep.mjs / smoke.mjs) — only run when executed.
+// Importable (__binding_census.mjs imports scanControls from here for its
+// population-split arm, rather than shipping a second control scanner that could
+// disagree with this one; the guard keeps that door honest and matches
+// breakpoint-sweep.mjs / smoke.mjs) — only run when executed.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main()
     .then((code) => process.exit(code))

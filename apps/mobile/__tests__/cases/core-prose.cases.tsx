@@ -10,6 +10,18 @@ export const coreProseCases: BlockCase[] = [
   // law reached this renderer (mob-zb-s3).
   { type: 'eyebrow', block: { type: 'eyebrow', content: [{ type: 'text', value: 'EYEBROW' }] } },
   { type: 'byline', block: { type: 'byline', items: ['Ada', 'Grace'] } },
+  // Reader-synthesised, never stored (#17199): PreGateRegister.badge_block/1's
+  // shape, warning tone so the non-default colour branch is the one exercised.
+  {
+    type: 'pre-gate-badge',
+    block: {
+      type: 'pre-gate-badge',
+      label: 'Published before the block gate',
+      title: 'Every other block renders.',
+      tone: 'warning',
+      anchor: 'byline',
+    },
+  },
   { type: 'ingress', block: { type: 'ingress', text: 'the lede' } },
   { type: 'pullquote', block: { type: 'pullquote', text: 'pulled' } },
   { type: 'list', block: { type: 'list', items: ['one', 'two'] } },

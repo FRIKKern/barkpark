@@ -309,7 +309,7 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
     slug
   end
 
-  test "a list-valued ?dataset[]= is 404, not an Ecto.Query.CastError 500", %{conn: conn} do
+  test "a list-valued ?dataset[]= is 404, not an Ecto.Query.CastError 400", %{conn: conn} do
     slug = paper_in_other_dataset!()
 
     # The honest selector finds it...
@@ -327,7 +327,7 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
            |> response(404)
   end
 
-  test "a map-valued ?dataset[k]= is 404, not an Ecto.Query.CastError 500", %{conn: conn} do
+  test "a map-valued ?dataset[k]= is 404, not an Ecto.Query.CastError 400", %{conn: conn} do
     slug = paper_in_other_dataset!()
 
     assert conn |> get("/papers/#{slug}/email?dataset[a]=b") |> response(404)

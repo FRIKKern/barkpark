@@ -157,12 +157,101 @@ check_runs_rows_file() {
 # it managed — a bounded read that returns rows is the same lie in a smaller hat.
 : "${BARKPARK_CHECK_RUNS_MAX_PAGES:=20}"
 
+# ── THE BOUNDED RETRY, AND WHY IT IS OPT-IN ─────────────────────────────────
+#
+# THE OBSERVED FAULT (measured 2026-09-11, 3 of 5 merges). scripts/bp-merge.sh's
+# pre-flight refused with `BLOCKED: cannot read check runs for <sha>` and the
+# SAME command 15-20 s later, against the SAME head with no push in between,
+# read the feed and merged. GitHub's check-runs pagination is not a snapshot: a
+# run created between page 1 and page 2 moves the accumulated length off the
+# `total_count` page 1 reported, and the completeness proof below — correctly —
+# refuses the set it cannot vouch for. Its own refusal already ends in the word
+# `retry`. Until this commit the thing that retried was a human.
+#
+# WHAT IS RETRIED, AND WHAT IS NEVER. Only refusals whose CAUSE is the read
+# being taken twice at different instants, or the far end being briefly
+# unavailable:
+#
+#   * the completeness proof failing (`read N … but the feed reports total_count M`)
+#   * a mid-walk page that adds no rows while rows are still outstanding
+#   * a `gh api` call that failed with a 5xx / 429 / rate limit / a dropped
+#     connection — the classes that clear on their own
+#
+# NEVER retried, because a second identical read returns the identical answer
+# and the delay would be pure theatre: a malformed payload, a feed over the page
+# ceiling, a FULL page with no `total_count`, an accumulation failure, and every
+# `gh` failure that is not in the transient set (401/403/404 above all — a bad
+# credential is not a blip, and retrying one hides it behind a timeout).
+#
+# IT IS OPT-IN (`BARKPARK_CHECK_RUNS_RETRIES`, default 1 = one attempt, today's
+# behaviour exactly) because two consumers call this IN A LOOP OVER MANY HEADS
+# (registration-sample.sh, required-checks-generate.sh) and a per-head sleep
+# there multiplies into minutes for no benefit — they already tolerate a hole.
+# The merge verb, which reads ONE head and whose refusal costs a human a manual
+# rerun, opts in: see scripts/bp-merge.sh.
+#
+# THE REFUSAL WORDING DOES NOT MOVE. Each attempt prints its own reason, in the
+# incumbent wording, from the same lines below; the wrapper adds only a
+# `check-runs: … retrying in Ns` note BETWEEN attempts. A read that never
+# settles refuses with the last attempt's line — byte-identical to today's — and
+# returns 2 with ZERO bytes on stdout. A retry that ran out is still a refusal.
+: "${BARKPARK_CHECK_RUNS_RETRIES:=1}"
+: "${BARKPARK_CHECK_RUNS_RETRY_SLEEP:=10}"
+
+# _check_runs_transient_gh_err <stderr text>  (INTERNAL)
+#
+# TRUE only for the `gh api` failures that clear on their own. Keyed on gh's own
+# stderr, which is the only place the status ever appears. Deliberately narrow:
+# anything unrecognised is PERMANENT, so a new failure shape is refused at once
+# rather than silently costing three sleeps before saying the same thing.
+_check_runs_transient_gh_err() {
+  case "$1" in
+    *"HTTP 500"*|*"HTTP 502"*|*"HTTP 503"*|*"HTTP 504"*|*"HTTP 429"*) return 0 ;;
+    *"rate limit"*|*"Rate limit"*|*"secondary rate"*)                 return 0 ;;
+    *"was reset by peer"*|*"connection reset"*|*"Connection reset"*)  return 0 ;;
+    *"EOF"*|*"i/o timeout"*|*"Client.Timeout"*|*"TLS handshake timeout"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # _check_runs_fetch <repo> <sha>  (INTERNAL)
 #
 # Prints a SINGLE `{total_count, check_runs}` payload carrying every check run on
 # the head, or returns 2 having printed nothing on stdout. Never prints a partial
 # feed: a truncated read must not be byte-identical to a genuinely small one.
+#
+# The RETRY LADDER lives here; the read itself is _check_runs_fetch_once, which
+# returns 3 (never seen by a caller) for a refusal this wrapper may take again
+# and 2 for one it must not. Whatever the ladder ends on, the caller sees 0 or 2.
 _check_runs_fetch() {
+  local repo="$1" sha="$2"
+  local attempts="$BARKPARK_CHECK_RUNS_RETRIES" n=1 rc
+  [ "$attempts" -ge 1 ] 2>/dev/null || attempts=1
+  while : ; do
+    rc=0
+    _check_runs_fetch_once "$repo" "$sha" || rc=$?
+    [ "$rc" -eq 0 ] && return 0
+    # 3 is the ONE-SHOT's private "you may take this again". It must never reach
+    # a caller: every exit of this wrapper is the documented 0 or 2.
+    if [ "$rc" -eq 3 ] && [ "$n" -lt "$attempts" ]; then
+      echo "check-runs: that refusal is a TRANSIENT read (attempt $n of $attempts) — retrying in ${BARKPARK_CHECK_RUNS_RETRY_SLEEP}s" >&2
+      sleep "$BARKPARK_CHECK_RUNS_RETRY_SLEEP"
+      n=$((n + 1))
+      continue
+    fi
+    if [ "$rc" -eq 3 ] && [ "$attempts" -gt 1 ]; then
+      echo "check-runs: $attempts attempts all refused — this is no longer a blip, and a retry that ran out is still a refusal" >&2
+    fi
+    return 2
+  done
+}
+
+# _check_runs_fetch_once <repo> <sha>  (INTERNAL)
+#
+# ONE read. Returns 0 having printed the payload, 3 on a refusal whose cause is
+# transient (see the ladder above), or 2 on one that is not. Prints NOTHING on
+# stdout on any non-zero return.
+_check_runs_fetch_once() {
   local repo="$1" sha="$2"
   local page=1 body acc total got prev err page_runs
 
@@ -175,6 +264,7 @@ _check_runs_fetch() {
   err="$(mktemp)"
   body="$(gh api "repos/$repo/commits/$sha/check-runs?per_page=100&page=1" 2>"$err")" || {
     echo "check-runs: cannot read check-runs for $sha (an unreadable feed is a failure, not an empty set) — $(head -3 "$err" | tr '\n' ' ' | cut -c1-400)" >&2
+    _check_runs_transient_gh_err "$(cat "$err")" && { rm -f "$err"; return 3; }
     rm -f "$err"
     return 2
   }
@@ -222,6 +312,7 @@ _check_runs_fetch() {
     fi
     body="$(gh api "repos/$repo/commits/$sha/check-runs?per_page=100&page=$page" 2>"$err")" || {
       echo "check-runs: cannot read check-runs page $page for $sha ($got of $total runs read) — refusing the partial set — $(head -3 "$err" | tr '\n' ' ' | cut -c1-400)" >&2
+      _check_runs_transient_gh_err "$(cat "$err")" && { rm -f "$err"; return 3; }
       rm -f "$err"
       return 2
     }
@@ -249,7 +340,7 @@ _check_runs_fetch() {
     if [ "$got" -le "$prev" ]; then
       echo "check-runs: page $page for $sha added no runs while $prev of $total were read — refusing the partial set" >&2
       rm -f "$err"
-      return 2
+      return 3
     fi
   done
 
@@ -260,7 +351,7 @@ _check_runs_fetch() {
   if [ "$got" -ne "$total" ]; then
     echo "check-runs: read $got check runs for $sha but the feed reports total_count $total — refusing (the set cannot be vouched for; a re-run may have landed mid-read, retry)" >&2
     rm -f "$err"
-    return 2
+    return 3
   fi
 
   rm -f "$err"

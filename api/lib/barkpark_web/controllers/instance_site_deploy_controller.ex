@@ -52,6 +52,17 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
   re-import the very bug it exists to report: the wedged-Runner case (D113) is
   exactly when this answer matters, and exactly when a call cannot come back.
 
+  That property is PINNED BY A BEHAVIOURAL TEST again (dr-w27-s7), after being
+  UNPINNED between dr-w26-s7 and dr-w27-s7: "a wedged Runner still gets
+  answered" in `InstanceSiteDeployControllerTest` parks a pid in `receive`, takes
+  over the Runner's registered name, pushes six real `DeployRunner.status/1`
+  callers into that mailbox, PROVES the wedge on the parked pid itself with
+  `Process.info(wedged, :message_queue_len) >= 6` — a precondition that can fail,
+  which is what makes the timing assertion mean something — and only then asserts
+  this route answers 200 inside a bounded time. It needs no payload field to do
+  it, which is why the deletion of `runner_queue_len` did not have to cost this
+  proof permanently.
+
     * `configured` — `DeployRunner.enabled?/0`, a pure `Application.get_env`
       read, and LITERALLY the expression `SiteDeployController.trigger/2`
       branches on to emit `feature_not_configured`. So this field cannot
@@ -74,8 +85,13 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
       `door_open_admissions_total` / `door_open_admissions` beside them (the
       builds the door ADMITTED without a second opinion, by reason),
       `refusals_total` ALWAYS beside `refusals_since`, and
-      `measured_at` so the staleness is stated rather than implied. Any of them
-      may be `null`: that means nothing was read, never zero.
+      `measured_at` so the staleness is stated rather than implied, with
+      `census_interval_ms` beside it so it is also BOUNDED: the Runner
+      republishes at least that often while healthy (the systemd backstop
+      tick), so `now - measured_at` far beyond it means the Runner is not
+      ticking and the reading is unbounded. `census_interval_ms` is config, like
+      `capacity`, and always renders; every MEASUREMENT may be `null`: that
+      means nothing was read, never zero.
     * `serving` — `ServingMemory.read/1`: the sha this box is serving and when
       it FIRST saw that sha, off a durable record in the run-state dir. Not a
       process uptime — a restart with an unchanged sha does not move it, which
@@ -86,7 +102,10 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
   Nothing here sees a WEDGE. `runner_alive` is a `whereis`, and a process parked
   forever in `receive` is as alive as a healthy one; the mailbox depth that told
   those two apart was `runner_queue_len`, and it is gone — deleted, not
-  degraded, because for its whole life nothing read it. `door` narrows the gap
+  degraded, because for its whole life nothing read it. This limit is about the
+  WIRE and is unchanged by dr-w27-s7: the restored control observes the wedge in
+  the test process, off `Process.info/2`, never through a field — no reader of
+  this payload gains wedge-detection from it. `door` narrows the gap
   (`observed_in_flight` and `refusals_total` DO move) but it is an ETS snapshot
   of admissions, not of the runner's responsiveness: a box parked mid-`systemctl`
   with an empty mailbox presents `configured: true, runner_alive: true,

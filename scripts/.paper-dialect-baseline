@@ -1,0 +1,27 @@
+# .paper-dialect-baseline — pinned counts for scripts/paper-dialect-ratchet.sh.
+#
+# Columns:  <source-name> <text_keyed> <malformed_items> <min_value_keyed>
+#
+# text_keyed       inline leaves {"type":"text","text":…} with NO "value" key.
+#                  render/inline.ex reads only "value", so these render EMPTY.
+# malformed_items  notes/cards ITEMS and pipeline NODES that are not maps
+#                  (a bare string renders an EMPTY row behind a 200).
+# min_value_keyed  NON-VACUITY FLOOR: canonical {"type":"text","value":…} leaves.
+#                  Falling below it is a REFUSAL (exit 2), not a pass — a zero
+#                  defect count under a walker that stopped matching is not a
+#                  measurement.
+#
+# Only DOWN. Growth reds. Raising a number requires a justification in the PR
+# body in the same commit.
+#
+# rig-fixtures holds 5 malformed items on purpose: tooling/paper-excellence/rig/
+# fixtures/heggemsnes-act.json is the frozen PRE-repair specimen of the live
+# paper this task repaired on 2026-09-10 (guerrilla rev 423948ee -> 3ead12a0).
+# It is a normalizer input, not a defect to launder.
+#
+# Floors set 2026-09-10 at 90% of the measured value-keyed count, so ordinary
+# fixture churn does not red the gate while a corpus vanishing does.
+
+rig-fixtures 0 5 840
+twin         0 0 167
+go-testdata  0 0 2

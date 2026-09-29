@@ -23,6 +23,7 @@ import { useIsDesktop } from './use-is-desktop'
 import { HoveredDocProvider } from '../finder/lib/hovered-doc-context'
 import { FinderNavProvider } from '../finder/lib/finder-nav-context'
 import { shapeFindResponse, emptyParsed } from '../finder/lib/find-shape'
+import { MAX_HITS } from '../finder/lib/search-limits'
 import type { FindResponse, SearchEngine, PopularQuery } from '../finder/lib/find'
 import { DOC_TYPES } from '../finder/lib/find'
 import { DATASET } from '../finder/lib/config'
@@ -43,7 +44,6 @@ const ORIGIN = (() => {
 })()
 // The type allowlist the finder scopes to — D45 pins it to the single built type.
 const TYPES = DOC_TYPES.map((t) => t.type).join(',')
-const MAX_HITS = 100
 // The SCALAR fields normalizeHit/derive* consume (find.ts) — requested via the
 // route's ?fields= allowlist so a hit ships ~600B, not ~38KB. Live-caught
 // twice: papers' body_html (37KB/hit, never read by the finder) and then their

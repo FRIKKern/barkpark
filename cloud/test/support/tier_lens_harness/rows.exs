@@ -15,6 +15,12 @@
 # Takes explicit paths (not a repo root) so you can point it at a lens from
 # one tree and a router from another — comparing a candidate lens against a
 # pristine router is exactly how you tell a lens bug from a router bug.
+#
+# DO NOT RENAME THIS TO ANYTHING ENDING IN `_test.exs`. It calls System.halt
+# at top level; `mix test` discovers `test/**/*_test.exs` and this directory is
+# under test/, so a matching name takes the ENTIRE cloud suite down (the
+# incident PR #14496 fixed). Enforced by cloud/test/barkpark_cloud/
+# support_halt_guard_test.exs, which runs under the required `Cloud gate`.
 
 lens = System.argv() |> Enum.at(0)
 router = System.argv() |> Enum.at(1)

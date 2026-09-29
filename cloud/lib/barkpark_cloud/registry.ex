@@ -10,7 +10,9 @@ defmodule BarkparkCloud.Registry do
   Four moving parts:
 
     * `Barkpark`   — the registry row (one per instance). `register_barkpark/2`
-      / `upsert_barkpark/2` create-or-update it (the warm-pool's write path);
+      creates it (quota-gated), and `register_managed_barkpark/3` (go-live) and
+      `adopt_barkpark/3` (`POST /v1/internal/barkparks`, the off-box warm-pool
+      provisioner's own door) are the two shipped write paths that ride it;
       `upsert_health/2` lands the agent's health report.
     * `Provider`   — a connected cloud account. `connect_provider/3` encrypts the
       account token at rest (`Vault`) before storing it.
@@ -30,6 +32,7 @@ defmodule BarkparkCloud.Registry do
   alias BarkparkCloud.GitHub.CommitDistance
   alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Notifications
+  alias BarkparkCloud.Notifications.AbandonmentPolicy
   alias BarkparkCloud.Notifications.DeploymentFailedPolicy
   alias BarkparkCloud.Workers.DeploymentAlertWorker
 
@@ -39,6 +42,7 @@ defmodule BarkparkCloud.Registry do
     Barkpark,
     Deployment,
     FleetSettings,
+    HostnameClaim,
     Provider,
     ProvisionJob,
     Site,
@@ -273,9 +277,7 @@ defmodule BarkparkCloud.Registry do
   :limit_reached}` (Coolify's `serverLimitReached`, the API altitude the UI can't
   route around). The friendly HTTP 403 in the router's `go_live/1` is the front
   door; this guard catches the agent/internal register path too.
-  `upsert_barkpark/2` routes EXISTING `(team_id, slug)` rows to update before
-  reaching here, so an idempotent re-register is never blocked — only a genuine
-  new instance. Only a team with an ACTIVE subscription is quota-gated; an
+  Only a team with an ACTIVE subscription is quota-gated; an
   unsubscribed team is `false` here (the go-live 402 is what stops it).
 
   PDF-D86 (the ONE documented exception): a fleet SUPPORT insert does NOT flow
@@ -372,8 +374,9 @@ defmodule BarkparkCloud.Registry do
   # SUPPORT insert is quota-exempt (PDF-D86). Keep this private: a new caller that
   # skips the quota must be a deliberate, documented exception, not an accident.
   defp insert_barkpark(team, attrs) do
-    %Barkpark{}
-    |> Barkpark.changeset(put_team_id(attrs, team))
+    changeset = Barkpark.changeset(%Barkpark{}, put_team_id(attrs, team))
+
+    changeset
     # `mode: :savepoint` because BOTH callers now run inside a transaction
     # (`register_barkpark/2` for the quota lock, `register_support_barkpark/2` for
     # the fleet write). Without it a unique-constraint violation aborts the whole
@@ -383,32 +386,370 @@ defmodule BarkparkCloud.Registry do
     # decides to fall back to the suffixed FQDN. The savepoint keeps the
     # constraint error a VALUE the caller can read, as it was before the lock.
     |> Repo.insert(mode: :savepoint)
+    |> claim_url_host(changeset)
+  end
+
+  # The provisioning half of the hostname_claims backstop: the new row's url
+  # host is claimed in the SAME transaction as the insert (both callers of
+  # `insert_barkpark/2` run inside one). `barkparks_url_unique_idx` only sees
+  # url-vs-url; this claim also refuses a url host that another row already
+  # serves as its `custom_host` — the collision no per-column index can see.
+  #
+  # A refused claim deletes the row it just inserted (same transaction, nothing
+  # references it yet) and answers the SAME changeset error the url index
+  # gives — `{:url, "is already provisioned", constraint: :unique}` — so
+  # `insert_with_url_reservation/4` falls back to the suffixed FQDN and the
+  # worker route renders its usual 422, never a 500.
+  defp claim_url_host({:ok, %Barkpark{url: url} = bp}, changeset) do
+    case hostname_claim_key(url) do
+      nil ->
+        {:ok, bp}
+
+      host ->
+        case claim_hostname(host, {:barkpark, bp.id}, "url", []) do
+          :ok ->
+            {:ok, bp}
+
+          :taken ->
+            Repo.delete!(bp)
+
+            {:error,
+             changeset
+             |> Map.put(:action, :insert)
+             |> Ecto.Changeset.add_error(:url, "is already provisioned",
+               constraint: :unique,
+               constraint_name: "hostname_claims_host_unique_idx"
+             )}
+        end
+    end
+  end
+
+  defp claim_url_host(other, _changeset), do: other
+
+  @doc """
+  The key a hostname is claimed under in `hostname_claims`: `host` (a bare
+  hostname or an origin such as `https://h:4000/x`) run through the SAME
+  normaliser the provisioning-FQDN leg of `custom_host_taken?/2` compares with
+  (`normalize_claim_host/1`), or `nil` when nothing is left to claim.
+
+  `nil` for a nil value, for anything that normalises to `""` (`"   "`,
+  `"https://"`, `"https:///"`, `"https://:443"`, `"."`), and for a residue with
+  no letter or digit in it (`"-"`, `".-"`, from `"https://-/"`): that is not a
+  hostname anyone can serve, so it claims nothing. This is what keeps the
+  table's `host <> ''` CHECK unreachable from the backfill and from live writes.
+
+  Public for one caller outside this module: the `create_hostname_claims`
+  migration's backfill, which must key existing rows exactly as live writes
+  key new ones.
+  """
+  @spec hostname_claim_key(term()) :: String.t() | nil
+  def hostname_claim_key(host) when is_binary(host) do
+    norm = normalize_claim_host(host)
+    if norm =~ ~r/[a-z0-9]/, do: norm, else: nil
+  end
+
+  def hostname_claim_key(_), do: nil
+
+  # Claim `host` for `barkpark_id` in ONE statement. The UNIQUE index on
+  # `hostname_claims.host` is the arbiter: a concurrent claim of the same host
+  # blocks on the uncommitted key and, once the holder commits, meets the
+  # conflict. `ON CONFLICT … DO UPDATE … WHERE` turns that conflict into a
+  # VALUE instead of a raised unique_violation, so the enclosing transaction is
+  # not aborted and the caller can answer its own refusal shape.
+  #
+  # The conflict arm updates (i.e. the claim succeeds) only when the existing
+  # claim is ALREADY this barkpark's (an idempotent re-attach, or attaching the
+  # host the row already serves as its url), or when it is a `"url"` claim held
+  # by one of `takeover_ids` — rows the caller's pre-check has already judged
+  # abandoned. Anything else → 0 rows → `:taken`.
+  #
+  # `owner` is `{:barkpark, id}` (kinds `"url"` / `"custom_host"`) or
+  # `{:site, id}` (kind `"site_domain"`); the table's owner CHECK pins which
+  # column each kind fills. A takeover moves the claim to the new owner and
+  # clears the other owner column.
+  defp claim_hostname(host, owner, kind, takeover_ids) do
+    now = DateTime.utc_now()
+    {barkpark_id, site_id} = claim_owner_columns(owner)
+
+    may_update =
+      dynamic(
+        [c],
+        ^own_claim_filter(owner) or (c.kind == "url" and c.barkpark_id in ^takeover_ids)
+      )
+
+    on_conflict =
+      from(c in HostnameClaim,
+        where: ^may_update,
+        update: [
+          set: [barkpark_id: ^barkpark_id, site_id: ^site_id, kind: ^kind, updated_at: ^now]
+        ]
+      )
+
+    row = %{
+      id: Ecto.UUID.generate(),
+      host: host,
+      barkpark_id: barkpark_id,
+      site_id: site_id,
+      kind: kind,
+      inserted_at: now,
+      updated_at: now
+    }
+
+    case Repo.insert_all(HostnameClaim, [row], on_conflict: on_conflict, conflict_target: :host) do
+      {1, _} -> :ok
+      {0, _} -> :taken
+    end
+  end
+
+  defp claim_owner_columns({:barkpark, id}), do: {id, nil}
+  defp claim_owner_columns({:site, id}), do: {nil, id}
+
+  defp own_claim_filter({:barkpark, id}), do: dynamic([c], c.barkpark_id == ^id)
+  defp own_claim_filter({:site, id}), do: dynamic([c], c.site_id == ^id)
+
+  # Claim every host in `hosts` for `site`, stopping at the first refusal.
+  # `:ok` or `:taken`. Each host takes over the abandoned-url holders the pre-check
+  # already judged (read before it, by the caller).
+  defp claim_site_hosts(%Site{id: site_id}, hosts, takeovers) do
+    Enum.reduce_while(hosts, :ok, fn host, :ok ->
+      case claim_hostname(host, {:site, site_id}, "site_domain", Map.get(takeovers, host, [])) do
+        :ok -> {:cont, :ok}
+        :taken -> {:halt, :taken}
+      end
+    end)
+  end
+
+  # Release this site's claim on `domain` (keyed like every claim), and only
+  # this site's — a claim some other owner holds is never touched.
+  defp release_site_host(%Site{id: site_id}, domain) do
+    case hostname_claim_key(domain) do
+      nil ->
+        :ok
+
+      host ->
+        Repo.delete_all(
+          from(c in HostnameClaim, where: c.host == ^host and c.site_id == ^site_id)
+        )
+
+        :ok
+    end
   end
 
   @doc """
-  Create-or-update a Barkpark for `team`, keyed on `(team_id, slug)`. This is
-  the warm-pool's idempotent write path: registering the same slug twice updates
-  the existing row instead of failing the unique constraint.
+  Copy every existing SITE domain into `hostname_claims` as a `"site_domain"`
+  claim. Called by the `add_site_domains_to_hostname_claims` migration;
+  idempotent, so it also re-lists pre-existing collisions later
+  (`bin/barkpark_cloud eval "BarkparkCloud.Registry.backfill_site_domain_claims(BarkparkCloud.Repo)"`).
 
-  Requires a `:slug` in `attrs`.
+  NEVER RAISES on a collision: each claim is `INSERT … ON CONFLICT DO NOTHING`.
+  A domain whose host is already claimed by another owner is skipped, left on
+  the site row as it is, and logged at warning level naming both sides.
+
+  PRECEDENCE on a pre-existing collision: the claim already in the table holds.
+  Barkpark claims (url host, custom_host) were backfilled by the
+  `create_hostname_claims` migration and have been written live ever since, so
+  a site domain that collides with one is the one skipped. A custom_host is a
+  deliberate attach that the V2 DNS-ownership proof guards, and the barkpark it
+  names is the box the name already routes to — moving that claim to a site in
+  a migration would silently change who owns a live hostname. Between two sites
+  (only possible for rows older than the cross-site trigger), the older site
+  (by `inserted_at`) holds.
+
+  Returns `%{claimed: n, skipped: [%{host, site_id, held_by, held_as}]}`.
   """
-  @spec upsert_barkpark(Team.t() | binary(), map()) ::
-          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
-  def upsert_barkpark(team, attrs) do
-    attrs = put_team_id(attrs, team)
-    team_id = attrs |> Map.get(:team_id) || Map.get(attrs, "team_id")
-    slug = attrs |> Map.get(:slug) || Map.get(attrs, "slug")
+  @spec backfill_site_domain_claims(module()) :: %{claimed: non_neg_integer(), skipped: [map()]}
+  def backfill_site_domain_claims(repo) do
+    rows =
+      repo.all(
+        from(s in Site, order_by: [asc: s.inserted_at, asc: s.id], select: {s.id, s.domains})
+      )
 
-    case team_id && slug && Repo.get_by(Barkpark, team_id: team_id, slug: slug) do
-      %Barkpark{} = existing ->
-        existing
-        |> Barkpark.changeset(attrs)
-        |> Repo.update()
+    candidates =
+      for {id, domains} <- rows,
+          host <- (domains || []) |> Enum.map(&hostname_claim_key/1) |> Enum.uniq(),
+          host != nil,
+          do: {host, id}
 
-      _ ->
-        register_barkpark(team, attrs)
-    end
+    now = DateTime.utc_now()
+
+    result =
+      Enum.reduce(candidates, %{claimed: 0, skipped: []}, fn {host, id}, acc ->
+        row = %{
+          id: Ecto.UUID.generate(),
+          host: host,
+          site_id: id,
+          kind: "site_domain",
+          inserted_at: now,
+          updated_at: now
+        }
+
+        case repo.insert_all(HostnameClaim, [row], on_conflict: :nothing, conflict_target: :host) do
+          {1, _} ->
+            %{acc | claimed: acc.claimed + 1}
+
+          {0, _} ->
+            case repo.one(
+                   from(c in HostnameClaim,
+                     where: c.host == ^host,
+                     select: {c.site_id, c.barkpark_id, c.kind}
+                   )
+                 ) do
+              {^id, _, _} ->
+                acc
+
+              {held_site, held_bp, held_as} ->
+                held_by = held_site || held_bp
+                owner = if held_site, do: "site", else: "barkpark"
+
+                Logger.warning(
+                  "hostname_claims site backfill: SKIPPED pre-existing collision on #{host} — " <>
+                    "site #{id} (site_domain) left unclaimed; held by #{owner} #{held_by} (#{held_as})"
+                )
+
+                skip = %{host: host, site_id: id, held_by: held_by, held_as: held_as}
+                %{acc | skipped: acc.skipped ++ [skip]}
+            end
+        end
+      end)
+
+    Logger.info(
+      "hostname_claims site backfill: #{result.claimed} claim(s) written, " <>
+        "#{length(result.skipped)} pre-existing collision(s) skipped"
+    )
+
+    result
   end
+
+  # The `"url"` claims on `host` held by OTHER barkparks whose row STILL shows
+  # that url host, read BEFORE the pre-check. If the pre-check then answers
+  # "free", it walked every such row and judged it abandoned, so these holders
+  # may be taken over. Two filters, both load-bearing:
+  #
+  #   * read BEFORE the pre-check — a row provisioned in between would otherwise
+  #     land in the set without the pre-check ever judging it;
+  #   * the row's own url must key to `host` — a claim whose row the pre-check
+  #     cannot see (any state where the claim and the column disagree) is never
+  #     taken over; it refuses, which is the backstop's whole job.
+  #
+  # `self_id` nil (a SITE door: a site is never a barkpark) excludes nobody —
+  # conditionally, never `!= ^nil`, which SQL answers NULL for every row.
+  defp url_claim_holders(host, self_id) do
+    HostnameClaim
+    |> join(:inner, [c], b in Barkpark, on: b.id == c.barkpark_id)
+    |> where([c], c.host == ^host and c.kind == "url")
+    |> exclude_claim_holder(self_id)
+    |> select([c, b], {c.barkpark_id, b.url})
+    |> Repo.all()
+    |> Enum.filter(fn {_id, url} -> hostname_claim_key(url) == host end)
+    |> Enum.map(fn {id, _url} -> id end)
+  end
+
+  defp exclude_claim_holder(query, nil), do: query
+  defp exclude_claim_holder(query, id), do: where(query, [c], c.barkpark_id != ^id)
+
+  @doc """
+  Copy every existing barkpark hostname claim into `hostname_claims`. Called by
+  the `create_hostname_claims` migration; idempotent, so it is also the tool
+  that RE-LISTS pre-existing collisions later
+  (`bin/barkpark_cloud eval "BarkparkCloud.Registry.backfill_hostname_claims(BarkparkCloud.Repo)"`).
+
+  NEVER RAISES on a collision. Each claim is `INSERT … ON CONFLICT DO NOTHING`;
+  a claim whose host is already held by a DIFFERENT barkpark is skipped, left
+  exactly as it is on the barkparks row, and logged at warning level naming
+  both rows. Only new writes are refused by the index; pre-existing duplicates
+  stay. `custom_host` claims go in before `url` claims, so on a collision the
+  customer's deliberate claim holds the host and the platform-minted url is the
+  one skipped (the known case: a ghost row whose url another row now serves as
+  its custom_host).
+
+  Returns `%{claimed: n, skipped: [%{host, kind, barkpark_id, held_by, held_as}]}`.
+  """
+  @spec backfill_hostname_claims(module()) :: %{claimed: non_neg_integer(), skipped: [map()]}
+  def backfill_hostname_claims(repo) do
+    rows =
+      repo.all(
+        from(b in Barkpark,
+          order_by: [asc: b.inserted_at, asc: b.id],
+          select: {b.id, b.url, b.custom_host}
+        )
+      )
+
+    candidates =
+      for({id, _url, ch} <- rows, key = hostname_claim_key(ch), do: {key, id, "custom_host"}) ++
+        for({id, url, _ch} <- rows, key = hostname_claim_key(url), do: {key, id, "url"})
+
+    now = DateTime.utc_now()
+
+    result =
+      Enum.reduce(candidates, %{claimed: 0, skipped: []}, fn {host, id, kind}, acc ->
+        row = %{
+          id: Ecto.UUID.generate(),
+          host: host,
+          barkpark_id: id,
+          kind: kind,
+          inserted_at: now,
+          updated_at: now
+        }
+
+        case repo.insert_all(HostnameClaim, [row], on_conflict: :nothing, conflict_target: :host) do
+          {1, _} ->
+            %{acc | claimed: acc.claimed + 1}
+
+          {0, _} ->
+            case repo.one(
+                   from(c in HostnameClaim,
+                     where: c.host == ^host,
+                     select: {c.barkpark_id, c.kind}
+                   )
+                 ) do
+              # The row's own other column (its url host IS its custom_host):
+              # one claim, not a collision.
+              {^id, _} ->
+                acc
+
+              {held_by, held_as} ->
+                Logger.warning(
+                  "hostname_claims backfill: SKIPPED pre-existing collision on #{host} — " <>
+                    "barkpark #{id} (#{kind}) left unclaimed; held by barkpark #{held_by} (#{held_as})"
+                )
+
+                skip = %{
+                  host: host,
+                  kind: kind,
+                  barkpark_id: id,
+                  held_by: held_by,
+                  held_as: held_as
+                }
+
+                %{acc | skipped: acc.skipped ++ [skip]}
+            end
+        end
+      end)
+
+    Logger.info(
+      "hostname_claims backfill: #{result.claimed} claim(s) written, " <>
+        "#{length(result.skipped)} pre-existing collision(s) skipped"
+    )
+
+    result
+  end
+
+  # cch-w58 (DELETED): `upsert_barkpark/2` used to live here, documented by both
+  # its own @doc and the moduledoc as "the warm-pool's idempotent write path". It
+  # had ZERO production callers repo-wide — only two tests — and the warm pool has
+  # always written through OTHER functions: a new row via `adopt_barkpark/3`
+  # (`POST /v1/internal/barkparks`, worker token) or `register_managed_barkpark/3`
+  # (go-live), and updates via `succeed_job/3` / `record_agent_report/2`. Two
+  # alternatives were rejected: (ii) marking it test-only in its @doc keeps a
+  # public create-or-update door — one that casts `:url` from arbitrary attrs
+  # (cch-w58-bl-barkparks-url-has-no-scheme-guard) — alive for nothing but its own
+  # tests; (iii) wiring the warm pool to it would REPLACE a shipped, exercised
+  # write path with an unexercised one to justify the function, and the warm pool
+  # needs no create-or-update (its create is a one-shot adopt/go-live). Its only
+  # non-mirror coverage — that a NEW row is quota-blocked while an UPDATE is not —
+  # moved onto the shipped paths in
+  # `test/barkpark_cloud/billing_limits_test.exs` ("the internal/provisioner
+  # NEW-ROW path (adopt_barkpark/3) is also quota-blocked").
 
   @doc """
   EVERY Barkpark row across ALL teams, newest first — the fleet-ops view behind
@@ -784,6 +1125,52 @@ defmodule BarkparkCloud.Registry do
   def get_barkpark(_), do: nil
 
   @doc """
+  Resolve a registered instance from the PUBLIC HOSTNAME it answers on — the
+  lookup key an instance-initiated "Sign in with Barkpark Cloud" has, and the
+  only one it has. The instance-side login page knows its own address; it does
+  NOT know its control-plane UUID (that id is never shipped to a box), so
+  `get_barkpark/1` cannot serve this door.
+
+  Accepts a bare hostname (`acme.example.com`) or a full origin
+  (`https://acme.example.com:443/login`) — `normalize_claim_host/1` is the SAME
+  normaliser the hostname-claim guard uses, so a name that is "taken" over there
+  resolves to the same row here. Matching is over the ONE hostname namespace a
+  box answers on:
+
+    * `custom_host` — the operator-attached name, stored already-normalised;
+    * `url` — the provisioning FQDN, stored as a full `https://<host>` origin,
+      so the candidate origins are reconstructed in Elixir rather than
+      normalised in SQL (both forms are index-served equality, not a `LIKE`).
+
+  NOT team-scoped: the caller has no team in hand at this door (the browser
+  arrives from the instance, not from a console team context). Resolution is
+  therefore deliberately separated from AUTHORIZATION — the router checks
+  `Accounts.get_membership/2` against the row's `team_id` before anything is
+  minted, and answers the same 404 for "no such host" and "not your instance"
+  so this function can never be used as an existence oracle.
+
+  Blank/non-binary input, and a host that normalises to `""`, are nil.
+  """
+  @spec get_barkpark_by_public_host(binary()) :: Barkpark.t() | nil
+  def get_barkpark_by_public_host(host) when is_binary(host) do
+    case normalize_claim_host(host) do
+      "" ->
+        nil
+
+      norm ->
+        origins = ["https://" <> norm, "https://" <> norm <> "/", "http://" <> norm]
+
+        Barkpark
+        |> where([b], b.custom_host == ^norm or b.url in ^origins)
+        |> order_by([b], asc: b.inserted_at)
+        |> limit(1)
+        |> Repo.one()
+    end
+  end
+
+  def get_barkpark_by_public_host(_), do: nil
+
+  @doc """
   azh-w6 (S14c): the team's existing Barkpark with this exact `name`, or nil —
   the resurrect live-twin guard. Because Remove (deprovision) DELETES the
   registry row, a still-present row named the same as an archive you're trying to
@@ -859,8 +1246,75 @@ defmodule BarkparkCloud.Registry do
   """
   @spec delete_barkpark(Barkpark.t()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
   def delete_barkpark(%Barkpark{} = barkpark) do
+    _ = deregister_barkpark_content_webhooks(barkpark)
     _ = revoke_barkpark_site_read_tokens(barkpark)
     Repo.delete(barkpark)
+  end
+
+  # The empty report — the shape `deregister_barkpark_content_webhooks/1` returns
+  # for an instance with no sites. An EMPTY report and an ALL-`:ok` report are
+  # different facts.
+  @empty_content_webhook_report %{ok: [], noop: [], error: []}
+
+  @doc """
+  Deregister the content-publish webhook of EVERY site this instance is about to
+  cascade away — the webhook half of the second door `revoke_barkpark_site_read_tokens/1`
+  already closed for credentials (task-e360d05a2708fdb0).
+
+  WHY IT IS NEEDED AT ALL. `sites.barkpark_id` is `on_delete: :delete_all`, so an
+  instance delete removes its site rows in the DATABASE, without `delete_site/1`
+  — and `delete_site/1` is where the deregister lives. Every content-bound site on
+  a removed instance therefore left a `site-autodeploy-<id>` row on a box the
+  control plane no longer tracks, pointed at a per-site receiver that answers 404
+  forever, re-probed by the box's HALF-OPEN auto-disable latch until it gives up.
+  The instance row was also the last thing that could NAME the box, so nothing
+  could reap it afterwards either.
+
+  ORDER IS LOAD-BEARING, exactly as it is in `delete_site/1`: the site rows ARE
+  the pointers (`bootstrap_dataset` names the list route, the site id names the
+  row), and after `Repo.delete/1` nothing in this database can name what to
+  delete.
+
+  BEST-EFFORT, NEVER BLOCKING, NEVER SILENT. A box that is down does not make its
+  instance undeletable — the CP row is the truth — but every unconfirmed
+  deregister is logged with the box slug and the `site-autodeploy-<id>` names that
+  may still be live. Returns `%{ok: [slug], noop: [slug], error: [slug]}`:
+
+    * `:ok`    — the box confirms no row by this site's name remains
+    * `:noop`  — the site has no content binding (or its instance row is gone),
+                 so there is nothing to deregister
+    * `:error` — the delete was refused, OR the box's list could not be read at
+                 all. An unreadable list is NOT a clean bill of health.
+  """
+  @spec deregister_barkpark_content_webhooks(Barkpark.t()) :: %{
+          ok: [String.t()],
+          noop: [String.t()],
+          error: [String.t()]
+        }
+  def deregister_barkpark_content_webhooks(%Barkpark{} = barkpark) do
+    outcomes =
+      barkpark
+      |> list_sites()
+      |> Enum.map(fn site -> {deregister_content_webhook(site), site} end)
+
+    report =
+      Enum.reduce(outcomes, @empty_content_webhook_report, fn {outcome, site}, acc ->
+        Map.update!(acc, outcome, &[site.slug | &1])
+      end)
+      |> Map.new(fn {outcome, slugs} -> {outcome, Enum.reverse(slugs)} end)
+
+    if report.error != [] do
+      names = Enum.map_join(for({:error, s} <- outcomes, do: s), ", ", &content_webhook_name/1)
+
+      Logger.warning(
+        "instance delete on #{barkpark.slug}: #{length(report.error)} content-publish " <>
+          "webhook(s) could not be confirmed deregistered — #{names} may still be live on the " <>
+          "box, and the site rows that named them are being deleted. Sweep with " <>
+          "`mix barkpark_cloud.content_webhooks`."
+      )
+    end
+
+    report
   end
 
   @doc """
@@ -874,7 +1328,16 @@ defmodule BarkparkCloud.Registry do
   `site-autodeploy-*` rows — endpoints whose every delivery 404s against a
   receiver that no longer resolves, until the box auto-disables them. A box that
   is down (or a webhook already gone) never blocks the delete: the CP row is the
-  truth, and the by-name reconciler can reap the leftover later.
+  truth, and the leftover is reaped afterwards by
+  `mix barkpark_cloud.content_webhooks`.
+
+  WHICH IS *NOT* THE RECONCILER, and this doc said it was until stw10's second
+  review measured it. `reconcile_content_webhooks/1` enumerates
+  `list_content_webhook_sites/1` — a query over the LIVE `sites` table — and only
+  ever issues `:put`/`:post`. A site that has been deleted has left that table, so
+  the sweep never looks at its box row and could not delete one if it did. The
+  reap is the mix task above: it enumerates the BOX's `site-autodeploy-*` rows and
+  keeps only the ones whose site id still exists (`orphan_content_webhooks/1`).
 
   ssw8 (charter D40, deferred then and paid here): the site's public-read CONTENT
   TOKEN is REVOKED on the box in the same breath, and for the same reason —
@@ -2384,14 +2847,31 @@ defmodule BarkparkCloud.Registry do
 
   defp console_line_meta(_), do: %{}
 
-  # Keep only the last @max_console_lines entries (oldest dropped) — the append-only
-  # cap that bounds the row size — and DISCLOSE the drop: the oldest SURVIVING
-  # entry carries `"dropped_before" => <cumulative count>`, so a reader can tell a
-  # complete narration from the tail of one. The count is cumulative because the
-  # entry being dropped is itself the previous oldest survivor and carries the
-  # running total; below the cap nothing is dropped and no key is written (an
-  # absent key reads as 0).
-  defp cap_console(entries) when is_list(entries) do
+  @doc """
+  dwb-18: THE canonical console cap — keep only the last `@max_console_lines`
+  entries (oldest dropped), the append-only bound on the row size, and DISCLOSE
+  the drop: the oldest SURVIVING entry carries `"dropped_before" => <cumulative
+  count>`, so a reader can tell a complete narration from the tail of one. The
+  count is cumulative because the entry being dropped is itself the previous
+  oldest survivor and carries the running total; below the cap nothing is
+  dropped and no key is written (an absent key reads as 0).
+
+  PUBLIC because it has a caller outside this module.
+  `BarkparkCloud.Sites.Deploy.record_stage/2` writes `console` directly inside
+  the same fenced CAS as the stage transition — it cannot route through
+  `append_deployment_console/2` without splitting that atomicity — and until
+  dwb-18 it was the ONE console writer whose bound held by ARITHMETIC (six
+  stages x three statuses = eighteen entries against a cap of 300) rather than
+  by enforcement. Arithmetic is not a bound: nothing noticed the cap being
+  lowered, and appending onto a console another path had already capped silently
+  overflowed it and lost the `dropped_before` disclosure — a console that had
+  dropped its head became indistinguishable from a complete one. Re-deriving the
+  ring at the call site would have bought the bound with a silent `Enum.take/2`,
+  committing that very defect, so the one canonical implementation is promoted
+  instead of copied.
+  """
+  @spec cap_console([map()]) :: [map()]
+  def cap_console(entries) when is_list(entries) do
     case length(entries) - @max_console_lines do
       drop when drop > 0 ->
         entries
@@ -2412,6 +2892,54 @@ defmodule BarkparkCloud.Registry do
   # console that has never been capped, and on a non-map/absent head).
   defp dropped_before([%{"dropped_before" => count} | _]) when is_integer(count), do: count
   defp dropped_before(_), do: 0
+
+  # dwb-18: the CONTROL PLANE'S OWN console entry for a builder transition it
+  # performs — the deploy-side twin of `append_provision_step/4`'s narration,
+  # written in the SAME changeset as the transition it describes.
+  #
+  # WHY THIS EXISTS. `console` only ever filled from the OUTSIDE: the builder
+  # POSTs lines via `append_deployment_console/2`. So a container deploy that
+  # was minted by a GitHub push and then claimed by a builder narrated NOTHING
+  # until the builder's first line landed — the row moved `queued -> building`
+  # with an empty console, and the dashboard's build console (`deployConsoleHtml`,
+  # fed from `deployment_json/1`'s `console` key) rendered an empty panel beside
+  # a spinning pill. The moment a build STARTS, and which worker started it, was
+  # the one transition nothing recorded.
+  #
+  # BEST-EFFORT AND NON-RAISING BY CONSTRUCTION: a claim must never fail because
+  # its narration could not be composed. An unusable line degrades to the console
+  # the row already had, so the claim proceeds with exactly the pre-dwb-18 array.
+  #
+  # BOUNDED AND ORDERED like every other console writer: the line is chopped at
+  # `@max_console_line_chars` with a `truncated_from` disclosure, the array is
+  # `cap_console/1`-capped at `@max_console_lines` with a `dropped_before`
+  # disclosure, and the timestamp is the SERVER clock (never a worker's).
+  # `"source" => "control-plane"` marks the entry as authored HERE rather than
+  # relayed from a build, which is the distinction a reader needs to tell the
+  # narration of the pipeline from the output of the build.
+  defp narrate_transition(%Deployment{} = deployment, line) when is_binary(line) do
+    existing = deployment.console || []
+
+    case validate_console_line(line) do
+      {:ok, text} ->
+        entry =
+          %{
+            "line" => text,
+            "at" => DateTime.to_iso8601(DateTime.utc_now()),
+            "source" => "control-plane"
+          }
+          |> Map.merge(console_line_meta(line))
+
+        cap_console(existing ++ [entry])
+
+      :error ->
+        existing
+    end
+  end
+
+  # The one place the builder-claim narration's wording is composed, so both
+  # container claim paths (fleet-wide and box-scoped) cannot drift apart.
+  defp builder_claim_line(worker_id), do: "BUILD — claimed by builder #{worker_id}"
 
   # Keep only the last @max_step_entries entries (oldest dropped) — the append-only
   # cap that bounds the step-transition array.
@@ -3057,6 +3585,46 @@ defmodule BarkparkCloud.Registry do
     |> Repo.one()
   end
 
+  @doc """
+  The team's IN-FLIGHT managed main that an equivalent go-live would duplicate,
+  or nil (dwb-launch-flow-double-submit-test). go_live answers a match with
+  `409 {error: "already_provisioning", barkpark}` — the envelope the /new client
+  reconciles to — instead of provisioning twice.
+
+  EQUIVALENT = same team, same slug (the unique key a second insert would
+  collide on), same template, same provider. IN FLIGHT = not live (`host`
+  nil/blank) and its latest provision job is pending/claimed, OR it has none
+  yet: a racing loser reads the winner's row in the gap between the winner's
+  insert and its job enqueue. A FAILED provision is not in flight (Retry owns
+  it), and a live box is not either — both keep go_live's plain refusal.
+  """
+  @spec inflight_launch_twin(Team.t() | binary(), term(), String.t() | nil, term()) ::
+          Barkpark.t() | nil
+  def inflight_launch_twin(team, slug, template, provider) when is_binary(slug) do
+    tid = team_id(team)
+
+    from(b in Barkpark,
+      where:
+        b.team_id == ^tid and b.slug == ^slug and b.mode == "managed" and
+          (is_nil(b.fleet_role) or b.fleet_role == "main")
+    )
+    |> Repo.one()
+    |> case do
+      %Barkpark{host: host, template: ^template, provider: ^provider} = bp
+      when host in [nil, ""] ->
+        case latest_provision_job(bp) do
+          nil -> bp
+          %ProvisionJob{status: status} when status in ["pending", "claimed"] -> bp
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  def inflight_launch_twin(_team, _slug, _template, _provider), do: nil
+
   @doc "The warm-pool default region a provision job carries when unset."
   @spec default_region() :: String.t()
   def default_region, do: @default_region
@@ -3675,8 +4243,21 @@ defmodule BarkparkCloud.Registry do
   (instance-admin-token). Returns `{:ok, token}` when one was reported + stored,
   `{:ok, nil}` when the row never got an admin token (the ip-only succeed path, or
   a pre-feature instance), or `:error` when the stored ciphertext is tampered
-  (`Vault.decrypt/1` fails closed). The owner-facing `/credentials` route is the
-  only caller — it is show-to-owner, team-admin-gated.
+  (`Vault.decrypt/1` fails closed).
+
+  It has many callers, not one. Every seam that talks to an instance as its
+  admin decrypts through here, so a refusal or a fault here reaches all of them.
+  Re-derived 2026-09-23 with `git grep -n "reveal_admin_token(" -- cloud/lib`:
+
+    * the owner-facing `GET /v1/barkparks/:id/credentials` route (show-to-owner,
+      team-admin-gated) and the router's `fleet_provision_support/1` and
+      `reveal_parent_admin_token/1`;
+    * `Verify.run/1` and `Usage.instance_admin_token/1`;
+    * in this module, `mint_studio_link/2`, `mint_app_token/2`,
+      `revoke_app_token/3`, `refresh_update_status/1`, `relay_admin/4` and
+      `reveal_admin_token_or_error/1`.
+
+  This list goes stale. Re-run the grep instead of trusting it.
   """
   @spec reveal_admin_token(Barkpark.t()) :: {:ok, binary() | nil} | :error
   def reveal_admin_token(%Barkpark{admin_token_encrypted: nil}), do: {:ok, nil}
@@ -5226,11 +5807,18 @@ defmodule BarkparkCloud.Registry do
   """
   @spec autoupdate_in_flight() :: [Barkpark.t()]
   def autoupdate_in_flight do
-    from(b in Barkpark,
-      where: not is_nil(b.autoupdate_triggered_at),
-      order_by: [asc: b.autoupdate_triggered_at]
-    )
+    autoupdate_in_flight_query()
+    |> order_by([b], asc: b.autoupdate_triggered_at)
     |> Repo.all()
+  end
+
+  # The IN-FLIGHT predicate, shared by the list the rollout worker walks and the
+  # `in_flight` counter the operator route reports. One predicate, two consumers:
+  # a counter that re-typed this `where` beside the list would be a SECOND
+  # definition of in-flight-ness, free to drift from the gate it claims to
+  # measure.
+  defp autoupdate_in_flight_query do
+    from(b in Barkpark, where: not is_nil(b.autoupdate_triggered_at))
   end
 
   @doc """
@@ -5270,27 +5858,95 @@ defmodule BarkparkCloud.Registry do
   """
   @spec next_autoupdate_candidate(nil | binary()) :: Barkpark.t() | nil
   def next_autoupdate_candidate(channel \\ nil) do
-    base =
-      from(b in Barkpark,
-        where: not is_nil(b.host) and b.host != "",
-        where: b.suspended == false,
-        where: b.update_state == "behind",
-        where: b.autoupdate_enabled == true,
-        where: b.autoupdate_paused == false,
-        where: is_nil(b.pinned_release),
-        where: is_nil(b.autoupdate_triggered_at),
-        where: is_nil(b.apply_arming) or b.apply_arming != "unarmed",
-        order_by: [asc: b.update_checked_at],
-        limit: 1
-      )
-
-    base
+    autoupdate_candidate_query()
+    |> order_by([b], asc: b.update_checked_at)
+    |> limit(1)
     |> maybe_filter_channel(channel)
     |> Repo.one()
   end
 
+  # The ELIGIBILITY predicate itself, with no order and no limit — the set
+  # `next_autoupdate_candidate/1` takes the head of, and the set the `eligible`
+  # counter counts. The docstring above is the contract for BOTH; the counter
+  # deliberately does not restate it, because a counter that re-typed these eight
+  # `where` clauses would be a second definition of eligibility and would drift
+  # from the rollout it claims to gauge (the operator would then read a number
+  # about a policy that is not the one running).
+  defp autoupdate_candidate_query do
+    from(b in Barkpark,
+      where: not is_nil(b.host) and b.host != "",
+      where: b.suspended == false,
+      where: b.update_state == "behind",
+      where: b.autoupdate_enabled == true,
+      where: b.autoupdate_paused == false,
+      where: is_nil(b.pinned_release),
+      where: is_nil(b.autoupdate_triggered_at),
+      where: is_nil(b.apply_arming) or b.apply_arming != "unarmed"
+    )
+  end
+
   defp maybe_filter_channel(query, nil), do: query
   defp maybe_filter_channel(query, channel), do: where(query, [b], b.channel == ^channel)
+
+  @doc """
+  The fleet ROLLOUT GAUGE: `%{eligible:, behind:, in_flight:}` — the three
+  counters `GET /v1/admin/autoupdate` (and its `/v1/operator/autoupdate` twin)
+  report alongside the `halted` lever, and the three `bp cloud autoupdate status`
+  prints. Until task-0f05a5f719493b5f nothing anywhere computed them: the routes
+  emitted `halted` alone, the Go `RolloutState` nil-guarded the three absent
+  pointers, and the gauge read blank on every control plane that has ever run.
+
+  Each counter is defined ONCE, off the same query the rollout itself runs, and
+  each means a different thing — the spread between them is the whole point:
+
+    * `in_flight` — instances the rollout has TRIGGERED and is waiting to settle
+      (`autoupdate_triggered_at` stamped). Same predicate as
+      `autoupdate_in_flight/0`, which is the serial-of-1 gate: non-zero here is
+      exactly why `eligible` is not advancing.
+    * `eligible` — instances the policy would update RIGHT NOW: the full set
+      `next_autoupdate_candidate/1` takes its head from, unordered and unlimited
+      and across every channel. Note it EXCLUDES in-flight boxes (the candidate
+      predicate requires `autoupdate_triggered_at` to be nil), so `eligible` is
+      the queue still to be started, never the work in progress.
+    * `behind` — instances whose OWN last verdict is `behind`, over the same live
+      managed fleet frame (`host` set, not billing-suspended). This is drift, not
+      policy: a box that is pinned, paused, opted out, measured-unarmed or
+      already in flight still counts here. So `eligible <= behind` always holds
+      by construction, and the GAP is the operator's real question — "the fleet
+      is 9 behind but the rollout would only move 2" is the sentence a blank
+      gauge could never say.
+
+  WHAT `behind` DELIBERATELY DOES NOT COUNT: an instance on `update_state`
+  `"unknown"` — a box the control plane could not read. Unmeasured is not behind,
+  and folding it in would put a reachability failure into a drift number where
+  nobody could tell the two apart. Such a box is invisible to this gauge by
+  design; `unarmed_autoupdate_boxes/0` and the fleet roll-up are where an
+  operator sees non-answering instances.
+  """
+  @spec autoupdate_rollout_counts() :: %{
+          eligible: non_neg_integer(),
+          behind: non_neg_integer(),
+          in_flight: non_neg_integer()
+        }
+  def autoupdate_rollout_counts do
+    %{
+      eligible: Repo.aggregate(autoupdate_candidate_query(), :count),
+      behind: Repo.aggregate(autoupdate_behind_query(), :count),
+      in_flight: Repo.aggregate(autoupdate_in_flight_query(), :count)
+    }
+  end
+
+  # DRIFT, over the same live managed frame as eligibility: an instance whose own
+  # last verdict says it is not on the blessed release. No policy clauses — those
+  # are what make `eligible` smaller, and keeping them out of here is what makes
+  # the two numbers worth printing side by side.
+  defp autoupdate_behind_query do
+    from(b in Barkpark,
+      where: not is_nil(b.host) and b.host != "",
+      where: b.suspended == false,
+      where: b.update_state == "behind"
+    )
+  end
 
   @doc """
   Is the canary staging gate GREEN — i.e. may prod-channel boxes advance?
@@ -5692,26 +6348,64 @@ defmodule BarkparkCloud.Registry do
     # so fixing `add_site_domain/2` alone would be theatre — an attacker would
     # simply CREATE the site with the stolen hostname instead of attaching it
     # afterwards. Same leaf, same verdict, before any row exists.
-    case first_claimed_domain(prepared, barkpark) do
-      nil ->
-        case %Site{} |> Site.changeset(prepared) |> Repo.insert() do
-          {:ok, site} ->
-            # Best-effort: register the dataset-scoped webhook on the box so a publish
-            # fires the CP receiver. NEVER fails the create — the site row is the truth;
-            # a box that is not yet live (or refuses) just means auto-rebuild is wired
-            # on the next successful registration path. Fires only for a live static
-            # site with a bootstrap_dataset (charter D42/D47).
-            _ = maybe_register_content_webhook(barkpark, site, content_secret)
-            {:ok, site}
+    # ONE transaction over the claim check AND the insert, holding the per-hostname
+    # advisory lock for every domain this create claims. Without it two concurrent
+    # creates of the same hostname both read a free namespace and both insert.
+    result =
+      serialize_hostname_claim(normalized_attr_domains(prepared), fn ->
+        hosts = prepared |> normalized_attr_domains() |> Enum.uniq()
+        takeovers = Map.new(hosts, &{&1, url_claim_holders(&1, nil)})
 
-          {:error, _cs} = error ->
-            error
+        case first_claimed_domain(prepared, barkpark) do
+          nil ->
+            %Site{}
+            |> Site.changeset(prepared)
+            |> Repo.insert()
+            |> claim_created_site_hosts(takeovers)
+
+          _taken ->
+            {:error, :domain_taken}
         end
+      end)
 
-      _taken ->
+    case result do
+      {:ok, site} ->
+        # Best-effort: register the dataset-scoped webhook on the box so a publish
+        # fires the CP receiver. NEVER fails the create — the site row is the truth;
+        # a box that is not yet live (or refuses) just means auto-rebuild is wired
+        # on the next successful registration path. Fires only for a live static
+        # site with a bootstrap_dataset (charter D42/D47). Deliberately OUTSIDE the
+        # claim transaction: a network round trip must not hold a hostname lock.
+        _ = maybe_register_content_webhook(barkpark, site, content_secret)
+        {:ok, site}
+
+      other ->
+        other
+    end
+  end
+
+  # The site half of the hostname_claims backstop at CREATE: every domain the
+  # new row carries is claimed in the same transaction as the insert. The keys
+  # are the row's STORED domains (normalised by `Site.changeset/2`) run through
+  # `hostname_claim_key/1` — the one normaliser every claim uses; on a domain
+  # that passed `Site.domain_format/0` it is the identity. A refused claim
+  # deletes the row it just inserted (nothing references it yet; claims already
+  # written for it cascade) and answers the pre-check's own `{:error,
+  # :domain_taken}`.
+  defp claim_created_site_hosts({:ok, %Site{domains: domains} = site}, takeovers) do
+    hosts = domains |> Enum.map(&hostname_claim_key/1) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+
+    case claim_site_hosts(site, hosts, takeovers) do
+      :ok ->
+        {:ok, site}
+
+      :taken ->
+        Repo.delete!(site)
         {:error, :domain_taken}
     end
   end
+
+  defp claim_created_site_hosts(other, _takeovers), do: other
 
   # The first domain in a create's attrs already claimed elsewhere in the
   # hostname namespace, or nil. NO self-exclusions are passed: the site does not
@@ -5723,11 +6417,20 @@ defmodule BarkparkCloud.Registry do
   # ask-gate share, so `Example.com` in a create body collides just as it does on
   # attach.
   defp first_claimed_domain(attrs, %Barkpark{team_id: team_id}) do
+    attrs
+    |> normalized_attr_domains()
+    |> Enum.find(&hostname_claimed?(&1, team_id: team_id))
+  end
+
+  # The normalized domains a create's attrs claim. Split out of
+  # `first_claimed_domain/2` so `create_site/2` can LOCK the whole set before the
+  # check — `Enum.find/2` short-circuits, so locking lazily inside the walk would
+  # leave every domain past the first collision unprotected for the insert.
+  defp normalized_attr_domains(attrs) do
     (Map.get(attrs, :domains) || Map.get(attrs, "domains") || [])
     |> List.wrap()
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&normalize_domain/1)
-    |> Enum.find(&hostname_claimed?(&1, team_id: team_id))
   end
 
   # Mint + Vault-encrypt the content-publish secret when this is a content-bound
@@ -6273,34 +6976,67 @@ defmodule BarkparkCloud.Registry do
   # failure generator that made content-auto look dead fleet-wide.
   #
   # Best-effort and never blocks the delete: the CP row is the truth, and a box
-  # that is down simply keeps an orphan we can reap later (the same reconciler
-  # above finds it by name).
+  # that is down simply keeps an orphan. THE REAPER IS `orphan_content_webhooks/1`
+  # + `mix barkpark_cloud.content_webhooks` — NOT the reconciler above, which this
+  # comment claimed until stw10's second review measured it: that sweep enumerates
+  # the LIVE `sites` table (`list_content_webhook_sites/1`) and only ever issues
+  # `:put`/`:post`, so a deleted site's row is invisible to it and it could not
+  # delete one anyway.
+  #
+  # THREE OUTCOMES, and `:absent` is `:ok` on purpose — the box answered with a
+  # list and this row is not in it, which is exactly the state a deregister is for.
+  # An `:unknown` list is `:error`, never `:noop`: "I could not look" is not "there
+  # is nothing there", and the caller that reports the leftover
+  # (`deregister_barkpark_content_webhooks/1`) must be able to tell them apart.
   defp deregister_content_webhook(%Site{} = site) do
+    name = content_webhook_name(site)
+
     with dataset when is_binary(dataset) and dataset != "" <- site.bootstrap_dataset,
-         %Barkpark{} = barkpark <- get_barkpark(site.barkpark_id),
-         {:ok, id} <- find_content_webhook(barkpark, dataset, content_webhook_name(site)) do
-      path = "/v1/webhooks/#{URI.encode(dataset)}/#{URI.encode(id)}"
-
-      case relay_admin(barkpark, :delete, path, nil) do
-        {:ok, status, _resp} when status in 200..299 ->
-          :ok
-
-        other ->
-          Logger.warning(
-            "content-publish webhook deregistration for site #{site.id} did not take: #{inspect(other)}"
-          )
-
-          :error
+         %Barkpark{} = barkpark <- get_barkpark(site.barkpark_id) do
+      case find_content_webhook(barkpark, dataset, name) do
+        {:ok, id} -> delete_content_webhook(barkpark, dataset, id, name)
+        :absent -> :ok
+        :unknown -> :error
       end
     else
       _ -> :noop
     end
   end
 
+  @doc """
+  Delete ONE box-side content-publish webhook by its BOX id — the single write
+  behind both the per-site deregister above and the orphan reap
+  (`Mix.Tasks.BarkparkCloud.ContentWebhooks`).
+
+  `:ok` only on a 2xx. Anything else — a box that is down, a non-2xx, a build
+  whose webhook routes predate this one — is `:error` and is LOGGED with the row's
+  name, because the caller is usually deleting the last database row that could
+  name it.
+  """
+  @spec delete_content_webhook(Barkpark.t(), String.t(), String.t(), String.t()) :: :ok | :error
+  def delete_content_webhook(%Barkpark{} = barkpark, dataset, id, name \\ "") do
+    path = "/v1/webhooks/#{URI.encode(dataset)}/#{URI.encode(id)}"
+
+    case relay_admin(barkpark, :delete, path, nil) do
+      {:ok, status, _resp} when status in 200..299 ->
+        :ok
+
+      other ->
+        Logger.warning(
+          "content-publish webhook delete on #{barkpark.slug} did not take for " <>
+            "#{name} (dataset #{dataset}, id #{id}): #{inspect(other)}"
+        )
+
+        :error
+    end
+  end
+
   # The box-side identity of a site's content-publish webhook. ONE definition —
   # registration, reconciliation and deregistration must agree byte-for-byte or
   # the "find by name" lookup silently misses and duplicates instead.
-  defp content_webhook_name(%Site{id: id}), do: "site-autodeploy-#{id}"
+  @content_webhook_name_prefix "site-autodeploy-"
+
+  defp content_webhook_name(%Site{id: id}), do: @content_webhook_name_prefix <> "#{id}"
 
   # The doc-type filter for this site's box webhook: exactly the ONE type its
   # build reads. A site with no doc_type (a row predating the column) falls back
@@ -6386,6 +7122,142 @@ defmodule BarkparkCloud.Registry do
       _ ->
         :unknown
     end
+  end
+
+  ## ── THE REAP (task-e360d05a2708fdb0) ──────────────────────────────────────
+  ##
+  ## Everything above is REGISTRATION-shaped: it starts from a Site row and asks
+  ## the box about it. An ORPHAN has no Site row — that is what makes it an orphan
+  ## — so no query in this module could see one, and the hourly reconciler (which
+  ## enumerates `list_content_webhook_sites/1`, a `sites` query, and only issues
+  ## `:put`/`:post`) is structurally incapable of finding or deleting it. Two
+  ## docstrings promised that reconciler as the reaper for weeks; it never was.
+  ##
+  ## So the reap reads the OTHER WAY ROUND: enumerate what the BOX holds, and keep
+  ## only the rows whose site id still exists in this database. Same shape as
+  ## `orphan_site_read_tokens/1` — the credential half of the identical defect —
+  ## and driven by the same kind of operator tool
+  ## (`mix barkpark_cloud.content_webhooks`, modelled on
+  ## `mix barkpark_cloud.site_read_tokens`).
+
+  @doc """
+  Every `site-autodeploy-*` webhook on `barkpark` whose SITE no longer exists.
+
+  Returns `{:ok, rows}` where each row is
+
+      %{barkpark_slug:, dataset:, id:, name:, site_id:, url:, active?:}
+
+  or:
+
+    * `{:error, :no_dataset}`  — this box serves no dataset we can name, so there
+      is no webhook list to read. Nothing was looked at.
+    * `{:error, :unreadable}`  — every dataset's list came back unreadable (box
+      down / non-2xx / no `webhooks` key). NOT "no orphans": "I could not look" is
+      not "there are none", exactly as `orphan_site_read_tokens/1` states it. One
+      readable dataset out of several is enough to report rows — the unreadable
+      ones simply contribute nothing, and the operator surface says how many.
+
+  WHICH DATASETS ARE SCANNED. The box exposes its webhooks per-dataset
+  (`GET /v1/webhooks/:dataset`), so the sweep needs names: this instance's own
+  `bootstrap_dataset` plus every LIVE site's. A dataset whose sites have ALL been
+  deleted is therefore out of reach by construction — stated because a sweep that
+  quietly cannot see a population is the false green this row is about.
+
+  WHAT COUNTS AS AN ORPHAN, deliberately the NARROW reading: the name parses as
+  `site-autodeploy-<uuid>` AND no `sites` row anywhere in this database carries
+  that id. Not "no site on THIS box": a row whose site moved is somebody's live
+  trigger, and this tool must never be able to kill one. A name that is not a
+  well-formed `site-autodeploy-<uuid>` is not ours and is never touched.
+
+  READ-ONLY. It deletes nothing; `delete_content_webhook/4` is the write, and
+  `mix barkpark_cloud.content_webhooks --reap` re-derives this set before issuing
+  one.
+  """
+  @spec orphan_content_webhooks(Barkpark.t()) ::
+          {:ok, [map()]} | {:error, :no_dataset | :unreadable}
+  def orphan_content_webhooks(%Barkpark{} = barkpark) do
+    case content_webhook_datasets(barkpark) do
+      [] ->
+        {:error, :no_dataset}
+
+      datasets ->
+        results = Enum.map(datasets, fn ds -> {ds, list_box_content_webhooks(barkpark, ds)} end)
+
+        if Enum.all?(results, fn {_ds, r} -> r == :unknown end) do
+          {:error, :unreadable}
+        else
+          rows =
+            for {ds, {:ok, hooks}} <- results,
+                hook <- hooks,
+                row = orphan_content_webhook_row(barkpark, ds, hook),
+                row != nil,
+                do: row
+
+          {:ok, rows}
+        end
+    end
+  end
+
+  # The dataset names this box is known to serve content under: its own bootstrap
+  # dataset plus every live site's. ONE definition, so the audit and the reap can
+  # never disagree about what they looked at.
+  defp content_webhook_datasets(%Barkpark{} = barkpark) do
+    [barkpark.bootstrap_dataset | Enum.map(list_sites(barkpark), & &1.bootstrap_dataset)]
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.uniq()
+  end
+
+  # The box's whole webhook list for one dataset. `:unknown` is the same
+  # deliberately-distinct value `find_content_webhook/3` uses, and for the same
+  # reason: the consequence downstream is a DELETE.
+  defp list_box_content_webhooks(%Barkpark{} = barkpark, dataset) do
+    case relay_admin(barkpark, :get, "/v1/webhooks/#{URI.encode(dataset)}", nil) do
+      {:ok, status, %{"webhooks" => hooks}} when status in 200..299 and is_list(hooks) ->
+        {:ok, hooks}
+
+      _ ->
+        :unknown
+    end
+  end
+
+  # One box webhook row -> an orphan row, or nil. Every rejection below has to be
+  # checked or the reap offers an operator a row it must not delete.
+  defp orphan_content_webhook_row(%Barkpark{} = barkpark, dataset, hook) when is_map(hook) do
+    id = Map.get(hook, "id")
+    name = Map.get(hook, "name")
+
+    with true <- is_binary(id) and id != "",
+         true <- is_binary(name),
+         {:ok, site_id} <- content_webhook_site_id(name),
+         false <- site_exists?(site_id) do
+      %{
+        barkpark_slug: barkpark.slug,
+        dataset: dataset,
+        id: id,
+        name: name,
+        site_id: site_id,
+        url: Map.get(hook, "url"),
+        active?: Map.get(hook, "active")
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp orphan_content_webhook_row(_barkpark, _dataset, _hook), do: nil
+
+  # The INVERSE of `content_webhook_name/1`, and the only place the name is read
+  # back. A name that does not parse as `site-autodeploy-<uuid>` is not ours: it
+  # could be a hand-made hook an operator relies on, and casting it loosely (or
+  # querying with an unparseable id) is how a reap kills something it does not own.
+  defp content_webhook_site_id(@content_webhook_name_prefix <> rest) do
+    Ecto.UUID.cast(rest)
+  end
+
+  defp content_webhook_site_id(_name), do: :error
+
+  defp site_exists?(site_id) do
+    Repo.exists?(from(s in Site, where: s.id == ^site_id))
   end
 
   # The public URL the box POSTs a content-publish delivery to. Per-site receiver
@@ -6820,6 +7692,110 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  The box-side id of `site`'s LIVE public-read credential, looked up in the
+  site's CURRENT `bootstrap_workspace`/`bootstrap_project` scope.
+
+    * `{:ok, id}` — a live (never-revoked) token carries this site's label there
+    * `:absent`   — the box listed the scope and no live token carries it (or the
+                    site has no binding, so none was ever minted)
+    * `:unknown`  — the inventory could not be read; "I could not look" is never
+                    "it is not there"
+
+  THIS EXISTS FOR THE REBIND, and the ORDER is the whole point. Tokens are listed
+  per (workspace, project) and matched BY LABEL, and a rebind that changes only
+  the DATASET keeps the same workspace/project — so the moment the replacement is
+  minted, TWO live tokens carry `site-read-<slug>` in that one scope and a
+  find-by-label revoke is a coin flip that can kill the credential the site just
+  started using. Name the incumbent BEFORE the mint, revoke it BY ID after; that
+  is exactly the discipline `rotate_site_read_token/1` documents in its step 1.
+  """
+  @spec site_read_token_id(Site.t()) :: {:ok, String.t()} | :absent | :unknown
+  def site_read_token_id(%Site{} = site) do
+    with ws when is_binary(ws) and ws != "" <- site.bootstrap_workspace,
+         proj when is_binary(proj) and proj != "" <- site.bootstrap_project,
+         %Barkpark{} = barkpark <- get_barkpark(site.barkpark_id) do
+      find_workspace_token(barkpark, ws, proj, site_read_token_label(site))
+    else
+      _ -> :absent
+    end
+  end
+
+  @doc """
+  site-spawner `site-rebind-content`: REPOINT a static/node site at a different
+  workspace/project/dataset and swap its scope-bound public-read credential.
+
+  `attrs` carries the FULL new triple (`:bootstrap_workspace`,
+  `:bootstrap_project`, `:bootstrap_dataset`), the PLAINTEXT `:read_token` the
+  caller already minted against that new scope (encrypted here; the plaintext
+  never lands in the DB), the observed `:content_binding_verdict` /
+  `:content_binding_checked_at`, and optionally any settings the same PATCH moved
+  (`:theme`, `:doc_type`, `:prebuilt_enabled`).
+
+  `incumbent` is what `site_read_token_id/1` answered BEFORE the replacement was
+  minted — see that function for why it cannot be looked up here.
+
+  ONE `Repo.update` through the narrow `Site.content_binding_changeset/2`: the
+  binding and the credential that authorizes it move together or not at all. A
+  half-applied rebind (new dataset, old token) is a site that builds 403s.
+
+  THEN the incumbent is revoked, BY ID, in the OLD scope — never before the
+  persist, so there is no instant at which the row names a dead credential.
+
+  Returns `{:ok, site, :ok | :error | :none}` (the third element is the
+  incumbent's fate: confirmed dead / could not confirm / there was none), or
+  `{:error, changeset}` with NOTHING changed and the old credential untouched.
+  """
+  @spec rebind_site_content(Site.t(), map(), {:ok, String.t()} | :absent) ::
+          {:ok, Site.t(), :ok | :error | :none} | {:error, Ecto.Changeset.t()}
+  def rebind_site_content(%Site{} = site, attrs, incumbent) when is_map(attrs) do
+    {plaintext, attrs} = Map.pop(attrs, :read_token)
+
+    attrs =
+      attrs
+      |> Map.take([
+        :bootstrap_workspace,
+        :bootstrap_project,
+        :bootstrap_dataset,
+        :content_binding_verdict,
+        :content_binding_checked_at,
+        :theme,
+        :doc_type,
+        :prebuilt_enabled
+      ])
+      |> Map.put(:read_token_encrypted, encrypt_read_token(plaintext))
+
+    case site |> Site.content_binding_changeset(attrs) |> Repo.update() do
+      {:ok, rebound} -> {:ok, rebound, revoke_rebound_incumbent(site, incumbent)}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  defp encrypt_read_token(plaintext) when is_binary(plaintext) and plaintext != "",
+    do: Vault.encrypt(plaintext)
+
+  # nil reaches `validate_required(:read_token_encrypted)` and becomes a 422 —
+  # never a silently blanked credential.
+  defp encrypt_read_token(_plaintext), do: nil
+
+  defp revoke_rebound_incumbent(_site, :absent), do: :none
+
+  defp revoke_rebound_incumbent(%Site{} = site, {:ok, id}) do
+    case get_barkpark(site.barkpark_id) do
+      %Barkpark{} = barkpark ->
+        revoke_workspace_token(
+          barkpark,
+          site.bootstrap_workspace,
+          site.bootstrap_project,
+          id,
+          site_read_token_label(site)
+        )
+
+      _ ->
+        :error
+    end
+  end
+
   # The scope walk shared by `orphan_site_read_tokens/1` and
   # `site_read_token_census/1`. ONE definition of "which (workspace, project)
   # pairs does this box serve content under" and ONE definition of unreadable, so
@@ -7091,20 +8067,35 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  Fetch a Site by id only if it belongs to `team` — the team-scoped read for the
-  user-facing API. Returns `nil` if the site exists but is owned by another
-  team (an existence leak protection: callers cannot distinguish "wrong team"
-  from "no such site").
+  Fetch a Site by id OR by team-scoped slug, only if it belongs to `team` — the
+  team-scoped read for the user-facing API. Returns `nil` if the site exists but
+  is owned by another team (an existence leak protection: callers cannot
+  distinguish "wrong team" from "no such site").
+
+  `ref` is a UUID or a slug. A non-UUID `ref` falls back to a `(team_id, slug)`
+  lookup, which the schema's unique index makes unambiguous — that pair names at
+  most one row, so the slug arm can never widen the tenancy fence the uuid arm
+  holds: BOTH arms filter on `team_id`, so a slug belonging to another team is
+  `nil` (→ 404) exactly like a foreign uuid.
+
+  This is what lets `POST /v1/sites/:id/rollback` (and every other
+  `with_team_site` route — status, deploy, delete, settings, promote) accept the
+  slug the user typed. Before it, the CLI had to resolve slug → uuid itself with
+  a list-ALL `GET /v1/sites` first, a measured ~0.4 s round trip (Apple M4,
+  N=10, live api.barkpark.cloud, 2026-09-16) paid by EVERY slug-addressed verb
+  before its real request was even issued.
   """
   @spec get_team_site(Team.t() | binary(), binary()) :: Site.t() | nil
-  def get_team_site(team, id) when is_binary(id) do
-    case uuid_or_nil(id) do
+  def get_team_site(team, ref) when is_binary(ref) do
+    tid = team_id(team)
+
+    case uuid_or_nil(ref) do
       nil ->
-        nil
+        Site
+        |> where([s], s.slug == ^ref and s.team_id == ^tid)
+        |> Repo.one()
 
       uuid ->
-        tid = team_id(team)
-
         Site
         |> where([s], s.id == ^uuid and s.team_id == ^tid)
         |> Repo.one()
@@ -7173,39 +8164,77 @@ defmodule BarkparkCloud.Registry do
   def add_site_domain(%Site{domains: existing} = site, domain) when is_binary(domain) do
     norm = normalize_domain(domain)
 
-    cond do
-      # Idempotent: this site already owns the normalized domain.
-      norm in existing ->
-        {:ok, site}
+    # Idempotent: this site already owns the normalized domain. Answered BEFORE
+    # the claim transaction on purpose — it claims nothing, so it must not queue
+    # behind a racer holding this hostname's lock.
+    if norm in existing do
+      {:ok, site}
+    else
+      # ONE transaction for the check AND the write, so the per-hostname advisory
+      # lock `hostname_claimed?/2` takes is still held when the row lands. See
+      # `serialize_hostname_claim/2`.
+      serialize_hostname_claim([norm], fn ->
+        # Read BEFORE the pre-check, exactly as `set_custom_host/2` does: the
+        # abandoned-url holders the pre-check is about to judge.
+        takeover_ids = url_claim_holders(norm, nil)
 
-      # Claimed anywhere else in the ONE hostname namespace — another site
-      # (any team), a barkpark's `custom_host`, a foreign team's parent domain,
-      # or a live provisioning FQDN. Reject before the ask-gate can answer 200
-      # for two owners. Until this called `hostname_claimed?/2` it tested SITES
-      # ONLY, so a site could take a hostname another team already served as its
-      # `custom_host` — and no route existed to take it back.
-      hostname_claimed?(norm, except_site_id: site.id, team_id: site.team_id) ->
-        {:error, :domain_taken}
+        # Claimed anywhere else in the ONE hostname namespace — another site
+        # (any team), a barkpark's `custom_host`, a foreign team's parent domain,
+        # or a live provisioning FQDN. Reject before the ask-gate can answer 200
+        # for two owners. Until this called `hostname_claimed?/2` it tested SITES
+        # ONLY, so a site could take a hostname another team already served as its
+        # `custom_host` — and no route existed to take it back.
+        cond do
+          hostname_claimed?(norm, except_site_id: site.id, team_id: site.team_id) ->
+            {:error, :domain_taken}
 
-      true ->
-        new_domains = Enum.uniq(existing ++ [norm])
+          # THE DATABASE BACKSTOP. The advisory lock serialises only the doors
+          # that take it; provisioning does not, so a url host committed after
+          # the pre-check read the namespace is invisible to it. The
+          # hostname_claims UNIQUE (host) index refuses it here, with the same
+          # `{:error, :domain_taken}`.
+          #
+          # Only a well-formed domain is claimed: a malformed one is refused by
+          # `Site.changeset/2` below, and keying it first would claim whatever
+          # prefix the normaliser cut it down to.
+          Regex.match?(Site.domain_format(), norm) and
+              claim_site_hosts(site, [norm], %{norm => takeover_ids}) == :taken ->
+            {:error, :domain_taken}
 
-        # The DB-level uniqueness trigger (add_domain_cross_site_uniqueness
-        # migration) is the race backstop between the check above and this write;
-        # it raises a unique_violation, which we translate to the same friendly
-        # {:error, :domain_taken} rather than a 500.
-        try do
-          site
-          |> Site.changeset(%{domains: new_domains})
-          |> Repo.update()
-        rescue
-          e in Postgrex.Error ->
-            if e.postgres[:code] == :unique_violation do
-              {:error, :domain_taken}
-            else
-              reraise e, __STACKTRACE__
+          true ->
+            new_domains = Enum.uniq(existing ++ [norm])
+
+            # WHAT THE DB-LEVEL UNIQUENESS TRIGGER (add_domain_cross_site_uniqueness
+            # migration) ACTUALLY DOES — it is NOT the race backstop, and this
+            # comment said it was. Its body is a plpgsql
+            # `IF EXISTS (SELECT 1 FROM sites s WHERE s.id <> NEW.id AND d = ANY(s.domains))`
+            # inside a BEFORE ROW trigger. That EXISTS runs under the SAME READ
+            # COMMITTED snapshot rules as any other statement, so it CANNOT see a
+            # concurrent uncommitted `sites` row. Because its snapshot is taken later
+            # than the application check above, it NARROWS the window from
+            # milliseconds to microseconds — it does not close it. Only a UNIQUE
+            # INDEX, an EXCLUDE constraint, explicit locking, or SERIALIZABLE gives
+            # mutual exclusion; what serialises this door is the per-hostname
+            # `pg_advisory_xact_lock` taken in `hostname_claimed?/2` and held by the
+            # transaction `serialize_hostname_claim/2` opened around this whole body.
+            #
+            # The trigger is still worth rescuing: it fires for writers that bypass
+            # this door, raising a unique_violation we translate to the same friendly
+            # {:error, :domain_taken} rather than a 500.
+            try do
+              site
+              |> Site.changeset(%{domains: new_domains})
+              |> Repo.update()
+            rescue
+              e in Postgrex.Error ->
+                if e.postgres[:code] == :unique_violation do
+                  {:error, :domain_taken}
+                else
+                  reraise e, __STACKTRACE__
+                end
             end
         end
+      end)
     end
   end
 
@@ -7216,9 +8245,14 @@ defmodule BarkparkCloud.Registry do
     norm = normalize_domain(domain)
     new_domains = Enum.reject(existing, &(&1 == norm))
 
-    site
-    |> Site.changeset(%{domains: new_domains})
-    |> Repo.update()
+    # The array write and the claim release are ONE transaction: a released
+    # claim with the domain still on the row (or the reverse) is never visible.
+    serialize_hostname_claim([norm], fn ->
+      with {:ok, updated} <- site |> Site.changeset(%{domains: new_domains}) |> Repo.update() do
+        if norm in existing, do: release_site_host(site, norm)
+        {:ok, updated}
+      end
+    end)
   end
 
   # Case-folded, trimmed, trailing-dot-stripped — the ONE normalization used for
@@ -7226,6 +8260,81 @@ defmodule BarkparkCloud.Registry do
   # and `example.com` collide. Mirrors Site.normalize_domain/1 (the stored form).
   defp normalize_domain(d) when is_binary(d) do
     d |> String.downcase() |> String.trim() |> String.trim_trailing(".")
+  end
+
+  # ── Mutual exclusion for the hostname claim doors ──────────────────────
+  #
+  # The three claim doors (`add_site_domain/2`, `create_site/2`,
+  # `set_custom_host/2`) are check-then-write. `BarkparkCloud.Repo` sets no
+  # isolation level, so they run at stock READ COMMITTED: two concurrent claims
+  # of one hostname each take their own snapshot, each sees the namespace free,
+  # and BOTH commit. Being inside a `Repo.transaction` is NOT mutual exclusion —
+  # it is what makes the window durable, not what closes it.
+  #
+  # Only four mechanisms actually serialise a check-then-write: a UNIQUE INDEX,
+  # an EXCLUDE constraint, explicit locking, or SERIALIZABLE. We take the third.
+  # Why not the others, priced:
+  #
+  #   * UNIQUE INDEX — `sites.domains` is an ARRAY column (`d = ANY(s.domains)`),
+  #     so a plain unique index does not apply, and the namespace spans TWO
+  #     tables (`sites.domains` and `barkparks.custom_host`) which one index
+  #     cannot cover. `barkparks_custom_host_unique_idx` already covers exactly
+  #     the one pair an index CAN cover.
+  #   * EXCLUDE — single-table by construction, so it cannot span the two tables
+  #     either; on `sites` alone it needs ACCESS EXCLUSIVE plus a validating scan
+  #     and fails outright if prod already holds a duplicate.
+  #   * SERIALIZABLE — a repo-wide isolation change with serialization-failure
+  #     retries on every caller, for one narrow invariant.
+  #
+  # A per-hostname advisory transaction lock costs one round trip, needs NO
+  # migration and NO new lock on a live table, and is the repo's own pattern
+  # (20+ call sites in api/; `lock_team_for_quota/1` at the top of this module is
+  # the same argument in `FOR UPDATE` form).
+  #
+  # STATED WEAKNESS: this is conventional, not structural. It serialises writers
+  # that go through these doors; a writer that reaches `sites.domains` without
+  # calling `hostname_claimed?/2` is not excluded. Putting the lock inside the
+  # shared predicate — not at the three call sites — is what mitigates that.
+  defp lock_hostname!(norm) do
+    Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["hostname:" <> norm])
+    :ok
+  end
+
+  # Run `fun` with the whole check-then-write inside ONE transaction, so the
+  # advisory lock `hostname_claimed?/2` takes is still held when the row lands.
+  # `pg_advisory_xact_lock` is released at COMMIT, so a lock taken OUTSIDE a
+  # transaction is released at the end of its own implicit statement and
+  # serialises nothing — that is the residue this wrapper removes. The doors do
+  # already run inside a transaction incidentally (via `Accounts.audit/3`), but
+  # incidentally is not a guarantee, and a door that lost its audit wrapper would
+  # silently lose its mutual exclusion.
+  #
+  # `hostnames` are locked UP FRONT and SORTED. Sorted because a multi-domain
+  # create that locked in caller order could deadlock against a racer claiming
+  # the same set in the other order; up front because a lock taken lazily (as
+  # `Enum.find/2` short-circuits) leaves the domains past the first collision
+  # unprotected for the write that follows.
+  #
+  # Joins an enclosing transaction when there is one; `fun`'s own return value is
+  # passed through unchanged, so each door keeps its own error vocabulary
+  # (`{:error, :domain_taken}` here, `{:error, :taken}` there).
+  defp serialize_hostname_claim(hostnames, fun) do
+    take_locks = fn ->
+      hostnames |> Enum.uniq() |> Enum.sort() |> Enum.each(&lock_hostname!/1)
+    end
+
+    if Repo.in_transaction?() do
+      take_locks.()
+      fun.()
+    else
+      {:ok, result} =
+        Repo.transaction(fn ->
+          take_locks.()
+          fun.()
+        end)
+
+      result
+    end
   end
 
   # ── ONE hostname namespace, ONE predicate ──────────────────────────────
@@ -7263,6 +8372,12 @@ defmodule BarkparkCloud.Registry do
     except_site_id = Keyword.get(opts, :except_site_id)
     except_barkpark_id = Keyword.get(opts, :except_barkpark_id)
     team_id = Keyword.fetch!(opts, :team_id)
+
+    # THE MUTUAL EXCLUSION, taken BEFORE the first SELECT. Locking after reading
+    # serialises nothing — the stale verdict is already in hand. Living in the
+    # shared predicate rather than at the three call sites is deliberate: every
+    # claim door inherits it, and a FOURTH door cannot forget it.
+    lock_hostname!(norm)
 
     site_domain_claimed?(norm, except_site_id) or
       barkpark_custom_host_claimed?(norm, except_barkpark_id) or
@@ -7345,9 +8460,11 @@ defmodule BarkparkCloud.Registry do
   provisioning FQDN (its `url` host, compared NORMALISED — a url-held FQDN and
   a custom_host are ONE namespace) — each of those would silently
   shadow or be shadowed by the attach. Taken → `{:error, :taken}`. The
-  pre-check is check-then-write; the `barkparks_custom_host_unique_idx` unique
-  constraint is the atomic backstop for a custom_host↔custom_host race
-  (translated to the same `:taken`).
+  pre-check is check-then-write; the atomic backstop is the `hostname_claims`
+  row this call writes in the same transaction (UNIQUE over the host, whichever
+  column claimed it), so a url/custom_host race lost to a concurrent
+  provisioning insert answers the same `:taken`. A site-domain race is still
+  serialised only by the advisory lock.
 
   RE-ATTACH IS REFUSED, not overwritten
   (`cch-w54-bl-re-attaching-a-domain-orphans-the-previous-record-on-a-live-box`).
@@ -7391,11 +8508,36 @@ defmodule BarkparkCloud.Registry do
       reattach_of_different_host?(barkpark, changeset) ->
         {:error, {:already_attached, barkpark.custom_host}}
 
-      custom_host_taken?(Ecto.Changeset.fetch_field!(changeset, :custom_host), barkpark) ->
-        {:error, :taken}
-
       true ->
-        changeset |> Repo.update() |> translate_custom_host_conflict()
+        norm = Ecto.Changeset.fetch_field!(changeset, :custom_host)
+
+        # ONE transaction over the taken-walk AND the write, holding this
+        # hostname's advisory lock. `barkparks_custom_host_unique_idx` already
+        # makes the custom_host<->custom_host pair atomic (which is why the
+        # unique_violation rescue below is honest), but it covers ONE of the four
+        # legs `custom_host_taken?/2` walks — a racing SITE claim of the same
+        # hostname is not an index collision at all. The lock covers all four.
+        #
+        # The lock serialises only the doors that take it; provisioning does not.
+        # So the pre-check stays (it gives the friendly refusal) and the
+        # `hostname_claims` UNIQUE index is the atomic backstop behind it: a
+        # provisioning url host committed after our pre-check read the
+        # namespace makes `claim_hostname/4` answer `:taken` — the SAME refusal.
+        serialize_hostname_claim([norm], fn ->
+          takeover_ids = url_claim_holders(norm, barkpark.id)
+
+          cond do
+            custom_host_taken?(norm, barkpark) ->
+              {:error, :taken}
+
+            claim_hostname(norm, {:barkpark, barkpark.id}, "custom_host", takeover_ids) ==
+                :taken ->
+              {:error, :taken}
+
+            true ->
+              changeset |> Repo.update() |> translate_custom_host_conflict()
+          end
+        end)
     end
   end
 
@@ -7447,6 +8589,49 @@ defmodule BarkparkCloud.Registry do
   # ONE row (self); `nil` drops none — the same nil-trap as
   # `site_domain_claimed?/2`, so the exclusion is a conditional `where`, never
   # `b.id != ^nil`.
+  #
+  # NAMED `other_barkpark_custom_host?/2` until #14458 (3b34f91fc) folded the four
+  # legs into `hostname_claimed?/2` and renamed this one. The old spelling now
+  # survives nowhere in the tree, which is worth knowing when a filed defect asks
+  # for a change to a function by that name.
+  #
+  # THE ASYMMETRY WITH `provisioning_fqdn_claim/2` IS DELIBERATE: this leg has NO
+  # abandonment carve-out, and it must not grow one
+  # (`dr-w25-bl-gyldendal-taker-is-also-a-ghost`, ruled 2026-09-10). The two
+  # columns are not the same kind of name:
+  #
+  #   * `url` is a PLATFORM-MINTED provisioning FQDN (`<slug>-<hex>.barkpark.cloud`).
+  #     Nobody chose it, nobody points DNS at it by hand, and a row that never
+  #     came up leaves it squatted with no owner able to release it — the June-29
+  #     squat the carve-out exists to unstick.
+  #   * `custom_host` is a CUSTOMER'S DELIBERATE CLAIM on a name they control the
+  #     DNS for. Quietness is not abandonment of a NAME. Releasing it from a row
+  #     that has merely gone quiet is a hostname takeover: the next attach wins
+  #     the name, `/v1/tls/ask` starts answering 200 for the new owner, and the
+  #     original customer's cert renewal fails the next time Caddy asks — the
+  #     precise outcome charter D457 forbids ("DO NOT de-register
+  #     `gyldendal.barkpark.cloud` from `/v1/tls/ask` — the 200 belongs to team
+  #     Gyldendal's LEGITIMATE `custom_host`") and D605 re-affirms by keeping the
+  #     ask-gate name-bound.
+  #
+  # `last_seen_at IS NULL` cannot carry this weight in either direction. It means
+  # the AGENT never phoned home; it says nothing about the APP. Driven live
+  # 2026-09-10 against `gyldendal.barkpark.cloud` (see
+  # `tooling/grip/ledger/dr-w25-gyldendal-taker-probe-2026-09-10.md`): the box at
+  # 116.203.98.0 answers 302, `/status.json` reports `operational` on database,
+  # migrations and plugins, and `uptime_seconds` 5_568_983 = 64.5 days unbroken —
+  # while its Let's Encrypt certificate was RENEWED on 2026-09-05, i.e. the
+  # platform's own ask-gate authorised issuance for that name five days ago. A row
+  # the abandonment predicate would call a ghost is a continuously serving,
+  # cert-renewing customer instance.
+  #
+  # And porting the carve-out here would not even move the row that motivated the
+  # ask: `provisioning_fqdn_claim/2`'s three legs are ANDed, and
+  # `:active_subscription` alone holds the claim for a team on a live plan
+  # (charter D443 measured the silence-only predicate 0-for-3 on live data —
+  # yo/forever, Gyldendal/supporter, Guerrilla/forever were ALL entitled). The
+  # asymmetry is therefore not a gap; the symmetric version is a takeover vector
+  # that buys nothing.
   defp barkpark_custom_host_claimed?(norm, except_barkpark_id) do
     Barkpark
     |> where([b], b.custom_host == ^norm)
@@ -7464,9 +8649,11 @@ defmodule BarkparkCloud.Registry do
   # url-held FQDN and a custom_host occupy ONE hostname namespace — the two
   # partial unique indexes (`barkparks_url_unique_idx`,
   # `barkparks_custom_host_unique_idx`) are DISJOINT and structurally cannot
-  # see across them, so this pre-check is the only guard there is.
+  # see across them. This pre-check gives the friendly refusal; the atomic
+  # backstop behind it is `hostname_claims` (one row per claimed host,
+  # UNIQUE (host)), written by `set_custom_host/2` and the provisioning insert.
   #
-  # Self is EXCLUDED, exactly as `other_barkpark_custom_host?/2` does it: a row
+  # Self is EXCLUDED, exactly as `barkpark_custom_host_claimed?/2` does it: a row
   # attaching the host it ALREADY serves (its own provisioning FQDN — e.g.
   # re-attaching to re-run the DNS upsert after a repair) shadows nobody, so
   # refusing it would only block a legitimate re-attach. Excluding self cannot
@@ -7626,6 +8813,97 @@ defmodule BarkparkCloud.Registry do
     |> Repo.all()
     |> Enum.find_value(:free, &claim_leg(&1, cutoff))
   end
+
+  @doc """
+  The claim refusal, RENDERED FOR THE CALLER — the wire half of
+  `provisioning_fqdn_claim/2`, and the whole reason it exists is that the leg
+  used to reach nobody.
+
+  `provisioning_fqdn_claim/2` names WHICH leg holds a hostname and writes a
+  careful operator sentence for it. Until this function, that pair reached a
+  human through exactly ONE path: the `Logger.info` in
+  `provisioning_fqdn_taken?/2`, a server log with no UI, no alert and no CLI
+  surface. The API answered `409 {"error":"taken"}` and dropped both, so the
+  operator staring at a refusal could not tell "somebody is paying for that
+  name" from "a provisioning job is mid-flight, wait a minute" — two refusals
+  with opposite remedies rendered as one word.
+
+  Returns a map to MERGE onto a refusal body: `%{}` when this walk does not
+  hold the name (some OTHER surface does — a Site domain, another instance's
+  `custom_host` — and this function has nothing to say about those), or
+  `%{claim_leg: "<leg>", detail: "<caller-safe sentence>"}`.
+
+  ## THE DISCLOSURE DECISION — why the operator sentence does NOT go on the wire
+
+  Every sentence `claim_leg/2` writes opens `row <uuid>`, and three of them
+  characterise the holder further ("belongs to a team with a live subscription
+  that is still ENTITLED", "phoned home at <timestamp>"). The 409 is answered
+  to the CALLER WHO ASKED FOR THE HOSTNAME, who is routinely a DIFFERENT team
+  than the holder — that is the ordinary shape of a name collision. Relaying
+  those sentences verbatim would hand a stranger a foreign instance's primary
+  key and its liveness timeline, which is the same class of leak the
+  `/credentials` and `/bootstrap` routes fail closed on. So the full sentence
+  stays where it already was, in the Logger line, and the wire gets two things
+  that name no row:
+
+    * `claim_leg` — the leg ATOM. The categories themselves say nothing about
+      WHO: `active_subscription` is a fact about the hostname the caller
+      already typed, not an identifier for anybody.
+    * `detail` — a per-leg sentence written FOR the caller, in the second
+      person where it can be, carrying the remedy and no identity.
+
+  The mapping is TOTAL over `claim_leg/2`'s legs and falls back for an
+  unrecognised one, so a leg added there can never leak by accident: a new
+  atom renders the generic sentence until somebody writes it a caller-facing
+  one. The atom itself still reaches the wire, because a coarse category is
+  the part that was worth carrying.
+  """
+  @spec provisioning_fqdn_claim_disclosure(String.t(), Ecto.UUID.t() | nil) :: map()
+  def provisioning_fqdn_claim_disclosure(host, self_id \\ nil) when is_binary(host) do
+    case provisioning_fqdn_claim(host, self_id) do
+      :free -> %{}
+      {:held, leg, _why} -> %{claim_leg: Atom.to_string(leg), detail: caller_claim_detail(leg)}
+    end
+  end
+
+  # The caller-facing half of each leg's sentence: the same verdict
+  # `claim_leg/2` reaches, with the row id, the team and the timestamp taken
+  # OUT and the remedy left IN.
+  defp caller_claim_detail(:admin_credential),
+    do:
+      "That hostname still belongs to an instance the platform holds a live " <>
+        "credential for, so the name is not free to re-attach. Decommission that " <>
+        "instance first, or pick another hostname."
+
+  defp caller_claim_detail(:recent_usage_sample),
+    do:
+      "That hostname was still being reached by the platform within the last " <>
+        "#{@recent_sample_window_hours} hours, so the name is not free to re-attach. " <>
+        "Decommission the instance answering on it first, or pick another hostname."
+
+  defp caller_claim_detail(:active_subscription),
+    do:
+      "That hostname belongs to an instance on a live, still-entitled " <>
+        "subscription. A billed name is never released — pick another hostname."
+
+  defp caller_claim_detail(:agent_reporting),
+    do:
+      "An agent on that hostname has phoned home recently, so the instance " <>
+        "answering on it is live and the name is not free to re-attach."
+
+  defp caller_claim_detail(:active_job),
+    do:
+      "A provisioning job for that hostname is still in flight. Wait for it to " <>
+        "finish and try again, or pick another hostname."
+
+  defp caller_claim_detail(:within_grace),
+    do:
+      "That hostname belongs to an instance younger than the " <>
+        "#{@abandoned_claim_after_days}-day abandonment window, so it is not yet " <>
+        "releasable. Decommission it first, or pick another hostname."
+
+  defp caller_claim_detail(_other),
+    do: "That hostname is held by another instance and is not free to re-attach."
 
   # CONDITIONAL, and that is the whole point: an unconditional
   # `b.id != ^self_id` compiles to SQL `id != NULL` when `self_id` is nil, which
@@ -7869,8 +9147,40 @@ defmodule BarkparkCloud.Registry do
           {:ok, Deployment.t()} | {:error, Ecto.Changeset.t()}
   def create_deployment(%Site{} = site, attrs \\ %{}) do
     %Deployment{}
-    |> Deployment.changeset(Map.put(attrs, :site_id, site.id))
+    |> Deployment.changeset(stamp_demand_class(attrs, site))
     |> Repo.insert()
+  end
+
+  @doc """
+  dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206): classify a site's
+  DEMAND — `"customer"`, `"platform"`, or `nil` to un-classify it.
+
+  This is the ONLY writer of `sites.demand_class`, and it is an operator act:
+  the class says what a site IS FOR, and nothing in the code infers it. There is
+  no list of known demo slugs anywhere — a class derived from a hard-coded list
+  could never disagree with the list, so no fixture could make it lose. Every
+  deployment minted AFTER this call carries the new class; every deployment
+  minted before keeps the class it was stamped with, which is why the census can
+  be read as a time series at all.
+  """
+  @spec classify_site_demand(Site.t(), String.t() | nil) ::
+          {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
+  def classify_site_demand(%Site{} = site, class) do
+    site
+    |> Site.demand_class_changeset(%{demand_class: class})
+    |> Repo.update()
+  end
+
+  # charter D206: the ONE place a build's demand class is chosen. Every create
+  # path funnels through it, so a new writer inherits the stamp by construction
+  # rather than by remembering — and `Deployment.demand_class_for/1` writes
+  # "unclassified" for a site nobody has classified rather than guessing
+  # "customer", which is the misclassification this whole label exists to make
+  # visible instead of invisible.
+  defp stamp_demand_class(attrs, %Site{} = site) do
+    attrs
+    |> Map.put(:site_id, site.id)
+    |> Map.put(:demand_class, Deployment.demand_class_for(site))
   end
 
   @doc """
@@ -7917,7 +9227,7 @@ defmodule BarkparkCloud.Registry do
       Repo.transaction(fn ->
         with {:ok, queued} <-
                %Deployment{}
-               |> Deployment.changeset(Map.put(attrs, :site_id, site.id))
+               |> Deployment.changeset(stamp_demand_class(attrs, site))
                |> Repo.insert(),
              {:ok, failed} <-
                queued
@@ -8120,15 +9430,18 @@ defmodule BarkparkCloud.Registry do
         evict_oldest_preview_branch(site.id, cap)
       end
 
-      attrs = %{
-        site_id: site.id,
-        environment: "preview",
-        branch: branch,
-        preview_slug: slug,
-        preview_host: host,
-        git_ref: sha,
-        delivery_id: delivery_id
-      }
+      attrs =
+        stamp_demand_class(
+          %{
+            environment: "preview",
+            branch: branch,
+            preview_slug: slug,
+            preview_host: host,
+            git_ref: sha,
+            delivery_id: delivery_id
+          },
+          site
+        )
 
       case %Deployment{} |> Deployment.preview_changeset(attrs) |> Repo.insert() do
         {:ok, dep} -> dep
@@ -8558,6 +9871,150 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  deploy-reliability W8: RECORD ONE GRACE EVENT against a deployment — a
+  transient box 5xx the poll loop swallowed (`:poll_refusal`) or a START trigger
+  retried across an untyped 5xx (`:start_retry`).
+
+  THE COUNTER THIS REPLACES DIED OF SUCCESS. `Sites.Deploy` keeps a graced-refusal
+  tally on `ctx`, and `forget_graced_refusals/1` drops it on ANY poll that
+  reached the box — correct for the failure caption it feeds, fatal for
+  measurement: the only graces that were ever counted were the ones that did not
+  work. These columns are monotonic for the life of the run, so a deployment that
+  went `live` BECAUSE grace held can still say so.
+
+  ATOMIC `UPDATE`, never a changeset — the same discipline `coalesced_attempts`
+  follows, and for two reasons here: the bump happens mid-run against a row whose
+  `status` has not moved (a `transition_changeset` would drag the from-status
+  guard into a telemetry write), and a read-modify-write would lose bumps.
+  `COALESCE` because every pre-W8 row is NULL and `NULL + 1` is NULL.
+
+  Best-effort: the return is always `:ok`, an unknown id updates zero rows
+  without raising, and the caller (`Sites.Deploy`) wraps it besides. A deploy
+  must never fail because its own accounting did.
+  """
+  @spec record_deploy_grace(binary(), :poll_refusal | :start_retry) :: :ok
+  def record_deploy_grace(id, kind)
+      when is_binary(id) and kind in [:poll_refusal, :start_retry] do
+    case uuid_or_nil(id) do
+      nil -> :ok
+      uuid -> bump_deploy_grace(uuid, kind, DateTime.utc_now())
+    end
+  end
+
+  defp bump_deploy_grace(uuid, :poll_refusal, now) do
+    from(d in Deployment,
+      where: d.id == ^uuid,
+      update: [
+        set: [
+          graced_poll_refusals: fragment("COALESCE(?, 0) + 1", d.graced_poll_refusals),
+          last_graced_at: ^now
+        ]
+      ]
+    )
+    |> Repo.update_all([])
+
+    :ok
+  end
+
+  defp bump_deploy_grace(uuid, :start_retry, now) do
+    from(d in Deployment,
+      where: d.id == ^uuid,
+      update: [
+        set: [
+          graced_start_retries: fragment("COALESCE(?, 0) + 1", d.graced_start_retries),
+          last_graced_at: ^now
+        ]
+      ]
+    )
+    |> Repo.update_all([])
+
+    :ok
+  end
+
+  @doc """
+  deploy-reliability W8: THE NAMED QUERY over the grace counters — the reachable
+  surface that turns "a rename killed grace" from a rate into a number.
+
+  Folded over a PINNED `inserted_at` window (`from`/`to`), exactly like the
+  deploy ledger's census, so two readers asking the same question over the same
+  window get the same answer. `:site_ids` narrows to a list of site ids (a
+  team-scoped caller); omit it for the fleet.
+
+  Returns:
+
+    * `deployments`             — rows in the window (the denominator).
+    * `graced_poll_refusals`    — transient box 5xx swallowed by the poll loop.
+    * `graced_start_retries`    — START triggers retried across an untyped 5xx.
+    * `deployments_graced`      — rows where either counter is above zero.
+    * `saved`                   — graced rows that nonetheless reached `live`.
+      THIS IS THE NUMBER THE TASK EXISTS FOR: it is the population the grace
+      produced, it was previously unobservable in every outcome, and killing
+      grace (charter D114 — one wire literal) drives it to zero while the
+      failure rate is still climbing for reasons nobody can name.
+    * `unmeasured`              — rows predating the counters (NULL, never 0).
+      A census whose zero could mean "no saves" OR "nobody was counting" cannot
+      be read, so the two are separated rather than summed.
+  """
+  @spec deploy_grace_census(DateTime.t(), DateTime.t(), keyword()) :: map()
+  def deploy_grace_census(%DateTime{} = from_at, %DateTime{} = to_at, opts \\ []) do
+    scoped =
+      from(d in Deployment,
+        where: d.inserted_at >= ^from_at and d.inserted_at < ^to_at
+      )
+      |> scope_grace_census_sites(Keyword.get(opts, :site_ids))
+
+    rows =
+      scoped
+      |> select([d], %{
+        status: d.status,
+        polls: d.graced_poll_refusals,
+        starts: d.graced_start_retries
+      })
+      |> Repo.all()
+
+    # ONE `Repo.all`, every term folded from it — a census assembled from N
+    # independent aggregates can report a `saved` that its own `deployments_graced`
+    # contradicts if a row lands between them.
+    Enum.reduce(
+      rows,
+      %{
+        from: from_at,
+        to: to_at,
+        deployments: 0,
+        graced_poll_refusals: 0,
+        graced_start_retries: 0,
+        deployments_graced: 0,
+        saved: 0,
+        unmeasured: 0
+      },
+      fn row, acc ->
+        polls = row.polls || 0
+        starts = row.starts || 0
+        graced? = polls > 0 or starts > 0
+
+        acc
+        |> Map.update!(:deployments, &(&1 + 1))
+        |> Map.update!(:graced_poll_refusals, &(&1 + polls))
+        |> Map.update!(:graced_start_retries, &(&1 + starts))
+        |> Map.update!(:deployments_graced, &if(graced?, do: &1 + 1, else: &1))
+        |> Map.update!(
+          :saved,
+          &if(graced? and row.status == "live", do: &1 + 1, else: &1)
+        )
+        |> Map.update!(
+          :unmeasured,
+          &if(is_nil(row.polls) and is_nil(row.starts), do: &1 + 1, else: &1)
+        )
+      end
+    )
+  end
+
+  defp scope_grace_census_sites(query, nil), do: query
+
+  defp scope_grace_census_sites(query, site_ids) when is_list(site_ids),
+    do: from(d in query, where: d.site_id in ^site_ids)
+
+  @doc """
   gh-5: APPEND one builder-reported LIVE console line to a deployment — the
   deploy-side twin of `append_provision_console/2`. Best-effort telemetry: it
   records what the builder narrated regardless of the deployment's current
@@ -8711,7 +10168,11 @@ defmodule BarkparkCloud.Registry do
               status: "building",
               claim_worker: worker_id,
               claimed_at: DateTime.truncate(DateTime.utc_now(), :microsecond),
-              claim_epoch: d.claim_epoch + 1
+              claim_epoch: d.claim_epoch + 1,
+              # dwb-18: narrate the transition the control plane is performing,
+              # in the SAME changeset — atomic with the claim, so a console entry
+              # for a claim that rolled back can never exist.
+              console: narrate_transition(d, builder_claim_line(worker_id))
             })
             |> Repo.update()
 
@@ -8789,7 +10250,11 @@ defmodule BarkparkCloud.Registry do
               status: "building",
               claim_worker: worker_id,
               claimed_at: DateTime.truncate(DateTime.utc_now(), :microsecond),
-              claim_epoch: d.claim_epoch + 1
+              claim_epoch: d.claim_epoch + 1,
+              # dwb-18: narrate the transition the control plane is performing,
+              # in the SAME changeset — atomic with the claim, so a console entry
+              # for a claim that rolled back can never exist.
+              console: narrate_transition(d, builder_claim_line(worker_id))
             })
             |> Repo.update()
 
@@ -8904,9 +10369,11 @@ defmodule BarkparkCloud.Registry do
   horizon". The age gate is what keeps a FRESH row out: the route that minted it
   is driving it right now, and `Deploy.run/1` claims within milliseconds — a
   never-claimed row still `queued` a full `deployment_stale_after_seconds/0`
-  later is one whose driver never started. Human-cancelled rows are excluded by
+  later is one whose driver never started. Cancelled rows are excluded by
   `d.status == "queued"` (a cancel writes `"cancelled"`), so nothing resurrects a
-  build a person stopped.
+  build the fleet already refused — an auto-deploy refusal, a superseded or torn
+  down preview, or a box's terminal. There is no human cancel path
+  (`dr-w16-bl-cancelled-rows-rationale-is-wrong`).
 
   Being FOUND here is a re-attempt, not a cure: if the spawn keeps being refused
   the row stays `claim_epoch == 0` and comes back next sweep. Pass (0c) of
@@ -8960,6 +10427,17 @@ defmodule BarkparkCloud.Registry do
   def update_site_settings(%Site{} = site, attrs) when is_map(attrs) do
     site
     |> Site.settings_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  task-71082f5541c13b53 (N-08): record whether the site's form endpoint is on.
+  Called by the forms route only AFTER the box accepted the endpoint write, so
+  the bit never claims an endpoint the box does not hold.
+  """
+  def set_site_forms_enabled(%Site{} = site, enabled?) when is_boolean(enabled?) do
+    site
+    |> Site.forms_changeset(%{forms_enabled: enabled?})
     |> Repo.update()
   end
 
@@ -9327,16 +10805,20 @@ defmodule BarkparkCloud.Registry do
       D28): "no build source" means something DIFFERENT for each Site kind, so
       this is two status-guarded passes summed into one `no_source_failed` count.
       A CONTAINER row is un-buildable with no `artifact_url` AND a site with no
-      `github_repo`. A STATIC row is content-bound, not artifact-bound: it is
+      `github_repo`. A CONTENT-BOUND row — STATIC *or* NODE, the two kinds
+      whose build reads from a Barkpark dataset — is content-bound, not
+      artifact-bound: it is
       un-buildable exactly when its site has no `bootstrap_dataset` (nothing to
       read content from) — a legitimate static row (bound dataset, no artifact,
       no repo) matches the CONTAINER predicate exactly, so a single un-scoped
       pass would terminally fail every static deploy within 60s with a message
       about artifacts and GitHub repos that names neither the cause nor the cure.
       Kind-scoping the container pass ALONE is the other half of the trap: an
-      UNBOUND static row would then match nothing and spin `queued` forever —
-      the eternal spinner this sweep exists to kill. Hence: two passes, each with
-      its own honest reason. Such a row can NEVER build regardless of fleet
+      UNBOUND content-bound row would then match nothing and spin `queued`
+      forever — the eternal spinner this sweep exists to kill. Hence: two passes,
+      each with its own honest reason, and between them they name ALL THREE
+      kinds — container in (0a), static AND node in (0b) — so no kind is left
+      silently uncovered. Such a row can NEVER build regardless of fleet
       (nothing to build from), so it would otherwise sit queued forever behind an
       eternal dashboard spinner. NOT staleness-gated (it is un-buildable the
       instant it exists). Repo-backed queued rows (a `github_repo` is set) are
@@ -9462,7 +10944,7 @@ defmodule BarkparkCloud.Registry do
         where:
           d.status == "queued" and s.kind == "container" and is_nil(d.artifact_url) and
             is_nil(s.github_repo),
-        select: {d.id, d.site_id}
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> where(^not_awaiting_prebuilt_upload())
       |> Repo.update_all(
@@ -9474,19 +10956,44 @@ defmodule BarkparkCloud.Registry do
         ]
       )
 
-    # (0b) STATIC: the twin, and the half a naive kind-scope forgets. A static
-    # build reads its content from a Barkpark dataset, so its build source IS the
-    # content binding — a site with no `bootstrap_dataset` has nothing to build
-    # from and can never succeed. Without this pass an unbound static row matches
-    # NOTHING (0a excludes it by kind) and spins `queued` forever: the exact
-    # eternal-spinner disease the reaper exists to cure. The reason names the
-    # cure the user can actually run.
+    # (0b) CONTENT-BOUND — STATIC *AND* NODE: the twin, and the half a naive
+    # kind-scope forgets. A static build reads its content from a Barkpark
+    # dataset, so its build source IS the content binding — a site with no
+    # `bootstrap_dataset` has nothing to build from and can never succeed.
+    # Without this pass an unbound content-bound row matches NOTHING (0a excludes
+    # it by kind) and spins `queued` forever: the exact eternal-spinner disease
+    # the reaper exists to cure. The reason names the cure the user can actually
+    # run.
+    #
+    # BOTH content-bound kinds, not just static (task-85693fd7401812fd). A NODE
+    # site is content-bound EXACTLY like a static one, and this is CITED, not
+    # re-derived — the repo already states it in three places: `Web.Router`'s
+    # `require_content_binding/2` ("a NODE site is content-bound EXACTLY like a
+    # static one — its SSR build fetches from workspace/project/dataset and has
+    # literally nothing to render without all three"), `Web.Router`'s
+    # `mint_site_read_token/3` ("a node site is content-bound like a static one,
+    # so it mints the SAME public-read token over the SAME scoped route"), and
+    # `list_orphaned_static_deployments/0` in THIS module ("live-caught twice in
+    # one evening that a NODE row strands identically (W7 made node ride the same
+    # box relay), so the sweep now covers both box-driven kinds").
+    #
+    # Left at `== "static"`, an unbound NODE row matched NEITHER (0a) (excluded
+    # by kind) NOR (0b) (excluded by kind) and inherited the exact eternal
+    # spinner this pass exists to kill. LATENT, NOT LIVE:
+    # `require_content_binding("node", attrs)` refuses an unbound node create at
+    # the door, `create_site/2` has exactly one caller downstream of that guard,
+    # no update path can NULL an existing `bootstrap_dataset`, and the guard and
+    # the node kind landed in the SAME commit (afa5c5d49d) — so no unbound node
+    # row can exist today. This pass is the BACKSTOP for a door-guard regression,
+    # and a backstop covering 2 of 3 kinds fails SILENTLY.
     {static_failed, static_rows} =
       from(d in Deployment,
         join: s in Site,
         on: s.id == d.site_id,
-        where: d.status == "queued" and s.kind == "static" and is_nil(s.bootstrap_dataset),
-        select: {d.id, d.site_id}
+        where:
+          d.status == "queued" and s.kind in ["static", "node"] and
+            is_nil(s.bootstrap_dataset),
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> Repo.update_all(
         set: [
@@ -9515,8 +11022,10 @@ defmodule BarkparkCloud.Registry do
     # Container rows are out of scope: they legitimately wait on the off-box
     # builder's claim (`queued_deploy_age_map/1` is that class's read-only
     # alarm), and failing a queue for being a queue would be a new defect.
-    # `d.status == "queued"` also keeps a HUMAN-CANCELLED row (status
-    # "cancelled") out — nothing here resurrects or re-terminates one.
+    # `d.status == "queued"` also keeps an ALREADY-CANCELLED row (status
+    # "cancelled") out — nothing here resurrects or re-terminates one. Such a
+    # row was cancelled by the fleet, never by a person: no human cancel path
+    # exists (`dr-w16-bl-cancelled-rows-rationale-is-wrong`).
     spawn_budget_before =
       DateTime.add(now, -(max_claims * deployment_stale_after_seconds()), :second)
 
@@ -9527,7 +11036,7 @@ defmodule BarkparkCloud.Registry do
         where:
           d.status == "queued" and d.claim_epoch == 0 and s.kind in ["static", "node"] and
             d.inserted_at < ^spawn_budget_before,
-        select: {d.id, d.site_id}
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> where(^not_awaiting_prebuilt_upload())
       |> Repo.update_all(
@@ -9553,7 +11062,7 @@ defmodule BarkparkCloud.Registry do
     #
     # Its own window — `prebuilt_upload_grace_seconds/0`, not the fleet's lease
     # or claim budget — because what it waits on is the CLIENT'S build, not any
-    # worker of ours. `d.status == "queued"` keeps a human-cancelled row and a
+    # worker of ours. `d.status == "queued"` keeps an already-cancelled row and a
     # row whose upload DID arrive (the artifact route starts the driver, which
     # claims it out of `queued`) out by construction; `is_nil(artifact_sha256)`
     # is the second, independent proof that no bytes ever landed.
@@ -9563,7 +11072,7 @@ defmodule BarkparkCloud.Registry do
     {upload_missing_failed, upload_missing_rows} =
       from(d in Deployment,
         where: d.status == "queued" and d.inserted_at < ^prebuilt_grace_before,
-        select: {d.id, d.site_id}
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> where(^awaiting_prebuilt_upload())
       |> Repo.update_all(
@@ -9582,7 +11091,7 @@ defmodule BarkparkCloud.Registry do
         where:
           d.status == "building" and d.claimed_at < ^stale_before and
             d.claim_epoch >= ^max_claims,
-        select: {d.id, d.site_id}
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> Repo.update_all(
         set: [
@@ -9617,7 +11126,7 @@ defmodule BarkparkCloud.Registry do
         where:
           d.status == "pushing" and not is_nil(d.claim_worker) and
             d.claimed_at < ^stale_before and d.claim_epoch >= ^max_claims,
-        select: {d.id, d.site_id}
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> Repo.update_all(
         set: [
@@ -9699,7 +11208,7 @@ defmodule BarkparkCloud.Registry do
         where:
           d.status == "pushing" and is_nil(d.claim_worker) and
             d.updated_at < ^handoff_budget_before,
-        select: {d.id, d.site_id}
+        select: {d.id, d.site_id, d.stage, d.git_ref, d.content_rev, d.build_id}
       )
       |> Repo.update_all(
         set: [
@@ -9715,8 +11224,8 @@ defmodule BarkparkCloud.Registry do
     pushing_failed = claimed_pushing_failed + abandoned_pushing_failed
 
     # notifications (wave 28 S6): the reaper is the OTHER half of the covering
-    # set. These four passes are bare `Repo.update_all` writes — no changeset, no
-    # callback — so they never touch `transition_deployment_fenced/4`, and a
+    # set. These seven terminal passes are bare `Repo.update_all` writes — no
+    # changeset, no callback — so they never touch `transition_deployment_fenced/4`, and a
     # route-side-only dispatch would silently miss every reaped deployment. The
     # rows are named via `select:` in the query, NOT the `returning:` option: on
     # this Ecto (3.14.0) / Postgrex (0.22.2) pair `Repo.update_all(q, sets,
@@ -9735,7 +11244,16 @@ defmodule BarkparkCloud.Registry do
       {abandoned_pushing_rows, @instance_unreachable_reason}
     ]
     |> Enum.flat_map(fn {rows, reason} ->
-      Enum.map(rows || [], fn {id, site_id} -> {site_id, reason, %{deployment_id: id}} end)
+      Enum.map(rows || [], fn {id, site_id, stage, git_ref, content_rev, build_id} ->
+        {site_id, reason,
+         deployment_identity(%{
+           id: id,
+           stage: stage,
+           git_ref: git_ref,
+           content_rev: content_rev,
+           build_id: build_id
+         })}
+      end)
     end)
     |> dispatch_reaped_deployment_alerts()
 
@@ -9864,25 +11382,80 @@ defmodule BarkparkCloud.Registry do
   # `create_failed_deployment/3`'s born-failed row — so neither can be narrowed
   # without the other. The struct is what carries `environment`, which is why the
   # gate sits on the /1 arity and not on /3.
+  # dr-w13-bl-abandonment-splits-off-the-flood (charter D193): AND THE CHAIN THE
+  # FLEET GAVE UP ON IS NOT THE SAME EVENT AS THE ONE THAT FAILED. Both terminals
+  # come down this one funnel, so the split is a branch here and nowhere else —
+  # no second producer, no second dispatch, no reaper.
+  #
+  # THE ABANDONMENT BRANCH SITS ABOVE THE NARROWING, and the order is the
+  # ruling. `destroyed_content?/1` suppresses a failure whenever the site is
+  # already serving something, which is TRUE of an abandoned chain almost every
+  # time — the site keeps serving the revision before the one nobody could ship.
+  # Below the gate, the most severe outcome in the fleet would be the quietest.
+  # It is a DIFFERENT question anyway: that predicate asks whether this attempt
+  # cost a reader anything, and this one asks whether the fleet stopped trying.
+  #
+  # The narrowing is otherwise untouched: a routine failure still asks
+  # `destroyed_content?/1` and still dispatches `:deployment_failed`, so this
+  # split reclassifies none of the ~870-a-day flood.
+  #
+  # task-2db350610ca0a168: AND THE GATE IS NOW `alarm?/1`, WHICH IS BOTH HALVES.
+  # `destroyed_content?/1` alone answers a question about the SITE, so it says
+  # the same thing to every attempt while the site is dark — 135 failures in an
+  # hour passed it 135 times. `alarm?/1` is that narrowing AND the per-site
+  # episode latch, and producers call it rather than either half so the two
+  # cannot be picked up separately. The abandonment branch stays ABOVE it and is
+  # therefore unlatched, for the reason the paragraph above gives: it is a
+  # different event, and the most severe outcome in the fleet must not be the
+  # one the volume ruling quiets.
   defp dispatch_deployment_failed(%Deployment{} = deployment) do
-    if DeploymentFailedPolicy.destroyed_content?(deployment) do
-      dispatch_deployment_failed(
-        deployment.site_id,
-        deployment.failure_reason,
-        deployment_identity(deployment)
-      )
-    else
-      :ok
+    cond do
+      AbandonmentPolicy.abandonment?(deployment) ->
+        dispatch_deployment_abandoned(deployment)
+
+      DeploymentFailedPolicy.alarm?(deployment) ->
+        dispatch_deployment_failed(
+          deployment.site_id,
+          deployment.failure_reason,
+          deployment_identity(deployment)
+        )
+
+      true ->
+        :ok
     end
+  end
+
+  # The abandonment payload is the failure payload PLUS the refusal count, which
+  # is what the copy needs to say what was given up on and after how many tries
+  # (charter D194: the CHAIN was abandoned — never "your content never reached
+  # the web", which the data does not support; site `d8e9c2c7` deferred again 68
+  # seconds after its chain died). `refusals/1` answers `nil` on a row that does
+  # not carry the column, and both renderers degrade the clause rather than
+  # invent a number.
+  #
+  # ONE LINE for the `dispatch_site_event(` call, deliberately: `__app.test.mjs`'s
+  # producer census matches its idioms per SOURCE LINE, so a call the formatter
+  # wrapped is INVISIBLE to it and this event would be reported as an orphaned
+  # console offer while the producer sat right here.
+  defp dispatch_deployment_abandoned(%Deployment{} = deployment) do
+    payload =
+      deployment.failure_reason
+      |> deployment_failed_payload(deployment_identity(deployment))
+      |> put_present(:refusals, AbandonmentPolicy.refusals(deployment))
+
+    Notifications.dispatch_site_event(deployment.site_id, :deployment_abandoned, payload)
   end
 
   # Site-keyed, because a Deployment only `belongs_to :site` and the alert's team
   # lives one hop further out. `Notifications.dispatch_site_event/3` resolves the
   # team through the site and names the site in the alert; it never raises.
   #
-  # `identity` is whatever the call site actually HOLDS — the two struct-bearing
-  # sites carry the full identity, the reaper carries the id its `select:`
-  # already named. Nothing is synthesized to fill a gap.
+  # `identity` is whatever the call site actually HOLDS, and as of
+  # dr-w15-bl-reaper-alert-identity-is-id-only that is the SAME identity on every
+  # path: the reaper's seven sweep `select:` clauses carry
+  # `{id, site_id, stage, git_ref, content_rev, build_id}`, so the reaped alert
+  # names the deployment exactly the way a fenced-writer alert does. Nothing is
+  # synthesized to fill a gap — every part is still a real column.
   defp dispatch_deployment_failed(site_id, failure_reason, identity) when is_map(identity) do
     Notifications.dispatch_site_event(
       site_id,
@@ -9917,23 +11490,39 @@ defmodule BarkparkCloud.Registry do
   # is not build time (`Sites.Deploy.record_stage/2` writes RETIRE-skipped
   # console entries onto rows that are already failed — measured median drift
   # 65s, max 2,270s). A fabricated number is worse than an absent one.
+  # TWO CALL SITES, ONE FORMATTER (dr-w15-bl-reaper-alert-identity-is-id-only).
+  # The struct-bearing producers hand it a `%Deployment{}`; the reaper hands it
+  # the plain map its widened `select:` now yields. The struct clause DELEGATES
+  # rather than duplicating, so the two paths cannot drift into naming the same
+  # deployment two different ways — the same "one story, two envelopes" property
+  # `Notifications.Render.deployment_identity/1` exists for, one layer down.
   defp deployment_identity(%Deployment{} = deployment) do
-    %{deployment_id: deployment.id}
-    |> put_present(:stage, deployment.stage)
-    |> put_code_identity(deployment)
+    deployment_identity(%{
+      id: deployment.id,
+      stage: deployment.stage,
+      git_ref: deployment.git_ref,
+      content_rev: deployment.content_rev,
+      build_id: deployment.build_id
+    })
   end
 
-  defp put_code_identity(identity, %Deployment{git_ref: ref}) when is_binary(ref) and ref != "",
+  defp deployment_identity(%{id: id} = row) do
+    %{deployment_id: id}
+    |> put_present(:stage, row.stage)
+    |> put_code_identity(row)
+  end
+
+  defp put_code_identity(identity, %{git_ref: ref}) when is_binary(ref) and ref != "",
     do: Map.put(identity, :git_ref, ref)
 
-  defp put_code_identity(identity, %Deployment{content_rev: rev})
+  defp put_code_identity(identity, %{content_rev: rev})
        when is_binary(rev) and rev != "",
        do: Map.put(identity, :content_rev, rev)
 
-  defp put_code_identity(identity, %Deployment{build_id: id}) when is_binary(id) and id != "",
+  defp put_code_identity(identity, %{build_id: id}) when is_binary(id) and id != "",
     do: Map.put(identity, :build_id, id)
 
-  defp put_code_identity(identity, %Deployment{}), do: identity
+  defp put_code_identity(identity, _row), do: identity
 
   defp put_present(identity, _key, value) when value in [nil, ""], do: identity
   defp put_present(identity, key, value), do: Map.put(identity, key, value)
@@ -9956,16 +11545,16 @@ defmodule BarkparkCloud.Registry do
   #
   # dr-w11-bl-deployment-failed-alarm-fatigue: THE THIRD PRODUCER, NARROWED BY
   # THE SAME PREDICATE. The reaper's rows never pass through
-  # `dispatch_deployment_failed/1` — the four bulk passes are bare
+  # `dispatch_deployment_failed/1` — the seven terminal bulk passes are bare
   # `Repo.update_all` writes — so the gate has to be repeated here or the reaped
   # half of the covering set keeps sending. The filter is on the ENQUEUE and not
   # inside `DeploymentAlertWorker`, so a suppressed alert costs no Oban row at
   # all; the worker's own `dispatch_site_event(_, :deployment_failed, _)` is fed
   # by nothing but this list.
   #
-  # The reaper holds only the `{id, site_id}` its `select:` named, so the policy
-  # gets no `:environment` and asks the site question unqualified. That is not a
-  # gap: `DeployLedger.content_on_web?/1` is production-scoped either way.
+  # The reaper's `select:` names identity columns, never `:environment`, so the
+  # policy asks the site question unqualified. That is not a gap:
+  # `DeployLedger.content_on_web?/1` is production-scoped either way.
   defp dispatch_reaped_deployment_alerts([]), do: :ok
 
   defp dispatch_reaped_deployment_alerts(alerts) do
@@ -10006,15 +11595,45 @@ defmodule BarkparkCloud.Registry do
   # two rows of the same site. The verdict map is built first, then applied — the
   # single predicate is still `DeploymentFailedPolicy.destroyed_content?/1`, so
   # the reaper and the two synchronous producers cannot drift apart.
+  #
+  # task-2db350610ca0a168: AND THE LATCH IS APPLIED HERE TOO, still at one read
+  # per distinct site. The narrowing's verdict cannot differ between two rows of
+  # one site; the LATCH deliberately can, and must — a mass reap that terminates
+  # 27 rows of one dark site is precisely the shape the volume ruling exists to
+  # bound, and it must collapse to ONE alert rather than to 27 or to 0.
+  #
+  # WHY THE EARLIEST ID AND NOT "HAS A SIBLING". The four bulk passes have
+  # already committed when this runs, so all 27 rows are in the table and all 27
+  # can see each other; "does another failed row exist" is true for every one of
+  # them and would silence the site completely. Naming the single earliest row
+  # is the same verdict whether the rows arrived one at a time or together.
+  #
+  # A reaped row whose id is not the episode notice is dropped BEFORE the Oban
+  # insert, so a latched alert costs no job row, exactly as a narrowed one does.
   defp destroyed_content_alerts(alerts) do
     verdicts =
       alerts
       |> Enum.map(fn {site_id, _reason, _identity} -> site_id end)
       |> Enum.uniq()
-      |> Map.new(&{&1, DeploymentFailedPolicy.destroyed_content?(%{site_id: &1})})
+      |> Map.new(
+        &{&1,
+         {DeploymentFailedPolicy.destroyed_content?(%{site_id: &1}),
+          DeploymentFailedPolicy.episode_notice_id(&1)}}
+      )
 
-    Enum.filter(alerts, fn {site_id, _reason, _identity} -> Map.fetch!(verdicts, site_id) end)
+    Enum.filter(alerts, fn {site_id, _reason, identity} ->
+      {destroyed?, notice_id} = Map.fetch!(verdicts, site_id)
+      destroyed? and episode_notice?(notice_id, Map.get(identity, :deployment_id))
+    end)
   end
+
+  # UNKEYABLE IS NOT QUIET (charter D3), the same ruling
+  # `DeploymentFailedPolicy.first_notice_of_episode?/1` makes on the synchronous
+  # paths: a site the ledger names no failed row for, or an identity carrying no
+  # deployment id, is alerted rather than silently dropped.
+  defp episode_notice?(nil, _deployment_id), do: true
+  defp episode_notice?(_notice_id, nil), do: true
+  defp episode_notice?(notice_id, deployment_id), do: notice_id == deployment_id
 
   # The narrowing can empty a non-empty sweep, and an empty sweep must not reach
   # `Oban.insert_all/1` — the same reason the head clause above exists.

@@ -44,7 +44,15 @@ defmodule BarkparkWeb.Studio.StudioLiveWidthBucketTest do
 
   setup %{conn: conn} do
     {_ws, _proj} = TenancyFixtures.ensure_default_scope!()
-    {:ok, _} = Auth.create_token(@readonly, "spd-s4 readonly", @dataset, ["read"])
+
+    {:ok, _} =
+      Auth.create_token(
+        @readonly,
+        "spd-s4 readonly",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, _schema} =
       Content.upsert_schema(

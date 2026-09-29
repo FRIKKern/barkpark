@@ -157,6 +157,74 @@ defmodule BarkparkCloud.Web.RouterAttachDomainTest do
       assert Registry.get_barkpark(bp.id).custom_host == @domain
     end
 
+    # task-353dacaf39f33244 — the attach enqueue reaches the SAME
+    # `instance_deprovisioning?/1` the verify route already calls. Attaching a
+    # domain to a box whose teardown is already queued points DNS at a machine
+    # the deprovision worker is deleting. NOTE the row's own limit: this NARROWS
+    # the window, it does NOT close the race — a deprovision enqueued just after
+    # this check still beats the attach worker, and the worker-side gate from PR
+    # #14039 (AttachDomainWith re-checking liveness before AND after the
+    # platform A-record upsert) remains the durable fix.
+    test "deprovisioning instance → 409 not_live; nothing persisted, nothing enqueued" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = session_token(user)
+
+      {:ok, dep} = Registry.enqueue_deprovision_job(bp)
+      assert dep.status == "pending"
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: @domain}, token)
+
+      assert conn.status == 409
+      assert json_body(conn) == %{"error" => "not_live"}
+
+      # The refusal is BEFORE the persist: no custom_host on the row, no
+      # attach_domain job, and the ask-gate still refuses the host.
+      assert is_nil(Registry.get_barkpark(bp.id).custom_host)
+      assert active_attaches(bp) == 0
+      assert call(:get, "/v1/tls/ask?domain=#{@domain}").status == 404
+
+      # A CLAIMED deprovision refuses identically (both states the predicate
+      # names).
+      {:ok, _} = dep |> Ecto.Changeset.change(%{status: "claimed"}) |> Repo.update()
+      claimed = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: @domain}, token)
+      assert claimed.status == 409
+      assert json_body(claimed) == %{"error" => "not_live"}
+    end
+
+    # CONTROL for the 409 above, and the scope proof for the predicate's NAME:
+    # `instance_deprovisioning?/1` decides ONLY "is the LATEST deprovision job
+    # pending or claimed". The same instance, same domain, with the deprovision
+    # in a TERMINAL state, still attaches — so the guard is not a blanket
+    # "unhealthy box" refusal that would break the ordinary attach.
+    test "healthy instance still attaches (202), and a terminal deprovision does not block it" do
+      {user, team} = user_with_team()
+      healthy = live_barkpark(team)
+      token = session_token(user)
+
+      ok = call(:post, "/v1/barkparks/#{healthy.id}/domain", %{domain: @domain}, token)
+      assert ok.status == 202
+      assert json_body(ok)["status"] == "attaching"
+      assert Registry.get_barkpark(healthy.id).custom_host == @domain
+      assert active_attaches(healthy) == 1
+
+      # Second box: a deprovision that already FAILED is not "on its way out".
+      other = live_barkpark(team)
+      {:ok, dep} = Registry.enqueue_deprovision_job(other)
+      {:ok, _} = dep |> Ecto.Changeset.change(%{status: "failed"}) |> Repo.update()
+
+      revived =
+        call(
+          :post,
+          "/v1/barkparks/#{other.id}/domain",
+          %{domain: "revived.barkpark.cloud"},
+          token
+        )
+
+      assert revived.status == 202
+      assert active_attaches(other) == 1
+    end
+
     test "malformed domain → 422 invalid_domain; missing → 422 domain_required; nothing persisted or enqueued" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
@@ -192,6 +260,69 @@ defmodule BarkparkCloud.Web.RouterAttachDomainTest do
 
       assert conn.status == 409
       assert json_body(conn) == %{"error" => "taken"}
+      assert Registry.get_barkpark(bp.id).custom_host == nil
+      assert active_attaches(bp) == 0
+    end
+
+    # dr-w26-bl-claim-leg-refusal-reaches-no-human — THE LEG REACHES THE WIRE.
+    #
+    # The test above holds the name with another instance's `custom_host`, a
+    # surface `provisioning_fqdn_claim/2` does not walk, so its body is the bare
+    # `taken` and stays that way. THIS one holds the name with another
+    # instance's PROVISIONING FQDN — the walk that writes `{:held, leg, why}` —
+    # and asserts the leg lands on the body, that MUTATING which leg holds it
+    # changes the body, and that the row-identifying half of the operator
+    # sentence does NOT ride along.
+    test "held by a provisioning FQDN → 409 taken CARRIES the leg, and mutating the leg changes the body" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = session_token(user)
+
+      # The holder: an old, silent row whose url IS @domain, holding the name on
+      # its decryptable admin credential.
+      holder =
+        barkpark_fixture(elem(user_with_team(), 1))
+        |> Ecto.Changeset.change(
+          url: "https://" <> @domain,
+          inserted_at: DateTime.add(DateTime.utc_now(), -30, :day)
+        )
+        |> Repo.update!()
+
+      holder =
+        holder |> Ecto.Changeset.change(admin_token_encrypted: "ciphertext") |> Repo.update!()
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: @domain}, token)
+      credential_body = json_body(conn)
+
+      assert conn.status == 409
+      assert credential_body["error"] == "taken"
+      assert credential_body["claim_leg"] == "admin_credential"
+      assert credential_body["detail"] =~ "live credential"
+
+      # THE DISCLOSURE FENCE. The operator sentence names the holding row, its
+      # team and its liveness timeline; the caller is a DIFFERENT team, so none
+      # of that may ride the wire.
+      rendered = Enum.join(Map.values(credential_body), " ")
+      refute rendered =~ holder.id
+      refute rendered =~ holder.team_id
+
+      # MUTATION — the leg, and only the leg. Drop the credential and let the
+      # row phone home instead: the SAME hostname, the SAME refusal, a different
+      # leg, and the body must say so.
+      holder
+      |> Ecto.Changeset.change(admin_token_encrypted: nil, last_seen_at: DateTime.utc_now())
+      |> Repo.update!()
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: @domain}, token)
+      reporting_body = json_body(conn)
+
+      assert conn.status == 409
+      assert reporting_body["error"] == "taken"
+      assert reporting_body["claim_leg"] == "agent_reporting"
+      refute reporting_body["claim_leg"] == credential_body["claim_leg"]
+      refute reporting_body["detail"] == credential_body["detail"]
+
+      # And nothing was written or enqueued on either refusal.
       assert Registry.get_barkpark(bp.id).custom_host == nil
       assert active_attaches(bp) == 0
     end

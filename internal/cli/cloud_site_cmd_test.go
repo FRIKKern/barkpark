@@ -32,6 +32,12 @@ import (
 // fleet list call.
 const testSiteID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
+// testSiteSlug is the SAME site addressed the way an operator types it. The
+// control plane resolves a team-scoped slug itself (Registry.get_team_site/2),
+// so `/v1/sites/blog/...` and `/v1/sites/<uuid>/...` are the same row there —
+// the fake below routes them together while recording the path bp ACTUALLY sent.
+const testSiteSlug = "blog"
+
 // --instance is MANDATORY on create; the package-level testInstanceID (declared in
 // cloud_webhook_cmd_test.go) is a valid UUID, so resolveOpenBarkparkID passes it
 // through without a fleet-list call.
@@ -46,6 +52,19 @@ type siteCP struct {
 	lastAuth   string
 	deployHits int
 	pollHits   int
+	// wireLog records every request the fake served, in order, as "METHOD path".
+	// A LATENCY row is a round-trip row: the only machine-independent thing a
+	// test can pin about how long `bp cloud site rollback` takes is HOW MANY
+	// times it goes to the control plane and why. A wall-clock assertion passes
+	// forever on a fast box and reds under CI load for reasons that have nothing
+	// to do with the code; the request sequence reds exactly when someone adds a
+	// round trip. (task-b017df2fda0fe600)
+	wireLog []string
+	// GET /v1/sites — the list-ALL read `resolveOpenSiteID` issues to turn a
+	// slug into the uuid the CP route requires. sitesListHits counts it.
+	sitesListResp fakeResp
+	sitesListHits int
+	rollHits      int
 	// per-route responses (status, body)
 	createResp fakeResp
 	deployResp fakeResp
@@ -65,6 +84,10 @@ type siteCP struct {
 	listResp  fakeResp
 	listHits  int
 	listQuery string
+	// listQueries records EVERY list query in order — listQuery keeps only the
+	// last, which cannot see a keyset walk at all: the whole point of a walk is
+	// that request 2 carries a `before=` the first one handed back.
+	listQueries []string
 	// listSeq, when non-empty, answers the n-th LIST read with its n-th entry
 	// (the last entry repeats) — the --wait-for-live loop reads the list
 	// repeatedly, and its tests need the rebuild to appear live only on a later
@@ -76,7 +99,12 @@ type siteCP struct {
 	// POST /v1/sites/:id/deployments/:dep/artifact — the prebuilt lane's second
 	// call. The recorded Content-Length is the point of the test: a piped upload
 	// arrives chunked (-1) and the server cannot reject it early.
-	artifactResp   fakeResp
+	artifactResp fakeResp
+	// artifactRespFn, when set, BUILDS the artifact response from the request the
+	// fake actually received — the only way a test can pin the client against a
+	// digest the control plane computed over the real wire bytes rather than one
+	// hard-coded beside them (ssw9-cli-prebuilt-followups).
+	artifactRespFn func(sha string, n int) fakeResp
 	artifactHits   int
 	artifactBody   []byte
 	artifactLen    int64
@@ -114,7 +142,24 @@ func (cp *siteCP) serve() *httptest.Server {
 		cp.lastAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		path := r.URL.Path
+		cp.wireLog = append(cp.wireLog, r.Method+" "+path)
+		// Route the slug form onto the uuid form, exactly as the control plane's
+		// own `Registry.get_team_site/2` does. The wireLog above is appended
+		// BEFORE this rewrite, so a test still asserts the literal path bp put on
+		// the wire — the rewrite decides which case answers, never what was seen.
+		path = strings.Replace(path, "/v1/sites/"+testSiteSlug, "/v1/sites/"+testSiteID, 1)
 		switch {
+		// GET /v1/sites is the list-ALL read that `resolveOpenSiteID` issues when
+		// the ref is not already a uuid. It is a real round trip on every
+		// slug-addressed verb, and before this case the default arm t.Fatal'd —
+		// which is exactly why no test had ever exercised the slug path.
+		case r.Method == "GET" && path == "/v1/sites":
+			cp.sitesListHits++
+			if cp.sitesListResp.body == "" && cp.sitesListResp.status == 0 {
+				cp.write(w, fakeResp{200, `{"sites":[{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static"}]}`})
+				break
+			}
+			cp.write(w, cp.sitesListResp)
 		case r.Method == "POST" && path == "/v1/sites":
 			cp.createBody, _ = io.ReadAll(r.Body)
 			cp.write(w, cp.createResp)
@@ -129,6 +174,10 @@ func (cp *siteCP) serve() *httptest.Server {
 			cp.artifactChunks = len(r.TransferEncoding) > 0
 			cp.artifactSha = r.Header.Get("X-Artifact-Sha256")
 			cp.artifactBody, _ = io.ReadAll(r.Body)
+			if cp.artifactRespFn != nil {
+				cp.write(w, cp.artifactRespFn(cp.artifactSha, len(cp.artifactBody)))
+				break
+			}
 			cp.write(w, cp.artifactResp)
 		case r.Method == "GET" && strings.HasPrefix(path, "/v1/sites/"+testSiteID+"/deployments/"):
 			cp.pollHits++
@@ -141,6 +190,7 @@ func (cp *siteCP) serve() *httptest.Server {
 		case r.Method == "GET" && path == "/v1/sites/"+testSiteID+"/deployments":
 			cp.listHits++
 			cp.listQuery = r.URL.RawQuery
+			cp.listQueries = append(cp.listQueries, r.URL.RawQuery)
 			if len(cp.listSeq) > 0 {
 				n := cp.listHits
 				if n > len(cp.listSeq) {
@@ -155,6 +205,7 @@ func (cp *siteCP) serve() *httptest.Server {
 			}
 			cp.write(w, cp.listResp)
 		case r.Method == "POST" && path == "/v1/sites/"+testSiteID+"/rollback":
+			cp.rollHits++
 			cp.write(w, cp.rollResp)
 		case r.Method == "DELETE" && path == "/v1/sites/"+testSiteID:
 			cp.write(w, cp.deleteResp)
@@ -162,6 +213,19 @@ func (cp *siteCP) serve() *httptest.Server {
 			cp.patchBody, _ = io.ReadAll(r.Body)
 			cp.write(w, cp.patchResp)
 		case r.Method == "GET" && path == "/v1/sites/"+testSiteID:
+			// Default body, for the same reason the LIST route above has one: the
+			// `--prebuilt` lane now READS the site row before it mints (the
+			// opt-in preflight, ssw10-prebuilt-preflight-opt-in), so every
+			// pre-existing prebuilt test would otherwise hit an unset fakeResp —
+			// a 200 with an empty body — and fail to decode. An opted-in site is
+			// what those tests have always been modelling: they assert the mint
+			// and the upload SUCCEED, which the control plane only allows for a
+			// site whose prebuilt_enabled is true. A test that wants the other
+			// answer sets getResp itself.
+			if cp.getResp.body == "" && cp.getResp.status == 0 {
+				cp.write(w, fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","prebuilt_enabled":true}}`})
+				break
+			}
 			cp.write(w, cp.getResp)
 		default:
 			cp.t.Fatalf("unexpected request %s %s", r.Method, path)
@@ -507,7 +571,7 @@ func TestRunCloudSiteCreateNode(t *testing.T) {
 // SpawnSite + spawnSiteMap threaded the fields).
 func TestRunCloudSiteStatusNodeFields(t *testing.T) {
 	cp := newSiteCP(t)
-	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"app","slug":"app","kind":"node","framework":"nextjs","workspace":"acme","project":"app","dataset":"production","runtime_target":"node-slot","port":4301,"port_base":4300,"url":"https://acme.barkpark.cloud/sites/app/","current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","runtime_target":"node-slot","port":4301,"stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"app","slug":"app","kind":"node","framework":"nextjs","workspace":"acme","project":"app","dataset":"production","runtime_target":"node-slot","port":4301,"port_base":4300,"url":"https://acme.barkpark.cloud/sites/app/","current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","port":4301,"stages":[{"name":"PLAN","status":"done"}]}}}`}
 	cp.serve()
 
 	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
@@ -529,10 +593,7 @@ func TestRunCloudSiteStatusNodeFields(t *testing.T) {
 			Port          int    `json:"port"`
 			PortBase      int    `json:"port_base"`
 		} `json:"site"`
-		Deployment struct {
-			RuntimeTarget string `json:"runtime_target"`
-			Port          int    `json:"port"`
-		} `json:"deployment"`
+		Deployment map[string]any `json:"deployment"`
 	}
 	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
 		t.Fatalf("status json not parseable: %v\n%s", err, jstdout)
@@ -540,8 +601,14 @@ func TestRunCloudSiteStatusNodeFields(t *testing.T) {
 	if env.Site.RuntimeTarget != "node-slot" || env.Site.Port != 4301 || env.Site.PortBase != 4300 {
 		t.Fatalf("status -o json dropped the node site fields: %+v\n%s", env.Site, jstdout)
 	}
-	if env.Deployment.RuntimeTarget != "node-slot" || env.Deployment.Port != 4301 {
-		t.Fatalf("status -o json dropped the node deployment fields: %+v\n%s", env.Deployment, jstdout)
+	if port, _ := env.Deployment["port"].(float64); port != 4301 {
+		t.Fatalf("status -o json dropped the node deployment port: %+v\n%s", env.Deployment, jstdout)
+	}
+	// The runtime target is not a DEPLOYMENT fact (dr-w11-payload-divergence-close):
+	// the control plane never emits it on a deployment row, so the deployment
+	// envelope must not grow one.
+	if _, has := env.Deployment["runtime_target"]; has {
+		t.Fatalf("status -o json put runtime_target on the deployment, which the plane never sends: %+v", env.Deployment)
 	}
 }
 
@@ -659,12 +726,16 @@ func TestRunCloudSiteRollbackNode(t *testing.T) {
 }
 
 // TestRunCloudSiteDeployNodeJSON proves the deploy stream's `-o json` surfaces the
-// node runtime_target/port the server stamped on the deployment — they would be
-// silently dropped without SiteDeployment carrying the fields.
+// node slot port the server stamped on the deployment — it would be silently
+// dropped without SiteDeployment carrying the field. The fixture carries NO
+// runtime_target: deployment_json/1 never emits one (it rides only the box's
+// deploy/rollback payloads), and a
+// fixture richer than the producer is what hid that for five weeks
+// (producer_contract_test.go).
 func TestRunCloudSiteDeployNodeJSON(t *testing.T) {
 	cp := newSiteCP(t)
 	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stages":[]}}`}
-	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"live","stage":"RETIRE","build_id":"b-1","runtime_target":"node-slot","port":4301,"url":"https://acme.barkpark.cloud/sites/app/","stages":[` +
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"live","stage":"RETIRE","build_id":"b-1","port":4301,"url":"https://acme.barkpark.cloud/sites/app/","stages":[` +
 		`{"name":"PLAN","status":"done"},{"name":"BUILD","status":"done"},{"name":"STAGE","status":"done"},` +
 		`{"name":"HEALTH","status":"done"},{"name":"SWITCH","status":"done"},{"name":"RETIRE","status":"done"}]}}`}
 	cp.serve()
@@ -674,15 +745,14 @@ func TestRunCloudSiteDeployNodeJSON(t *testing.T) {
 	}
 	var env struct {
 		Deployment struct {
-			RuntimeTarget string `json:"runtime_target"`
-			Port          int    `json:"port"`
+			Port int `json:"port"`
 		} `json:"deployment"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
 		t.Fatalf("json not parseable: %v\n%s", err, stdout)
 	}
-	if env.Deployment.RuntimeTarget != "node-slot" || env.Deployment.Port != 4301 {
-		t.Fatalf("deploy -o json dropped the node fields: %+v\n%s", env.Deployment, stdout)
+	if env.Deployment.Port != 4301 {
+		t.Fatalf("deploy -o json dropped the node port: %+v\n%s", env.Deployment, stdout)
 	}
 }
 
@@ -851,6 +921,80 @@ func TestRunCloudSiteCreateDeployInstanceNotLive(t *testing.T) {
 	}
 	if strings.Contains(stdout, "site live") {
 		t.Fatalf("instance-not-live must never claim the site is live:\n%s", stdout)
+	}
+}
+
+// TestChainSiteDeployBranchesOnStatusNotSubstring is the BOTH-STATUSES arm of
+// task-4ee4b6588ea91fc6. The control plane emits ONE slug, `instance_not_live`,
+// at TWO statuses with OPPOSITE remedies, so a guard that reads only the slug
+// cannot be right about both:
+//
+//   - 422 — the box has no URL yet. RETRYABLE: say "still provisioning" and
+//     point at `bp cloud site deploy`.
+//   - 409 — the box was deprovisioned in flight (do_bind_cloudflare fails
+//     closed). It is GONE: retrying never works, so the retry hint is a lie and
+//     the exit must be the conflict family, not the generic one.
+//
+// A single-status test cannot distinguish the old substring guard from the new
+// typed one — only the pair can. RED BEFORE the fix on the 409 arm: the
+// substring matched, the operator was told to retry a box that no longer
+// exists, and the exit was exitGeneric.
+func TestChainSiteDeployBranchesOnStatusNotSubstring(t *testing.T) {
+	const created = `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`
+
+	t.Run("422 is retryable — keep the provisioning hint", func(t *testing.T) {
+		cp := newSiteCP(t)
+		cp.createResp = fakeResp{200, created}
+		cp.deployResp = fakeResp{422, `{"error":"instance_not_live","detail":"the instance has no URL yet"}`}
+		cp.serve()
+
+		stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID, "--deploy")
+		if code != exitGeneric {
+			t.Fatalf("a 422 instance_not_live must stay the retryable create-chain refusal (exit %d), got %d\nstdout:%s\nstderr:%s", exitGeneric, code, stdout, stderr)
+		}
+		if !strings.Contains(stderr, "still provisioning") || !strings.Contains(stderr, "bp cloud site deploy") {
+			t.Fatalf("the 422 arm lost its retry hint:\n%s", stderr)
+		}
+	})
+
+	t.Run("409 is fail-closed — never tell them to retry a freed box", func(t *testing.T) {
+		cp := newSiteCP(t)
+		cp.createResp = fakeResp{200, created}
+		cp.deployResp = fakeResp{409, `{"error":"instance_not_live","detail":"the instance backing this site was deprovisioned while this request was in flight"}`}
+		cp.serve()
+
+		stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID, "--deploy")
+		if code == exitGeneric {
+			t.Fatalf("a 409 instance_not_live took the 422 retry branch — the guard read the slug, not the status\nstdout:%s\nstderr:%s", stdout, stderr)
+		}
+		if code != exitConflict {
+			t.Fatalf("a 409 instance_not_live must exit %d (%s), got %d (%s)\nstderr:%s", exitConflict, siteExitName(exitConflict), code, siteExitName(code), stderr)
+		}
+		if strings.Contains(stderr, "still provisioning") {
+			t.Fatalf("a deprovisioned box was reported as still provisioning — the box is GONE:\n%s", stderr)
+		}
+		if !strings.Contains(stderr, "deprovisioned") {
+			t.Fatalf("the 409 refusal did not name what the server said:\n%s", stderr)
+		}
+	})
+}
+
+// TestSiteInstanceNotLiveIgnoresProseMentions is the FALSE-POSITIVE arm the
+// substring guard could not have: cloudError folds `detail` INTO the message, so
+// any OTHER refusal quoting the slug in its prose matched. The typed read looks
+// at re.Code, so prose is prose.
+func TestSiteInstanceNotLiveIgnoresProseMentions(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`}
+	cp.deployResp = fakeResp{422, `{"error":"no_content_binding","detail":"this site has no bootstrap dataset (this is not instance_not_live)"}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID, "--deploy")
+	if strings.Contains(stderr, "still provisioning") {
+		t.Fatalf("a no_content_binding refusal that merely MENTIONS the slug took the provisioning branch:\n%s", stderr)
+	}
+	if code == exitOK {
+		t.Fatalf("a refused chained deploy exited 0\nstdout:%s\nstderr:%s", stdout, stderr)
 	}
 }
 
@@ -1566,6 +1710,163 @@ func TestRunCloudSiteRollback(t *testing.T) {
 	}
 }
 
+// --- rollback round-trip cost (task-b017df2fda0fe600) -------------------------
+//
+// THE ROW IS A LATENCY ROW, AND THESE TWO TESTS PIN THE ONE PART OF THE LATENCY
+// A UNIT TEST CAN HONESTLY OWN: the number of control-plane round trips.
+//
+// Measured 2026-09-16 (Apple M4, loadavg 54, N=10 each, against the live
+// api.barkpark.cloud): bp process startup 57-73 ms; GET /v1/sites 343-460 ms by
+// raw curl, 390-496 ms through bp. So the slug path pays ~0.4 s BEFORE the
+// rollback request is issued — 38-46% of the charter's 1000 ms budget — and the
+// original filing's claim that "~0.39 s is unavoidable client + network
+// overhead" is wrong about the word unavoidable: most of it is one discretionary
+// list-ALL read, not a floor.
+//
+// IT IS NO LONGER DISCRETIONARY IN PRINCIPLE ONLY, AND THAT IS WHY THIS TEST
+// FLIPPED. The note above was written when `Registry.get_team_site/2` ran the
+// ref through `uuid_or_nil/1`, so POST /v1/sites/:id/rollback accepted a uuid
+// and NOTHING else, and the test pinned the count at its true value of two.
+// PR #18797 gave that function a `(team_id, slug)` arm, so the control plane
+// resolves the slug itself; `resolveOpenSiteID` hands a slug-shaped ref straight
+// through and the list read is gone. The count is now ONE, and this assertion is
+// the arm that reds if the passthrough is reverted.
+//
+// Why a count and not a clock: a `< 1s` assertion passes on every developer
+// machine regardless of the code and reds under CI load regardless of the code.
+// A round-trip count reds when, and only when, someone puts another request on
+// this path — the thing that actually spends the time.
+func TestRunCloudSiteRollbackBySlugCostsExactlyOneExtraRoundTrip(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, rollbackEnvelope}
+	cp.serve()
+
+	// Addressed by SLUG — the way the live 1840/3021/3820 ms measurements on
+	// guerrilla addressed it, and the way an operator does.
+	_, stderr, code := runSite(t, "table", "rollback", "blog")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	want := []string{
+		"POST /v1/sites/" + testSiteSlug + "/rollback",
+	}
+	if len(cp.wireLog) != len(want) {
+		t.Fatalf("slug rollback must cost exactly %d round trip(s), got %d:\n%v",
+			len(want), len(cp.wireLog), cp.wireLog)
+	}
+	for i, w := range want {
+		if cp.wireLog[i] != w {
+			t.Fatalf("round trip %d = %q, want %q (full log %v)", i+1, cp.wireLog[i], w, cp.wireLog)
+		}
+	}
+	// Named separately so a regression says WHICH leg grew. Zero, not one: the
+	// slug went to the control plane unresolved.
+	if cp.sitesListHits != 0 {
+		t.Fatalf("a slug-addressed rollback must not read GET /v1/sites at all, got %d hits (log %v)",
+			cp.sitesListHits, cp.wireLog)
+	}
+	if cp.rollHits != 1 {
+		t.Fatalf("rollback must POST exactly once, got %d", cp.rollHits)
+	}
+	// The flip is synchronous and the envelope already carries the post-swap
+	// deployment id, so there is NO verification read and NO poll loop after it.
+	// A third request here would be a re-read of state the response already held.
+	if cp.pollHits != 0 || cp.listHits != 0 {
+		t.Fatalf("rollback must not poll or re-read deployments after the flip (poll=%d list=%d)",
+			cp.pollHits, cp.listHits)
+	}
+}
+
+// TestRunCloudSiteRollbackByIDIsASingleRoundTrip is the QUIET arm: given a uuid,
+// `resolveOpenSiteID` short-circuits and the list read must not happen at all.
+// It is the control for the test above — it proves the extra round trip is
+// attributable to slug resolution specifically and not to the rollback verb, and
+// it is the assertion that would catch the opposite regression (an unconditional
+// list read, making every rollback pay ~0.4 s even when addressed by id).
+func TestRunCloudSiteRollbackByIDIsASingleRoundTrip(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, rollbackEnvelope}
+	cp.serve()
+
+	_, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if cp.sitesListHits != 0 {
+		t.Fatalf("a uuid ref must not read GET /v1/sites at all, got %d hits (log %v)",
+			cp.sitesListHits, cp.wireLog)
+	}
+	want := []string{"POST /v1/sites/" + testSiteID + "/rollback"}
+	if len(cp.wireLog) != 1 || cp.wireLog[0] != want[0] {
+		t.Fatalf("id rollback must be exactly one round trip %v, got %v", want, cp.wireLog)
+	}
+}
+
+// TestRunCloudSiteRollbackByDisplayNameStillPaysTheListRead is the FAILURE
+// DIRECTION arm of the slug passthrough, and it is the assertion that would have
+// caught the regression an unconditional passthrough would have shipped.
+//
+// The control plane resolves a uuid or a team-scoped SLUG. It cannot resolve a
+// display NAME — `Registry.get_team_site/2` has exactly two arms — and the list
+// read that `resolveOpenSiteID` used to make unconditionally matched names too.
+// So the saving is gated on SHAPE: a ref with a capital or a space is not a slug
+// the CP could look up, it keeps the list read, and it must still work. A ref
+// this test addresses (`Blog Site`) resolves through GET /v1/sites to the uuid,
+// costing the two round trips the slug path no longer pays.
+func TestRunCloudSiteRollbackByDisplayNameStillPaysTheListRead(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, rollbackEnvelope}
+	// A site whose NAME is not its slug — the only shape the list read still owns.
+	cp.sitesListResp = fakeResp{200,
+		`{"sites":[{"id":"` + testSiteID + `","name":"Blog Site","slug":"blog","kind":"static"}]}`}
+	cp.serve()
+
+	_, stderr, code := runSite(t, "table", "rollback", "Blog Site")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if cp.sitesListHits != 1 {
+		t.Fatalf("a display-name ref must still resolve through GET /v1/sites exactly once, got %d (log %v)",
+			cp.sitesListHits, cp.wireLog)
+	}
+	want := []string{"GET /v1/sites", "POST /v1/sites/" + testSiteID + "/rollback"}
+	if len(cp.wireLog) != len(want) {
+		t.Fatalf("name rollback must cost exactly %d round trips, got %d:\n%v",
+			len(want), len(cp.wireLog), cp.wireLog)
+	}
+	for i, w := range want {
+		if cp.wireLog[i] != w {
+			t.Fatalf("round trip %d = %q, want %q (full log %v)", i+1, cp.wireLog[i], w, cp.wireLog)
+		}
+	}
+}
+
+// TestLooksLikeSiteSlug pins the predicate against the control plane's own rule
+// (registry/site.ex @slug_format + the 63-char length validation) rather than
+// against a vibe: everything the CP would accept as a slug must pass, and every
+// shape it would refuse must fall back to the list read.
+func TestLooksLikeSiteSlug(t *testing.T) {
+	for _, ok := range []string{"blog", "b", "my-site-2", "0", "a-b-c", strings.Repeat("a", 63)} {
+		if !looksLikeSiteSlug(ok) {
+			t.Errorf("looksLikeSiteSlug(%q) = false, want true (the CP resolves this by slug)", ok)
+		}
+	}
+	for _, bad := range []string{
+		"",                      // no ref at all
+		"Blog",                  // a capital: a NAME, never a slug
+		"Blog Site",             // spaces
+		"my_site",               // underscore
+		"my.site",               // dot
+		"-leading",              // the CP requires [a-z0-9] first
+		"has/slash",             // would forge a path segment
+		strings.Repeat("a", 64), // one past validate_length max: 63
+	} {
+		if looksLikeSiteSlug(bad) {
+			t.Errorf("looksLikeSiteSlug(%q) = true, want false (the CP cannot resolve this)", bad)
+		}
+	}
+}
+
 func TestRunCloudSiteRollbackJSON(t *testing.T) {
 	cp := newSiteCP(t)
 	cp.rollResp = fakeResp{200, rollbackEnvelope}
@@ -1881,10 +2182,15 @@ func TestRunCloudSiteCreateInvalidBindingExitsGeneric(t *testing.T) {
 // The fixture ships THREE rows — two with counts, one WITHOUT (bare type) — so the
 // grammar `type (count)` / bare `type` is exercised on one payload, plus a JUNK
 // row (empty type) the render must drop.
+// cch-w69-bl: the plane's `detail` is SURFACE-NEUTRAL and the incantation rides
+// its own `cli_hint` key, so this fixture carries the two halves separately —
+// and the CLI must reassemble them by reading the KEY, never by finding a
+// sentence inside `detail`.
 const emptyBindingBody = `{"error":"content_binding_empty",` +
 	`"detail":"this site would build from nothing — its token sees nothing at acme/blog/production. ` +
 	`This site CAN read: task (12), paper (40), note. ` +
-	"Re-run naming a type this site can read: `bp cloud site create <name> --kind static --framework astro --dataset acme/blog/production --doc-type <type>`\"," +
+	`Name a content type this site can read.",` +
+	`"cli_hint":"bp cloud site create <name> --kind static --framework astro --dataset acme/blog/production --doc-type <type>",` +
 	`"readable_types":[{"type":"task","count":12},{"type":"paper","count":40},{"type":"note"},{"type":""}]}`
 
 // The HUMAN receipt renders the menu FROM THE ARRAY in the console grammar and
@@ -1908,9 +2214,29 @@ func TestRunCloudSiteCreateEmptyBindingRendersReadableTypesMenu(t *testing.T) {
 	if strings.Contains(stderr, "This site CAN read:") {
 		t.Fatalf("the CLI must compose from the array, not echo the server prose menu:\n%s", stderr)
 	}
-	// The bp re-run line is the CLI's home — kept, unlike the console which strips it.
+	// The bp re-run line is the CLI's home — kept, unlike the console, which now
+	// never sees it at all because it rides its own key.
 	if !strings.Contains(stderr, "--doc-type <type>") {
 		t.Fatalf("the CLI must KEEP the bp re-run line:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "bp cloud site create <name>") {
+		t.Fatalf("the re-run must come from cli_hint, whole:\n%s", stderr)
+	}
+	// cch-w69-bl MUTATION CONTROL: reword `detail` exactly as a writer would —
+	// no sentence the old strings.Index(detail, "Re-run naming a type") search
+	// could find, and no re-run text in `detail` at all. The receipt must be
+	// unchanged in substance, because the hint is read from a FIELD. On the
+	// pre-fix build this body loses the re-run line entirely and this reds.
+	reworded := `{"error":"content_binding_empty",` +
+		`"detail":"nothing here to build from — acme/blog/production holds no post this site may read. Pick a type it can see.",` +
+		`"cli_hint":"bp cloud site create <name> --kind static --framework astro --dataset acme/blog/production --doc-type <type>",` +
+		`"readable_types":[{"type":"task","count":12},{"type":"paper","count":40},{"type":"note"}]}`
+	_, stderr2, _ := createRefused(t, fakeResp{422, reworded})
+	if !strings.Contains(stderr2, "It can read: task (12), paper (40), note") {
+		t.Fatalf("a reworded detail must not disturb the array-derived menu:\n%s", stderr2)
+	}
+	if !strings.Contains(stderr2, "--doc-type <type>") {
+		t.Fatalf("a reworded detail must NOT cost the re-run line — that is the whole point of cli_hint:\n%s", stderr2)
 	}
 	if !strings.Contains(stderr, "No site was created") {
 		t.Fatalf("a refused create must say no site was created:\n%s", stderr)
@@ -2861,8 +3187,11 @@ func TestCloudSitePrebuiltRefusesABadDirBeforeAnyCall(t *testing.T) {
 	if code != exitUsage {
 		t.Fatalf("project dir exit=%d want %d\n%s%s", code, exitUsage, stdout, stderr)
 	}
-	if !strings.Contains(stdout+stderr, "no index.html") {
-		t.Fatalf("the refusal must name the missing root index.html:\n%s%s", stdout, stderr)
+	// The PRE-MINT arm has read no site row yet, so it asks the union question
+	// (see prebuiltRuntime): a project directory is refused because it is
+	// NEITHER release-root shape, and the refusal names both.
+	if !strings.Contains(stdout+stderr, "neither an index.html nor a server.js") {
+		t.Fatalf("the refusal must name both release-root shapes it looked for:\n%s%s", stdout, stderr)
 	}
 
 	if cp.deployHits != 0 || cp.artifactHits != 0 {
@@ -2895,7 +3224,7 @@ func TestCloudSitePrebuiltPrintsThePathSiteBaseFromTheSlug(t *testing.T) {
 	cp := newSiteCP(t)
 	// The mint's real shape: queued, and NO url — deployment_url is nil until live.
 	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"freshbuildid00","content_rev":"cr-42","source":"prebuilt"}}`}
-	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"Blog","slug":"blog","kind":"static"}}`}
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"Blog","slug":"blog","kind":"static","prebuilt_enabled":true}}`}
 	cp.serve()
 
 	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
@@ -2941,7 +3270,7 @@ func TestCloudSitePrebuiltSiteBaseIgnoresADeploymentURL(t *testing.T) {
 
 	cp := newSiteCP(t)
 	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-9","status":"queued","build_id":"freshbuildid00","content_rev":"cr-7","source":"prebuilt","url":"https://guerrilla.barkpark.cloud/sites/blog/"}}`}
-	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"Blog","slug":"blog"}}`}
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"Blog","slug":"blog","prebuilt_enabled":true}}`}
 	cp.serve()
 
 	stdout, stderr, _ := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
@@ -3780,8 +4109,21 @@ func TestRunCloudSiteStatusNamesTheWindowItRead(t *testing.T) {
 	// A count without a denominator is the defect this block exists to fix — and a
 	// derived share is banned outright (charter D174/D142: chains carry no key, so
 	// any percentage over them is unfalsifiable and era-unstable).
-	if strings.Contains(stdout, "%") {
-		t.Fatalf("the window must print counts with denominators, never a rate:\n%s", stdout)
+	//
+	// SCOPED TO THE CENSUS BLOCK, not to stdout (dr-w17-bl-per-site-cost-needs-paging).
+	// The ban is about deriving a share over THIS window's counts — a number that
+	// moves with whatever page you happened to read. It is not a ban on quoting a
+	// DATED fleet measurement whose numerator and denominator both travel with it,
+	// which is what the cost block below prints ("1,837 of 2,124 (86.5%)"). A
+	// stdout-wide substring check cannot tell the two apart, and reading it as a
+	// prohibition on the second is how a surface ends up unable to state the very
+	// fact it exists to state.
+	census := stdout[strings.Index(stdout, "recent attempts"):]
+	if i := strings.Index(census, "\ncost of getting content live"); i >= 0 {
+		census = census[:i]
+	}
+	if strings.Contains(census, "%") {
+		t.Fatalf("the window census must print counts with denominators, never a rate:\n%s", census)
 	}
 	// The census is its OWN block after the KV table, not KV rows — renderKV sorts
 	// alphabetically and pads to the widest key, so census rows would scatter
@@ -4755,5 +5097,341 @@ func TestSiteStatusJSONCarriesThePublishTrigger(t *testing.T) {
 	without := spawnSiteMap(cloudclient.SpawnSite{ID: "s1"})
 	if _, ok := without["publish_trigger"]; ok {
 		t.Errorf("an unsent publish_trigger must be OMITTED, never rendered as an absence the CP did not claim: %v", without)
+	}
+}
+
+// --- the prebuilt opt-in: preflight + read path (ssw10) -----------------------
+
+// TestCloudSitePrebuiltRefusesAnUnOptedInSiteBeforeMintingOrPacking is the wire
+// proof for ssw10-prebuilt-preflight-opt-in. Prebuilt is a per-site opt-in
+// (charter D87) and `bp` used to learn that from the control plane's 422 — AFTER
+// the mint. A prebuilt mint is nonced, so the burned row cannot be re-used by
+// re-running the same command: the cost of learning late is an orphan queued
+// deployment and a command that never converges.
+//
+// The two counters ARE the test. deployHits==0 says nothing was minted;
+// artifactHits==0 says nothing was packed and shipped. A guard that merely
+// printed a warning would leave both non-zero.
+func TestCloudSitePrebuiltRefusesAnUnOptedInSiteBeforeMintingOrPacking(t *testing.T) {
+	const buildID = "b0b0b0b0b0b0b0b0"
+	dir := writeDistFixture(t, buildID)
+
+	cp := newSiteCP(t)
+	// The site row the control plane stores: off-box builds are NOT enabled.
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","prebuilt_enabled":false}}`}
+	// Both write routes are armed with a SUCCESS: if the guard did not fire, this
+	// test would pass the deploy, not error out — the counters below are the only
+	// thing standing between the two outcomes.
+	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"` + buildID + `","source":"prebuilt"}}`}
+	cp.artifactResp = fakeResp{201, `{"artifact_url":"db://artifact/dep-1"}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+	if code == exitOK {
+		t.Fatalf("an un-opted-in site must not deploy --prebuilt\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+	if cp.deployHits != 0 {
+		t.Fatalf("deploy hits=%d want 0 — the refusal must land BEFORE the mint (a prebuilt mint is nonced)", cp.deployHits)
+	}
+	if cp.artifactHits != 0 {
+		t.Fatalf("artifact hits=%d want 0 — the refusal must land BEFORE the pack", cp.artifactHits)
+	}
+	all := stdout + stderr
+	// The control plane's OWN wording (router.ex deploy_static_site), not a second
+	// divergent sentence for the same fault.
+	for _, want := range []string{
+		"builds on its box — enable off-box builds first",
+		`PATCH /v1/sites/` + testSiteID,
+		`{"prebuilt_enabled": true}`,
+		"bp cloud site settings " + testSiteID + " --prebuilt-enabled true",
+	} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("the refusal must carry %q:\n%s", want, all)
+		}
+	}
+	// THE HANDLE THE USER TYPED, not the row's name. The fixture's name is "blog"
+	// and the caller addressed the site by its id — a refusal that says "blog"
+	// names something the user never typed and cannot paste back.
+	if !strings.HasPrefix(strings.TrimSpace(all[strings.Index(all, testSiteID):]), testSiteID+" builds on its box") {
+		t.Fatalf("the refusal must open with the handle the caller typed (%s), not the row's name:\n%s", testSiteID, all)
+	}
+}
+
+// TestCloudSitePrebuiltUnreadableSiteRowStillMints is the CONTROL for the guard
+// above: it fires on a DEFINITE false, never on an absent answer. A site row that
+// could not be read is a saved round trip we did not get — not evidence about the
+// opt-in — so the deploy proceeds and the control plane's own 422 stays the
+// backstop. Without this arm the preflight would be fail-closed, and a flaky GET
+// would block deploys that the control plane would have accepted.
+func TestCloudSitePrebuiltUnreadableSiteRowStillMints(t *testing.T) {
+	const buildID = "b0b0b0b0b0b0b0b0"
+	dir := writeDistFixture(t, buildID)
+
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{500, `{"error":"boom"}`}
+	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"` + buildID + `","source":"prebuilt"}}`}
+	cp.artifactResp = fakeResp{201, `{"artifact_url":"db://artifact/dep-1"}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"live","stage":"RETIRE","build_id":"` + buildID + `","source":"prebuilt","url":"https://box.example/sites/blog/"}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+	if code != exitOK {
+		t.Fatalf("an unreadable site row must not block the deploy: exit=%d\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if cp.deployHits != 1 {
+		t.Fatalf("deploy hits=%d want 1 — the mint must still happen", cp.deployHits)
+	}
+	if !strings.Contains(stdout+stderr, "could not read") {
+		t.Fatalf("an un-run check must be SAID, never implied to have passed:\n%s%s", stdout, stderr)
+	}
+}
+
+// TestSiteSettingsReceiptEchoesPrebuiltFromTheStoredRow is the row-2 proof, and
+// it is deliberately a test on the PRINTED BYTES rather than on cp.patchBody.
+// The pre-existing prebuilt-enabled test asserts only the request body, so a
+// control plane that stored `false` when you sent `true` — or an older one that
+// ignored the key — produced byte-identical output and nothing could see it.
+//
+// The fixture makes those two disagree on purpose: the request says true, the
+// stored row says false, and the receipt has to print the ROW.
+func TestSiteSettingsReceiptEchoesPrebuiltFromTheStoredRow(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.patchResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","theme":"ember","prebuilt_enabled":false}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "settings", testSiteID, "--prebuilt-enabled", "true")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s%s", code, stdout, stderr)
+	}
+	if !bytes.Contains(cp.patchBody, []byte(`"prebuilt_enabled":true`)) {
+		t.Fatalf("the request must still carry the flag: %s", cp.patchBody)
+	}
+	if !strings.Contains(stdout, "prebuilt: disabled") {
+		t.Fatalf("the receipt must echo the STORED row (false), not the request (true):\n%s", stdout)
+	}
+	if strings.Contains(stdout, "prebuilt: enabled") {
+		t.Fatalf("the receipt printed the request back — that is the A3 violation this row exists to kill:\n%s", stdout)
+	}
+
+	// And the other direction, so the line is not a constant.
+	cp2 := newSiteCP(t)
+	cp2.patchResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","theme":"ember","prebuilt_enabled":true}}`}
+	cp2.serve()
+	stdout2, _, _ := runSite(t, "table", "settings", testSiteID, "--prebuilt-enabled", "false")
+	if !strings.Contains(stdout2, "prebuilt: enabled") {
+		t.Fatalf("a stored true must print enabled:\n%s", stdout2)
+	}
+}
+
+// TestCloudSiteStatusCarriesThePrebuiltFlag: the opt-in gains a read path that
+// does not cost a deploy attempt. Before this, `bp` could TURN prebuilt on and
+// then never read it back from any surface — settings, status or -o json — and
+// the only oracle was the 422 from a mint that had already burned a nonced row.
+func TestCloudSiteStatusCarriesThePrebuiltFlag(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production","prebuilt_enabled":true}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "prebuilt") || !strings.Contains(stdout, "enabled —") {
+		t.Fatalf("the human status header must carry the opt-in:\n%s", stdout)
+	}
+
+	jout, _, jcode := runSite(t, "json", "status", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("json status exit=%d", jcode)
+	}
+	var env struct {
+		Site map[string]any `json:"site"`
+	}
+	if err := json.Unmarshal([]byte(jout), &env); err != nil {
+		t.Fatalf("decode %q: %v", jout, err)
+	}
+	if env.Site["prebuilt_enabled"] != true {
+		t.Fatalf("the json shape must carry prebuilt_enabled=true, got %v:\n%s", env.Site["prebuilt_enabled"], jout)
+	}
+
+	// The other value, so the key is read from the row rather than hardcoded.
+	cp2 := newSiteCP(t)
+	cp2.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","prebuilt_enabled":false}}`}
+	cp2.serve()
+	sout2, _, _ := runSite(t, "table", "status", testSiteID)
+	if !strings.Contains(sout2, "disabled — this site builds on its box") {
+		t.Fatalf("a site that has not opted in must say so:\n%s", sout2)
+	}
+	jout2, _, _ := runSite(t, "json", "status", testSiteID)
+	if !strings.Contains(jout2, `"prebuilt_enabled": false`) && !strings.Contains(jout2, `"prebuilt_enabled":false`) {
+		t.Fatalf("the json shape must carry a false rather than omit it:\n%s", jout2)
+	}
+}
+
+// TestCloudSitePrebuiltMintReadsTheSourceBack: the mint receipt's "no build
+// started on the box" was printed from the LOCAL flag — it asserted the outcome
+// of the verb the user typed. A control plane that ignored source=prebuilt and
+// queued a real box build returned a row saying exactly that, and the line said
+// the opposite. The resume path already checked dep.Source; the mint did not.
+func TestCloudSitePrebuiltMintReadsTheSourceBack(t *testing.T) {
+	const buildID = "b0b0b0b0b0b0b0b0"
+	dir := writeDistFixture(t, buildID)
+
+	cp := newSiteCP(t)
+	// The control plane minted a BOX BUILD despite the prebuilt request.
+	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"` + buildID + `","source":"box-build"}}`}
+	cp.artifactResp = fakeResp{201, `{"artifact_url":"db://artifact/dep-1"}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"live","stage":"RETIRE","build_id":"` + buildID + `","source":"box-build","url":"https://box.example/sites/blog/"}}`}
+	cp.serve()
+
+	stdout, stderr, _ := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+	all := stdout + stderr
+	if strings.Contains(all, "no build started on the box") {
+		t.Fatalf("the mint claimed no box build while the row it was handed said box-build:\n%s", all)
+	}
+	if !strings.Contains(all, "NOT a prebuilt one") {
+		t.Fatalf("a source the control plane did not honour must be reported:\n%s", all)
+	}
+
+	// The prebuilt row still says it, so the line is not merely deleted.
+	cp2 := newSiteCP(t)
+	cp2.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"` + buildID + `","source":"prebuilt"}}`}
+	cp2.artifactResp = fakeResp{201, `{"artifact_url":"db://artifact/dep-1"}`}
+	cp2.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"live","stage":"RETIRE","build_id":"` + buildID + `","source":"prebuilt","url":"https://box.example/sites/blog/"}}`}
+	cp2.serve()
+	sout2, serr2, _ := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+	if !strings.Contains(sout2+serr2, "no build started on the box") {
+		t.Fatalf("a genuinely prebuilt mint must still say it:\n%s%s", sout2, serr2)
+	}
+}
+
+// --- the rollback receipt's latency clause -----------------------------------
+
+// stubSiteClockSteps makes `siteClock` return t0, then t0+steps[0], then
+// t0+steps[1], … so a test can hand `runCloudSiteRollback` an exact flip
+// duration without sleeping. Past the end the last step repeats, so a caller
+// that reads the clock more times than a test predicted gets a stable answer
+// instead of a panic — the test would then be measuring the wrong span, which
+// the assertions below catch, rather than crashing on an off-by-one.
+func stubSiteClockSteps(t *testing.T, steps ...time.Duration) {
+	t.Helper()
+	orig := siteClock
+	t0 := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	n := -1
+	siteClock = func() time.Time {
+		n++
+		if n == 0 {
+			return t0
+		}
+		i := n - 1
+		if i >= len(steps) {
+			i = len(steps) - 1
+		}
+		return t0.Add(steps[i])
+	}
+	t.Cleanup(func() { siteClock = orig })
+}
+
+// THE RED ARM. A rollback that misses the 1 s budget must SAY SO on the receipt,
+// with the number and with where the time went. 3820 ms is not a made-up value:
+// it is the slowest of the three live guerrilla runs this row was filed on
+// (1840 / 3021 / 3820 ms, 2026-09-02), every one of which printed the same
+// unqualified checkmark a 90 ms flip prints.
+//
+// Proven by mutation: deleting the `siteRollbackOverBudgetLine` call from
+// `runCloudSiteRollback` reds this test and leaves the quiet arm below green.
+func TestRunCloudSiteRollbackOverBudgetSaysSoAndSaysWhere(t *testing.T) {
+	stubSiteClockSteps(t, 3820*time.Millisecond)
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, rollbackEnvelope}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	// The checkmark is unchanged — this clause is additive, not a replacement.
+	if !strings.Contains(stdout, "✓ site rolled back") {
+		t.Fatalf("the success receipt must survive the latency clause:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "3.82s") {
+		t.Fatalf("an over-budget rollback must print the measured flip duration:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "over the 1.00s budget") {
+		t.Fatalf("the clause must name the budget it missed:\n%s", stdout)
+	}
+	// The whole point of the sentence: a breach of a span that brackets the POST
+	// alone is server-side by construction, and the operator must be told that
+	// rather than left to suspect their own machine or link.
+	if !strings.Contains(stdout, "server-side") {
+		t.Fatalf("the clause must say the wait is server-side:\n%s", stdout)
+	}
+}
+
+// THE QUIET ARM, and the control for the test above. A rollback INSIDE the
+// budget must print exactly the receipt it always printed — no duration, no
+// budget word. It is what makes the red arm's failure attributable to the breach
+// and not merely to the clause existing, and it pins the failure direction of
+// the obvious "just always print the time" alternative: a number on every run is
+// output that changes on every run.
+func TestRunCloudSiteRollbackUnderBudgetPrintsNoLatencyClause(t *testing.T) {
+	stubSiteClockSteps(t, 90*time.Millisecond)
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, rollbackEnvelope}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "✓ site rolled back") {
+		t.Fatalf("the success receipt must be unchanged:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "budget") || strings.Contains(stdout, "0.09s") {
+		t.Fatalf("an in-budget rollback must print no latency clause:\n%s", stdout)
+	}
+}
+
+// The BOUNDARY, stated because "under 1000 ms" is the criterion's own wording and
+// an off-by-one here would make the CLI and
+// `deploy/site-spawner-live-proof.sh` disagree about the same run. Exactly at the
+// budget is NOT a breach; one millisecond past it is.
+func TestSiteRollbackOverBudgetLineBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		d    time.Duration
+		want bool
+	}{
+		{999 * time.Millisecond, false},
+		{1000 * time.Millisecond, false},
+		{1001 * time.Millisecond, true},
+		{3820 * time.Millisecond, true},
+	} {
+		got := siteRollbackOverBudgetLine(tc.d) != ""
+		if got != tc.want {
+			t.Errorf("siteRollbackOverBudgetLine(%s) breach=%v, want %v", tc.d, got, tc.want)
+		}
+	}
+}
+
+// `-o json` and `-o yaml` return the control plane's envelope VERBATIM, and the
+// latency clause must not leak into either: a machine reader parses that body,
+// and a line of English in it is a parse error, not a warning. This is the arm
+// that would catch someone "helpfully" moving the clause above the format switch.
+func TestRunCloudSiteRollbackJSONCarriesNoLatencyClause(t *testing.T) {
+	for _, format := range []string{"json", "yaml"} {
+		t.Run(format, func(t *testing.T) {
+			stubSiteClockSteps(t, 3820*time.Millisecond)
+			cp := newSiteCP(t)
+			cp.rollResp = fakeResp{200, rollbackEnvelope}
+			cp.serve()
+
+			stdout, stderr, code := runSite(t, format, "rollback", testSiteID)
+			if code != exitOK {
+				t.Fatalf("exit=%d want 0\n%s", code, stderr)
+			}
+			if strings.Contains(stdout, "budget") || strings.Contains(stdout, "3.82s") {
+				t.Fatalf("-o %s must carry the envelope alone:\n%s", format, stdout)
+			}
+		})
 	}
 }

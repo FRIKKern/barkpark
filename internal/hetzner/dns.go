@@ -176,5 +176,50 @@ func splitFqdn(fqdn string) (label, zone string) {
 	return parts[0], strings.Join(parts[1:], ".")
 }
 
-// compile-time assertion that *DNS satisfies the cloud seam's interface.
+// compile-time assertion that *DNS satisfies the cloud seam's interface, and
+// the by-value sweep's optional RecordLister with it. The RecordLister line is
+// the one that matters here: without it the build stays green and
+// deprovisionDNS silently takes the by-name arm (see ListRecords below).
 var _ cloud.DNSProvider = (*DNS)(nil)
+var _ cloud.RecordLister = (*DNS)(nil)
+
+// ListRecords returns every record in the zone, flattened to one cloud.Record
+// per (rrset, value) — the native analogue of cloud.CloudDNS.ListRecords, and
+// the capability cloud.RecordLister names.
+//
+// WHY THIS EXISTS AT ALL: deprovisionDNS (internal/cli/cloud/warmpool.go)
+// type-asserts its DNSProvider to cloud.RecordLister and, on a MISS, degrades
+// to the by-NAME delete without erroring — deliberately, because the box is
+// already gone by then. So a DNSProvider missing this one method does not fail
+// loudly; it quietly stops sweeping custom-domain A records off an IP Hetzner
+// is about to hand to someone else. Flipping the fleet to this native provider
+// without ListRecords would have been exactly that silent downgrade.
+//
+// The apex rrset "@" maps back to the EMPTY label so cloud.Fqdn renders it as
+// the bare zone — the same normalisation CloudDNS.ListRecords applies.
+func (d *DNS) ListRecords(ctx context.Context, zone string) ([]cloud.Record, error) {
+	zone = strings.Trim(strings.TrimSpace(zone), ".")
+	rrsets, err := d.client.hc.Zone.AllRRSets(ctx, zoneRef(zone))
+	if err != nil {
+		return nil, fmt.Errorf("hetzner dns list %q: %w", zone, err)
+	}
+	out := make([]cloud.Record, 0, len(rrsets))
+	for _, rr := range rrsets {
+		if rr == nil {
+			continue
+		}
+		name := rr.Name
+		if name == "@" {
+			name = ""
+		}
+		for _, r := range rr.Records {
+			out = append(out, cloud.Record{
+				Zone:  zone,
+				Name:  name,
+				Type:  string(rr.Type),
+				Value: r.Value,
+			})
+		}
+	}
+	return out, nil
+}

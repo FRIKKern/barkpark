@@ -37,6 +37,10 @@ defmodule BarkparkCloud.Telemetry do
         load1: number | nil,      # 1-minute load average (agent `load1`, -1 verbatim)
         req_per_s: number | nil,  # request rate (instance-exposed; nil until it ships)
         p95_ms: number | nil,     # p95 request latency ms (instance-exposed; nil until it ships)
+        err_5xx_per_s: number | nil, # 5xx rate off the SAME ring (nil until it ships)
+        # The width, in seconds, of the ring the three rates above came out of.
+        # Not a signal of its own — the DENOMINATOR that makes them readable.
+        window_s: number | nil,
         backup: %{
           state: :unmeasured | :unconfigured | :ok | :failed | :error | :unknown,
           ok: boolean | nil,
@@ -135,6 +139,24 @@ defmodule BarkparkCloud.Telemetry do
       cores: num_or_nil(Map.get(payload, "cpu_cores")),
       req_per_s: num_or_nil(Map.get(payload, "req_per_s")),
       p95_ms: num_or_nil(Map.get(payload, "p95_ms")),
+      # The THIRD number off the same request-stats ring, and until this slice
+      # it was the epic's signature defect in the other direction: the agent
+      # EXTRACTS `err_5xx_per_s` (report.go `Err5xxPerS`) and the fleet row
+      # decodes it, but nothing on the console envelope carried it — a key
+      # measured, shipped, decoded and rendered by NOTHING. Same law as its two
+      # siblings: absent → nil, and the agent's `-1` sentinel passes through
+      # VERBATIM for the meter builder to refuse (a fabricated 0 here reads
+      # "this box is serving no errors" about a box nobody measured).
+      err_5xx_per_s: num_or_nil(Map.get(payload, "err_5xx_per_s")),
+      # THE DENOMINATOR OF TIME (dr-w14-bl). The three numbers above are rates,
+      # and a rate without its window is a number nobody can bound: 0.22 5xx/s
+      # over a 60-second ring and over a 1-second one are different facts. The
+      # agent decodes `window_s` off the same request-stats envelope and puts
+      # it on the beat; before this slice the control plane threw it away at
+      # the door, so the console re-derived a width it had been TOLD. It is not
+      # a meter — it has no threshold and no bar — it is the qualifier that
+      # rides WITH the three rates (`Usage.compose/1` attaches it to each).
+      window_s: num_or_nil(Map.get(payload, "window_s")),
       backup: %{
         state: backup_state(payload),
         ok: bool_or_nil(Map.get(payload, "backup_ok")),

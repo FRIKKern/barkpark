@@ -94,12 +94,26 @@
 //       check 19 focus rules painted a 1.19–1.52:1 band while E5 was green. A
 //       rule carrying an opaque border-color is compliant (that border IS the
 //       indicator); full predicate on focusIndicatorErrors below.
-//   E13 an unpainted deployment status: a status in DEPLOY_STATUSES with no
-//       `.dep-<status>` rule in app.css. The `dep-pill dep-` E3 allowlist waives
-//       the whole dynamic head, so the emitted VALUE SPACE was unchecked and
-//       `cancelled` shipped ruleless — falling through to the .dep-pill base,
-//       which is byte-identical to .dep-queued, so an aborted deploy painted as
-//       one still waiting. Full boundary on DEPLOY_STATUSES below.
+//   E13 a BROKEN STATE GRAMMAR. Since the decision-24 sweep there is ONE pill
+//       vocabulary: `DEPLOY_STATUS_META` in app.js maps every ledger status to
+//       a `.status-pill` role (+ optional shape variant), and the second
+//       `.dep-*` family is retired. Five arms, because the old one-arm shape
+//       ("does .dep-<status> have a rule?") could only ever police ONE of the
+//       ways this grammar breaks:
+//         (a) the table could not be located or parsed in app.js — a rename must
+//             come with an update here, never a silently skipped check;
+//         (b) a status in DEPLOY_STATUSES the table does not cover (it would
+//             fall to neutral and impersonate `queued`, the exact defect that
+//             shipped twice under the old family);
+//         (c) a role or variant the table names with no `.status-pill--<name>`
+//             rule in app.css — the unpainted arm, one family over;
+//         (d) a role outside the closed five, which would be a sixth hue
+//             invented at a call site rather than declared in the family;
+//         (e) the RETIRED family coming back — any `.dep-pill` / `.dep-<status>`
+//             rule in app.css or `dep-pill` literal in app.js. This is the arm
+//             that reds if the sweep is reverted: re-forking the grammar is the
+//             regression, not any single missing rule.
+//       Full boundary on DEPLOY_STATUSES / STATUS_PILL_ROLES below.
 //   E15 an unpainted DELIVERY TONE, and a stale consent for one. Same family as
 //       E13 one surface over: `wh-del-status wh-del-status--` is an E3 allowlist
 //       entry too, so the tone half was unmeasured. The value space is DERIVED
@@ -130,114 +144,37 @@
 //       `node __css_check.mjs --citation-inventory`, which also crosses the set
 //       with the RULED alternation so the E11 widening's cost is a run, never a
 //       quoted number.
-//   E14 wrap-recipe DIVERGENCE (charter D220). THE INVARIANT, verbatim:
-//
-//         A rule whose selector is WRAPPER-SCOPED onto the pill
-//         (`<wrapper> .status-pill` — one or more descendant/child steps then
-//         `.status-pill`, and nothing after it) AND which declares AT LEAST ONE
-//         of the five CORE properties must declare ALL FIVE, at the canonical
-//         value: white-space: normal | height: auto | min-height: 24px |
-//         padding-top: 2px | padding-bottom: 2px.
-//
-//       WHY AN INSTRUMENT AND NOT AN EXTRACTION. This epic hand-built the same
-//       five-declaration wrap three times (`.detail-rail`, `.fleet-status`,
-//       `.instance-card-head`). D210 ruled the third copy deliberate and made
-//       THE FOURTH HOST the extraction trigger. Wave 19 reached the fourth host
-//       and REFUSED the trigger, because driving it showed the axis was wrong:
-//       the five-declaration recipe applied to `.op-gate` does NOT fix it (every
-//       clipped cell stays clipped — it hides the symptom and leaves the label
-//       unreadable), while ONE declaration, `.op-gate .status-pill { flex: 0 0
-//       auto }`, is 64/64 at every width. Host COUNT is not the sin. DIVERGENCE
-//       between the copies is, and nothing measured it. E14 measures it, so a
-//       fourth copy that drifts from the shared core stops being possible.
-//       THREE DESIGN CHOICES ARE LOAD-BEARING — each proven by a driven leg in
-//       __app.test.mjs; do not "simplify" any of them:
-//         1. TRIGGER ON DECLARATION, NOT ON SELECTOR. "every wrapper-scoped
-//            `.status-pill` rule must carry the core" would false-red a future
-//            `.foo .status-pill { margin-left: 4px }`. Triggering on
-//            declares-any-core-property makes the rule SELF-SCOPING: start the
-//            recipe and you must finish it; don't start it and E14 is silent.
-//         2. DO NOT ASSERT THE JACKET. `align-items: flex-start` (2 of 3
-//            copies), the `-dot`/`-detail`/`-label` sibling rules and the
-//            wrapper's own `flex-wrap` are per-HOST. `.detail-rail` carries no
-//            `align-items` and no `-dot`/`-detail` rules and must GREEN; a
-//            jacketless synthetic fourth host must GREEN.
-//         3. PIN THE CORE AS A LITERAL (WRAP_CORE below), never derive it as
-//            the intersection of what the copies happen to declare — that is
-//            self-fulfilling: a fourth copy dropping `min-height` would shrink
-//            the intersection and pass.
-//       THE BASE `.status-pill` IS EXCLUDED BY SELECTOR SHAPE, NOT BY AN
-//       ALLOWLIST: it declares `height: 24px` and `white-space: nowrap` — core
-//       PROPERTIES at non-core VALUES, by design. Requiring at least one
-//       descendant/child combinator excludes it structurally, so the exclusion
-//       cannot go stale when the base rule is renamed or moved.
-//       TWO ANTI-VACUITY GUARDS, because a scan that stops seeing the copies
-//       would otherwise report clean: zero wrapper-scoped copies is itself an
-//       error, and the three known survivor selectors are PINNED as
-//       required-present (same-file pins under pin-your-own/derive-foreign),
-//       which closes the PARTIAL blindness the zero-guard misses.
-//       COVERAGE BOUNDARY (charter D40 — a check states what it does NOT own):
-//       E14 is STATIC and owns the DECLARATION-PARITY class ONLY.
-//         • It cannot see whether a copy actually WRAPS when rendered. The host
-//           needs `flex-wrap: wrap` on the WRAPPER; a copy with all five core
-//           declarations inside a non-wrapping host is GREEN here and broken on
-//           screen. The complement is overflow-guard.mjs's rendered legs — a
-//           DELIBERATE SPLIT, not a duplicate.
-//         • It cannot see a host that SHOULD have copied the recipe and did
-//           not. Nothing static knows which wrappers hold a long-labelled pill.
-//         • It asserts nothing about the base `.status-pill`, and nothing about
-//           the jacket (see choice 2).
-//         • It does not READ shorthand VALUES. A core property set through a
-//           shorthand (`padding: 2px 11px`, `block-size`, `text-wrap`) is
-//           TRIGGERED and REFUSED, never parsed — see the shorthand ruling
-//           below for why that is the remedy and not a parser.
-//       SHORTHAND (cch-w19-bl-e14-shorthand-blind). THE GAP AS MEASURED: on the
-//       pre-fix tree a wrapper-scoped `.status-pill` rule written
-//       `{ padding: 2px 11px }` neither TRIGGERED E14 (`padding` is not one of
-//       the five pinned core NAMES, so declares-any-core never fired) nor
-//       SATISFIED `padding-top`/`padding-bottom`. The asymmetry ran the bad
-//       way: a drifting fourth copy in shorthand was INVISIBLE, not red — the
-//       vacuous green this epic exists to kill. REPRODUCED BEFORE IT WAS FIXED:
-//       the same synthetic stylesheet the driven legs build (four pinned
-//       survivors plus `.op-gate .status-pill { padding: 2px 11px }`) exited 0
-//       with `4 wrapper-scoped wrap copy(ies), 0 E14 error(s)` on the pre-fix
-//       check and exits 1 naming `.op-gate` after it. Both directions, plus the
-//       legal shorthand-with-restatement copy, are driven in __app.test.mjs.
-//       TWO REMEDIES WERE ON THE TABLE AND ONE LOST.
-//         (a) EXPAND THE SHORTHAND, then compare longhands — REJECTED. It buys
-//             a mini CSS parser: padding's 1/2/3/4-value grammar, `!important`,
-//             `var()` inside the value (unresolvable statically — `padding:
-//             var(--p)` would have to answer "is padding-top 2px?" and cannot),
-//             `inherit`/`initial`/`unset`, and the same grammar again for every
-//             future core property. Each edge it gets wrong is a FALSE GREEN in
-//             a tripwire — the disease, not the cure — and the cost recurs on
-//             every core-property change. It also legitimises TWO spellings of
-//             the canonical recipe, so the next reader must diff two forms to
-//             see whether four copies agree.
-//         (b) TRIGGER ON THE SHORTHAND AND DEMAND THE LONGHAND — CHOSEN. A core
-//             shorthand makes the rule a wrap copy (so it can never be
-//             invisible), and the copy is green only if every core longhand
-//             that shorthand can set is RESTATED in longhand, at the canonical
-//             value, LATER IN THE SAME BLOCK. No value is parsed, so there is
-//             no grammar to get wrong and no `var()` it cannot answer; the
-//             canonical recipe stays single-form; and `{ padding: 2px 11px;
-//             padding-top: 2px; padding-bottom: 2px }` — the legitimate way to
-//             add horizontal padding — still greens.
-//       IT IS SOURCE-ORDER CORRECT, which the naive form is not. Requiring only
-//       that the longhand be PRESENT would green `padding-top: 2px;
-//       padding-bottom: 2px; padding: 3px 11px`, where the shorthand comes last
-//       and wins the cascade — a false green. The longhand must appear AFTER
-//       the shorthand it re-pins.
-//       THE SHORTHAND SET IS PINNED AS A LITERAL (WRAP_CORE_SHORTHANDS), for
-//       design choice 3's reason: derived from the copies it would shrink to
-//       whatever they happen to use. It covers the physical shorthand, the
-//       logical aliases and the `white-space` sub-longhands, because each of
-//       them CAN set a core property's computed value and so can hide drift.
-//       Fixture: __css_check.wrapparity.fixture.css; targeted run:
-//       `node __css_check.mjs --wrap-parity-check
-//       __css_check.wrapparity.fixture.css` (exit 1). Executed, both
-//       directions, by __app.test.mjs.
-//
+//   E18 an unpainted DOMAIN-CHECKLIST ROLE, and a deriver that went blind.
+//       FOURTH in the E13/E15/E16 family: `dom-rung dom-rung--` is an E3
+//       allowlist entry, so the role half was unmeasured and its trailing comment
+//       was the only statement of the value space — a comment that named FIVE
+//       roles for a SIX-role fold, omitting `unknown` (which has a rule) and
+//       listing `pending` (which had none). Wrong in both directions at once,
+//       and unfailable. The set is DERIVED from domainStageRows' ternary arms and
+//       its `active` promotion, diffed against DOM_RUNG_ROLES both ways.
+//       WEAKER THAN E16's DEFECT, AND SAID SO: the bare .dom-rung is not a
+//       separately shipped state, so ruleless `pending` fell through to the right
+//       muted paint by COINCIDENCE rather than impersonating anything. The remedy
+//       is still a written rule — arm (d) pins that .dom-rung--pending mirrors a
+//       base that still exists.
+//   E19 a WAIVER THAT ABSOLVES NOTHING: an ALLOW_PREFIXES entry no dynamic
+//       composition site in app.js or index.html actually has. The general form
+//       of E15's stale-consent arm, applied to the E3 allowlist itself. A waiver
+//       for an unemitted head can never red, so it is indistinguishable from one
+//       doing real work — and it silently PRE-EXEMPTS the family if that name
+//       ever returns, at which point the gate reports green over a family it has
+//       never checked. Compared against `allowlistedHits`, the walker's own
+//       record, so the arm and the waiver are judged on the same evidence.
+//   E20 a HOOK WAIVER THAT ABSOLVES NOTHING: an ALLOW_HOOK_CLASSES entry no
+//       emission in the scanned tree actually carries as a class. E19's exact
+//       shape, one list over — ALLOW_HOOK_CLASSES was the ONE of this file's
+//       four suppression lists with no decay arm at all, so a name deleted from
+//       the console left a standing consent nobody was ever told about and the
+//       run still printed `0 error(s)`. HARD, like E19 and unlike the
+//       report-only `stale` lines: see the block's own comment for why the four
+//       lists are not all the same severity. Judged against `hookHits`, the E2
+//       loop's own record, and it runs its own controls so it cannot pass by
+//       never having had a subject.
 // REPORTS (printed, never exit-affecting):
 //   R2  tokens defined in app.css that nothing consumes yet.
 //   R3  REPORT-ONLY: known violations whose fix would require editing app.js
@@ -298,8 +235,10 @@
 //
 //   KNOWN GRANULARITY LIMIT — CLOSED (D41/D66). The original HEAD fence proved
 //   SELECTOR-PREFIX PRESENCE in app.css TEXT, not per-property survival: deleting
-//   ONLY `.live-chip[data-state="stale"] .live-dot { background: … }` (app.css:3470)
-//   while the same-prefix `.live-chip-label` rule on :3471 survived red NEITHER
+//   ONLY `.live-chip[data-state="stale"] .live-dot { background: … }` (re-derive:
+//   grep -n '^\.live-chip\[data-state="stale"\] \.live-dot' app.css)
+//   while the same-prefix `.live-chip[data-state="stale"] .live-chip-label` rule
+//   on the NEXT line survived red NEITHER
 //   check, so a state could lose its DOT colour — its one severity signal —
 //   silently. That gap is now closed by a PER-DECLARATION probe in __app.test.mjs:
 //   the test `every state's .live-dot rule DECLARES a background (per-declaration
@@ -307,19 +246,39 @@
 //   block (first-occurrence indexOf over the ` .live-dot {` marker, which skips the
 //   `.live-dot.is-ping::after` decoy and the @media duplicate), and asserts a
 //   `background:` declaration survives INSIDE it — so a background-ONLY deletion
-//   reds as well as a whole-rule deletion. Mutation-proved: deleting app.css:3470
+//   reds as well as a whole-rule deletion. Mutation-proved: deleting that
+//   `.live-dot` rule
 //   reds it with `no .live-dot paint rule for the "stale" state … falls back to
 //   var(--dim)` while the prefix fence stayed green. __css_check itself is
 //   UNCHANGED and still never reads data-state — that E2 boundary declared above
 //   stands; the closure lives in the app.js/app.css-paired test, not here.
 //
+//   @boundary capability:css-check-e2-attribute-blindness test:cloud/priv/static/__app.test.mjs#liveness chip: every state's .live-dot rule DECLARES a background (per-declaration fence)
+//
 // Zero dependencies. Run: node __css_check.mjs
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
+
+// ── THE MAIN GUARD (cch-bl-css-check-gate-body-not-importable) ─────────────
+// TRUE only when this file IS the process entry point. The gate body at the
+// bottom used to be bare top-level statements ending in process.exit(1), so
+// `import`ing this module ran the whole gate over the importer's stdout and,
+// on any error, NEVER RETURNED — which made every helper the file defines
+// unreachable from a unit test. The cost was specific, not aesthetic: a REACH
+// bug (the scan set quietly not looking at a kind of file) could only be
+// caught by running the gate on a mutated mirror tree, so nothing cheap ever
+// asked citationScanFiles() what it actually returns. With the body behind
+// runGate(), __app.test.mjs asserts the SET directly.
+//
+// `node -e` leaves argv[1] undefined and `node --test x.test.mjs` sets it to
+// the test file, so both read FALSE; a spawned `node <path>/__css_check.mjs`
+// (including the mirror-tree harness, which copies this file to a tmpdir)
+// reads TRUE, because argv[1] is already the resolved absolute path.
+const IS_CLI = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
 // REFUSAL IS NOT A FINDING. Every sibling in this instrument family
 // (__reason_arm_census, __me_envelope_census, __agent_event_vocabulary_census,
 // __unknown_census, __binding_census) exits 2 when it cannot read its input,
@@ -328,13 +287,34 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 // reported "the tree has a measured defect" when the truth was "the instrument
 // could not read its input". Exit 2 here, with the file named — a checker that
 // cannot see its inputs must make NO claim about the tree, in either direction.
+
+// ── THE ONE REFUSAL VOCABULARY (cch-w63-bl) ─────────────────────────────────
+// EVERY exit-2 path in this file ends with exactly ONE line, on STDERR:
+//
+//     !! CSS CHECK (exit 2): REFUSED TO MEASURE — <reason>
+//
+// It is the same shape __preview__/exit-vocabulary.mjs already emits for the
+// browser instruments, so ONE reader covers the whole console fence. Before
+// this, six of console-unit's nine exit-2 sites spoke a private vocabulary
+// (`REFUSED (2): …` with no `!!`) that no `!!`-anchored capture could see — a gate that CAPTURES the
+// refusing instrument's own summary line would have replaced a wrong sentence
+// with NO sentence, in the wave about silence.
+//
+// THE READER IS scripts/console-refusal-capture.mjs, and its unit test
+// ENUMERATES this file from source: a new exit-2 path that does not go through
+// `refuse2` reds that test. Do not add one.
+const REFUSAL_NAME = "CSS CHECK";
+const refuse2 = (reason) => {
+  process.stderr.write(`!! ${REFUSAL_NAME} (exit 2): REFUSED TO MEASURE — ${reason}\n`);
+  process.exit(2);
+};
+
 const readOrRefuse = (abs, label) => {
   try {
     return fs.readFileSync(abs, "utf8");
   } catch (e) {
     console.error(`FAIL(2): required input ${label} not readable at ${abs} — ${e.message}`);
-    console.error("REFUSED (2): __css_check will not report a result it could not measure.");
-    process.exit(2);
+    refuse2(`required input ${label} is not readable at ${abs} (${e.message}). __css_check will not report a result it could not measure.`);
   }
 };
 const read = (f) => readOrRefuse(path.join(dir, f), f);
@@ -350,7 +330,11 @@ const ALLOW_PREFIXES = [
   "choice-ico sm ",    // provider row mini-tile: + m.cls (same brand-* set)
   "token-row",         // token row (GR33 lean line item, no longer a .fleet-row): + (revoked ? " is-revoked" : "")
   "dot ",              // badge(): + esc(kind) (up | down | unknown | online | offline | warn)
-  "dep-pill dep-",     // deployment status pill: + esc(st) — the value space is NOT this comment's; it is DEPLOY_STATUSES below, and E13 checks it
+  // gr-backlog-d24: `"dep-pill dep-"` stood here and is REMOVED with the family.
+  // Deploy status chips now compose `status-pill status-pill--` like every other
+  // status affordance, so they are covered by that entry below — and E19 would
+  // red on this one anyway the moment the last emitting site went, which is the
+  // durable half of the removal.
   "deploy-fail",       // deploy-fail row: + (failureTone === "blocked" ? " deploy-fail--blocked" : "")
   "deploy-console",    // + (open ? "" : " is-collapsed")
   "tier",              // + " tier-current" / " tier-free" conditionals
@@ -358,8 +342,14 @@ const ALLOW_PREFIXES = [
   "new-console",       // + (collapsed ? " is-collapsed" : "")
   "new-step ",         // + cls (done | active | failed)
   "status-pill status-pill--", // statusPill(): + role (ok | info | warn | danger | neutral)
-  "rollup-card rollup-card--",  // rollupCard(): + bucket (attention | inflight | healthy)
-  "bp-tl-step bp-tl-step--",    // timelineHtml(): + role (ok | active | failed | pending)
+  // cch: `rollup-card rollup-card--` and `bp-tl-step bp-tl-step--` stood here and
+  // were REMOVED. Neither head is emitted by app.js any more (rollupCard() and the
+  // bp-tl-step row family are both gone), and none of the modifiers their comments
+  // named had a rule anywhere. A waiver for a head nobody emits can never red, so
+  // it is indistinguishable from one doing real work — and it would silently
+  // pre-exempt the family the day the name came back. E19 below now makes that
+  // shape red on its own, which is the durable half: this pair was found by a
+  // person reading the list, the next one is found by the gate.
   "bp-console",                 // timelineConsoleHtml(): + (collapsed ? " is-collapsed" : "")
   "inst-tab",                   // instanceTabStripHtml(): + (on ? " is-active" : "")
   "wh-del-status wh-del-status--", // delivery status pill: + tone — the value space is NOT this comment's; it is WH_DEL_TONES below, and E15 checks it
@@ -368,7 +358,11 @@ const ALLOW_PREFIXES = [
   "usage-card usage-card--",    // usageMeterHtml(): + rowTone (warn | over)
   // gr-w1 (cloud GUI remake): dynamic sites whose composed classes all have
   // rules in app.css today — verified via `.<family>` grep before allowing.
-  "inst-life-pill ",            // instanceLifecyclePill(): + model.pill.cls (.inst-life-pill rule)
+  // cch-r21l: `"inst-life-pill "` stood here and is REMOVED with the family. The
+  // instance lifecycle chip now composes `status-pill status-pill--` like every
+  // other state affordance (LIFECYCLE_PILL_ROLE -> statusMetaPill), so it is
+  // covered by that entry above — and E19 would red on this one anyway the
+  // moment the last emitting site went, which is the durable half of the removal.
   "inst-life-note",             // + (retry ? " inst-life-note--warn" : "") (.inst-life-note[--warn])
   "notice",                     // fleetRolloutBannerHtml(): + NOTICE_TONE_CLASS[tone] (.notice / .notice-ok|warn|error)
   "deploy-rail-status deploy-rail-status--", // + esc(st.tone) (.deploy-rail-status-- rules)
@@ -386,7 +380,7 @@ const ALLOW_PREFIXES = [
   "instance-card-stat-v",          // + (warn ? " is-warn" : "") (.instance-card-stat-v / .is-warn)
   "runway-step",                   // runwayCardHtml(): + (done ? " is-done" : "") (.runway-step / .is-done)
   // gr-p3 SITE DETAIL (E-02): the v4 domain-checklist rung pill.
-  "dom-rung dom-rung--",           // domainRungChip(): + role (ok | failed | active | pending | proxied) (.dom-rung / .dom-rung-- rules)
+  "dom-rung dom-rung--",           // domainRungChip(): + role — the value space is NOT this comment's; it is DOM_RUNG_ROLES below, and E18 checks it
   // gr-p5r5-css-families: the three var-then-concat sites rewritten to inline
   // concat, so the walker finally reads a literal head instead of "". These were
   // never missing CSS — every composed class below has had a rule all along; the
@@ -409,13 +403,22 @@ const ALLOW_PREFIXES = [
   "bp-lc-",                        // coherenceFixtureToHtml(): + captured role word (info | warn | ok | danger) — closed alternation in code
 ];
 
-// ── E13: the .dep-* VALUE SPACE, derived instead of described ───────────────
-// The `dep-pill dep-` entry above is an E3 allowlist: it waives the whole
-// dynamic head, so before this list existed NOTHING checked which suffixes the
-// head can actually take. The comment on that entry claimed five statuses and
-// the server has six — `cancelled` shipped with no rule at all and fell through
-// to the .dep-pill base, which is byte-identical to .dep-queued, so a terminal
-// abort painted as "still waiting". A comment cannot fail; this list can.
+// ── E13: the DEPLOY STATE GRAMMAR, derived instead of described ────────────
+// This list began as the value space of a `dep-pill dep-` E3 allowlist entry:
+// that entry waived the whole dynamic head, so before the list existed NOTHING
+// checked which suffixes the head could take, and the comment on it claimed
+// five statuses while the server had six — `cancelled` shipped with no rule at
+// all and fell through to the .dep-pill base, which was byte-identical to
+// .dep-queued, so a terminal abort painted as "still waiting". A comment cannot
+// fail; this list can.
+//
+// gr-backlog-d24 kept the list and moved what it is CHECKED AGAINST. There is
+// no `.dep-*` family any more: app.js's DEPLOY_STATUS_META maps each status
+// below to a role (+ optional shape variant) in the one `.status-pill` family,
+// and E13 now reads that table out of app.js and holds it total over this list.
+// The list therefore states the server's value space and NOTHING about the
+// mapping — which is the property that made the old check weak, because the
+// mapping was spread across five hand-written class attributes.
 //
 // THE SOURCE OF TRUTH is Ecto: BarkparkCloud.Registry.Deployment's @statuses
 // (grep: `grep -n '@statuses' cloud/lib/barkpark_cloud/registry/deployment.ex`
@@ -443,6 +446,72 @@ const ALLOW_PREFIXES = [
 // `.dep-deferred`), so it co-merges with the rule in the same commit — a
 // deliberate guard+fix co-merge, not a guard weakened to fit.
 const DEPLOY_STATUSES = ["queued", "building", "pushing", "live", "failed", "cancelled", "deferred"];
+
+// The CLOSED role set of the unified pill family. A sixth name here would be a
+// hue invented at a call site instead of declared in the family, which is how
+// two families happened the first time — so E13 arm (d) refuses it by NAME, not
+// merely by "has a rule" (a typo'd role with a stray matching rule would pass
+// the unpainted arm and still be wrong).
+const STATUS_PILL_ROLES = ["ok", "info", "warn", "danger", "neutral"];
+
+// app.js's DEPLOY_STATUS_META, read out of the source. DERIVED, never
+// enumerated: an enumerated copy is the mapping somebody REMEMBERED, and the
+// whole point of decision 24 is that there is exactly one place the mapping
+// lives. Returns null when the table cannot be located or brace-matched — an
+// empty scan is not a clean scan, so arm (a) makes that a hard error.
+function deployStatusMetaTable(js) {
+  return roleTableOf(js, "DEPLOY_STATUS_META");
+}
+
+// The same brace-matched read, for any `var <NAME> = { key: {role,variant}, … }`
+// role table in app.js. cch-r21l added LIFECYCLE_PILL_ROLE as a second such
+// table (the instance lifecycle chip's absorption into the .status-pill family),
+// and a SECOND hand-rolled parser is a second thing to keep in step — so the
+// deploy reader above is expressed through this one rather than beside it.
+function roleTableOf(js, name) {
+  if (js == null) return null;
+  const start = js.indexOf(`var ${name} = {`);
+  if (start === -1) return null;
+  let i = js.indexOf("{", start);
+  if (i === -1) return null;
+  const open = i;
+  let depth = 0;
+  for (; i < js.length; i++) {
+    if (js[i] === "{") depth++;
+    else if (js[i] === "}" && --depth === 0) break;
+  }
+  if (depth !== 0) return null;
+  const body = js.slice(open + 1, i);
+  const table = new Map();
+  for (const m of body.matchAll(/([a-z][a-z0-9_]*)\s*:\s*\{([^{}]*)\}/g)) {
+    const role = /\brole\s*:\s*"([a-z][a-z0-9-]*)"/.exec(m[2]);
+    const variant = /\bvariant\s*:\s*"([a-z][a-z0-9-]*)"/.exec(m[2]);
+    table.set(m[1], { role: role ? role[1] : null, variant: variant ? variant[1] : null });
+  }
+  return table.size === 0 ? null : table;
+}
+
+// The KEY SET of a flat `var <NAME> = { key: "…", … }` object in app.js. Used by
+// E13 arm (g) to hold LIFECYCLE_PILL_ROLE's domain against LIFECYCLE_PILL_LABEL's,
+// so a sixth lifecycle state cannot arrive with a label and no role (which would
+// fall the chip through to a bare neutral pill — the impersonation shape).
+function flatObjectKeys(js, name) {
+  if (js == null) return null;
+  const start = js.indexOf(`var ${name} = {`);
+  if (start === -1) return null;
+  let i = js.indexOf("{", start);
+  const open = i;
+  let depth = 0;
+  for (; i < js.length; i++) {
+    if (js[i] === "{") depth++;
+    else if (js[i] === "}" && --depth === 0) break;
+  }
+  if (depth !== 0) return null;
+  const body = js.slice(open + 1, i);
+  const keys = new Set();
+  for (const m of body.matchAll(/([a-z][a-z0-9_]*)\s*:/g)) keys.add(m[1]);
+  return keys.size === 0 ? null : keys;
+}
 
 // The `wh-del-status--` VALUE SPACE, mirroring DEPLOY_STATUSES above and checked
 // by E15. `"wh-del-status wh-del-status--"` is an ALLOW_PREFIXES entry, which
@@ -538,15 +607,99 @@ function emittedFreshnessDots(js) {
   return { dots, literal, assigns };
 }
 
+// ── E18: the .dom-rung-- ROLE SET, derived instead of described ─────────────
+// `"dom-rung dom-rung--"` in ALLOW_PREFIXES waives the dynamic head, and until
+// now the only statement about what it composes was that entry's own trailing
+// comment. That comment named FIVE roles — ok | failed | active | pending |
+// proxied — and domainStageRows folds SIX: it omitted `unknown`, which HAS had a
+// rule since cch-w29, and it listed `pending`, which had NONE. So the comment was
+// wrong in both directions at once, and nothing could tell you: a comment cannot
+// fail. The set below is a DECLARATION only; emittedDomainRungRoles() reads the
+// arms and E18 reds if the two disagree either way.
+//
+// WHY THIS ONE GETS NO CONSENT ARM EITHER, and the reason differs from E16's. On
+// the fresh-badge family, a rule-less modifier IMPERSONATED a real state, because
+// the bare .fresh-badge is itself the "never deployed" badge. Here the bare
+// .dom-rung had no other consumer at all — domainRungChip always composes
+// `dom-rung dom-rung--<role>`, and `pending` was the only one of the six roles
+// that ever reached the base — so the fall-through was landing on the correct
+// muted paint by luck, not by statement. That is a weaker defect than cch-w64's
+// and it is recorded as such, but the remedy is the same: .dom-rung--pending is
+// now authored explicitly, and arm (c) requires a rule for all six. Nothing is
+// permitted to rely on an unwritten fall-through again.
+const DOM_RUNG_ROLES = ["ok", "failed", "proxied", "pending", "unknown", "active"];
+
+// The roles domainStageRows actually produces. Derived, never enumerated. The
+// initializer is a ternary CHAIN, so the roles are read out of the RESULT
+// positions only (`? "x"` arms and the trailing `: "x";` default) — never every
+// string in the expression, which would also scoop up the `status === "…"`
+// comparands and hand E18 a set wider than the code's. Reassignments (`role =
+// "active"`, the markNextStep promotion) are read separately. Returns null when
+// the function cannot be located or brace-matched; reports arm/assignment COUNTS
+// beside the literals so an arm this reader cannot follow is a hard error rather
+// than a silently shorter set — an empty scan is not a clean scan.
+function emittedDomainRungRoles(js) {
+  const start = js.indexOf("function domainStageRows(");
+  if (start === -1) return null;
+  let i = js.indexOf("{", start);
+  if (i === -1) return null;
+  const open = i;
+  let depth = 0;
+  for (; i < js.length; i++) {
+    if (js[i] === "{") depth++;
+    else if (js[i] === "}" && --depth === 0) break;
+  }
+  if (depth !== 0) return null;
+  const body = js.slice(open, i);
+
+  const initStart = body.search(/\bvar\s+role\s*=/);
+  if (initStart === -1) return null;
+  const initEnd = body.indexOf(";", initStart);
+  if (initEnd === -1) return null;
+  const init = body.slice(initStart, initEnd + 1);
+
+  const roles = new Set();
+  // Ternary result arms: `? "ok"`.
+  const armLits = [...init.matchAll(/\?\s*"([a-z][a-z0-9-]*)"/g)];
+  for (const m of armLits) roles.add(m[1]);
+  // The chain's trailing default: `: "unknown";`.
+  const tail = init.match(/:\s*"([a-z][a-z0-9-]*)"\s*;\s*$/);
+  if (tail) roles.add(tail[1]);
+  const arms = (init.match(/\?/g) || []).length;
+
+  // Reassignments elsewhere in the body (the `active` promotion).
+  const reassigns = [...body.slice(initEnd).matchAll(/(?:^|[^.\w$])role\s*=(?!=)/g)].length;
+  const reassignLits = [...body.slice(initEnd).matchAll(/(?:^|[^.\w$])role\s*=\s*"([a-z][a-z0-9-]*)"/g)];
+  for (const m of reassignLits) roles.add(m[1]);
+
+  return {
+    roles,
+    arms,
+    armLiterals: armLits.length,
+    tail: !!tail,
+    reassigns,
+    reassignLiterals: reassignLits.length,
+  };
+}
+
 // Classes that intentionally have no style rule: they are JS/structural hooks
 // (selector targets, event delegation markers), not visual classes. Each is
-// printed on every run; removing the hook from the markup should remove the
-// entry too.
+// printed on every run, and E20 below now REQUIRES each to fire: removing the
+// hook from the markup no longer merely "should" remove the entry, it reds the
+// gate until someone does.
+//
+// THE ENTRY THIS ARM FOUND ON ITS FIRST RUN: "notif-smtp", carrying the reason
+// `querySelector(".notif-smtp") — SMTP fieldset container`. The console never
+// emitted it as a class; notifEmailSectionHtml() writes `id="notif-smtp"` (grep
+// -n 'function notifEmailSectionHtml' app.js) and every reader is the ID
+// selector `$("#notif-smtp")` — `grep -n 'notif-smtp' app.js` shows every site
+// is `#notif-smtp` or a `notif-smtp-*` input id, and none is a class. So
+// the entry waived nothing and its stated reason was false in the same breath,
+// which is the whole reason a list needs an arm rather than a convention.
 const ALLOW_HOOK_CLASSES = [
   "view",              // section container app.js shows/hides per route ($$(".view"))
   "modal-body",        // openModal() innerHTML target (selected by #modal-body)
   "session-revoke",    // querySelectorAll(".session-revoke") — revoke button in the sessions panel
-  "notif-smtp",        // querySelector(".notif-smtp") — SMTP fieldset container in notifications
   "token-revoke",      // querySelectorAll(".token-revoke[data-id]") — per-token revoke button
   "token-ab",          // querySelectorAll(".token-ab") — ability checkboxes in the new-token modal
   "fleet-open-studio", // querySelectorAll(".fleet-open-studio") — Open Studio button per fleet row
@@ -555,6 +708,7 @@ const ALLOW_HOOK_CLASSES = [
   "launch-region",     // querySelector(".launch-region") — region <select>, styled by .form-input; S7 change hook
   "launch-connect-provider", // querySelector(".launch-connect-provider") — connect CTA, styled by .btn; S7 click hook
   "launch-catalog-retry",    // querySelector(".launch-catalog-retry") — retry button, styled by .btn; S7 click hook
+  "tier-free",         // querySelector(".tier-free .btn") in __preview__/breakpoint-sweep.mjs (tierLabelProbeJs) — the tier-floor-render probe's Free-tier anchor; styled by .tier/.btn, no rule of its own
 ];
 
 // R3 / KNOWN_GAPS — genuine E2/E3 violations that live in app.js and index.html,
@@ -597,6 +751,12 @@ const ALLOW_RAW_COLORS = [
   { line: ".modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }", why: "scrim — theme-invariant by design (GR63: fixed, so it stays over the viewport while a tall modal scrolls)" },
   { line: "color: #fff; font-weight: 700; font-size: 13px;", why: "white initials on the fixed provider brand tiles" },
   // .brand-hetzner + .brand-azure now tint from --provider-* tokens (S7) — no raw literal to allow.
+  // console-w28: the same shelf as the three below, NOT the --provider-* family.
+  // That family emits into the Go CLI chrome sibling too, and Cloudflare has no
+  // fleet chip and no CLI glyph (nothing is ever hosted on it) — a row there
+  // would be a zero-consumer Go token. See the .brand-cloudflare comment in
+  // app.css for the full reasoning and for the emit-fence refusal that produced it.
+  { line: ".brand-cloudflare { background: #f6821f; }", why: "Cloudflare brand colour — picker tile + roster row only; no fleet chip, no CLI glyph, so no --provider-* token" },
   { line: ".brand-do { background: #0080ff; }", why: "DigitalOcean brand colour" },
   { line: ".brand-aws { background: #232f3e; }", why: "AWS brand colour" },
   { line: ".brand-vultr { background: #007bfc; }", why: "Vultr brand colour" },
@@ -622,7 +782,7 @@ const CONTRAST_PAIRS = [
   { fg: "--muted-text", bg: "--surface", min: 4.5, why: "secondary copy on cards" },
   { fg: "--dim", bg: "--bg", min: 4.5, why: "tertiary copy (.dim)" },
   { fg: "--dim", bg: "--muted-surface", min: 4.5, why: "tertiary copy on muted" },
-  { fg: "--dim", bg: "--surface", min: 4.5, why: ".dep-cancelled pill text — the chip is hollow (background: transparent), so its label composites straight onto the .deploys card" },
+  { fg: "--dim", bg: "--surface", min: 4.5, why: ".status-pill--stopped pill text (a cancelled deploy) — the chip is hollow (background: transparent), so its label composites straight onto the .deploys card" },
   { fg: "--primary-fg", bg: "--primary", min: 4.5, why: "avatar label / step dots" },
   { fg: "--btn-fg", bg: "--btn-bg", min: 4.5, why: ".btn-primary label" },
   { fg: "--btn-danger-fg", bg: "--btn-danger-bg", min: 4.5, why: ".btn-danger label" },
@@ -631,12 +791,12 @@ const CONTRAST_PAIRS = [
   { fg: "--ok", bg: "--surface", min: 4.5, why: "success text (.plan-rec, .new-eyebrow.ok)" },
   { fg: "--ok-strong", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".runway-sub trial chip (green=accent: strong text voice on the soft tint, GR6)" },
   { fg: "--danger", bg: "--surface", min: 4.5, why: "error text (.deploy-fail, .wh-del-err)" },
-  { fg: "--danger", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".dep-failed pill text" },
-  { fg: "--warn-strong", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".dep-building pill text" },
+  { fg: "--danger", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".wh-del-status--danger / .tlv-badge--verify-fail / .dom-rung--failed text on a soft danger tint" },
+  { fg: "--warn-strong", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".deploy-fail--blocked text on a soft warn tint" },
   // cch-w64-s6: `.dep-deferred` keeps the warn hue but gives up the filled chip
   // (it no longer holds a build slot), so its ground is the CARD itself — the
   // one pair the tinted variant would not have owed.
-  { fg: "--warn-strong", bg: "--surface", min: 4.5, why: ".dep-deferred pill text on an open chip" },
+  { fg: "--warn-strong", bg: "--surface", min: 4.5, why: ".status-pill--warn.status-pill--hollow pill text (a deferred deploy) on an open chip" },
   { fg: "--text", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".notice-ok copy" },
   { fg: "--text", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".notice-warn copy" },
   { fg: "--text", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".notice-error copy" },
@@ -829,151 +989,6 @@ export function orphanCommentErrors(cssRawText, file = "app.css") {
   return errs;
 }
 
-// ── E14: wrap-recipe declaration parity (charter D220) ───────────────────────
-// The full ruling, the three load-bearing design choices and the coverage
-// boundary are stated in the E14 entry of this file's header. What follows is
-// the executable form of that invariant — the durable artifact.
-//
-// THE CORE, PINNED AS A LITERAL (design choice 3). Deriving it from the copies
-// would let a fourth copy dropping a property redefine the contract.
-const WRAP_CORE = [
-  ["white-space", "normal"],
-  ["height", "auto"],
-  ["min-height", "24px"],
-  ["padding-top", "2px"],
-  ["padding-bottom", "2px"],
-];
-// EVERY PROPERTY THAT CAN SET A CORE PROPERTY WITHOUT NAMING IT — the physical
-// shorthand, the logical aliases (`writing-mode: horizontal-tb` is the console's
-// only mode, so block-start/end ARE top/bottom here) and `white-space`'s own
-// sub-longhands. Pinned as a literal for design choice 3's reason. A rule that
-// declares any of these is a wrap copy and owes the longhand RESTATED AFTER it;
-// nothing here is value-parsed. Ruling and the rejected alternative: the
-// SHORTHAND paragraph of this file's E14 header entry.
-const WRAP_CORE_SHORTHANDS = [
-  ["padding", ["padding-top", "padding-bottom"]],
-  ["padding-block", ["padding-top", "padding-bottom"]],
-  ["padding-block-start", ["padding-top"]],
-  ["padding-block-end", ["padding-bottom"]],
-  ["block-size", ["height"]],
-  ["min-block-size", ["min-height"]],
-  ["white-space-collapse", ["white-space"]],
-  ["text-wrap", ["white-space"]],
-  ["text-wrap-mode", ["white-space"]],
-];
-// The three copies that survived wave 18, pinned as REQUIRED-PRESENT. A
-// same-file pin is the correct form here (pin-your-own, derive-foreign): it
-// closes the PARTIAL-blindness case the zero-copies guard cannot see — a scan
-// that degrades to finding 1 of 3 still reports "clean" without this.
-// W20-S6 added `.attention-row` as the FOURTH copy and it is pinned here in the
-// same commit. Without this line the fourth copy was COUNTED but not
-// REQUIRED — a scan degrading to 3-of-4 that lost exactly the attention
-// queue's copy would still have reported clean, which is the partial
-// blindness these pins exist to close.
-const WRAP_REQUIRED_HOSTS = [".attention-row", ".detail-rail", ".fleet-status", ".instance-card-head"];
-// WRAPPER-SCOPED: one or more descendant/child steps, then `.status-pill`, and
-// NOTHING after it. The trailing anchor keeps `.detail-rail .status-pill-label`
-// and `.status-pill--ok .status-pill-dot` out; requiring a leading step keeps
-// the BASE `.status-pill` out structurally rather than by allowlist.
-const WRAPPER_SCOPED_PILL = /^\s*(\S[^{}]*?)[\s>]+\.status-pill\s*$/;
-
-export function wrapParityErrors(cssRawText, file = "app.css") {
-  const stripped = stripCssComments(cssRawText);
-  const errs = [];
-  const copies = []; // { selector, host, line, declared: Map }
-  // Innermost `{…}` blocks only: a prelude cannot contain a brace, so an
-  // `@media` wrapper never matches as a selector and its inner rules do.
-  for (const m of stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    const prelude = m[1];
-    const body = m[2];
-    const declared = new Map();
-    // Source POSITION of each property's LAST declaration. The shorthand arm is
-    // order-sensitive by construction (a longhand only re-pins a shorthand that
-    // came BEFORE it), so position is data, not decoration.
-    const posOf = new Map();
-    let nth = 0;
-    for (const seg of body.split(";")) {
-      const c = seg.indexOf(":");
-      if (c === -1) continue;
-      const prop = seg.slice(0, c).trim().toLowerCase();
-      if (!/^[a-z-]+$/.test(prop)) continue;
-      declared.set(prop, seg.slice(c + 1).trim().replace(/\s*!important$/, ""));
-      posOf.set(prop, nth++);
-    }
-    // DESIGN CHOICE 1 — the trigger is the DECLARATION, not the selector. A
-    // wrapper-scoped rule that touches none of the five is not a wrap copy and
-    // is not even counted. A core SHORTHAND counts as declaring the core: it is
-    // how a fourth copy used to go invisible (see the header's SHORTHAND
-    // ruling), so the trigger reads the shorthand set too.
-    const startedWith = [
-      ...WRAP_CORE.filter(([p]) => declared.has(p)).map(([p]) => p),
-      ...WRAP_CORE_SHORTHANDS.filter(([p]) => declared.has(p)).map(([p]) => p),
-    ];
-    if (!startedWith.length) continue;
-    // Which core longhands are set through a shorthand and NOT re-pinned in
-    // longhand at the canonical value after it. No shorthand value is parsed —
-    // remedy (b), not remedy (a).
-    const shadowedBy = new Map();
-    for (const [sp, longs] of WRAP_CORE_SHORTHANDS) {
-      const at = posOf.get(sp);
-      if (at === undefined) continue;
-      for (const [lp, canonical] of WRAP_CORE) {
-        if (!longs.includes(lp)) continue;
-        const li = posOf.get(lp);
-        if (li !== undefined && li > at && declared.get(lp) === canonical) continue;
-        shadowedBy.set(lp, sp);
-      }
-    }
-    for (const part of prelude.split(",")) {
-      const hit = part.match(WRAPPER_SCOPED_PILL);
-      if (!hit) continue;
-      const selector = part.trim().replace(/\s+/g, " ");
-      const line = lineOf(stripped, m.index + prelude.indexOf(part.replace(/^\s+/, "")));
-      copies.push({ selector, host: hit[1].trim().replace(/\s+/g, " "), line, declared });
-      const missing = WRAP_CORE.filter(([p, v]) => declared.get(p) !== v || shadowedBy.has(p)).map(
-        ([p, v]) =>
-          `${p}: ${v} (${
-            shadowedBy.has(p)
-              ? `set through the shorthand \`${shadowedBy.get(p)}: ${declared.get(shadowedBy.get(p))}\`, ` +
-                `which E14 does not parse — restate \`${p}: ${v}\` in longhand AFTER that shorthand`
-              : declared.has(p)
-                ? `declared "${declared.get(p)}"`
-                : "not declared"
-          })`,
-      );
-      if (missing.length) {
-        errs.push(
-          `E14 ${file}:${line}  ${selector} declares ${startedWith
-            .join(", ")} — starting the wrap recipe — but DIVERGES from the shared core: ` +
-            `${missing.join("; ")}. A wrapper-scoped .status-pill rule that declares ANY of the five ` +
-            `must declare ALL five at the canonical value (white-space: normal; height: auto; ` +
-            `min-height: 24px; padding-top: 2px; padding-bottom: 2px) — charter D220. The jacket ` +
-            `(align-items, the -dot/-detail rules, the wrapper's flex-wrap) is per-host and is NOT asserted.`,
-        );
-      }
-    }
-  }
-  // ANTI-VACUITY 1 — zero copies is a broken scan, not a clean stylesheet.
-  if (!copies.length) {
-    errs.push(
-      `E14 ${file}  ZERO wrapper-scoped .status-pill wrap copies found — a vacuous green. ` +
-        `This check exists because three such copies ship; seeing none means the scan stopped ` +
-        `seeing them (a selector shape changed, a parse broke), not that they agree.`,
-    );
-  }
-  // ANTI-VACUITY 2 — a scan degrading to 1-of-3 also reports clean without this.
-  for (const host of WRAP_REQUIRED_HOSTS) {
-    if (!copies.some((c) => c.host === host)) {
-      errs.push(
-        `E14 ${file}  the pinned wrap copy \`${host} .status-pill\` is MISSING — either the copy ` +
-          `was deleted (a shipped wrap regression) or the scan can no longer see it (partial ` +
-          `blindness). Re-derive by grep before editing this pin.`,
-      );
-    }
-  }
-  return { errors: errs, copies };
-}
-
 // ── E11: banned source line-number citation (charter D41; bp-honest-gates D5) ─
 // THE RULING — a BAN, not a resolver. Argued from maintenance cost and from the
 // three measured occurrences, not taste: (a) every live `app.js:<line>` was
@@ -987,45 +1002,131 @@ export function wrapParityErrors(cssRawText, file = "app.css") {
 // survives any sibling shift a line number cannot.
 //
 // SCANS THE WHOLE SOURCE TEXT, not a comment subset. A comment-only walk was
-// prototyped and REJECTED: a {string, //, /* */} state machine over 893 KB of
-// app.js (template literals, regex literals) desyncs and MISSES real citations
+// prototyped and REJECTED: a {string, //, /* */} state machine over the ~1,651 KiB
+// of app.js (template literals, regex literals) desyncs and MISSES real citations
 // — a false-negative in a tripwire, the exact disease this epic removes. Full
 // text cannot desync and cannot miss a citation that migrates into a string.
+// THAT SIZE IS MEASURED, AND THE PREVIOUS ONE WAS NOT: this sentence said
+// "893 KB" long after the file had nearly doubled past it. Re-derive it, never
+// quote it forward — `wc -c cloud/priv/static/app.js` reads 1,690,235 bytes at
+// the commit that corrected this line. A justification carrying a number that
+// is half of reality is the same shape as an allowlist entry that waives
+// nothing: still persuasive, no longer true, and nothing in the run checks it.
 // The shape `app.js:<digits>` is citation-specific: measured on this tree every
 // one of the seven live occurrences is a comment citation, zero are in code, so
 // full-text scanning is both robust AND false-positive-free today.
 //
 //   COVERAGE BOUNDARY (charter D40 — an enforcement mechanism states its limits):
-//     • CROSS-LANGUAGE `router.ex:<line>` cites are OUT. Re-anchoring a JS
-//       comment that points at Elixir source means grepping the .ex file — a
-//       distinct move filed as cch-bl-citation-drift-cross-language. E11 flags
-//       only the same-repo `app.js:` shape; `router.ex:<line>` stays UNFLAGGED
-//       here by design (live on this tree: __app.test.mjs + two app.js comments).
-//     • SHAPE-SCOPED. Only `app.js:<digits>` (also `app.js ~<n>` / a range) is a
-//       citation to E11. A prose reference like "the app.js file" is untouched;
-//       a NON-numeric anchor (a function name + grep) is exactly what it asks
-//       for. It cannot judge whether a cited function name is itself correct —
-//       that is a semantic claim no regex owns.
+//     • CROSS-LANGUAGE `.ex`/`.exs` cites are OUT. Re-anchoring a JS comment
+//       that points at Elixir source means grepping a file OUTSIDE
+//       cloud/priv/static — a distinct move, owned by
+//       cch-bl-citation-drift-cross-language. E11's alternation names only
+//       same-tree extensions (.js/.mjs/.css/.sh), so `router.ex:<line>` and
+//       friends stay UNFLAGGED here BY DESIGN. The live population is stated as
+//       a DERIVATION, never a count — every figure ever written for it (3, then
+//       5) was false by the next merge. Re-derive it with:
+//         grep -rnE '\.(ex|exs):[0-9]{2,}' cloud/priv/static \
+//           --include='*.mjs' --include='*.js' --include='*.css'
+//     • FOREIGN FROZEN ARTIFACTS ARE OUT. `*.html:<line>` cites point at
+//       design/handover/…/*.dc.html — a frozen handover artifact outside this
+//       directory that does not receive the sibling shifts app.css does. Not in
+//       the alternation; not a citation to E11.
+//     • `.sh` AND EVERY OTHER TEXT SIDECAR ARE NOW SCANNED — THE ASYMMETRY IS
+//       GONE (cchi-w18). This bullet used to record the opposite: the scan set
+//       matched an allowlist of three extensions, so a shell instrument's own
+//       cites, and every recorded `.baseline`, were STRUCTURALLY UNREACHABLE at
+//       any regex width while a cite of the same shape one file away reddened.
+//       That was the REACH-not-SHAPE defect charter D292 fixed for app.css,
+//       left standing for everything else. citationScanFiles() now admits any
+//       TEXT file in the two arms (see the predicate above), which closed it and
+//       surfaced fourteen live citations across three previously-unreachable
+//       files — all re-anchored in the same commit that widened the set, so the
+//       widened guard is green here rather than vacuous, exactly as D292 was.
+//       Re-derive the set and its per-file cross with
+//       `node __css_check.mjs --citation-inventory`. Rows:
+//       cch-w17-bl-e11-scan-set-app-css-and-shoot-sh (app.css + shoot.sh) and
+//       cchi-w18-bl-e11-scan-set-third-blind-spot-baseline (the baselines).
+//     • THE BARE ANCHOR — A KNOWN-UNREACHABLE FORM, NOT AN OVERSIGHT. A
+//       citation that drops the filename and keeps only the number, written as
+//       a colon or a parenthesised colon immediately before the digits, carries
+//       NO filename for any filename-anchored regex to bind to, so it is
+//       unreachable at every regex width AND at every scan-set width — widening
+//       the FILE SET (which this gate now does by text shape) cannot reach it
+//       either, because the defect is in the CITATION, not in the reach. It is
+//       the same class as the `if $. == <n>` recipe. Banning it is NOT free and
+//       is deliberately NOT done: the shape collides with legitimate CSS and
+//       prose (a bare number after a colon is a declaration value, a port, a
+//       viewport width, a byte count), so a ban here would be a false-positive
+//       engine rather than a tripwire. Re-derive the live population — never
+//       quote a count, every figure written for one in this tree has gone stale:
+//         grep -cP '(?<![A-Za-z0-9_.\-]):\d{3,5}-\d{3,5}' app.css   # bare ranges
+//         grep -oP '\(:\d{3,5}\)' app.css | wc -l                    # bare singles
+//       Owner row: cchi-w18-bl-e11-scan-set-third-blind-spot-baseline.
+//     • app.css's OWN self-citations are DEFERRED, and the deferral is a SHAPE
+//       exemption, not a set exclusion. app.css joined the scan set in D292 so
+//       that `app.js:<n>` inside the stylesheet reds — that stays. The WIDENED
+//       shapes (`app.css:<n>` and `<name>.<ext>:<n>`) are skipped for app.css
+//       itself: re-anchoring them is a comment-only edit to this wave's most
+//       contended file, which would serialize a gate change behind every CSS
+//       slice in flight for zero measurement value. Same owner row as shoot.sh
+//       above. `--citation-inventory`'s `ruled` column still COUNTS them, so
+//       the deferral is visible in a run rather than invisible in a regex.
+//     • SHAPE-SCOPED, AND THE SEPARATOR IS DELIBERATELY ASYMMETRIC. Loose
+//       `[:~ ]+~?` for the `app.js` branch; tight `(?::~?|\s~)` for every
+//       widened target. This is a design choice, not an accident. The loose
+//       form is safe for `app.js` (nobody writes "app.js <n>" as prose) and the
+//       shipped gate already catches the bare-space, the double-space-tilde and
+//       the range forms of `app.js` + a number — a tight-everywhere regex would
+//       DROP all three, a net loss. The three forms are NOT spelled out as
+//       literal examples anywhere, and no fixture holds them: EVERY file in the
+//       scan set — this one, the test file, the harness sidecars — would red E11
+//       against ITSELF for writing one, which is why the test that needs a
+//       banned citation assembles it from parts at runtime instead of typing it
+//       (grep -n "NEVER WRITTEN WHOLE" __app.test.mjs). The separator forms are
+//       therefore DEFINED HERE AND ONLY HERE, as the two separator branches of
+//       the alternation itself:
+//         grep -n "^const CITATION_RULED_ALTERNATION" __css_check.mjs
+//       That single line IS the enumeration; diff its `app.js` branch's
+//       separator class against the widened branch's and the asymmetry this
+//       paragraph describes is the difference between them. If you came here
+//       looking for a fixture that lists the forms, there is none, and inventing
+//       one to satisfy a recipe would put a banned citation into the scan set.
+//       Loose for the new targets is toxic: it reds the `app.css <bytes> B`
+//       size records in __preview__/cssom-heads.baseline (count them, never
+//       quote them: `grep -cE 'app\.css [0-9]+ B' __preview__/cssom-heads.baseline`
+//       — the sidecar gains a record on every wave that re-measures) plus
+//       `app.css: 620` INSIDE a scanned file, __preview__/breakpoint-sweep.mjs.
+//       That last one is the decisive argument: it is not a sidecar false
+//       positive, it would red the gate. A prose reference like "the app.js
+//       file" is untouched; a NON-numeric anchor (a function name + grep) is
+//       exactly what E11 asks for. It cannot judge whether a cited function
+//       name is itself correct — that is a semantic claim no regex owns.
 export function bannedSourceCitationErrors(src, file) {
   const errs = [];
-  const CITATION = /\bapp\.js[:~ ]+~?\d{2,}(?:-\d{2,})?/g;
-  for (const m of src.matchAll(CITATION)) {
+  const base = String(file).replace(/\\/g, "/").split("/").pop();
+  for (const m of src.matchAll(CITATION_RULED_ALTERNATION)) {
+    // app.css's own widened-shape cites are deferred (see the boundary above).
+    // `app.js:<n>` inside app.css still reds — that is D292's whole point.
+    if (base === "app.css" && !m[0].startsWith("app.js")) continue;
     const line = src.slice(0, m.index).split("\n").length;
     errs.push(
       `E11 ${file}:${line}  banned source line citation ${JSON.stringify(m[0].trim())} — ` +
         `line numbers rot on any sibling shift (charter D41 / bp-honest-gates D5). ` +
-        `Re-anchor to the enclosing FUNCTION name + a grep that re-derives it ` +
+        `Re-anchor to the enclosing FUNCTION name (or, for a stylesheet, the SELECTOR) ` +
+        `plus a grep that re-derives it ` +
         `(e.g. renderLivenessChip() with grep -n 'function renderLivenessChip'). ` +
-        `Cross-language router.ex cites are OUT (cch-bl-citation-drift-cross-language).`,
+        `Cross-language .ex cites are OUT (cch-bl-citation-drift-cross-language).`,
     );
   }
   return errs;
 }
 
-// The files E11 scans: every top-level *.js|*.mjs|*.css plus __preview__/* of
-// the same extensions. Read from the directory (never a hardcoded list) so a
-// NEW harness file is covered the moment it lands — a fixed list is the
-// enumerate-don't-ban shape bp-honest-gates D5 forbids.
+// The files E11 scans: every TEXT file anywhere under the scan root. Both
+// halves of that sentence are predicates — the shape half (is it text?) and the
+// reach half (is it under the root?) — because a list of extensions and a list
+// of directory arms are the same enumerate-don't-ban shape bp-honest-gates D5
+// forbids, and BOTH of them rotted here, in that order. A new harness file, and
+// now a whole new harness SUBDIRECTORY, is covered the moment it lands.
 //
 // WHY .css IS IN THE SET, AND WHY THE REGEX IS NOT THE LEVER (charter D292).
 // This scan read `/\.m?js$/` only — 15 files, and app.css was not one of them —
@@ -1061,21 +1162,114 @@ export function bannedSourceCitationErrors(src, file) {
 // same derivation at a directory where the set legitimately collapses and watch
 // it refuse. A guard whose failure arm no test can reach is a guard nobody has
 // ever seen fire.
-function citationScanFiles(root = dir) {
+// THE SCAN PREDICATE IS A RULE, NOT AN EXTENSION LIST (charter D41 /
+// bp-honest-gates D5: "ban the SHAPE, do not enumerate"). This filter read
+// `/\.(m?js|css)$/` — an ALLOWLIST OF THREE EXTENSIONS — so every sidecar,
+// shell instrument and recorded baseline in the same two directories was
+// structurally unreachable at any regex width, exactly the REACH-not-SHAPE
+// defect D292 fixed for app.css and the coverage boundary above filed against
+// itself. An extension list is a SNAPSHOT: it covers what existed the day it
+// was written, and a new sidecar lands unscanned and silent.
+//
+// The replacement asks the only question E11 actually needs answered — CAN
+// THIS FILE CARRY A CITATION, i.e. is it text? — and asks it of the BYTES,
+// never of the name. A NUL byte in the sniff window is the binary signal
+// (favicon.ico is the one member of these two directories it excludes today;
+// re-derive that with `node __css_check.mjs --citation-inventory`). Anything
+// textual is in, whatever it is called, the day it lands.
+//
+// WHY NOT A SKIP LIST OF BINARY EXTENSIONS. Same disease, opposite sign: a
+// two-item skip list in this repo turned out to really be eight. The bytes
+// cannot go stale; a list of names always does.
+const CITATION_TEXT_SNIFF_BYTES = 4096;
+function isTextFile(abs) {
+  let fd;
+  try {
+    fd = fs.openSync(abs, "r");
+  } catch {
+    return false;
+  }
+  try {
+    const buf = Buffer.alloc(CITATION_TEXT_SNIFF_BYTES);
+    const n = fs.readSync(fd, buf, 0, CITATION_TEXT_SNIFF_BYTES, 0);
+    return buf.subarray(0, n).indexOf(0) === -1;
+  } catch {
+    return false;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+// THE REACH IS A RULE TOO, NOT A LIST OF ARMS (the second half of the same
+// defect). The predicate above fixed WHAT SHAPE of file is admitted; this walk
+// fixes WHERE the gate is allowed to look. It used to be exactly two
+// readdir calls — the scan root and `__preview__/` — which is an ENUMERATION
+// wearing a derivation's clothes: it covers the directories that existed the
+// day it was written, and every subdirectory that lands afterwards is
+// structurally unreachable at any regex width and at any text predicate. That
+// is not a hypothetical. While the text-shape widening was in flight, this tree
+// already held nested fixture subtrees under `__preview__/fixtures/` (each with
+// its own recorded baseline and proof script), a top-level `__fixtures__/`, and
+// `fonts/` — none of which either arm descends into. A two-arm list had already
+// failed before the change that introduced it finished merging.
+//
+// The replacement asks the only question REACH needs answered — IS THIS FILE
+// UNDER THE SCAN ROOT? — and answers it by descending, so a new subdirectory is
+// covered the day it lands rather than the day someone remembers to add an arm.
+//
+// EVERY EXCLUSION IS A PREDICATE WITH GROUNDS. There is no name list here, and
+// deliberately none for `node_modules/` or build output: neither exists under
+// this root, and a named exclusion for a thing that is not there can never fire
+// — E19's own shape (a waiver that absolves nothing), one level up at the
+// directory. The three that DO fire are properties of the entry itself:
+//
+//   1. NOT A REGULAR FILE (after directories are descended). A socket, FIFO or
+//      device node carries no reviewable comment and opening one can BLOCK the
+//      gate forever. Judged from the dirent, never from the name.
+//   2. A SYMBOLIC LINK, of either kind. A link can point outside the tree
+//      (scanning files this gate does not own) or back into it (an unbounded
+//      walk, and the same file counted under two names, so one repair reads as
+//      two). A link TARGET that genuinely lives under this root is still
+//      scanned — under its own real path, exactly once.
+//   3. BINARY BYTES — the NUL sniff above. Unchanged, and it is what keeps the
+//      newly reachable `fonts/*.woff2` out by their CONTENT rather than by
+//      their extension.
+//
+// Re-derive the whole set, and what the widening cost, with
+// `node __css_check.mjs --citation-inventory` — never from a number quoted here.
+export function citationScanFiles(root = dir) {
   const out = [];
-  const scanned = (f) => /\.(m?js|css)$/.test(f);
   if (!fs.existsSync(root)) return out;
-  for (const f of fs.readdirSync(root)) if (scanned(f)) out.push(f);
-  const pv = path.join(root, "__preview__");
-  if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) if (scanned(f)) out.push(path.join("__preview__", f));
+  const walk = (absDir, rel) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(absDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      if (ent.isSymbolicLink()) continue; // exclusion 2
+      const abs = path.join(absDir, ent.name);
+      const childRel = rel ? path.join(rel, ent.name) : ent.name;
+      if (ent.isDirectory()) {
+        walk(abs, childRel);
+        continue;
+      }
+      if (!ent.isFile()) continue; // exclusion 1
+      if (!isTextFile(abs)) continue; // exclusion 3
+      out.push(childRel);
+    }
+  };
+  walk(root, "");
   return out.sort();
 }
 
 // E17 — THE SCAN SET IS A CLAIM, AND NOTHING CHECKED IT (charter D41 /
-// bp-honest-gates D5). citationScanFiles() derives its list from two readdir
-// calls and one extension filter, and ALL THREE can silently produce nothing: a
-// renamed or moved `__preview__/`, an extension pattern edited to a shape no
-// file matches, a scan rooted somewhere else. E11 then iterates an empty list
+// bp-honest-gates D5). citationScanFiles() derives its list from one recursive
+// walk under one root, filtered by one text predicate, and every part of that
+// can silently produce nothing: a renamed or moved `__preview__/`, a predicate
+// edited to a shape no file matches, a descent quietly flattened back to a
+// readdir of the root, a scan rooted somewhere else. E11 then iterates an empty list
 // and the gate prints its clean census — a green from a scan that read NOTHING
 // is byte-identical to a green from a scan that read everything. That is the
 // vacuous-instrument shape this whole file exists to forbid, sitting inside the
@@ -1091,13 +1285,16 @@ function citationScanFiles(root = dir) {
 // nothing asserted it. The self-membership arm applies only to the real root: it
 // is a claim about THIS tree and means nothing about a directory the inventory
 // mode was merely pointed at.
-function citationScanSetRefusals(files, root = dir) {
+export function citationScanSetRefusals(files, root = dir) {
   const out = [];
   if (!files.length) {
     return [
       `E17 ${root}  citation scan set is EMPTY — E11 would have reported a clean census over ` +
-        `ZERO files. Either the scan root does not exist, or the extension filter in ` +
-        `citationScanFiles() now matches nothing. A green over an empty set is not a green.`,
+        `ZERO files. Membership here is an invariant, not a mechanism: a file is in the set ` +
+        `when it lives under this scan root and its bytes read as text. So an empty set means ` +
+        `one of exactly two things — nothing lives under this root (missing, moved, or bare), ` +
+        `or nothing under it reads as text. Re-derive with: node __css_check.mjs ` +
+        `--citation-inventory ${root}. A green over an empty set is not a green.`,
     ];
   }
   const PV = "__preview__" + path.sep;
@@ -1113,6 +1310,22 @@ function citationScanSetRefusals(files, root = dir) {
         `of citationScanFiles() collapsed (a moved or renamed directory reads here exactly like ` +
         `a clean one). Re-derive with: node __css_check.mjs --citation-inventory`,
     );
+  // THE DESCENT ARM. The reach half of the derivation collapses in a way the
+  // two arms above cannot see: flatten the walk back to a readdir of each arm's
+  // own directory and every member is still present at depth 0 and depth 1, so
+  // both totals stay healthy while every nested fixture subtree — its recorded
+  // baselines, its proof scripts — silently stops being scanned. A set with no
+  // member below the first level is either that collapse or a tree with no
+  // nested content at all; both are worth a named refusal rather than a clean
+  // census, for the same reason the arms above are.
+  if (!files.some((f) => f.split(path.sep).length > 2))
+    out.push(
+      `E17 ${root}  citation scan set has ZERO members below the first level — the recursive ` +
+        `descent in citationScanFiles() collapsed (a walk flattened back to a readdir per arm ` +
+        `reads here exactly like a tree with no subdirectories), so every nested fixture ` +
+        `subtree went unscanned while E11 still reported a count. ` +
+        `Re-derive with: node __css_check.mjs --citation-inventory`,
+    );
   const self = path.basename(fileURLToPath(import.meta.url));
   if (root === dir && !files.includes(self))
     out.push(
@@ -1124,15 +1337,20 @@ function citationScanSetRefusals(files, root = dir) {
 }
 
 // THE RULED ALTERNATION — the widened citation shape ruled by charter D201 and
-// carried by cch-w16-s7. IT IS DELIBERATELY NOT WHAT E11 ENFORCES TODAY: E11
-// bans `app.js:<line>` only (see bannedSourceCitationErrors above), and that
-// shape has ZERO live hits on this tree, so the SHIPPED gate currently catches
-// nothing. The ruled alternation is what E11 would ban AFTER the widening —
-// loose separator for the `app.js` branch (the form the shipped gate already
-// catches, and which the "prescribed" tight-everywhere regex would have
-// dropped), tight `(?::~?|\s~)` for every widened target so that prose like
-// "the app.css 273 raw px font-size lines" and the sidecar's `app.css <bytes> B`
-// records stay clean.
+// carried by cch-w16-s7. IT IS WHAT E11 ENFORCES, as of that row's build:
+// bannedSourceCitationErrors above matches against THIS constant, so there is
+// exactly one citation shape in this file and no second copy to drift. Loose
+// separator for the `app.js` branch (the form the shipped gate already caught,
+// and which the "prescribed" tight-everywhere regex would have DROPPED — the
+// bare-space, the double-space-tilde and the range forms alike, a net loss), tight
+// `(?::~?|\s~)` for every widened target so that prose like "the app.css 273 raw
+// px font-size lines" and the sidecar's `app.css <bytes> B` records stay clean.
+//
+// IT IS A `const` DECLARED BELOW ITS ONLY OTHER CONSUMER ON PURPOSE — every call
+// site (the inventory mode, runGate() at the bottom, external importers) runs
+// after module evaluation has reached this line, so the TDZ window is empty.
+// Keeping the regex beside its ruling prose beats splitting the argument from
+// the pattern.
 //
 // IT LIVES HERE, NOT IN A TASK ROW, BECAUSE EVERY QUOTED FIGURE FOR IT HAS
 // ROTTED. The widening's cost has been recorded as 8, then 14, then 16/18, then
@@ -1140,6 +1358,62 @@ function citationScanSetRefusals(files, root = dir) {
 // next merge. --citation-inventory emits the figure as a RUN instead, so the
 // only way to cite it is to re-derive it.
 const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?:js|mjs|sh))(?::~?|\s~))\d{2,}(?:-\d{2,})?/g;
+
+// ── SYNCHRONOUS OUTPUT FOR THE FOUR spawnSync-CONSUMED SUB-MODES ────────────
+//
+// THE DEFECT THIS DELETES (studio r21d, task-a510820f5b757050). Each of the
+// four targeted sub-modes below ends in `process.exit(...)`, and every one of
+// them is consumed by `__app.test.mjs` through a `spawnSync` whose stdout is a
+// PIPE. On this platform a child's stdout to a pipe is NON-BLOCKING and
+// ASYNCHRONOUS, so `console.log` does not write — it QUEUES. `process.exit()`
+// tears the process down without draining that queue, and every byte still
+// sitting on it is DISCARDED. The consumer sees a clean, well-formed,
+// SHORTER-THAN-TRUE report and cannot tell it apart from a real one.
+//
+// MEASURED, NOT ASSUMED. The pipe's buffer here is 8192 bytes: a child that
+// emits 9000+ bytes and then calls process.exit(0) delivers exactly 8192 to a
+// spawnSync parent, 8 runs out of 8, at every size from 9000 up to 660000.
+// Below the buffer size nothing is ever lost. The inventory sub-mode emits 9624
+// bytes over this tree — 1432 bytes MORE than the buffer — so it survives only
+// while the parent keeps draining mid-stream. It usually does, which is why 280
+// isolated spawns found nothing; under the full harness, where the parent is
+// busy, the observed rate was 1 red in 14 runs. The captured stdout of that red
+// stopped at 8154 bytes — the last whole row that fits under 8192. The cut is
+// the buffer boundary, not a scan that ended early.
+//
+// WHY THIS DRAINS RATHER THAN RACES. `fs.writeSync` hands the bytes to the
+// KERNEL before it returns, so when the loop finishes there is nothing left on
+// any JS-side queue for process.exit to throw away — no callback to schedule,
+// no event-loop turn to lose, no drain event to miss. The two ways a
+// non-blocking fd can decline are both handled as WAITING, never as dropping: a
+// PARTIAL write advances the offset and re-offers only the remainder, and
+// EAGAIN (the reader is behind) sleeps a millisecond and re-offers the SAME
+// remainder. The loop does not terminate until the kernel has accepted every
+// byte. EPIPE is the one honest stop: the reader is gone, so there is no
+// consumer left to shorten a report for.
+//
+// USE THESE, NOT console.log / console.error, inside any block that ends in
+// process.exit(). Mixing the two REORDERS output, because console.* queues on
+// the stream and these bypass it.
+const SUBMODE_BACKOFF = new Int32Array(new SharedArrayBuffer(4));
+const emitSync = (fd, text) => {
+  const buf = Buffer.from(text, "utf8");
+  let off = 0;
+  while (off < buf.length) {
+    try {
+      off += fs.writeSync(fd, buf, off, buf.length - off);
+    } catch (e) {
+      if (e.code === "EAGAIN") {
+        Atomics.wait(SUBMODE_BACKOFF, 0, 0, 1);
+        continue;
+      }
+      if (e.code === "EPIPE") return;
+      throw e;
+    }
+  }
+};
+const outSync = (line) => emitSync(1, line + "\n");
+const errSync = (line) => emitSync(2, line + "\n");
 
 // Targeted fixture mode: `node __css_check.mjs --swallow-check <file.css>` runs
 // ONLY the E9 parse-completeness guard against one file and exits non-zero if it
@@ -1149,8 +1423,8 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
   if (i !== -1) {
     const f = process.argv[i + 1];
     const errs = swallowedTokenErrors(readOrRefuse(f, f), path.basename(f));
-    for (const e of errs) console.error("FAIL  " + e);
-    console.log(`__css_check --swallow-check ${f}: ${errs.length} E9 error(s)`);
+    for (const e of errs) errSync("FAIL  " + e);
+    outSync(`__css_check --swallow-check ${f}: ${errs.length} E9 error(s)`);
     process.exit(errs.length ? 1 : 0);
   }
 }
@@ -1168,29 +1442,8 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
   if (i !== -1) {
     const f = process.argv[i + 1];
     const errs = orphanCommentErrors(readOrRefuse(f, f), path.basename(f));
-    for (const e of errs) console.error("FAIL  " + e);
-    console.log(`__css_check --orphan-check ${f}: ${errs.length} E10 error(s)`);
-    process.exit(errs.length ? 1 : 0);
-  }
-}
-
-// Targeted fixture mode: `node __css_check.mjs --wrap-parity-check <file.css>`
-// runs ONLY the E14 wrap-recipe parity scan against one file and exits non-zero
-// if it fires — the committed D220 proof (see __css_check.wrapparity.fixture.css).
-// Symmetric with --swallow-check and --orphan-check above, and added for the
-// same reason they were: an instrument with no way to be run against a known-bad
-// input is an instrument that cannot fail. Per E9's own lesson, every diagnostic
-// below cites the file it ACTUALLY read, never a hard-coded app.css.
-{
-  const i = process.argv.indexOf("--wrap-parity-check");
-  if (i !== -1) {
-    const f = process.argv[i + 1];
-    const { errors: errs, copies } = wrapParityErrors(readOrRefuse(f, f), path.basename(f));
-    for (const e of errs) console.error("FAIL  " + e);
-    console.log(
-      `__css_check --wrap-parity-check ${f}: ${copies.length} wrapper-scoped wrap copy(ies) ` +
-        `[${copies.map((c) => `${c.selector}:${c.line}`).join(", ")}], ${errs.length} E14 error(s)`,
-    );
+    for (const e of errs) errSync("FAIL  " + e);
+    outSync(`__css_check --orphan-check ${f}: ${errs.length} E10 error(s)`);
     process.exit(errs.length ? 1 : 0);
   }
 }
@@ -1199,19 +1452,18 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
 // citation scan set CROSSED WITH the ruled alternation — every file
 // citationScanFiles() actually reads, each one's SHIPPED-E11 hit count and its
 // RULED-alternation hit count, and the matched text with the line it sits on —
-// then exits. Symmetric with --swallow-check / --orphan-check /
-// --wrap-parity-check above, and placed here for the same structural reason
+// then exits. Symmetric with --swallow-check / --orphan-check
+// above, and placed here for the same structural reason
 // they are: it must run BEFORE the gate body.
 //
-// WHY A SUB-MODE AND NOT AN EXPORT. `citationScanFiles` was a bare unexported
-// function, and this file has no main guard of any kind — the gate runs during
-// MODULE EVALUATION and ends in process.exit(). So a consumer that `import`s
-// this module to derive the inventory (a) has the whole gate's stdout dumped
-// over its own output and (b) NEVER GETS CONTROL BACK when the gate is red —
-// which is precisely the moment the inventory is wanted, because the widening
-// commit reds the gate by construction. Exporting the function alone would have
-// been a trap that works only while the gate is green. The sub-mode is immune to
-// the gate's exit status by construction, and is spawnSync-able.
+// WHY A SUB-MODE AS WELL AS AN EXPORT. `citationScanFiles` is exported now (the
+// gate body sits behind IS_CLI, so an importer gets control back), but the
+// sub-mode is NOT redundant: it reports the set as the CLI process actually
+// derives it, which is the only way to check the export against the thing the
+// gate runs — __app.test.mjs asserts list equality between the two. It is also
+// immune to the gate's exit status by construction and is spawnSync-able, which
+// matters exactly when the gate is red: the widening commit reds it by
+// construction, and that is the moment the inventory is wanted.
 //
 // WHAT THE TWO COLUMNS BUY. `ruled` is what E11 would flag after the widening;
 // `E11` is what it flags today. Their DIFFERENCE is the widening's real cost,
@@ -1228,23 +1480,24 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
     const PV = "__preview__" + path.sep;
     let shippedTotal = 0;
     let ruledTotal = 0;
-    console.log(`__css_check --citation-inventory ${root}`);
+    outSync(`__css_check --citation-inventory ${root}`);
     for (const rel of files) {
       const src = readOrRefuse(path.join(root, rel), rel);
       const shipped = bannedSourceCitationErrors(src, rel).length;
       const hits = [...src.matchAll(CITATION_RULED_ALTERNATION)];
       shippedTotal += shipped;
       ruledTotal += hits.length;
-      console.log(
+      outSync(
         `  ruled=${String(hits.length).padStart(3)}  E11=${String(shipped).padStart(3)}  ${rel}`,
       );
-      for (const m of hits) console.log(`        ${rel}:${lineOf(src, m.index)}  ${JSON.stringify(m[0].trim())}`);
+      for (const m of hits) outSync(`        ${rel}:${lineOf(src, m.index)}  ${JSON.stringify(m[0].trim())}`);
     }
-    for (const e of refusals) console.error("FAIL  " + e);
-    console.log(
+    for (const e of refusals) errSync("FAIL  " + e);
+    outSync(
       `__css_check --citation-inventory ${root}: ${files.length} file(s) scanned ` +
-        `(${files.filter((f) => !f.startsWith(PV)).length} top-level, ` +
-        `${files.filter((f) => f.startsWith(PV)).length} __preview__/), ` +
+        `(${files.filter((f) => !f.includes(path.sep)).length} at the root, ` +
+        `${files.filter((f) => f.startsWith(PV)).length} under __preview__/, ` +
+        `${files.filter((f) => f.split(path.sep).length > 2).length} below the first level), ` +
         `${shippedTotal} shipped-E11 hit(s), ${ruledTotal} ruled-alternation hit(s), ` +
         `${refusals.length} E17 refusal(s)`,
     );
@@ -1257,7 +1510,8 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
 const definedTokens = new Set();
 for (const m of css.matchAll(/(?:^|[{;\s])(--[A-Za-z0-9_-]+)\s*:/g)) definedTokens.add(m[1]);
 // @property --x { … } registers a custom property just as a `--x:` declaration
-// does (the animated conic-ring fill --p at app.css:1717). The name is followed
+// does (the animated conic-ring fill --p; grep -n '^@property --p ' app.css).
+// The name is followed
 // by `{`, not `:`, so the declaration scan above misses it — register it here.
 for (const m of css.matchAll(/@property\s+(--[A-Za-z0-9_-]+)/g)) definedTokens.add(m[1]);
 
@@ -2255,6 +2509,16 @@ function externalHostFindings(src, file, isHtml) {
 }
 
 // ── Evaluate ─────────────────────────────────────────────────────────────────
+//
+// EVERYTHING BELOW IS THE GATE BODY, and it runs only from runGate(). Exported
+// so a test can drive it deliberately; called at the bottom only when IS_CLI.
+//
+// THE BODY IS LEFT AT ITS ORIGINAL INDENTATION ON PURPOSE. Re-indenting ~545
+// lines would bury the one structural change in a wall of whitespace AND would
+// risk altering the gate's own output: the diagnostics below are multi-line
+// template literals, whose interior newline-plus-whitespace is DATA. The
+// indentation is cosmetic; the strings are the contract.
+export function runGate() {
 
 const errors = [];
 
@@ -2314,18 +2578,261 @@ for (const b of badTokens) {
   );
 }
 
-// E13 — every server-side deployment status is painted. Derived from
-// DEPLOY_STATUSES (the Ecto @statuses enum), never from the E3 allowlist's
-// prose. `css` is comment-stripped, so a selector that survives only inside a
-// comment does NOT count.
-for (const st of DEPLOY_STATUSES) {
-  if (cssClasses.has(`dep-${st}`)) continue;
-  errors.push(
-    `E13 app.css  deployment status "${st}" has no .dep-${st} rule — the ` +
-      `dep-pill dep- head emits it, so it falls through to the .dep-pill base ` +
-      `and paints as an untouched/queued deployment. Add a rule next to the ` +
-      `other .dep-* rules in the DEPLOYMENTS section.`,
-  );
+// E13 — the deploy STATE GRAMMAR is one vocabulary, total, painted, and the
+// retired second family has not come back. Derived from DEPLOY_STATUSES (the
+// Ecto @statuses enum) and from app.js's DEPLOY_STATUS_META, never from the E3
+// allowlist's prose. `css` is comment-stripped, so a selector that survives
+// only inside a comment does NOT count — which is what lets the retired
+// family's tombstone comment in app.css name `.dep-queued` without reviving it.
+// statusMetaPill()'s own body — the ONE sanctioned home of a `status-pill` class
+// literal in app.js. Brace-matched from the declaration rather than line-sliced,
+// so the arm that reads it cannot be fooled by the function growing or moving.
+// Returns null when the declaration is absent, which arm (f) treats as a FAILURE
+// and not as "nothing to check".
+function statusMetaPillBody(src) {
+  if (src == null) return null;
+  const at = src.indexOf("function statusMetaPill(");
+  if (at < 0) return null;
+  const open = src.indexOf("{", at);
+  if (open < 0) return null;
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return src.slice(open, i + 1);
+    }
+  }
+  return null;
+}
+
+{
+  const meta = deployStatusMetaTable(jsRaw);
+
+  // (a) VACUOUS-GREEN GUARD. Every other arm reads this table; a table this
+  //     reader cannot find would make all four of them silently pass.
+  if (meta === null) {
+    errors.push(
+      "E13 app.js  DEPLOY_STATUS_META could not be located or parsed — every other " +
+        "arm of E13 reads it, so a rename or a rewrite must come with an update to " +
+        "deployStatusMetaTable() here, never a silently skipped check.",
+    );
+  } else {
+    const roles = new Set(STATUS_PILL_ROLES);
+
+    // (b) TOTALITY. A status the table does not cover falls to `neutral` with no
+    //     variant at runtime — which is the `queued` look, the impersonation that
+    //     shipped twice under the old family.
+    for (const st of DEPLOY_STATUSES) {
+      if (meta.has(st)) continue;
+      errors.push(
+        `E13 app.js  deployment status "${st}" has no DEPLOY_STATUS_META entry — ` +
+          `statusMeta() falls it through to the neutral role with no variant, which ` +
+          `is the QUEUED look, so a ${st} deploy would impersonate one still waiting ` +
+          `its turn. Add the entry beside the others.`,
+      );
+    }
+
+    for (const [st, m] of meta) {
+      // (d) CLOSED ROLE SET.
+      if (m.role === null) {
+        errors.push(
+          `E13 app.js  DEPLOY_STATUS_META["${st}"] declares no role — the emitter ` +
+            `would compose \`status-pill status-pill--\` with nothing after it.`,
+        );
+      } else if (!roles.has(m.role)) {
+        errors.push(
+          `E13 app.js  DEPLOY_STATUS_META["${st}"] names role "${m.role}", which is ` +
+            `not one of the closed five (${STATUS_PILL_ROLES.join(" | ")}) — a sixth ` +
+            `hue invented at a call site instead of declared in the family is how two ` +
+            `pill families happened the first time. Use a declared role, or widen ` +
+            `STATUS_PILL_ROLES here in the same commit as its .status-pill-- rule.`,
+        );
+      }
+      // (c) PAINTED. Role and variant both have to exist in app.css.
+      for (const [kind, name] of [["role", m.role], ["variant", m.variant]]) {
+        if (!name) continue;
+        if (cssClasses.has(`status-pill--${name}`)) continue;
+        errors.push(
+          `E13 app.css  DEPLOY_STATUS_META["${st}"] names ${kind} "${name}" but there ` +
+            `is no .status-pill--${name} rule — the class rides into the DOM and ` +
+            `paints as the bare base pill. Add the rule beside the other ` +
+            `.status-pill--* rules in the STATUS PILL section.`,
+        );
+      }
+    }
+  }
+
+  // (e) THE RETIRED FAMILY HAS NOT COME BACK. This is the arm that reds if the
+  //     decision-24 sweep is reverted or re-forked: the defect is not any one
+  //     missing rule, it is a SECOND vocabulary for the same idea existing at
+  //     all — which is what made the two earlier impersonations invisible.
+  const revived = [...cssClasses].filter(
+    (c) => c === "dep-pill" || DEPLOY_STATUSES.some((st) => c === `dep-${st}`),
+  ).sort();
+  if (revived.length) {
+    errors.push(
+      `E13 app.css  the RETIRED .dep-* pill family is back: ${revived
+        .map((c) => "." + c)
+        .join(", ")}. Deploy status chips are .status-pill + a DEPLOY_STATUS_META ` +
+        `role since decision 24; a second family painting the same idea is the ` +
+        `regression this arm exists to catch, not a styling choice.`,
+    );
+  }
+  // app.js is scanned for the class inside a QUOTED string only, so the
+  // tombstone comments that explain the retirement (and name the dead classes)
+  // are not themselves a revival; styleguide.html is scanned for the attribute.
+  for (const [file, re, src] of [
+    ["app.js", /["'][^"'\n]*\bdep-pill\b/, jsRaw],
+    ["styleguide.html", /class="[^"\n]*\bdep-pill\b/, styleguideRaw],
+  ]) {
+    if (src == null || !re.test(src)) continue;
+    errors.push(
+      `E13 ${file}  emits a \`dep-pill\` class literal — the family is retired. ` +
+        `Render the chip through deployStatusPill()/statusMetaPill() so there stays ` +
+        `exactly one state grammar.`,
+    );
+  }
+
+  // (f) ONE EMITTER, STATED AS A RULE AND NOT AS A LIST. Arm (e) retired the
+  //     SECOND family; this arm is what keeps the surviving one from re-forking
+  //     inside itself. The decision-24 prose claimed "there are no hand-written
+  //     pill class attributes left" while seven call sites still opened their own
+  //     `<span class="status-pill status-pill--…">` — the assertion was the false
+  //     part, and nothing measured it. The check is a PREDICATE, never an
+  //     enumeration of the sites that happened to exist on the day: EVERY
+  //     `class="status-pill…` literal in app.js must sit inside statusMetaPill's
+  //     own body. A new hand-built chip anywhere else reds here on its first
+  //     commit, with no skip list to go stale.
+  {
+    const body = statusMetaPillBody(jsRaw);
+    if (body === null) {
+      errors.push(
+        "E13 app.js  statusMetaPill() could not be located — this arm reads its body " +
+          "to decide which pill literals are the sanctioned ones, so a rename must " +
+          "come with an update to statusMetaPillBody() here, never a skipped check.",
+      );
+    } else {
+      const LIT = /class="status-pill/g;
+      const inside = (body.match(LIT) || []).length;
+      const total = (jsRaw.match(LIT) || []).length;
+      const outside = total - inside;
+      if (inside === 0) {
+        errors.push(
+          "E13 app.js  statusMetaPill()'s body emits no `class=\"status-pill` literal " +
+            "at all — the emitter this arm measures against no longer emits the family, " +
+            "so every count below would be vacuous.",
+        );
+      } else if (outside > 0) {
+        errors.push(
+          `E13 app.js  ${outside} \`class="status-pill…\` literal(s) are emitted OUTSIDE ` +
+            `statusMetaPill() — a hand-built status chip is a second grammar for the ` +
+            `same idea, which is exactly what decision 24 absorbed. Render it through ` +
+            `statusMetaPill(meta, extraClass, attrs) (or statusPill / deployStatusPill, ` +
+            `which delegate to it); \`extraClass\` carries an extra class and \`attrs\` a ` +
+            `pre-escaped title / data-* attribute string, so no call site needs its own ` +
+            `span.`,
+        );
+      }
+    }
+
+    // cch-r21l — THE SAME PREDICATE, WIDENED TO THE SECOND ABSORBED FAMILY.
+    // Arm (f) above measures the SURVIVING family's literals; `.inst-life-pill`
+    // was a THIRD grammar for a state the ladder already paints (the fleet row
+    // renders the same lifecycle state through statusMetaPill), so absorbing it
+    // without a checked predicate would just re-run the decision-24 mistake —
+    // the sentence "there is one state grammar" with nothing measuring it.
+    //
+    // TWO WAYS IT CAN COME BACK, both refused BY NAME:
+    //   · a class LITERAL in app.js (the hand-built span in the pure render), or
+    //   · a RULE in app.css (comment-stripped, so the tombstone that names the
+    //     dead classes is not itself a revival).
+    // The third way — the imperative `className = "inst-life-pill " + …` repaint
+    // in the decommission handler — is caught by the literal scan too, because
+    // the class name is spelled in a quoted string either way. That site is
+    // exactly the one no class-attribute scan could ever see, which is why the
+    // regex below is keyed on the NAME and not on the attribute.
+    const ABSORBED = ["inst-life-pill", "inst-life-dot", "inst-life-label"];
+    const revivedCss = ABSORBED.filter((c) => cssClasses.has(c)).sort();
+    if (revivedCss.length) {
+      errors.push(
+        `E13 app.css  the RETIRED .inst-life-pill chip family is back: ${revivedCss
+          .map((c) => "." + c)
+          .join(", ")}. The instance lifecycle chip is .status-pill + a ` +
+          `LIFECYCLE_PILL_ROLE role since cch-r21l; a second family painting the ` +
+          `same state is the regression this arm exists to catch, not a styling ` +
+          `choice.`,
+      );
+    }
+    for (const [file, src] of [["app.js", jsRaw], ["styleguide.html", styleguideRaw]]) {
+      if (src == null) continue;
+      const back = ABSORBED.filter((c) => new RegExp(`["'][^"'\n]*\\b${c}\\b`).test(src)).sort();
+      if (!back.length) continue;
+      errors.push(
+        `E13 ${file}  emits a \`${back.join("\`, \`")}\` class literal — the ` +
+          `.inst-life-pill chip family is retired. Render the chip through ` +
+          `lifecycleStatePillHtml(state), which delegates to statusMetaPill, so ` +
+          `there stays exactly one state grammar and exactly one author for it.`,
+      );
+    }
+  }
+
+  // (g) THE ABSORBED FAMILY'S ROLE TABLE IS TOTAL AND PAINTED. Same shape as
+  //     arms (b)/(c)/(d) above, one surface over: LIFECYCLE_PILL_ROLE must cover
+  //     every state LIFECYCLE_PILL_LABEL declares, name only closed roles, and
+  //     every role/variant it names must have a .status-pill--* rule. A state
+  //     with a label and no role falls through to a bare neutral chip — the
+  //     impersonation shape that made `.dep-cancelled` read as `queued`.
+  {
+    const roleTable = roleTableOf(jsRaw, "LIFECYCLE_PILL_ROLE");
+    const labelKeys = flatObjectKeys(jsRaw, "LIFECYCLE_PILL_LABEL");
+    if (roleTable === null || labelKeys === null) {
+      errors.push(
+        "E13 app.js  LIFECYCLE_PILL_ROLE and/or LIFECYCLE_PILL_LABEL could not be " +
+          "located or parsed — this arm reads both, so a rename or a rewrite must " +
+          "come with an update to roleTableOf()/flatObjectKeys() here, never a " +
+          "silently skipped check.",
+      );
+    } else {
+      const roles = new Set(STATUS_PILL_ROLES);
+      for (const st of [...labelKeys].sort()) {
+        if (roleTable.has(st)) continue;
+        errors.push(
+          `E13 app.js  lifecycle state "${st}" has a LIFECYCLE_PILL_LABEL entry but ` +
+            `no LIFECYCLE_PILL_ROLE entry — lifecycleStatePillHtml() falls it through ` +
+            `to the neutral role with no variant, so a ${st} box would wear the same ` +
+            `chip as one nobody has classified. Add the role beside the others.`,
+        );
+      }
+      for (const [st, m] of roleTable) {
+        if (!labelKeys.has(st)) {
+          errors.push(
+            `E13 app.js  LIFECYCLE_PILL_ROLE["${st}"] names a state LIFECYCLE_PILL_LABEL ` +
+              `does not declare — the chip would render the literal word "Unknown" in a ` +
+              `${m.role || "?"}-coloured pill. Give it a label or drop the role.`,
+          );
+          continue;
+        }
+        if (m.role === null || !roles.has(m.role)) {
+          errors.push(
+            `E13 app.js  LIFECYCLE_PILL_ROLE["${st}"] names role "${m.role}", which is ` +
+              `not one of the closed five (${STATUS_PILL_ROLES.join(" | ")}).`,
+          );
+        }
+        for (const [kind, name] of [["role", m.role], ["variant", m.variant]]) {
+          if (!name) continue;
+          if (kind === "role" && !roles.has(name)) continue;
+          if (cssClasses.has(`status-pill--${name}`)) continue;
+          errors.push(
+            `E13 app.css  LIFECYCLE_PILL_ROLE["${st}"] names ${kind} "${name}" but there ` +
+              `is no .status-pill--${name} rule — the class rides into the DOM and ` +
+              `paints as the bare base pill.`,
+          );
+        }
+      }
+    }
+  }
 }
 
 // E15 — every delivery-log TONE is painted, or is a NAMED base-pill consent.
@@ -2462,6 +2969,317 @@ for (const st of DEPLOY_STATUSES) {
   }
 }
 
+// E18 — every domain-checklist ROLE is painted. Same four failure shapes as E16:
+// the deriver cannot read domainStageRows, it read it but could not follow an arm,
+// the declared set drifted from the arms, or a role has no rule. Arm (d) pins the
+// premise that makes the no-consent decision above reviewable rather than inherited.
+{
+  const derived = emittedDomainRungRoles(jsRaw);
+  if (derived === null) {
+    errors.push(
+      "E18 app.js  domainStageRows() could not be located, brace-matched, or its `var role =` " +
+        "initializer found — the dom-rung-- role set is DERIVED from that fold, so a rename or " +
+        "a rewrite must come with an update here, never a silently skipped check.",
+    );
+  } else {
+    // (a) DERIVER BLINDNESS, both halves of the fold. Every ternary arm and every
+    //     later `role =` must be a string literal, or this reader returns a set
+    //     narrower than the code's and (b) goes quietly vacuous.
+    if (derived.arms !== derived.armLiterals) {
+      errors.push(
+        `E18 app.js  domainStageRows()'s role ternary has ${derived.arms} arm(s) but only ` +
+          `${derived.armLiterals} yield a string literal — emittedDomainRungRoles reads literals ` +
+          `ONLY, so the derived set would be short by ${derived.arms - derived.armLiterals}. Keep ` +
+          `the arms literal, or teach the deriver the new form; do not let it report a set it cannot see.`,
+      );
+    }
+    if (!derived.tail) {
+      errors.push(
+        "E18 app.js  domainStageRows()'s role ternary chain no longer ends in a literal default " +
+          "(`: \"unknown\";`). That default is the arm that catches every status the server invents, " +
+          "so a non-literal there is exactly the role most likely to reach the DOM unpainted.",
+      );
+    }
+    if (derived.reassigns !== derived.reassignLiterals) {
+      errors.push(
+        `E18 app.js  domainStageRows() reassigns \`role\` ${derived.reassigns} time(s) but only ` +
+          `${derived.reassignLiterals} to a string literal — the markNextStep promotion is how ` +
+          `\`active\` enters the set at all, and a computed one is invisible to this reader.`,
+      );
+    }
+    // (b) DRIFT, both directions: DOM_RUNG_ROLES and the fold must name one set.
+    //     This is the arm that would have caught the ALLOW_PREFIXES comment, which
+    //     was wrong in BOTH directions simultaneously (it omitted `unknown` and it
+    //     listed `pending` as though painted).
+    for (const r of derived.roles) {
+      if (DOM_RUNG_ROLES.includes(r)) continue;
+      errors.push(
+        `E18 __css_check.mjs  domainStageRows() produces role "${r}", which is not in ` +
+          `DOM_RUNG_ROLES — add it there, then paint .dom-rung--${r}. There is no consent to ` +
+          `the base pill on this family.`,
+      );
+    }
+    for (const r of DOM_RUNG_ROLES) {
+      if (derived.roles.has(r)) continue;
+      errors.push(
+        `E18 __css_check.mjs  DOM_RUNG_ROLES names "${r}", which domainStageRows() no longer ` +
+          `produces — a value space wider than reality is how the entry's old comment came to ` +
+          `name five roles for a six-role fold. Remove it.`,
+      );
+    }
+  }
+
+  // (c) UNPAINTED: `cssClasses` is built from comment-stripped CSS, so a selector
+  //     surviving only inside a comment does not count. This is the arm that reds
+  //     on the filed defect: before this commit .dom-rung--pending had no rule.
+  for (const r of DOM_RUNG_ROLES) {
+    if (cssClasses.has(`dom-rung--${r}`)) continue;
+    errors.push(
+      `E18 app.css  domain role "${r}" has no .dom-rung--${r} rule — the ` +
+        `dom-rung dom-rung-- head emits it, so the chip falls through to the BARE ` +
+        `.dom-rung and paints whatever that happens to say. Add a rule beside the ` +
+        `other .dom-rung--* rules, even when the base already looks right: an ` +
+        `unwritten fall-through is not a treatment, it is a coincidence.`,
+    );
+  }
+
+  // (d) PREMISE: (c)'s "even when the base already looks right" and the decision to
+  //     ship no consent list both rest on the bare .dom-rung being a real authored
+  //     rule that pending's own rule mirrors. If the base goes, the mirroring rule
+  //     is stranded and the reasoning must be re-opened rather than left as prose.
+  if (!cssClasses.has("dom-rung")) {
+    errors.push(
+      "E18 app.css  the base .dom-rung rule is gone, but .dom-rung--pending is authored as an " +
+        "EXACT restatement of it (see its comment in app.css). Re-decide: either restore the " +
+        "base, or give pending a treatment that stands on its own.",
+    );
+  }
+}
+
+// E19 — a waiver must absolve something. Every ALLOW_PREFIXES entry is a standing
+// consent for a dynamic class head, and consent for a head nobody emits is consent
+// absolving nothing: it can never red, so it is indistinguishable from an entry
+// doing real work, and it silently pre-exempts the family the day that name comes
+// back — the gate would then report green over a family it had never checked.
+//
+// THIS IS THE GENERAL FORM OF WHAT E15's CONSENT ARM DOES FOR ONE LIST. It found
+// nothing new when it was written (the two dead entries it was built for —
+// `rollup-card rollup-card--` and `bp-tl-step bp-tl-step--` — were removed in the
+// same commit), and that is the intended steady state: this arm exists so the NEXT
+// one is found by the gate instead of by a person reading the list.
+//
+// `allowlistedHits` is the walker's own record of entries it actually used, so this
+// compares the list against the same evidence the E3 waiver is granted on — not
+// against a second, differently-shaped grep that could disagree with it.
+{
+  const used = new Set(allowlistedHits.map((h) => h.head));
+  for (const head of ALLOW_PREFIXES) {
+    if (used.has(head)) continue;
+    errors.push(
+      `E19 __css_check.mjs  ALLOW_PREFIXES entry "${head}" waived nothing on this run — no ` +
+        `dynamic class composition in app.js or index.html has that head. A waiver for an ` +
+        `unemitted head can never fail, so it reads as live consent forever and pre-exempts ` +
+        `the family if the name returns. Delete the entry; re-add it with the emission.`,
+    );
+  }
+}
+
+// E21 — THE GR57 FIXED-BLUE INVARIANT, held in BOTH directions.
+//
+// WHY THIS EXISTS. `--info` (= `--cc-blue`) is the console's deliberately
+// accent-INDEPENDENT blue: GR57 rules that `.btn-link` colours itself
+// `var(--primary)`, which IS the user-selectable accent (redefined in ten
+// `[data-bp-theme]` blocks across five identities), so the design's fixed-blue
+// links would render terracotta under ember and orchid under charple. GR57's
+// words: "Ship a scoped variant, never repurpose `--primary`."
+//
+// That invariant has now been mis-read TWICE by a five-accent screenshot matrix
+// as a bug — "a fixed blue that ignores the accent on 11 screens" — because a
+// reviewer looking at pixels cannot see a ruling that lives in a charter. The
+// charter itself records the first retraction (gr-p5r7-reshoot-verify: "its
+// builder nearly reported a defect that GR57 documents as deliberate"). A
+// written finding does not fire by itself; this arm is the finding made
+// mechanical, so the THIRD reviewer meets a gate with the reason in it.
+//
+// THREE ARMS, and the first is a precondition because a guard that can go
+// vacuous is not a guard:
+//   (a) `--cc-blue` must be declared exactly twice — once in `:root`, once in
+//       `[data-theme="dark"]`. Zero declarations means the token was renamed
+//       and arms (b)/(c) would pass having measured nothing.
+//   (b) NO CONSUMER RULE reads the ramp token. Consumers read the ROLE token
+//       `--info`; the only permitted `var(--cc-blue)` references are the two
+//       `--info:` alias declarations themselves. A ramp token with consumers is
+//       a second front door: retune `--info` and those rules do not follow.
+//       (gr-r21m-defect-jk found two — `.trial-chip`, `.billing-chip--trial`.)
+//   (c) NO `[data-bp-theme]` BLOCK may declare `--info`, `--info-hsl` or
+//       `--cc-blue`. This is the direction GR57 actually cares about, and it is
+//       unguarded today: an identity block could quietly accent-ify the blue and
+//       every fixed-blue link in the product would fan per theme with no test
+//       anywhere noticing.
+//
+// MEASURED, so the next reader does not over-trust arm (c): its `--cc-blue`
+// comparand is SUBSUMED by arm (a). Inserting `--cc-blue: #c46a2a` into the
+// ember block reds as "found 3" from (a) — (a) counts declarations file-wide and
+// runs first — so (c) never sees it. (c) was mutation-proven on the two
+// comparands that ARE only its own: `--info:` and `--info-hsl:` in the ember
+// block each red on the `html[data-bp-theme="ember"]` selector with (a) silent. `--cc-blue` is kept in (c)'s
+// list anyway: it costs nothing and it survives the day (a) is re-pointed.
+{
+  const declRe = /--cc-blue\s*:/g;
+  const declCount = (css.match(declRe) || []).length;
+  if (declCount !== 2) {
+    errors.push(
+      `E21 app.css  expected exactly 2 \`--cc-blue:\` declarations (:root + [data-theme="dark"]) ` +
+        `but found ${declCount}. The token was renamed, deleted or duplicated, so arms (b) and (c) ` +
+        `below would pass having measured NOTHING. Re-point this arm at whatever replaced it, or ` +
+        `delete E21 and say in the same commit that GR57's fixed blue is gone.`,
+    );
+  } else {
+    // (b) every var(--cc-blue) must sit on a line whose own declaration is the
+    //     `--info:` alias. Line-scoped, so a consumer rule can never hide behind
+    //     an alias elsewhere in the file.
+    for (const [i, line] of css.split("\n").entries()) {
+      if (!/var\(--cc-blue\)/.test(line)) continue;
+      if (/--info\s*:\s*var\(--cc-blue\)/.test(line)) continue;
+      errors.push(
+        `E21 app.css:${i + 1}  a rule reads the RAMP token \`var(--cc-blue)\` directly: ` +
+          `${line.trim()}\n      Consumers read the ROLE token \`var(--info)\` — which is what this ` +
+          `rule's own background/border tints already use. Reaching past the role is a second front ` +
+          `door: retune --info for contrast and this rule silently does not follow.`,
+      );
+    }
+    // (c) GR57's own invariant: the identity blocks must not touch the blue.
+    const themeBlockRe = /(html)?\s*\[data-bp-theme=[^\]]*\][^{]*\{([^}]*)\}/g;
+    let m, themeBlocks = 0;
+    while ((m = themeBlockRe.exec(css)) !== null) {
+      themeBlocks += 1;
+      const body = m[2];
+      for (const tok of ["--cc-blue", "--info-hsl", "--info"]) {
+        const re = new RegExp("(^|[^-\\w])" + tok + "\\s*:");
+        if (!re.test(body)) continue;
+        errors.push(
+          `E21 app.css:${lineOf(css, m.index)}  the identity block \`${m[0].slice(0, m[0].indexOf("{")).trim()}\` ` +
+            `declares \`${tok}\`. GR57 makes --info/--cc-blue the ACCENT-INDEPENDENT blue precisely ` +
+            `because it is declared only in :root and [data-theme="dark"]: the design's fixed-blue links ` +
+            `("Change password", "Copy", "Show all N") must read the same under all five identities. ` +
+            `An override here fans every one of them per accent with nothing else in the tree noticing. ` +
+            `If the fixed blue is being retired, retire GR57 and this arm in the same commit.`,
+        );
+        break;
+      }
+    }
+    if (themeBlocks < 10) {
+      errors.push(
+        `E21 app.css  arm (c) found only ${themeBlocks} [data-bp-theme] block(s); the five identities ` +
+          `declare ten (light + dark each). A short scan means the block regex stopped matching, so ` +
+          `"no identity overrides the blue" would be a statement about blocks this run never read.`,
+      );
+    }
+  }
+}
+
+// E20 — a HOOK waiver must absolve something, same rule as E19 one list over.
+//
+// WHY THIS EXISTS. This file runs four suppression lists, and until this arm
+// landed only three could notice an entry going dead: ALLOW_PREFIXES has E19
+// (hard), KNOWN_GAPS computes `staleGaps`, ALLOW_RAW_COLORS computes
+// `staleRawAllows`. ALLOW_HOOK_CLASSES had neither — its only uses were the
+// membership test in the E2 loop and the `allow` print of the hits that DID
+// fire. MEASURED before the fix: inserting a fictional entry into the array
+// left the run at exit 0, the summary unchanged, and produced ZERO output
+// naming it. A class deleted from the console therefore left a standing consent
+// nobody was told about, and the next reader learned a class exists that does
+// not.
+//
+// HARD ERROR, NOT A `stale` LINE — the asymmetry between the four lists is a
+// DECISION, stated here so the next reader does not have to infer it:
+//   · KNOWN_GAPS and ALLOW_RAW_COLORS report-only because each DEMOTES a real,
+//     already-true violation that another slice owns. Their stale line asks a
+//     third party to prune; making that fatal would red this gate on someone
+//     else's cleanup, which is precisely backwards.
+//   · ALLOW_PREFIXES (E19) and ALLOW_HOOK_CLASSES are consent granted BY this
+//     gate's own owners over this gate's own files. Nothing outside the console
+//     can make one of these entries go stale, so the person who breaks it is
+//     the person who can fix it in the same commit. Hard.
+//   · And the failure mode is the worse one: an unfired hook entry silently
+//     PRE-EXEMPTS the class the day the name comes back, at which point E2
+//     reports green over a class it never checked.
+//
+// Judged against `hookHits` — the E2 loop's own record of the entries it really
+// used — so the arm and the waiver are decided on the same evidence, never on a
+// second, differently-shaped grep that could disagree with it.
+function hookAllowlistErrors(allowlist, hookHits, emittedCount) {
+  const errs = [];
+  // (a) PRECONDITION — the arm must HAVE a subject. Both of these would make
+  //     the (b) loop pass by measuring nothing, which is the exact disease the
+  //     arm was written to cure; a guard that can go vacuous is not a guard.
+  if (!emittedCount) {
+    errs.push(
+      "E20 __css_check.mjs  the class census produced ZERO emitted classes, so `hookHits` is " +
+        "empty for a reason that has nothing to do with the allowlist. Every ALLOW_HOOK_CLASSES " +
+        "entry would read as stale and the E2 loop reported on nothing at all — fix the walker " +
+        "or the scan root; do not read this run's class verdicts as a result.",
+    );
+  }
+  if (!allowlist.length) {
+    errs.push(
+      "E20 __css_check.mjs  ALLOW_HOOK_CLASSES is EMPTY, so this decay arm has nothing to " +
+        "check and would pass forever without measuring anything (KNOWN_GAPS' stale arm sits " +
+        "in exactly that state today). If the console genuinely has no ruleless hook classes " +
+        "left, delete this arm and its call in the same commit and say so — an emptied list " +
+        "under a live arm is an arm that cannot lose.",
+    );
+  }
+  if (errs.length) return errs;
+  // (b) STALENESS — one line per entry that waived nothing on this run.
+  const used = new Set(hookHits.map((h) => h.cls));
+  for (const cls of allowlist) {
+    if (used.has(cls)) continue;
+    errs.push(
+      `E20 __css_check.mjs  ALLOW_HOOK_CLASSES entry "${cls}" waived nothing on this run — ` +
+        `nothing under the scan root emits it as a class, so this consent can never fail and ` +
+        `is indistinguishable from an entry doing real work. It also PRE-EXEMPTS the class the ` +
+        `day the name returns, at which point E2 reports green over a class it never checked. ` +
+        `Delete the entry; re-add it with the emission. (An id selector is not a class: check ` +
+        `whether the reason on the entry says \`.${cls}\` while the code says \`#${cls}\`.)`,
+    );
+  }
+  return errs;
+}
+
+for (const e of hookAllowlistErrors(ALLOW_HOOK_CLASSES, hookHits, emitted.length)) errors.push(e);
+
+// E20's OWN CONTROLS, run inside the measurement rather than in a test that
+// could stop being run. The shipped call above can only ever print a clean
+// nothing; these three say whether that nothing was MEASURED. Each drives the
+// same function the gate uses, on this run's real `hookHits`.
+{
+  const probe = "zz-css-check-control-class-that-is-never-emitted";
+  const ctlStale = hookAllowlistErrors([probe], hookHits, emitted.length);
+  if (!(ctlStale.length === 1 && ctlStale[0].includes(probe))) {
+    errors.push(
+      `E20 __css_check.mjs  the ALLOW_HOOK_CLASSES decay arm FAILED ITS OWN CONTROL: a ` +
+        `fabricated entry "${probe}", which nothing emits, produced ${ctlStale.length} error(s) ` +
+        `instead of exactly one naming it. The clean ALLOW_HOOK_CLASSES verdict this run printed ` +
+        `is therefore not evidence of anything.`,
+    );
+  }
+  if (!hookAllowlistErrors([], hookHits, emitted.length).length) {
+    errors.push(
+      "E20 __css_check.mjs  the ALLOW_HOOK_CLASSES decay arm FAILED ITS OWN CONTROL: an EMPTY " +
+        "allowlist was accepted silently, so emptying the array would retire the arm without " +
+        "anyone deciding to.",
+    );
+  }
+  if (!hookAllowlistErrors([probe], [], 0).length) {
+    errors.push(
+      "E20 __css_check.mjs  the ALLOW_HOOK_CLASSES decay arm FAILED ITS OWN CONTROL: a census " +
+        "that emitted ZERO classes was accepted silently, so a walker that stopped finding its " +
+        "subject would read as a clean allowlist.",
+    );
+  }
+}
+
 // E5 — the contrast manifest, both themes.
 runContrast(errors);
 
@@ -2482,13 +3300,6 @@ for (const e of swallowedTokenErrors(cssRaw)) errors.push(e);
 // E10 — comment nesting coherence: an orphan `*/` swallows the next whole rule
 // (#4592 — the modal root). Runs alongside E9, which sees only token blocks.
 for (const e of orphanCommentErrors(cssRaw)) errors.push(e);
-
-// E14 — wrap-recipe declaration parity (charter D220): the three hand-built
-// copies share a byte-identical five-declaration core wearing three different
-// jackets, and nothing asserted that the core still agrees. The copy inventory
-// is printed below so the count is the SCAN's claim, never a comment's.
-const wrapParity = wrapParityErrors(cssRaw);
-for (const e of wrapParity.errors) errors.push(e);
 
 // E11 — banned source line-number citation (charter D41 / bp-honest-gates D5):
 // `app.js:<line>` in a comment of any scanned SPA / harness file. The shape is
@@ -2640,14 +3451,6 @@ console.log(
     ` — a 0 is COVERAGE, not yield: the file declares no focus rule at all`,
 );
 
-// E14 inventory: the copies the scan actually SAW, with their true line
-// numbers. Printed unconditionally so a scan degrading to fewer copies is
-// visible in the log even before the pins turn it red.
-console.log(
-  `\nE14 ${wrapParity.copies.length} wrapper-scoped .status-pill wrap copy(ies): ` +
-    `${wrapParity.copies.map((c) => `${c.selector} (app.css:${c.line})`).join(", ")}`,
-);
-
 if (unconsumed.length) {
   console.log(`\nR2  defined but not yet consumed: ${unconsumed.join(", ")}`);
 }
@@ -2683,5 +3486,26 @@ console.log(
 if (errors.length) {
   console.error("");
   for (const e of errors) console.error("FAIL  " + e);
-  process.exit(1);
+  // NOT process.exit(1) — THE FIFTH INSTANCE of the sub-mode defect documented
+  // beside the emitSync helper above, found by this row's own stability arm.
+  // This body prints ~9.5KB, well past the 8192-byte pipe buffer, and the
+  // mirror harness in __app.test.mjs reads it through a spawnSync. On the GREEN
+  // path the gate simply falls off the end, so Node drains stdout before the
+  // process dies and nothing is ever lost — which is why the clean leg has
+  // never flaked. On THIS path the old `process.exit(1)` tore the process down
+  // with bytes still queued, and the mutation leg went red 1 run in 22 with a
+  // truncated capture.
+  //
+  // `process.exitCode` states the SAME verdict without the teardown: the
+  // statement below is the last in runGate, `if (IS_CLI) runGate()` is the last
+  // statement in the file, and the gate holds no timers or open handles, so
+  // returning here ends the program with nothing left to run. Node then exits
+  // on its own — flushing stdout and stderr first — and reports 1. Exit code
+  // identical, output no longer a race.
+  process.exitCode = 1;
+  return;
 }
+
+} // end runGate
+
+if (IS_CLI) runGate();

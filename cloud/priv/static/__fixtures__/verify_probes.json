@@ -14,6 +14,11 @@
       "name": "verify.studio",
       "label": "Studio renders",
       "pass_rule": "status < 500 after <= 3 redirect hops"
+    },
+    {
+      "name": "verify.siteplane",
+      "label": "Sites can build",
+      "pass_rule": "site plane complete when required; skipped when not required"
     }
   ]
 }

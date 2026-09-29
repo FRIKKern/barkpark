@@ -3,23 +3,23 @@ defmodule BarkparkCloud.Accounts.AuthzCallSiteCensusTest do
   THE TRIPWIRE UNDER `Authz`'s CORRECTED MODULEDOC (pws-s7). The moduledoc used
   to say "`authorize/3` is the single entry point and is TOTAL … never raises".
   Both halves were false: `authorize/3` has zero callers in `cloud/lib`, and the
-  entry points DO raise outside the resolved domain. The sentence is now three
-  clauses — total over RESOLVED inputs, latently non-total at the clause level,
-  and unreachable by three named guards — and this file is what stops each
-  clause from drifting back into a phantom.
+  entry points DID raise outside the resolved domain. The sentence is now three
+  clauses — total over RESOLVED inputs, total at the CLAUSE level too (as of
+  2026-09-13), and unreachable by three named guards anyway — and this file is
+  what stops each clause from drifting back into a phantom.
 
     * ARM 1 — DOMAIN CENSUS (runtime, measured). Drives all five public entry
       points (`role/2`, `team_admin?/2`, `team_owner?/2`, `authorize/3`,
       `can_grant?/3`) over the hostile input set and asserts the MEASURED
-      matrix: denial for resolved inputs, RAISE for unresolved ones
-      (`""` ⇒ `Ecto.Query.CastError`, `nil` ⇒ `FunctionClauseError`, both from
-      `Accounts.get_membership/2`'s three-clauses-and-no-catch-all). The raise
-      half is asserted DELIBERATELY, so that a change which totalises
-      `get_membership/2` (e.g. mirroring arpss-w9's api/ seam, or swapping the
-      unguarded `Repo.get_by` for `Repo.get_by_uuid/2`) REDS HERE and forces the
-      moduledoc's second clause to be rewritten rather than silently staling.
-      Mutation-proven: delete the `Map.get(@action_min, action, [])` default and
-      the unknown-action cell reds.
+      matrix: denial for resolved inputs, and — since `get_membership/2` was
+      totalised through `Repo.uuid_or_nil/1` plus a catch-all — denial for the
+      unresolved ones too (`""`, `"not-a-uuid"`, `nil`, on BOTH the team and the
+      user side). It used to assert `Ecto.Query.CastError` / `FunctionClauseError`
+      there, deliberately, so the fix could not land silently; it reddened
+      exactly as designed and was flipped in the same change that totalised the
+      clause. Mutation-proven: delete the `Map.get(@action_min, action, [])`
+      default and the unknown-action cell reds; drop the catch-all or the
+      `uuid_or_nil` guard on `get_membership/2` and the unresolved cells red.
 
     * ARM 2 — SOURCE CENSUS (static, the load-bearing arm). Every qualified
       `Authz.{role,team_admin?,team_owner?,can_grant?,authorize}` /
@@ -129,49 +129,61 @@ defmodule BarkparkCloud.Accounts.AuthzCallSiteCensusTest do
       end
     end
 
-    test "UNRESOLVED inputs raise — the moduledoc's clause-level caveat, measured" do
+    test "UNRESOLVED inputs are DENIED, never raised at — the totalised clause, measured" do
       user = user_fixture()
 
-      # Every entry point funnels into Accounts.get_membership/2, which has
-      # THREE clauses and NO catch-all and does an unguarded Repo.get_by.
+      # Every entry point funnels into Accounts.get_membership/2, which now
+      # cast-guards its binary clause through Repo.uuid_or_nil/1 and carries a
+      # catch-all, so the whole declared @spec domain lands on "no membership".
       #
-      # IF THIS TEST REDS: someone totalised get_membership/2 (welcome news —
-      # see the filed follow-up). Do NOT delete these assertions; rewrite
-      # Authz's moduledoc SECOND clause to state the new truth, then narrow
-      # this test to whatever still raises (if nothing does, replace it with
-      # the denial assertions and say so in the moduledoc).
-      raisers = [
-        {"empty string team", "", Ecto.Query.CastError},
-        {"nil team", nil, FunctionClauseError}
+      # IF THIS TEST REDS: someone de-totalised get_membership/2 (or dropped its
+      # catch-all / cast guard). Do NOT delete these assertions and do NOT
+      # narrow them back to a raise without rewriting Authz's moduledoc SECOND
+      # clause in the same change — that clause and this arm move together.
+      unresolved = [
+        {"empty string team", ""},
+        {"malformed team", "not-a-uuid"},
+        {"nil team", nil}
       ]
 
       entry_points = [
-        {"role/2", fn user, team -> Authz.role(user, team) end},
-        {"team_admin?/2", fn user, team -> Authz.team_admin?(user, team) end},
-        {"team_owner?/2", fn user, team -> Authz.team_owner?(user, team) end},
-        {"authorize/3", fn user, team -> Authz.authorize(user, team, :read) end},
-        {"can_grant?/3", fn user, team -> Authz.can_grant?(user, team, "member") end}
+        {"role/2", fn user, team -> Authz.role(user, team) end, nil},
+        {"team_admin?/2", fn user, team -> Authz.team_admin?(user, team) end, false},
+        {"team_owner?/2", fn user, team -> Authz.team_owner?(user, team) end, false},
+        {"authorize/3", fn user, team -> Authz.authorize(user, team, :read) end,
+         {:error, :forbidden}},
+        {"can_grant?/3", fn user, team -> Authz.can_grant?(user, team, "member") end,
+         {:error, :forbidden}}
       ]
 
-      for {label, team, exception} <- raisers, {name, call} <- entry_points do
-        raised =
+      for {label, team} <- unresolved, {name, call, expected} <- entry_points do
+        got =
           try do
-            call.(user, team)
-            nil
+            {:returned, call.(user, team)}
           rescue
-            e -> e
+            e -> {:raised, e}
           end
 
-        assert is_struct(raised, exception),
-               "#{name} must still raise #{inspect(exception)} on #{label}, got #{inspect(raised)}"
+        assert got == {:returned, expected},
+               "#{name} must DENY #{label} with #{inspect(expected)}, got #{inspect(got)}"
+      end
+
+      # The same totality on the USER side of the seam — the other half of the
+      # declared @spec domain, and the half nothing pinned before.
+      team = team_fixture()
+
+      for bad_user <- ["", "not-a-uuid", nil] do
+        assert Accounts.get_membership(team, bad_user) == nil,
+               "get_membership/2 must return nil for user #{inspect(bad_user)}"
       end
     end
 
-    test "@type team admits the raising inputs — spec and behaviour disagree, on purpose" do
-      # The moduledoc names this contradiction rather than hiding it: the spec
-      # says `Team.t() | binary()`, and "" IS a binary that raises. If someone
-      # narrows the typespec (or totalises the clause) this pin is the reminder
-      # that the moduledoc sentence must move with it.
+    test "@type team still admits bare binaries — the domain the clause now covers" do
+      # This pin used to record a CONTRADICTION (`""` is a binary and it raised).
+      # get_membership/2 is now total over the declared domain, so the type and
+      # the behaviour agree; the pin stays because the arm above is only a
+      # totality claim as long as the type keeps admitting bare binaries. Narrow
+      # the typespec and the arm above silently stops proving anything.
       {:ok, specs} = Code.Typespec.fetch_types(Authz)
 
       team_type =

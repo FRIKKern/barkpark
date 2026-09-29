@@ -11,14 +11,25 @@ defmodule Barkpark.Content.Errors do
   @hints %{
     "not_found" =>
       "Check the document _id, type, and dataset in the URL — the resource does not exist in this scope.",
+    # CREDENTIAL-AGNOSTIC BY CONSTRUCTION (task-57081836b628df35). This entry is
+    # the code-keyed DEFAULT and `put_hint/1` dispatches on the CODE STRING
+    # ALONE — no module, no conn, no route — so it is served verbatim at every
+    # "unauthorized" emitter: the GitHub webhook HMAC gate, the ingest-token
+    # plug, the media-processing callback, the login-session gates, and the
+    # OIDC/SAML/social callbacks. It therefore MUST NOT name a credential kind.
+    # It used to read "Send a valid token via the Authorization: Bearer header;
+    # tokens are dataset-scoped", which named a dataset-scoped API token at
+    # eleven call sites that between them want an HMAC signature, an ingest
+    # token, a callback token, a login session or an IdP assertion — so the
+    # refusal sent the caller to fetch a credential the route would refuse
+    # again. A route that CAN name its own credential now passes one through
+    # `ErrorResponse.emit_custom/6`, which wins over this default.
     "unauthorized" =>
-      "Send a valid token via the Authorization: Bearer header; tokens are dataset-scoped.",
+      "This route refused the credential it was given. The message names what this route accepts — present that and re-send; re-sending the same credential, or one that authenticates on another route, will refuse again.",
     "forbidden" => "Use a token with write/admin permission that is a member of this workspace.",
     "cors_forbidden" =>
       "Add this origin to the dataset's allowed origins, or call from a server-side token instead.",
     "csrf_required" => "Add the x-requested-with header to cookie-authenticated mutations.",
-    "schema_unknown" =>
-      "Register a schema for this type via POST /v1/schemas/:dataset before writing documents of it.",
     "rev_mismatch" => "Re-fetch the document, then retry with its current _rev in ifRevisionID.",
     "precondition_failed" =>
       "Re-fetch the document and retry with the current revision — it changed under you.",
@@ -86,6 +97,17 @@ defmodule Barkpark.Content.Errors do
     # The PRODUCER half of the same rule — `Barkpark.Tasks.DatasetTwinFence`.
     "dataset_twin" =>
       "A task with this _id already exists in another dataset of this workspace/project, and a second copy would make the id ambiguous for every by-id reader. Write to the dataset that already holds it (details.datasets), use a different _id, or — if a genuinely separate copy is intended — resend with content.dataset_twin_intended: true.",
+    # Postgres' per-tsvector 1 048 575-byte cap, hit by the generated
+    # `documents.search_vector` column (task-655f368ae5c72120). Was a bare 500.
+    "searchable_text_too_large" =>
+      "This document's searchable text (its title plus every string in content) exceeds Postgres' 1048575-byte full-text index limit. Shorten or split the document — details.field names the longest string in your payload, which is the likely culprit. Note the limit is on the derived index, not the request: a long, repetitive body can pass where a shorter, high-entropy one fails.",
+    # Reversible workspace archive (task-55474a106554e65a). 409, NOT the 404 a
+    # deleted workspace answers and NOT a bare 403: the workspace exists, the
+    # caller may well be entitled to it, and the remedy is a restore.
+    "workspace_archived" =>
+      "This workspace is archived: its content is intact but it accepts no reads or writes until a workspace admin restores it (POST /api/workspaces/:workspace_slug/restore).",
+    "default_workspace_not_archivable" =>
+      "The instance-Default workspace cannot be archived — every unscoped route resolves to it. Archive a named workspace instead.",
     # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
     # anchors its hint-append on this exact comma-free tail.
     "quota_exceeded" =>
@@ -175,6 +197,9 @@ defmodule Barkpark.Content.Errors do
                          # /papers/:slug/source and /v1/plugins/bulldocs, so a
                          # spec-generated SDK must expect this variant on either.
                          "paper_rev_unreadable",
+                         # Create-only Paper ingest refuses an occupied published
+                         # slug or draft twin without replacing either row.
+                         "paper_exists",
                          # Session-handoff (tasks 3-4) — the session legs of the
                          # SAME controller. `missing_slug` (422, an upsert body
                          # with no slug), `invalid_kind` (422, an event kind
@@ -274,6 +299,21 @@ defmodule Barkpark.Content.Errors do
                          # …while the sheets xlsx build failure is 422 and
                          # PERMANENT (plugins/sheets/web/export_controller.ex).
                          "export_build_failed",
+                         # Workspace bundle EXPORT admission control (PDS-D719) —
+                         # workspace_controller.ex `export_in_flight_conflict/2`:
+                         # 409 + `Retry-After` when the node's single export slot
+                         # is already taken. RETRYABLE, and distinct from the 503
+                         # above in what the caller should do: nothing failed, the
+                         # request was never started. The envelope's `reason`
+                         # narrows it further — `workspace_export_in_flight` (the
+                         # caller's OWN workspace is exporting; the slug is echoed)
+                         # vs `export_capacity_reached` (another workspace holds
+                         # the slot; its slug is deliberately withheld, because
+                         # this caller proved workspace_admin?/2 on theirs and on
+                         # nothing else). Those two are `reason` values, NOT
+                         # Error.code values, so they are correctly absent here —
+                         # the wire `code` is this one string for both.
+                         "export_already_running",
                          # Chat transport send/create failures (chat_controller.ex,
                          # charter D26 reason split — mobile/TUI clients branch on
                          # these: 5xx → transient retry, 4xx → refused/permanent).
@@ -420,6 +460,28 @@ defmodule Barkpark.Content.Errors do
   # 403 write-block; over-quota = 402 Payment Required (the honest "you hit your
   # plan's write cap" semantic, distinct from a 429 rate limit that clears on
   # backoff). `reason`/`quota` ride details so a client can surface the wall.
+  # Reversible workspace archive (task-55474a106554e65a). One status for the
+  # read AND the write refusal, because the state is the workspace's, not the
+  # verb's. `details.workspace` names the slug so a caller holding several
+  # workspaces knows WHICH one to restore.
+  defp build({:error, :workspace_archived}),
+    do: %{code: "workspace_archived", message: "workspace is archived", status: 409}
+
+  defp build({:error, {:workspace_archived, slug}}),
+    do: %{
+      code: "workspace_archived",
+      message: "workspace is archived",
+      status: 409,
+      details: %{workspace: slug}
+    }
+
+  defp build({:error, :default_workspace_not_archivable}),
+    do: %{
+      code: "default_workspace_not_archivable",
+      message: "the instance-Default workspace cannot be archived",
+      status: 409
+    }
+
   defp build({:error, :workspace_suspended}),
     do: %{code: "workspace_suspended", message: "workspace is suspended", status: 403}
 
@@ -470,6 +532,43 @@ defmodule Barkpark.Content.Errors do
       details: %{workspaces: workspaces}
     }
 
+  # The generated `documents.search_vector` column overflowed Postgres' single
+  # tsvector cap (SQLSTATE 54000, `:program_limit_exceeded`), translated by
+  # `Content.Mutations.classify_search_vector_overflow/2`. 422 — the request is
+  # well-formed and the cap is on the DERIVED index, not on the body, so
+  # `payload_too_large` (413) would tell the caller to shrink the wrong thing:
+  # a 2 MB low-entropy body indexes fine while an 800 KB high-entropy one does
+  # not. `details.limit_bytes` names the limit; `details.field` names the
+  # longest string in the submitted payload (with its document id and byte
+  # size) so the caller knows WHERE to cut.
+  defp build({:error, {:searchable_text_too_large, limit_bytes, %{} = field}})
+       when is_integer(limit_bytes) do
+    %{document: doc_id, field: path, bytes: bytes} = field
+
+    %{
+      code: "searchable_text_too_large",
+      message:
+        "the document's searchable text exceeds the #{limit_bytes}-byte full-text index limit; " <>
+          "the largest field in this write is #{path} (#{bytes} bytes)",
+      status: 422,
+      details: %{limit_bytes: limit_bytes, document: doc_id, field: path, field_bytes: bytes}
+    }
+  end
+
+  # The batch carried no string worth naming (a delete/publish op, or a payload
+  # whose text all lives somewhere the locator does not walk). The limit is still
+  # named; only the WHERE is absent — and it is absent rather than guessed.
+  defp build({:error, {:searchable_text_too_large, limit_bytes, _field}})
+       when is_integer(limit_bytes) do
+    %{
+      code: "searchable_text_too_large",
+      message:
+        "the document's searchable text exceeds the #{limit_bytes}-byte full-text index limit",
+      status: 422,
+      details: %{limit_bytes: limit_bytes}
+    }
+  end
+
   defp build({:error, :quota_exceeded}),
     do: %{code: "quota_exceeded", message: "workspace write quota exceeded", status: 402}
 
@@ -506,9 +605,6 @@ defmodule Barkpark.Content.Errors do
       message: "cookie-authenticated mutation requires the x-requested-with header",
       status: 403
     }
-
-  defp build({:error, :schema_unknown}),
-    do: %{code: "schema_unknown", message: "no schema for type", status: 404}
 
   defp build({:error, :rev_mismatch}),
     do: %{code: "rev_mismatch", message: "document was modified by another writer", status: 409}
@@ -1069,6 +1165,25 @@ defmodule Barkpark.Content.Errors do
       code: "rate_limited",
       message: "too many requests",
       details: %{retry_after: retry_after}
+    }
+
+  # Write admission (C083, Barkdown migration): a dedicated instance that is
+  # draining or holding writes for a library switch refuses new writes. Same
+  # public 503 transient shape as `storage_unavailable` above, for the same
+  # reason: one code, one status, retry is the right reflex, and `reason`
+  # discriminates. `admission_closed` means hold in progress; `unavailable` or
+  # `unconfigured` means the instance is enabled for admission but its
+  # coordinator is not running, which fails closed rather than writing.
+  defp build({:error, {:write_admission, reason}}) when is_atom(reason),
+    do: %{
+      code: "storage_unavailable",
+      message: "writes are not admitted while this instance is being switched",
+      status: 503,
+      reason: "write_admission_#{reason}",
+      hint:
+        "Transient: this instance is holding writes for a migration step, so " <>
+          "nothing was stored or refused on its merits. Retry once the switch " <>
+          "completes; if it persists, the instance needs explicit recovery."
     }
 
   defp build({:error, reason}) when is_binary(reason),

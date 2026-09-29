@@ -27,8 +27,9 @@ defmodule Barkpark.Content.DedupWall do
       lexical near-match is a real duplication signal.
 
   So a document scores purely on **title + tag-name token overlap** (Jaccard over
-  the combined token set), and the trgm `similarity()` idiom
-  (search/documents_retriever.ex) fetches the candidate set cheaply.
+  the combined token set), and a KNN trgm index scan (`title <-> $1` over
+  `documents_title_trgm_gist_idx`) fetches the candidate set in BOUNDED time —
+  exactly `@candidate_limit` rows read, whatever the corpus holds.
 
   ## When the gate cannot run: it SAYS SO (it does not silently pass)
 
@@ -48,7 +49,29 @@ defmodule Barkpark.Content.DedupWall do
       failure arrives as an exit, not an exception, and a rescue-only clause
       lets it escape as a 500;
     * a degraded fetch returns `{:error, {:dedup_unavailable, message}}` whose
-      message names what could not be done and how to proceed.
+      message names what could not be done and how to proceed — and says WHICH
+      of two things happened: an infra OUTAGE (DBConnection / Postgrex / exit)
+      keeps the `content.dedup_bypass` remedy and logs at `:warning`; a code
+      DEFECT (FunctionClauseError, ArgumentError, MatchError, …) names the bug,
+      offers no bypass, logs at `:error` with a `DEFECT` prefix and emits
+      `[:barkpark, :dedup_wall, :defect]` — one sentence cannot mean both.
+
+  ## The `catch :exit` arm is PROVEN, not asserted
+
+  That exit clause used to be unfalsifiable from a test: inside the Ecto SQL
+  sandbox every stageable failure (dead or live dummy dynamic repo, ownership
+  timeout, unallowed process, `pg_terminate_backend`, query/transaction timeout
+  0 and 1) arrives as an EXCEPTION and lands in the `rescue`. Deleting the
+  clause left the whole dedup suite green.
+
+  `Barkpark.Dedup.ScanSeam` closes that. It is a one-verb fault injector
+  (`exit/1` and nothing else) called from inside this module's candidate fetch,
+  compiled in ONLY when `:dedup_scan_seam` is set — which only `config/test.exs`
+  does. Outside that build the compiler emits `check!/1` as a literal `:ok` and
+  the arming functions do not exist in the BEAM at all; inside it, an unarmed
+  process is byte-identical to today. Its moduledoc states all three layers.
+  The coverage lives in `test/barkpark/dedup/scan_exit_seam_test.exs`, whose two
+  cases red INDEPENDENTLY when the matching `catch :exit` clause is deleted.
 
   Escape hatches, both live: a document in the grandfather exemption ledger
   never reaches E4 at all (`AuthoringWall.dedup_gate/5`), and
@@ -88,6 +111,7 @@ defmodule Barkpark.Content.DedupWall do
   require Logger
 
   alias Barkpark.Content.{Document, DraftId, Scope}
+  alias Barkpark.Dedup.ScanSeam
   alias Barkpark.Repo
 
   # ── Tunable thresholds (copied from Tasks.Similarity — one calibrated scale) ─
@@ -103,10 +127,19 @@ defmodule Barkpark.Content.DedupWall do
   # duplicate shares many words. Below this floor a high score drops to ADVISE.
   @min_refuse_shared 3
 
-  # Coarse trgm pre-filter for the candidate FETCH only (documents_retriever.ex
-  # `similarity()` idiom). A cheap net over the title; the precise token-Jaccard
-  # below is the real decision. Low on purpose — over-fetch, then score down.
+  # Coarse trgm floor for the candidate FETCH only. A cheap net over the title;
+  # the precise token-Jaccard below is the real decision. Low on purpose —
+  # over-fetch, then score down. It is applied to the @candidate_limit rows the
+  # KNN index scan returns, NOT as a scan predicate: as a predicate it bounded
+  # nothing (see `do_fetch_candidates/6`).
   @candidate_trgm_floor 0.1
+
+  # HARD SCAN CAP, not just a result cap. Paired with the `<->` ORDER BY and
+  # `documents_title_trgm_gist_idx` (migration 20260910100000) this is the
+  # number of rows Postgres READS, at every corpus size. Under the old `%` +
+  # `ORDER BY similarity()` shape it capped only the OUTPUT while the sort input
+  # grew linearly with the corpus — the mechanism behind
+  # `pds-bl-dedup-wall-scan-budget-blows-at-corpus-scale`.
   @candidate_limit 500
 
   # The candidate scan's own budget, on the transaction AND every query inside
@@ -137,6 +170,141 @@ defmodule Barkpark.Content.DedupWall do
   @doc "Default thresholds, exposed so callers/tests share one source of truth."
   @spec thresholds() :: %{refuse: float(), advise: float(), min_refuse_shared: non_neg_integer()}
   def thresholds, do: %{refuse: @refuse, advise: @advise, min_refuse_shared: @min_refuse_shared}
+
+  # ── The publish-scope serialization lock (acrc-dedup-toctou-serialize) ──────
+  #
+  # THE RACE THIS EXISTS FOR is NOT the same-row one `Lifecycle.lock_published_row/2`
+  # closes (#17244, `FOR UPDATE` on the INCUMBENT). It is the CROSS-doc_id one:
+  # two publishes carrying DIFFERENT doc_ids and near-duplicate titles, in the
+  # same (type, workspace, dataset) scope. Each excludes its OWN id from the
+  # candidate scan (`where: d.doc_id != ^incumbent`) and neither is committed
+  # when the other looks, so under snapshot isolation BOTH pass E4 and BOTH
+  # commit — a duplicate PAIR that the wall was built to refuse. There is no row
+  # to `FOR UPDATE` (neither exists yet) and no unique index that can express
+  # the predicate (it is a fuzzy trigram+Jaccard verdict; live uniqueness is the
+  # exact `[:doc_id, :type, :dataset_id]` of migration 20260527134000). The only
+  # thing left to serialize on is the SCOPE itself.
+  #
+  # KEY DERIVATION, and why it cannot collide with the task family:
+  #
+  #     hashtext("dedup:" <> type <> ":" <> (workspace_id || "global") <> ":" <> dataset)
+  #
+  # Every other advisory-lock family in this codebase is built by
+  # `Barkpark.Tasks.LockKey` and every one of its strings starts with `task:`,
+  # `task-resources` or `listener:` (`lib/barkpark/tasks/lock_key.ex`), and
+  # `BlockOps.upsert_blocks_doc/3`'s non-paper leg takes `"<type>:<slug>"`
+  # (today `session:…`). A `dedup:`-prefixed string is in NONE of those sets, so
+  # the two lock families are disjoint by prefix: a `Tasks.Internal.fenced_content_write`
+  # holding `task:<uuid>` never blocks a publish, and a publish never blocks it.
+  # `hashtext` collisions are possible in principle (it is a 32-bit hash) and
+  # harmless in kind: the worst case is two unrelated scopes serializing against
+  # each other, i.e. throughput, never correctness.
+  #
+  # The workspace segment is `"global"` for a nil workspace_id because that is
+  # exactly the corpus `Scope.scope_to_workspace_or_global/3` pools: a flat /
+  # Default publish compares against the shared surface, so it must serialize
+  # against the other flat / Default publishes. NOTE THE DELIBERATE ASYMMETRY:
+  # a SCOPED publish reads workspace-OR-global but locks only its own workspace
+  # key, so a scoped publish and a global one do not exclude each other. That is
+  # a residual window, and it is the honest one — locking every scoped publish
+  # against the single global key would serialize the whole corpus.
+  @dedup_lock_prefix "dedup:"
+
+  @doc """
+  The advisory-lock key string for a publish scope. Exposed so tests and the
+  two call sites share ONE derivation — two writers that build the key
+  differently do not exclude each other and NOTHING raises (see
+  `Barkpark.Tasks.LockKey`'s moduledoc for the same failure in the task family).
+  """
+  @spec publish_scope_lock_key(String.t(), String.t(), String.t() | nil) :: String.t()
+  def publish_scope_lock_key(type, dataset, workspace_id) do
+    ws = if is_binary(workspace_id) and workspace_id != "", do: workspace_id, else: "global"
+    @dedup_lock_prefix <> type <> ":" <> ws <> ":" <> to_string(dataset)
+  end
+
+  @doc """
+  Take the publish-scope advisory lock. MUST be called inside an open
+  transaction: `pg_advisory_xact_lock` is released at commit/rollback, so
+  taking it outside one acquires and releases it in the same statement and
+  serializes nothing.
+  """
+  @spec lock_publish_scope!(String.t(), String.t(), keyword()) :: :ok
+  def lock_publish_scope!(type, dataset, opts \\ []) do
+    if scope_lock_enabled?() do
+      workspace_id = Keyword.get(opts, :workspace_id)
+
+      # LOCK ORDER (task-0c397ec87de1f924): the audit-chain lock BEFORE the
+      # scope lock. A publish takes the scope lock and then, through
+      # `Broadcast.tap_broadcast` -> `Audit.emit/1`, the audit-chain lock in
+      # the SAME transaction. A mutate batch (`Mutations.apply_mutations/3` is
+      # one transaction) that audited an earlier mutation already holds the
+      # audit-chain lock when its publish reaches here: opposite orders over
+      # the same two keys, and Postgres answered 40P01:
+      #
+      #     A waits for advisory lock [_,0,1329934127,1]  dedup:paper:<ws>:production
+      #     B waits for advisory lock [_,0,2614849228,1]  audit chain of <ws>
+      #
+      # Taken first, every holder of the scope lock already holds the
+      # audit-chain lock, so the cycle cannot form; it is re-entrant, so the
+      # later emit does not wait on itself. `:audit_workspace_id` is the
+      # workspace the document is AUDITED under (AuthoringWall passes the
+      # document's); the opts scope is only the fallback. Inside this `if`, so
+      # the race harness's scope-lock-off red arm still serializes nothing.
+      :ok = Barkpark.Audit.lock_chain!(Keyword.get(opts, :audit_workspace_id, workspace_id))
+
+      key = publish_scope_lock_key(type, dataset, workspace_id)
+      _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [key])
+    end
+
+    :ok
+  end
+
+  # THE CONTROL, not a feature flag. A lock is the one kind of fix whose
+  # absence is invisible to every single-process test: with it removed the
+  # suite stays green, because nothing a serial test does can interleave. So
+  # the race harness (`dedup_publish_toctou_test.exs`) needs a way to run its
+  # OWN scenario with the lock off and observe the double-insert — a RED arm
+  # that lives in CI beside the GREEN one instead of in a commit message
+  # nobody can re-run. Default is ON, in every environment; the harness sets
+  # it false for one test and restores it in `on_exit`. It is deliberately NOT
+  # a config knob: no config file sets it, and turning it off in prod would
+  # re-open exactly the TOCTOU this module documents.
+  defp scope_lock_enabled?,
+    do: Application.get_env(:barkpark, :dedup_publish_scope_lock, true) != false
+
+  # TEST-ONLY BARRIER SEAM. The cross-doc_id race needs both publishes to have
+  # PASSED E4 before either commits, and nothing in a serial test can produce
+  # that interleaving on its own. This is where a harness rendezvouses the two:
+  # a `{dataset, phase, fun/0}` triple in the app env, invoked ONLY for the
+  # named dataset (so a concurrently-running async test in another dataset
+  # never touches it) and only in the named PHASE.
+  #
+  # The phase matters, and each arm needs the OTHER one:
+  #
+  #   * `:pre_txn` — the GREEN arm. Both publishes are parked after passing E4
+  #     and before either opens its transaction; releasing them then makes the
+  #     scope lock the only thing standing between two duplicate commits.
+  #   * `:in_txn` — the RED arm, and ONLY valid with the scope lock disabled.
+  #     Both publishes are parked INSIDE their transactions, after the
+  #     re-check, before either commits; releasing them commits both. With the
+  #     lock ENABLED this would deadlock by construction (the parked process
+  #     holds the lock the other is waiting for), which is precisely why it is
+  #     the arm that demonstrates the unserialized double-insert.
+  #
+  # Alternatives rejected: `:erlang.trace` on a private function (binds the
+  # harness to an implementation detail that mix format could rename), and a
+  # `RAISE EXCEPTION` trigger on `documents` (aborts the transaction it is
+  # supposed to pause, so it can never demonstrate a double COMMIT).
+  defp post_check_barrier(result, dataset, opts) do
+    phase = if Keyword.get(opts, :dedup_in_transaction, false), do: :in_txn, else: :pre_txn
+
+    case Application.get_env(:barkpark, :dedup_wall_post_check_barrier) do
+      {^dataset, ^phase, fun} when is_function(fun, 0) -> fun.()
+      _ -> :ok
+    end
+
+    result
+  end
 
   @doc """
   The blocking guard mounted in `Content.Lifecycle.publish_document/4`. Refuses a
@@ -190,7 +358,9 @@ defmodule Barkpark.Content.DedupWall do
         :ok
 
       true ->
-        gate(ref, type, dataset, opts)
+        ref
+        |> gate(type, dataset, opts)
+        |> post_check_barrier(dataset, opts)
     end
   end
 
@@ -278,7 +448,25 @@ defmodule Barkpark.Content.DedupWall do
     end
   end
 
-  defp degraded_message(reason) do
+  # Two messages from one door, because two different people need to act.
+  #
+  # OUTAGE (a binary reason): the database was slow or gone. The operator can
+  # wait it out or, deliberately, publish unchecked — so the remedy is named.
+  #
+  # DEFECT (`{:defect, phrase}`): OUR code raised. Offering `dedup_bypass` here
+  # would teach the operator to disable the wall permanently for a bug that is
+  # never reported — the exact misread this arm exists to prevent. No remedy is
+  # offered because the operator has none; the sentence tells them whose bug it
+  # is and to report it.
+  defp degraded_message({:defect, phrase}) do
+    "publish dedup wall hit a DEFECT, not an outage: #{phrase}. The publish was " <>
+      "REFUSED rather than passed unchecked — no duplicate check ran, so nothing " <>
+      "here claims this document is new. This is a bug in Barkpark, not a slow " <>
+      "database: retrying will not help and there is no operator escape for it. " <>
+      "Report it with this message so the defect gets fixed."
+  end
+
+  defp degraded_message(reason) when is_binary(reason) do
     "publish dedup wall could not complete: #{reason}. The publish was REFUSED " <>
       "rather than passed unchecked — no duplicate check ran, so nothing here " <>
       "claims this document is new. Retry, or resend with content.dedup_bypass: " <>
@@ -383,9 +571,24 @@ defmodule Barkpark.Content.DedupWall do
   # (body, blocks, acceptance criteria …) was pure transfer cost. The trgm
   # predicate and its ordering are untouched — both run on the `title` COLUMN,
   # not on the projection, so the GIN index is still the one doing the work.
+  # THE SCAN'S TRANSACTION IS A BUDGET CARRIER, NOT AN ISOLATION BOUNDARY (see
+  # the comment at its call site). When the caller is ALREADY inside a
+  # transaction — the publish-scope re-check of
+  # `AuthoringWall.recheck_dedup_under_scope_lock/5` — wrapping again would
+  # merely JOIN that transaction (Ecto nests without a savepoint by default),
+  # and a connection death inside it would then escape as an exception rather
+  # than resolving to the `{:degraded, _}` arm. So under `:dedup_in_transaction`
+  # the scan runs bare and the module-level `rescue` (CLIFF B) is what converts
+  # a pool/DB failure into the same fail-LOUD `{:error, {:dedup_unavailable, _}}`
+  # the un-nested path produces.
+  defp run_candidate_scan(query, timeout, false),
+    do: Repo.transaction(fn -> Repo.all(query, timeout: timeout) end, timeout: timeout)
+
+  defp run_candidate_scan(query, timeout, true), do: {:ok, Repo.all(query, timeout: timeout)}
+
   defp fetch_candidates(ref, type, dataset, opts) do
     title = field_str(ref, :title)
-    timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
+    timeout = resolve_timeout(opts)
     incumbent = DraftId.published_id(field_str(ref, :id))
 
     if timeout <= 0 do
@@ -408,6 +611,13 @@ defmodule Barkpark.Content.DedupWall do
   end
 
   defp do_fetch_candidates(type, dataset, title, timeout, incumbent, opts) do
+    # THE EXIT SEAM. Inert by construction outside `MIX_ENV=test` — see
+    # `Barkpark.Dedup.ScanSeam`'s moduledoc for the three layers that make it so.
+    # It sits INSIDE this function's try body on purpose: the `catch :exit` arm
+    # below is the thing under test, and an injection point outside the try would
+    # prove nothing about it.
+    ScanSeam.check!(:content_dedup_wall)
+
     query =
       from(d in Document,
         as: :doc,
@@ -415,15 +625,30 @@ defmodule Barkpark.Content.DedupWall do
         where: d.status == "published",
         # Same-id republish never trips — the incumbent can't duplicate itself.
         where: d.doc_id != ^incumbent,
-        # Coarse trgm net over the title. The `%` operator engages the GIN
-        # `documents_title_trgm_idx` (unlike `similarity() > x`, which can only
-        # seq-scan) — the precise token-Jaccard in `assess/3` scores below.
-        where: fragment("? % ?", d.title, ^title),
-        # Deterministic keep: the top-500-BY-SIMILARITY survive the @candidate_limit
-        # cap, so a plan change can never reorder which 500 pass to the scorer. `%`
-        # is `>=` (a safe superset of the old strict `>`) — re-scored downstream.
-        order_by: [desc: fragment("similarity(?, ?)", d.title, ^title)],
-        select: %{doc_id: d.doc_id, title: d.title, tags: fragment("?->'tags'", d.content)},
+        # BOUNDED CANDIDATE SCAN. `<->` is pg_trgm's KNN distance (`1 -
+        # similarity`), so ordering ASCENDING by it is the SAME order as the old
+        # `desc: similarity(...)` — but a `gist_trgm_ops` index can RETURN rows
+        # in that order, so the LIMIT stops the scan instead of merely trimming
+        # its output. The old shape paired a `%` net with `ORDER BY
+        # similarity()`: GIN cannot order, so every row surviving the net was
+        # fetched, scored and top-N heapsorted, and the sort input grew LINEARLY
+        # with the corpus (measured on a seeded corpus of real Barkpark task
+        # titles: 3,410 rows / 203 ms at 20k, 6,749 / 466 ms at 40k, 13,566 /
+        # 729-972 ms at 80k — 2,514 ms on a cold cache, half the 5 s budget).
+        # The index scan below reads exactly @candidate_limit rows at every
+        # corpus size: 500 / 25 ms at 20k, 500 / 43 ms at 40k, 500 / 74-85 ms
+        # at 80k. The row count is FLAT; the residual time growth is GiST page
+        # traversal, ~N^0.5, not the linear scan it replaces.
+        order_by: [asc: fragment("? <-> ?", d.title, ^title)],
+        # `sim` rides along so the floor can be applied to the BOUNDED set in
+        # Elixir (see below) instead of as a scan predicate. Reading it off the
+        # same `<->` the index just computed costs nothing extra.
+        select: %{
+          doc_id: d.doc_id,
+          title: d.title,
+          tags: fragment("?->'tags'", d.content),
+          sim: fragment("1 - (? <-> ?)", d.title, ^title)
+        },
         limit: @candidate_limit
       )
       |> maybe_filter_dataset(dataset)
@@ -444,39 +669,44 @@ defmodule Barkpark.Content.DedupWall do
         Keyword.get(opts, :project_id)
       )
 
-    # CLIFF A: `SET LOCAL` only takes effect INSIDE a transaction — outside one it
-    # is a silent no-op, leaving pg_trgm.similarity_threshold at its 0.3 default,
-    # which would tighten `%` and drop every 0.1–0.3 gray-zone near-duplicate. So
-    # wrap the fetch in an explicit txn and set the threshold FIRST. The literal is
-    # interpolated because SET takes no bind params; @candidate_trgm_floor stays the
-    # single source of truth.
-    result =
-      Repo.transaction(
-        fn ->
-          Repo.query!(
-            "SET LOCAL pg_trgm.similarity_threshold = #{@candidate_trgm_floor}",
-            [],
-            timeout: timeout
-          )
-
-          Repo.all(query, timeout: timeout)
-        end,
-        timeout: timeout
-      )
+    # The txn stays even though nothing inside it needs session state any more:
+    # it is what carries ONE budget over the checkout + the scan, and it is what
+    # turns a pool-checkout death into `{:error, reason}` (the degraded arm)
+    # instead of an escaped exit. `SET LOCAL pg_trgm.similarity_threshold` is
+    # GONE with the `%` operator it configured — `<->` is not threshold-gated,
+    # so setting it would be decoration, and decoration in this module has
+    # already cost one incident (CLIFF A: the same SET outside a txn was a
+    # silent no-op that read as protection).
+    result = run_candidate_scan(query, timeout, Keyword.get(opts, :dedup_in_transaction, false))
 
     case result do
       {:ok, rows} ->
-        {:ok, Enum.map(rows, &row_to_ref/1)}
+        # THE FLOOR MOVED, THE SEMANTICS DID NOT. `%` admitted exactly the rows
+        # with `similarity >= @candidate_trgm_floor`; this admits exactly the
+        # same predicate, applied to the 500 rows the index already ranked
+        # highest. It can only ever DROP the tail of an ordered list, so the
+        # candidate set is unchanged wherever the old net returned >= 500 rows,
+        # and a strict superset-by-ordering otherwise. Verified on the seeded
+        # 80k corpus: the two candidate sets were IDENTICAL (0 rows lost, same
+        # 0.1586 minimum similarity, 0 rows admitted below the floor).
+        {:ok,
+         rows
+         |> Enum.filter(&(&1.sim >= @candidate_trgm_floor))
+         |> Enum.map(&row_to_ref/1)}
 
       # A rolled-back txn is a degraded scan, not an empty corpus. Matching
       # `{:ok, _}` alone would have shaped this as a MatchError — the right
       # verdict by accident, with a message that names the wrong failure.
       {:error, reason} ->
-        Logger.warning(
-          "Content.DedupWall degraded: candidate txn rolled back: #{inspect(reason)}"
-        )
+        if code_error?(reason) do
+          {:degraded, defect_reason("candidate txn rolled back", reason)}
+        else
+          Logger.warning(
+            "Content.DedupWall degraded: candidate txn rolled back: #{inspect(reason)}"
+          )
 
-        {:degraded, rollback_phrase(reason, timeout)}
+          {:degraded, rollback_phrase(reason, timeout)}
+        end
     end
   rescue
     # CLIFF B, now fail-LOUD: this wraps the WHOLE Repo.transaction — a
@@ -488,12 +718,19 @@ defmodule Barkpark.Content.DedupWall do
     # outage, wrong for the bug — see @code_error_modules for the FunctionClauseError
     # that hid here, green, for months.
     e ->
-      if code_error?(e) and raise_on_code_errors?() do
-        reraise e, __STACKTRACE__
-      end
+      cond do
+        code_error?(e) and raise_on_code_errors?(opts) ->
+          reraise e, __STACKTRACE__
 
-      Logger.warning("Content.DedupWall degraded: candidate fetch failed: #{inspect(e)}")
-      {:degraded, reason_phrase(e, Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms))}
+        # Prod (tripwire off): the defect still refuses the publish, but it
+        # must not arrive wearing the outage's clothes — see `defect_reason/2`.
+        code_error?(e) ->
+          {:degraded, defect_reason("candidate fetch failed", e)}
+
+        true ->
+          Logger.warning("Content.DedupWall degraded: candidate fetch failed: #{inspect(e)}")
+          {:degraded, reason_phrase(e, resolve_timeout(opts))}
+      end
   catch
     # Pool-checkout death arrives as an EXIT, not an exception — a rescue-only
     # clause lets it through as a 500. This is the clause Tasks.Dedup needed.
@@ -516,6 +753,30 @@ defmodule Barkpark.Content.DedupWall do
     do: "the duplicate scan failed (#{inspect(mod)})"
 
   defp reason_phrase(_, _timeout), do: "the duplicate scan failed"
+
+  # The code-class arm of the rescue, when the tripwire is not re-raising (prod).
+  # Same fail-CLOSED verdict as an outage, DIFFERENT clothes:
+  #
+  #   * `Logger.error`, not `.warning` — an outage is watched, a defect is
+  #     paged. The `DEFECT` prefix is the string an alert can key on; the infra
+  #     arms above keep `degraded:` and stay at warning.
+  #   * `[:barkpark, :dedup_wall, :defect]` telemetry with the exception module,
+  #     for anyone who alerts on events rather than log lines.
+  #   * a `{:defect, phrase}` reason, so `degraded_message/1` renders the message
+  #     that does NOT offer `content.dedup_bypass`.
+  defp defect_reason(where, %{__struct__: mod} = e) do
+    Logger.error(
+      "Content.DedupWall DEFECT (not an outage): #{where} with a code error " <>
+        "in Barkpark, #{inspect(e)}"
+    )
+
+    :telemetry.execute([:barkpark, :dedup_wall, :defect], %{count: 1}, %{
+      exception: mod,
+      where: where
+    })
+
+    {:defect, "the duplicate scan could not run because of a bug in Barkpark (#{inspect(mod)})"}
+  end
 
   defp maybe_filter_dataset(query, nil), do: query
 
@@ -549,11 +810,14 @@ defmodule Barkpark.Content.DedupWall do
   # is refused, never waved through), which is exactly why nobody looked: the
   # wall was refusing publishes on that path while the log blamed the database.
   #
-  # PROD BEHAVIOUR IS UNCHANGED, deliberately. Raising in prod would turn a
-  # fail-closed refusal into a 500 and lose the actionable message the caller
-  # gets today, so `raise_on_code_errors?` defaults OFF and `config/test.exs`
-  # turns it ON. The tripwire's job is to stop a defect from SHIPPING, not to
-  # change what a shipped defect does.
+  # PROD STILL REFUSES INSTEAD OF RAISING, deliberately. Raising in prod would
+  # turn a fail-closed refusal into a 500, so `raise_on_code_errors?` defaults
+  # OFF and `config/test.exs` turns it ON. The tripwire's job is to stop a defect
+  # from SHIPPING. What a shipped defect SAYS did change: with the tripwire off,
+  # a code-class exception goes through `defect_reason/2` (`:error` log,
+  # telemetry, a message that names the bug and offers no bypass) instead of
+  # wearing the outage's `:warning` + `dedup_bypass` clothes. The classifier
+  # below is shared by both arms.
   @code_error_modules [
     ArgumentError,
     ArithmeticError,
@@ -576,8 +840,59 @@ defmodule Barkpark.Content.DedupWall do
   defp code_error?(%{__struct__: mod}), do: mod in @code_error_modules
   defp code_error?(_), do: false
 
-  defp raise_on_code_errors?,
-    do: Application.get_env(:barkpark, :dedup_raise_on_code_errors, false)
+  # A per-call `dedup_raise_on_code_errors: false` opt lets a test exercise the
+  # PROD arm (tripwire off) without flipping the global app env under async
+  # siblings; it can only ever turn the tripwire OFF for one call, which is what
+  # prod already is.
+  defp raise_on_code_errors?(opts) do
+    Keyword.get(
+      opts,
+      :dedup_raise_on_code_errors,
+      Application.get_env(:barkpark, :dedup_raise_on_code_errors, false)
+    )
+  end
+
+  # ── THE SCAN BUDGET, AND WHY ITS OVERRIDE IS COMPILED OUT OF PROD ───────────
+  #
+  # THE PROBLEM (dr-w32-bl-dedup-outage-unreachable-from-http). The degraded arm
+  # — `{:error, {:dedup_unavailable, _}}`, the ONE wall shape that is a transient
+  # OUTAGE rather than a policy refusal — fired only on a non-string dataset or
+  # an explicit `dedup_timeout_ms` opt. Neither is settable from an HTTP request:
+  # the ingest controller's `put_scope/3` always threads a string dataset and
+  # `Content.upsert_paper/1` passes no opts through. So the ingest controller's
+  # four `{:error, {:dedup_unavailable, reason}}` arms were unreachable from the
+  # wire, and the 503 envelope they render was asserted NOWHERE above unit level.
+  # That is precisely how this shape shipped as a 409 plugin-veto in the first
+  # place: no test could see what the door actually said.
+  #
+  # THE DECISION (option (a) of the row, ruled by the lead). The DEFAULT budget —
+  # what every request gets when no opt is passed — becomes overridable through
+  # `Application.get_env(:barkpark, :dedup_timeout_ms)`, so a ConnCase can drive
+  # the whole HTTP stack into a degraded scan with `put_env(…, 0)` and read the
+  # wire shape the controller emits.
+  #
+  # WHY IT IS `Mix.env() == :test` AND NOT A RUNTIME FLAG. A runtime-only default
+  # would mean a prod config file — or anything that can write application env in
+  # a running node — could steer the wall into permanent self-inflicted degraded
+  # mode, turning every publish into a 503 with no database fault behind it. The
+  # sibling door above (`raise_on_code_errors?`) is safe as pure runtime config
+  # because its worst case is a LOUD raise on an already-broken path; this one's
+  # worst case is a silent, total, fail-closed outage. So the `get_env` read is
+  # COMPILED AWAY outside `:test`: in `:prod` and `:dev` `default_timeout/0` is
+  # the literal `@query_timeout_ms` and there is no config key to find.
+  #
+  # PROD BEHAVIOUR IS BYTE-IDENTICAL. Same constant, same call, one extra inlined
+  # zero-arity function. An explicit `dedup_timeout_ms` opt still wins everywhere
+  # — the override only supplies the DEFAULT.
+  @test_env Mix.env() == :test
+
+  defp resolve_timeout(opts), do: Keyword.get(opts, :dedup_timeout_ms, default_timeout())
+
+  if @test_env do
+    defp default_timeout, do: Application.get_env(:barkpark, :dedup_timeout_ms, @query_timeout_ms)
+  else
+    defp default_timeout, do: @query_timeout_ms
+  end
 
   # ── shaping ──────────────────────────────────────────────────────────────────
 

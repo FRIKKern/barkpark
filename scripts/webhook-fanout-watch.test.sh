@@ -305,7 +305,36 @@ if [ -f "$WF" ]; then
   grep -q "scripts/webhook-fanout-watch.test.sh" "$WF" \
     && ok "the workflow lists webhook-fanout-watch.test.sh by explicit path" \
     || bad "webhook-fanout-watch.test.sh is not an explicit path entry in shell-harnesses.yml"
-  grep -q "bash scripts/webhook-fanout-watch.test.sh" "$WF" \
+  # THE EXECUTION TEXT IS NO LONGER ONLY THE YAML (task-1afb6eaf3a04b8ea).
+  # shell-harnesses.yml's 53 sibling jobs were collapsed into one matrix job
+  # whose per-leg `run:` bodies live in .github/shell-harness-legs.json and are
+  # executed verbatim by scripts/shell-harness-run.sh. So the text that answers
+  # "does the workflow RUN this harness" is the YAML PLUS those bodies. Reading
+  # the YAML alone made this arm print "never executes this harness" on the very
+  # commit that kept it executed — a wiring assertion reporting the opposite of
+  # the truth. The composite is built once and every arm below that asks about
+  # EXECUTION uses it; the arms that ask about the workflow FILE itself (the
+  # path entries) still read $WF, because a path entry really is a YAML fact.
+  WF_EXEC="$TMP/wf-exec.yml"
+  {
+    cat "$WF"
+    legs="$REPO_ROOT/.github/shell-harness-legs.json"
+    if [ -f "$legs" ] && command -v python3 >/dev/null 2>&1; then
+      python3 - "$legs" <<'LEGS'
+import json, sys
+try:
+    legs = json.load(open(sys.argv[1]))
+except Exception:
+    raise SystemExit(0)
+for leg in legs if isinstance(legs, list) else []:
+    for arm in leg.get("arms") or []:
+        for line in str(arm.get("run", "")).split("\n"):
+            print("        run: " + line if line.strip() else line)
+LEGS
+    fi
+  } > "$WF_EXEC"
+
+  grep -q "bash scripts/webhook-fanout-watch.test.sh" "$WF_EXEC" \
     && ok "the workflow actually RUNS this harness (a listed path with no run: is a green that never ran)" \
     || bad "shell-harnesses.yml never executes this harness"
 
@@ -313,7 +342,7 @@ if [ -f "$WF" ]; then
   # can no longer SEE a real continue-on-error is the same false green it exists
   # to prevent, so plant one in a copy and watch the detector fire.
   awk '{print} /run: bash scripts\/webhook-fanout-watch.test.sh/ {print "        continue-on-error: true"}' \
-    "$WF" > "$TMP/laundered.yml"
+    "$WF_EXEC" > "$TMP/laundered.yml"
   if uncommented_has "continue-on-error" "$TMP/laundered.yml"; then
     ok "the detector FIRES on a planted continue-on-error (it can still lose)"
   else

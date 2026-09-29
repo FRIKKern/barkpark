@@ -63,17 +63,24 @@ type apiError struct {
 	// away. Set from the dispatched request's headers (run.go), so it is a fact
 	// about what was sent, not a guess from config.
 	credentialSent bool
+	// datasetRemedy is the inbound half of the scope-honesty contract: the
+	// `ambiguous_dataset` refusal's remedy, restated in the dialect the operator
+	// can actually type. Derived at the dispatch site (handleResponseHinted),
+	// because it needs the COMMAND — whether `-d` is typeable here is a manifest
+	// question, not an error-code one. "" for every other refusal. It is purely
+	// additive: it never touches the exit ladder and never edits serverHint,
+	// which stays the headline because the server knows most.
+	datasetRemedy string
 }
 
 // codeExit is the SINGLE canonical error.code -> exit mapping (contract spine
 // rule #3). The CLI keys on the envelope's `code` string and NEVER re-derives an
 // exit code from the HTTP status. Source: docs/cli/error-exit-table.md.
 var codeExit = map[string]int{
-	"not_found":      exitNotFound,
-	"schema_unknown": exitNotFound,
-	"share_expired":  exitNotFound, // 410, bucketed as gone/not-found
-	"unauthorized":   exitAuth,
-	"forbidden":      exitAuth,
+	"not_found":     exitNotFound,
+	"share_expired": exitNotFound, // 410, bucketed as gone/not-found
+	"unauthorized":  exitAuth,
+	"forbidden":     exitAuth,
 	// A filter/order over a field the caller may not read — semantically a
 	// permission denial (use a token that can read the field), so the auth
 	// bucket, even though the HTTP status is 422. Added when QueryController /
@@ -110,6 +117,7 @@ var codeExit = map[string]int{
 	"invalid_path":        exitValidation,
 	"empty_body":          exitValidation,
 	"rev_mismatch":        exitConflict,
+	"paper_exists":        exitConflict,
 	"precondition_failed": exitConflict,
 	"conflict":            exitConflict,
 	// A plugin lifecycle veto. The bare-string {"error":"halted"} shape is still
@@ -157,8 +165,21 @@ var codeExit = map[string]int{
 	"criteria_mismatch":           exitValidation,
 	"criteria_index_out_of_range": exitValidation,
 	"criterion_text_required":     exitValidation,
-	"note_required":               exitValidation,
-	"illegal_transition":          exitValidation,
+	// A sealed-row criterion-TEXT amendment (`bp task stamp --amend`, #19930)
+	// that arrives without its replacement wording. VALIDATION, not conflict,
+	// by this table's own rule two blocks down and not by the gate's printed
+	// remedy: NOTHING moved under the caller — no lease, no rev, no lifecycle —
+	// and re-sending the identical request can never succeed, because the
+	// missing thing is a field the caller must supply. Its nearest sibling is
+	// `criterion_text_required` directly above: same family, same shape, same
+	// bucket. Absent from this table it fell through to exit 2 (usage), so a
+	// caller could not tell "you typed the command wrong" from "the server
+	// refused your well-formed request" — the exact confusion the 5/6 split
+	// exists to remove, and TestCodeExitCoversCloseRefusalVocabulary is the
+	// ratchet that caught it.
+	"amended_criterion_required": exitValidation,
+	"note_required":              exitValidation,
+	"illegal_transition":         exitValidation,
 	// The four the D371 split MISSED, every one measured at exit 2 before this
 	// block (probe through the real `bp task close` dispatch, 2026-08-24) — the
 	// SAME code as a malformed command line, which is the exact confusion the
@@ -178,7 +199,8 @@ var codeExit = map[string]int{
 	//                             disallows (tasks/close.ex:107). A different
 	//                             status is a different request.
 	//   sentinel_worker_id:<w>    the worker id is a placeholder — "none",
-	//                             "null", "nil", "-" (tasks/internal.ex:179).
+	//                             "null", "nil", "-"
+	//                             (tasks/internal.ex `@sentinel_worker_ids`).
 	//                             A real identity is a different request.
 	//   merge_gated_criterion     a builder `--met` on a criterion the LEAD
 	//                             closes at merge (tasks/stamp.ex:275). Fix:
@@ -211,8 +233,56 @@ var codeExit = map[string]int{
 	// task-650d7844d8fe7199: a `cancelled` close with a blank reason. Same code
 	// as its siblings — the request is wrong and re-sending it cannot help.
 	"cancel_reason_required": exitValidation,
-	"rate_limited":           exitRateLimit,
-	"internal_error":         exitServer,
+	// ── The rest of the close/stamp refusal vocabulary (task-d10d9eb47f2cc5e4) ──
+	//
+	// A FIFTH reason (criteria_raised_on_abandon, PR #16891) arrived at exit 2
+	// after the 2026-08-24 sweep fixed four — which is the argument that the
+	// sweep was never the fix. The durable answer is the arm in
+	// errors_close_refusal_coverage_test.go, which reads the vocabulary out of
+	// api/lib/barkpark/tasks/{close,stamp}.ex and reds on any member with no
+	// bucket here. These six are what it found on its first run; every one of
+	// them was landing on exitUsage (2) — the malformed-command-line code —
+	// because the tasks controller answers {"ok":false,"reason":…} and THAT
+	// branch falls back to exit 2, not to exitForCode's exitGeneric (1).
+	//
+	//   criteria_raised_on_abandon:<i,j>
+	//     a `cancelled`/`blocked` close that would RAISE an acceptance
+	//     criterion's met from false to true (tasks/close.ex). Main's ruling: a
+	//     cancel may ABANDON criteria, it may never assert them. VALIDATION:
+	//     nothing moved under the caller — no lease, no rev — and re-sending
+	//     the identical command can never succeed. There is deliberately NO
+	//     override flag on this gate, so unlike its four siblings there is no
+	//     `--set <key>_override=` escape: the fix is an act OUTSIDE the request
+	//     (drop the met flips and re-run the cancel, or prove the criterion
+	//     with `bp task stamp` first). Minted WITH a `:<indices>` suffix, so it
+	//     reaches this table through reasonKey's family lookup.
+	//   invalid_criteria
+	//     the stamp's criteria payload is the wrong shape (tasks/stamp.ex
+	//     build_update/4). A different payload is a different request.
+	//   evidence_required
+	//     a `--met` stamp with no evidence (tasks/stamp.ex). Type the evidence.
+	//   observed_rev_required
+	//     a withdrawal or post-close --miss on a row with no live claim, so
+	//     there is no epoch to fence it against (tasks/stamp.ex). Pin the rev
+	//     with `--observed-rev <rev>` — a different request.
+	"criteria_raised_on_abandon": exitValidation,
+	"invalid_criteria":           exitValidation,
+	"evidence_required":          exitValidation,
+	"observed_rev_required":      exitValidation,
+	// CONFLICT, not validation: the close lost a concurrent rev-CAS race
+	// (tasks/close.ex — the fenced write matched 0 rows). The world moved under
+	// the caller, so re-reading and re-sending is exactly the right reflex —
+	// the retryable half of the 5/6 split, beside stale_claim.
+	"stale_rev": exitConflict,
+	// NOT-FOUND, not conflict: the row is gone. The controller's
+	// find_task_by_doc_id normally 404s first, so this is the race window where
+	// the document disappeared between the lookup and the close — but it still
+	// reaches the caller as {"ok":false,"reason":"unknown_task"} at 409, and
+	// exit 4 is the honest answer: no retry of any shape brings the row back,
+	// and the remedy is to fix the id.
+	"unknown_task":   exitNotFound,
+	"rate_limited":   exitRateLimit,
+	"internal_error": exitServer,
 
 	// ── The API-parity backfill (task-2a774c5536503306) ───────────────────
 	//
@@ -293,6 +363,7 @@ var codeExit = map[string]int{
 	"source_not_found":           exitValidation, // 422, bulldocs_ingest_controller.ex:1478
 	"payload_too_large":          exitValidation, // 413, errors.ex:736
 	"import_body_too_large":      exitValidation, // 413, workspace_controller.ex:992
+	"searchable_text_too_large":  exitValidation, // 422, content/mutations.ex:216 (tsvector cap)
 	// 402. There is no payment/quota bucket in the 0-8 scheme, and inventing
 	// one would redefine the published table. 5 is the honest neighbour: it
 	// says "not retryable as sent", which is the fact a wrapper needs.
@@ -307,6 +378,11 @@ var codeExit = map[string]int{
 	"workspace_slug_conflict":     exitConflict, // 409, workspace_controller.ex:513
 	"import_constraint_violation": exitConflict, // 409, workspace_controller.ex:651
 	"blob_path_conflict":          exitConflict, // 409, workspace_controller.ex:592
+	// Reversible workspace archive (task-55474a106554e65a): the workspace is in
+	// a state that refuses the request; the remedy is a restore, not a retry
+	// of the same call — but it IS the world's state, not the payload's.
+	"workspace_archived":               exitConflict, // 409, errors.ex:465
+	"default_workspace_not_archivable": exitConflict, // 409, errors.ex:475
 
 	// 5xx → server. The box failed, not the request: the ONE class where a
 	// retry is the right reflex, and the class exit 1 made indistinguishable
@@ -330,8 +406,13 @@ var codeExit = map[string]int{
 	"invalid_import_mode":     exitValidation, // 422, workspace_controller.ex (bundle import mode)
 	"invalid_deploy_mode":     exitValidation, // 400, sites/deploy_request.ex (site deploy mode)
 	"session_restarting":      exitServer,     // 503 + retry-after, sheets/ops_controller.ex (crash loop — RETRY)
-	"session_start_failed":    exitValidation, // 422, sheets/ops_controller.ex (session could not start — PERMANENT)
-	"replay_unavailable":      exitServer,     // 503 + retry-after, sheets/ops_controller.ex (exactly-once ring unreadable; batch NOT applied — RETRY)
+	// 409 + Retry-After, workspace_controller.ex export_in_flight_conflict/2: one workspace
+	// export runs at a time per instance (shared-filesystem free-space preflight) — RETRY
+	// after the header. Conflict, not server: the box is healthy, the slot is taken. Arrived
+	// in known_codes/0 via #17933 without this bucket; TestCodeExitCoversKnownAPICodes red on main.
+	"export_already_running": exitConflict,
+	"session_start_failed":   exitValidation, // 422, sheets/ops_controller.ex (session could not start — PERMANENT)
+	"replay_unavailable":     exitServer,     // 503 + retry-after, sheets/ops_controller.ex (exactly-once ring unreadable; batch NOT applied — RETRY)
 }
 
 // codeExitNotWireBucketable names the members of known_codes/0 that are
@@ -653,21 +734,68 @@ func statusExit(status int) int {
 	}
 }
 
+// maxOpaqueRunes is this file's ONE budget for server-controlled opaque bytes
+// printed to a human stderr: an un-decodable error body (capBody) and a single
+// `details` line (capDetailLine). It was already capBody's local `maxRunes`;
+// hoisting it makes the two paths one policy rather than two coincidences.
+const maxOpaqueRunes = 200
+
 // capBody trims an opaque (non-envelope) error body to a short, single-flavour
 // message. A gateway 502/503/504 often returns a multi-KB HTML page or proxy
-// banner; dumping it verbatim to stderr is noise. Keep the first ~200 runes
-// (rune-safe, so a multibyte char is never split) and append an ellipsis. An
-// empty body becomes "request failed".
+// banner; dumping it verbatim to stderr is noise. Keep the first maxOpaqueRunes
+// runes (rune-safe, so a multibyte char is never split) and append an ellipsis.
+// An empty body becomes "request failed".
 func capBody(body []byte) string {
 	msg := strings.TrimSpace(string(body))
 	if msg == "" {
 		return "request failed"
 	}
-	const maxRunes = 200
-	if r := []rune(msg); len(r) > maxRunes {
-		return strings.TrimSpace(string(r[:maxRunes])) + "…"
+	if r := []rune(msg); len(r) > maxOpaqueRunes {
+		return strings.TrimSpace(string(r[:maxOpaqueRunes])) + "…"
 	}
 	return msg
+}
+
+// capDetailLine bounds ONE human `details` line to maxOpaqueRunes runes.
+//
+// WHY, MEASURED — not a number from the air. `details` is server-controlled and
+// two of its emitters are unbounded by construction:
+//
+//   - api/lib/barkpark/content/errors.ex:672 and :701 answer a bad filter with
+//     `details: %{filter: raw}` — the caller's filter string echoed VERBATIM.
+//     Driven against guerrilla.barkpark.cloud on 2026-09-11, a 9,000-byte
+//     filter produced a 9,010-byte `filter: …` line on stderr, while the
+//     message line beside it stopped at 4,271 bytes because Elixir's inspect/1
+//     caps at its 4,096-rune :printable_limit. The server caps its prose and
+//     not its details; the CLI capped neither.
+//   - api/lib/barkpark/content/papers/block_ops.ex structure_refusal_details
+//     answers `invalid_paper_structure` with one message per offending block
+//     under a single "blocks" key — its own comment cites a 105-block Paper —
+//     so the generic renderer prints that whole compact-JSON array on ONE line.
+//
+// Either buries the message the reader actually needs. The elision names the
+// byte count it dropped and the shape that still has all of it, so the cap
+// redirects rather than hides: -o json/-o yaml carry `details` byte-verbatim
+// and never route through here.
+func capDetailLine(line string) string {
+	r := []rune(line)
+	if len(r) <= maxOpaqueRunes {
+		return line
+	}
+	kept := strings.TrimSpace(string(r[:maxOpaqueRunes]))
+	return fmt.Sprintf("%s… (+%d more bytes; -o json for the full details)",
+		kept, len(line)-len(kept))
+}
+
+// capDetailLines applies capDetailLine to every line of a human details
+// rendering. Returns its argument untouched when nothing is over budget, so the
+// overwhelming majority of payloads (a field name, a rule, an id) are
+// byte-identical to before.
+func capDetailLines(lines []string) []string {
+	for i, line := range lines {
+		lines[i] = capDetailLine(line)
+	}
+	return lines
 }
 
 // renderErrorEnvelope emits the canonical {ok:false, error:{code, message,
@@ -694,7 +822,28 @@ func renderErrorEnvelope(out *writer, code, msg, requestID, hint string) bool {
 // details is omitted, so renderErrorEnvelope's ~60 detail-less call sites emit
 // byte-identical bytes through this delegation.
 func renderErrorEnvelopeDetailed(out *writer, code, msg, requestID, hint string, details json.RawMessage) bool {
+	return renderErrorEnvelopeRemedy(out, code, msg, requestID, hint, details, "")
+}
+
+// renderErrorEnvelopeRemedy is renderErrorEnvelopeDetailed plus `bp_remedy` —
+// the CLIENT's restatement of the refusal in the dialect this CLI speaks.
+//
+// It is a SEPARATE key from `hint`, never an edit of it. `hint` is the server's
+// own words and a parser that keys on it must keep reading exactly what the
+// server said; `bp_remedy` is the CLI's own, and is emitted only when the CLI
+// has something to add. Omitted when empty, so all ~60 existing call sites emit
+// byte-identical bytes.
+//
+// It has to exist at all because the human branch below is not the branch most
+// callers reach: `bp` renders the error ENVELOPE by default, so a remedy that
+// lived only on the stderr line would be invisible to the operator who typed
+// the plain command. Measured live 2026-09-16 — a bare `bp task get <twin>`
+// prints this envelope on stdout and nothing on stderr.
+func renderErrorEnvelopeRemedy(out *writer, code, msg, requestID, hint string, details json.RawMessage, remedy string) bool {
 	errObj := map[string]any{"code": code, "message": msg}
+	if remedy != "" {
+		errObj["bp_remedy"] = remedy
+	}
 	if requestID != "" {
 		errObj["request_id"] = requestID
 	}
@@ -833,6 +982,11 @@ func detailLines(raw json.RawMessage) []string {
 // back to the generic sorted key:value lines (detailLines), so no payload is
 // ever silently dropped. The machine channel (-o json/yaml) never routes
 // through here — it carries `details` verbatim.
+//
+// EVERY line this returns is bounded by capDetailLine, whatever produced it:
+// `details` is server-controlled and at least two emitters are unbounded (see
+// capDetailLine for the measurement). This is the LAST stop before the human
+// printer, so capping here is what makes the bound total.
 func detailLinesForCode(code string, raw json.RawMessage) []string {
 	d := normalizeDetails(raw)
 	if d == nil {
@@ -841,18 +995,80 @@ func detailLinesForCode(code string, raw json.RawMessage) []string {
 	switch code {
 	case "unknown_tag":
 		if lines := unknownTagLines(d); lines != nil {
-			return lines
+			return capDetailLines(lines)
 		}
 	case "duplicate_of":
 		if lines := duplicateOfLines(d); lines != nil {
-			return lines
+			return capDetailLines(lines)
 		}
 	case "resource_conflict":
 		if lines := resourceConflictLines(d); lines != nil {
-			return lines
+			return capDetailLines(lines)
+		}
+	case "validation_failed":
+		if lines := validationFailedLines(d); lines != nil {
+			return capDetailLines(lines)
 		}
 	}
-	return detailLines(raw)
+	return capDetailLines(detailLines(raw))
+}
+
+// validationFailedLines renders the CHANGESET shape of a `validation_failed`
+// payload — Ecto's and Barkpark.Tasks.Validation's `{field: [reason, ...]}` map
+// — as one readable `field: reason` line per field.
+//
+// WHY THIS CODE NEEDS ITS OWN RENDERING. The generic detailValue prints a
+// non-string value as compact JSON, which for a reason LIST means the reader
+// gets the brackets and, worse, a second round of escaping on every quote the
+// reason itself contains. Measured against guerrilla on 2026-09-10,
+// `bp doc patch task <id> --set lifecycle_status=...` printed
+//
+//	lifecycle_status: ["must be one of [\"open\", \"done\", ...], got \"\\\"bogus\\\"\""]
+//
+// The rule IS in that line; a human cannot read it out of it, and the row this
+// closes (pds-bl-task-criteria-publish-label-spine-opacity) is exactly the
+// complaint that a refusal a reader cannot act on is unactionable even when the
+// bytes are present. Joining with "; " and dropping the quotes is not a new
+// invention: it is apierr.DetailParts's algorithm, already canonical for the
+// ONE-LINE surfaces (the TUI status bar, wrapped error values), so this makes
+// the two presentations agree instead of drift.
+//
+// THE ADMISSION TEST IS TOTAL, ON PURPOSE: every value must be a NON-EMPTY JSON
+// array of strings. `validation_failed` is the CLI's most overloaded code — the
+// same token carries the changeset map, `invalid_schema_fields`'s
+// `{reason: "..."}`, and label-spine-shaped `{field, rule, index, similar}`
+// payloads whose `similar` array is a LIST OF IDS the reader copies, not a
+// sentence. Joining per-VALUE would quietly reshape those ids; requiring the
+// WHOLE payload to be the changeset shape means this arm fires only where the
+// join is right, and every other payload keeps the generic rendering byte for
+// byte. Returns nil otherwise, so the caller falls back to detailLines — the
+// same contract the three sibling per-code renderers keep.
+func validationFailedLines(d json.RawMessage) []string {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(d, &obj); err != nil || len(obj) == 0 {
+		return nil
+	}
+	joined := make(map[string]string, len(obj))
+	for k, raw := range obj {
+		var reasons []string
+		// `null` and `[]` both decode into an empty slice with NO error, so the
+		// length check is load-bearing: without it a null value would render as
+		// a bare `field: ` line, trading an unreadable line for an empty one.
+		if err := json.Unmarshal(raw, &reasons); err != nil || len(reasons) == 0 {
+			return nil
+		}
+		joined[k] = strings.Join(reasons, "; ")
+	}
+	keys := make([]string, 0, len(joined))
+	for k := range joined {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, k := range keys {
+		lines = append(lines, k+": "+joined[k])
+	}
+	return lines
 }
 
 // maxConflictHolders bounds how many holders a resource_conflict prints, for the
@@ -1167,7 +1383,7 @@ func (e apiError) hint() string {
 		return e.localHint
 	}
 	switch e.code {
-	case "not_found", "schema_unknown":
+	case "not_found":
 		return "check the type/id and --dataset; run `bp schema ls` to list types"
 	case "validation_failed", "invalid_op", "malformed_op", "type_mismatch", "duplicate_id", "block_not_found", "invalid_paper":
 		return "re-run with -v for field errors; check required/pattern fields"
@@ -1323,7 +1539,7 @@ func enumeratingSibling(m *manifest.Manifest, cmd manifest.Command) string {
 // "CLI message guidance" column of the table where a code is known.
 func (e apiError) errorMessage() string {
 	switch e.code {
-	case "not_found", "schema_unknown":
+	case "not_found":
 		if e.message != "" {
 			return "not found: " + e.message
 		}

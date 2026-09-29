@@ -5,7 +5,14 @@ defmodule BarkparkWeb.Contract.SearchSettingsTest do
   alias Barkpark.Search.SurfaceConfigs
 
   setup do
-    Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
+    Auth.create_token(
+      "barkpark-dev-token",
+      "dev",
+      "test",
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
+
     SurfaceConfigs.seed_defaults!()
     :ok
   end

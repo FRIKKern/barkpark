@@ -1,0 +1,1724 @@
+{
+ "generated_from": "bp task events <doc_id> --payload (production dataset)",
+ "rule": "latest-wins by mutation_events.id; measured loss = 0 (0 of 78 multi-note rows carry a distinct earlier text)",
+ "rows": [
+  {
+   "doc_id": "ae-related-read-index-tuning",
+   "distinct_notes": 1,
+   "latest_event_id": 78579,
+   "recovered_note": "Current related-read cost is accepted; reactivate only after a measured scale threshold while guarding the PR 4178 detoast scar.",
+   "all_notes": [
+    {
+     "event_id": 78416,
+     "at": "2026-07-22T20:30:39.520440Z",
+     "source": "staged",
+     "note": "Current related-read cost is accepted; reactivate only after a measured scale threshold while guarding the PR 4178 detoast scar."
+    },
+    {
+     "event_id": 78579,
+     "at": "2026-07-22T20:46:01.144889Z",
+     "source": "engagement_lapsed",
+     "note": "Current related-read cost is accepted; reactivate only after a measured scale threshold while guarding the PR 4178 detoast scar."
+    }
+   ]
+  },
+  {
+   "doc_id": "ae-search-tsvector-arm-latency",
+   "distinct_notes": 1,
+   "latest_event_id": 78580,
+   "recovered_note": "Fresh corpus-scale EXPLAIN and a named user latency budget are required before this measured lever becomes executable.",
+   "all_notes": [
+    {
+     "event_id": 78415,
+     "at": "2026-07-22T20:30:39.368613Z",
+     "source": "staged",
+     "note": "Fresh corpus-scale EXPLAIN and a named user latency budget are required before this measured lever becomes executable."
+    },
+    {
+     "event_id": 78580,
+     "at": "2026-07-22T20:46:01.150077Z",
+     "source": "engagement_lapsed",
+     "note": "Fresh corpus-scale EXPLAIN and a named user latency budget are required before this measured lever becomes executable."
+    }
+   ]
+  },
+  {
+   "doc_id": "ag-broadcast-revoked-residual",
+   "distinct_notes": 1,
+   "latest_event_id": 78511,
+   "recovered_note": "No unclaimed-grant live reader exists; reactivate only when a concrete surface introduces the modeled blast radius.",
+   "all_notes": [
+    {
+     "event_id": 78344,
+     "at": "2026-07-22T20:24:27.543863Z",
+     "source": "staged",
+     "note": "No unclaimed-grant live reader exists; reactivate only when a concrete surface introduces the modeled blast radius."
+    },
+    {
+     "event_id": 78511,
+     "at": "2026-07-22T20:40:01.072167Z",
+     "source": "engagement_lapsed",
+     "note": "No unclaimed-grant live reader exists; reactivate only when a concrete surface introduces the modeled blast radius."
+    }
+   ]
+  },
+  {
+   "doc_id": "ao-backlog-anchors-nested-checkout-general",
+   "distinct_notes": 1,
+   "latest_event_id": 78128,
+   "recovered_note": "Robustness-only; first choose a generic detector that cannot hide real source trees.",
+   "all_notes": [
+    {
+     "event_id": 77954,
+     "at": "2026-07-22T19:44:21.009646Z",
+     "source": "staged",
+     "note": "Robustness-only; first choose a generic detector that cannot hide real source trees."
+    },
+    {
+     "event_id": 78128,
+     "at": "2026-07-22T20:00:00.720859Z",
+     "source": "engagement_lapsed",
+     "note": "Robustness-only; first choose a generic detector that cannot hide real source trees."
+    }
+   ]
+  },
+  {
+   "doc_id": "ao-backlog-claude-code-connect-eyeball",
+   "distinct_notes": 1,
+   "latest_event_id": 78125,
+   "recovered_note": "Human interactive trust approval is the remaining honest gate.",
+   "all_notes": [
+    {
+     "event_id": 77955,
+     "at": "2026-07-22T19:44:21.177688Z",
+     "source": "staged",
+     "note": "Human interactive trust approval is the remaining honest gate."
+    },
+    {
+     "event_id": 78125,
+     "at": "2026-07-22T20:00:00.702688Z",
+     "source": "engagement_lapsed",
+     "note": "Human interactive trust approval is the remaining honest gate."
+    }
+   ]
+  },
+  {
+   "doc_id": "ao-backlog-copilot-eyeball",
+   "distinct_notes": 1,
+   "latest_event_id": 78359,
+   "recovered_note": "Prerequisite writer is merged; remaining proof requires a real signed-in VS Code Copilot session unavailable on this host.",
+   "all_notes": [
+    {
+     "event_id": 78228,
+     "at": "2026-07-22T20:09:37.056748Z",
+     "source": "staged",
+     "note": "Prerequisite writer is merged; remaining proof requires a real signed-in VS Code Copilot session unavailable on this host."
+    },
+    {
+     "event_id": 78359,
+     "at": "2026-07-22T20:25:01.109167Z",
+     "source": "engagement_lapsed",
+     "note": "Prerequisite writer is merged; remaining proof requires a real signed-in VS Code Copilot session unavailable on this host."
+    }
+   ]
+  },
+  {
+   "doc_id": "au-w5-comp-columns",
+   "distinct_notes": 1,
+   "latest_event_id": 109859,
+   "recovered_note": "Restore an editorial draft version that was incorrectly classified as a separate duplicate.",
+   "all_notes": [
+    {
+     "event_id": 109859,
+     "at": "2026-07-23T08:09:35.116814Z",
+     "source": "staged",
+     "note": "Restore an editorial draft version that was incorrectly classified as a separate duplicate."
+    }
+   ]
+  },
+  {
+   "doc_id": "au-w5-reading-typography",
+   "distinct_notes": 1,
+   "latest_event_id": 79067,
+   "recovered_note": "Prepare/review only with a named human approver; no unilateral cutover.",
+   "all_notes": [
+    {
+     "event_id": 78735,
+     "at": "2026-07-22T20:55:27.516136Z",
+     "source": "staged",
+     "note": "Prepare/review only with a named human approver; no unilateral cutover."
+    },
+    {
+     "event_id": 79067,
+     "at": "2026-07-22T21:11:00.374148Z",
+     "source": "engagement_lapsed",
+     "note": "Prepare/review only with a named human approver; no unilateral cutover."
+    }
+   ]
+  },
+  {
+   "doc_id": "au-w6-brand-mark",
+   "distinct_notes": 1,
+   "latest_event_id": 79070,
+   "recovered_note": "Activate after brand-owner direction; this is not the parent's recorded closure blocker.",
+   "all_notes": [
+    {
+     "event_id": 78734,
+     "at": "2026-07-22T20:55:27.356296Z",
+     "source": "staged",
+     "note": "Activate after brand-owner direction; this is not the parent's recorded closure blocker."
+    },
+    {
+     "event_id": 79070,
+     "at": "2026-07-22T21:11:00.389211Z",
+     "source": "engagement_lapsed",
+     "note": "Activate after brand-owner direction; this is not the parent's recorded closure blocker."
+    }
+   ]
+  },
+  {
+   "doc_id": "azh-cp-registry-inventory-hygiene",
+   "distinct_notes": 1,
+   "latest_event_id": 78512,
+   "recovered_note": "Requires an authorized operator to identify live tenant rows and approve any control-plane change; repository evidence cannot decide ownership intent.",
+   "all_notes": [
+    {
+     "event_id": 78342,
+     "at": "2026-07-22T20:24:27.123497Z",
+     "source": "staged",
+     "note": "Requires an authorized operator to identify live tenant rows and approve any control-plane change; repository evidence cannot decide ownership intent."
+    },
+    {
+     "event_id": 78512,
+     "at": "2026-07-22T20:40:01.077950Z",
+     "source": "engagement_lapsed",
+     "note": "Requires an authorized operator to identify live tenant rows and approve any control-plane change; repository evidence cannot decide ownership intent."
+    }
+   ]
+  },
+  {
+   "doc_id": "azh-roadmap-tail-s8-s11c-s15-s16",
+   "distinct_notes": 1,
+   "latest_event_id": 77546,
+   "recovered_note": "Research each deferred roadmap slice and promote only concrete buildable children; retire premises that no longer hold.",
+   "all_notes": [
+    {
+     "event_id": 77380,
+     "at": "2026-07-22T19:02:16.250176Z",
+     "source": "staged",
+     "note": "Research each deferred roadmap slice and promote only concrete buildable children; retire premises that no longer hold."
+    },
+    {
+     "event_id": 77404,
+     "at": "2026-07-22T19:02:43.649164Z",
+     "source": "staged",
+     "note": "Research each deferred roadmap slice and promote only concrete buildable children; retire premises that no longer hold."
+    },
+    {
+     "event_id": 77546,
+     "at": "2026-07-22T19:18:00.321097Z",
+     "source": "engagement_lapsed",
+     "note": "Research each deferred roadmap slice and promote only concrete buildable children; retire premises that no longer hold."
+    }
+   ]
+  },
+  {
+   "doc_id": "bp-task-stamp-select-by-criterion-text",
+   "distinct_notes": 1,
+   "latest_event_id": 77717,
+   "recovered_note": "Promote when the three-surface ergonomics feature is prioritized; the current mismatch fence already protects correctness.",
+   "all_notes": [
+    {
+     "event_id": 77516,
+     "at": "2026-07-22T19:15:32.247927Z",
+     "source": "staged",
+     "note": "Promote when the three-surface ergonomics feature is prioritized; the current mismatch fence already protects correctness."
+    },
+    {
+     "event_id": 77717,
+     "at": "2026-07-22T19:31:00.472449Z",
+     "source": "engagement_lapsed",
+     "note": "Promote when the three-surface ergonomics feature is prioritized; the current mismatch fence already protects correctness."
+    }
+   ]
+  },
+  {
+   "doc_id": "bpb-playground-rate-limit",
+   "distinct_notes": 1,
+   "latest_event_id": 78962,
+   "recovered_note": "Activate from measured abuse/public exposure after playground-tier identity is available.",
+   "all_notes": [
+    {
+     "event_id": 78679,
+     "at": "2026-07-22T20:51:41.791101Z",
+     "source": "staged",
+     "note": "Activate from measured abuse/public exposure after playground-tier identity is available."
+    },
+    {
+     "event_id": 78962,
+     "at": "2026-07-22T21:07:00.321326Z",
+     "source": "engagement_lapsed",
+     "note": "Activate from measured abuse/public exposure after playground-tier identity is available."
+    }
+   ]
+  },
+  {
+   "doc_id": "bpb-step6-migration-orchestration",
+   "distinct_notes": 1,
+   "latest_event_id": 78127,
+   "recovered_note": "Promote from an approved real migration with freeze/cutover authority and rehearsal target.",
+   "all_notes": [
+    {
+     "event_id": 77957,
+     "at": "2026-07-22T19:44:21.541082Z",
+     "source": "staged",
+     "note": "Promote from an approved real migration with freeze/cutover authority and rehearsal target."
+    },
+    {
+     "event_id": 78127,
+     "at": "2026-07-22T20:00:00.715109Z",
+     "source": "engagement_lapsed",
+     "note": "Promote from an approved real migration with freeze/cutover authority and rehearsal target."
+    }
+   ]
+  },
+  {
+   "doc_id": "cch-w50-bl-fifteen-lapsed-trials-still-read-active-so-the-reminder-copy-never-stops",
+   "distinct_notes": 1,
+   "latest_event_id": 229397,
+   "recovered_note": "GATE CLEARED 2026-08-23 (close-packet): cch-w55-s3-four-console-assertions-the-plane-cannot-support landed as 019fbd1d48 (#10957) on origin/main - verified by content. Buildable now.",
+   "all_notes": [
+    {
+     "event_id": 229397,
+     "at": "2026-08-23T07:48:45.195170Z",
+     "source": "staged",
+     "note": "GATE CLEARED 2026-08-23 (close-packet): cch-w55-s3-four-console-assertions-the-plane-cannot-support landed as 019fbd1d48 (#10957) on origin/main - verified by content. Buildable now."
+    }
+   ]
+  },
+  {
+   "doc_id": "cf-domain-status-live-cutover",
+   "distinct_notes": 1,
+   "latest_event_id": 77984,
+   "recovered_note": "Human Cloudflare account/domain and live cutover evidence required.",
+   "all_notes": [
+    {
+     "event_id": 77709,
+     "at": "2026-07-22T19:30:47.109803Z",
+     "source": "staged",
+     "note": "Human Cloudflare account/domain and live cutover evidence required."
+    },
+    {
+     "event_id": 77984,
+     "at": "2026-07-22T19:46:00.608359Z",
+     "source": "engagement_lapsed",
+     "note": "Human Cloudflare account/domain and live cutover evidence required."
+    }
+   ]
+  },
+  {
+   "doc_id": "cf-origin-health-rung-backlog",
+   "distinct_notes": 1,
+   "latest_event_id": 78000,
+   "recovered_note": "Depends on Origin CA provisioning and a scoped trust design.",
+   "all_notes": [
+    {
+     "event_id": 77775,
+     "at": "2026-07-22T19:34:42.193014Z",
+     "source": "staged",
+     "note": "Depends on Origin CA provisioning and a scoped trust design."
+    },
+    {
+     "event_id": 78000,
+     "at": "2026-07-22T19:50:00.621053Z",
+     "source": "engagement_lapsed",
+     "note": "Depends on Origin CA provisioning and a scoped trust design."
+    }
+   ]
+  },
+  {
+   "doc_id": "cf-r2-storage-backlog",
+   "distinct_notes": 1,
+   "latest_event_id": 78965,
+   "recovered_note": "Activate after a storage decision records a capacity, durability, failover, or committed R2 need.",
+   "all_notes": [
+    {
+     "event_id": 78676,
+     "at": "2026-07-22T20:51:41.372420Z",
+     "source": "staged",
+     "note": "Activate after a storage decision records a capacity, durability, failover, or committed R2 need."
+    },
+    {
+     "event_id": 78965,
+     "at": "2026-07-22T21:07:00.336317Z",
+     "source": "engagement_lapsed",
+     "note": "Activate after a storage decision records a capacity, durability, failover, or committed R2 need."
+    }
+   ]
+  },
+  {
+   "doc_id": "cf-tunnel-backlog",
+   "distinct_notes": 1,
+   "latest_event_id": 77998,
+   "recovered_note": "Promote from a real no-public-ingress requirement and approved availability/secret operations.",
+   "all_notes": [
+    {
+     "event_id": 77774,
+     "at": "2026-07-22T19:34:42.035694Z",
+     "source": "staged",
+     "note": "Promote from a real no-public-ingress requirement and approved availability/secret operations."
+    },
+    {
+     "event_id": 77998,
+     "at": "2026-07-22T19:50:00.608795Z",
+     "source": "engagement_lapsed",
+     "note": "Promote from a real no-public-ingress requirement and approved availability/secret operations."
+    }
+   ]
+  },
+  {
+   "doc_id": "cloud-console-operator-audit-log",
+   "distinct_notes": 1,
+   "latest_event_id": 77485,
+   "recovered_note": "Research the global operator-event scope and reader authorization before selecting a schema or build shape.",
+   "all_notes": [
+    {
+     "event_id": 77330,
+     "at": "2026-07-22T18:54:13.721603Z",
+     "source": "staged",
+     "note": "Research the global operator-event scope and reader authorization before selecting a schema or build shape."
+    },
+    {
+     "event_id": 77485,
+     "at": "2026-07-22T19:10:00.302788Z",
+     "source": "engagement_lapsed",
+     "note": "Research the global operator-event scope and reader authorization before selecting a schema or build shape."
+    }
+   ]
+  },
+  {
+   "doc_id": "connectors-chat-token-mint-capabilities-entry",
+   "distinct_notes": 1,
+   "latest_event_id": 77716,
+   "recovered_note": "Schedule a sanctioned manifest/OpenAPI artifact wave and discoverability review before implementation.",
+   "all_notes": [
+    {
+     "event_id": 77519,
+     "at": "2026-07-22T19:15:32.623816Z",
+     "source": "staged",
+     "note": "Schedule a sanctioned manifest/OpenAPI artifact wave and discoverability review before implementation."
+    },
+    {
+     "event_id": 77716,
+     "at": "2026-07-22T19:31:00.464617Z",
+     "source": "engagement_lapsed",
+     "note": "Schedule a sanctioned manifest/OpenAPI artifact wave and discoverability review before implementation."
+    }
+   ]
+  },
+  {
+   "doc_id": "connectors-cloud-interactive-multiturn",
+   "distinct_notes": 1,
+   "latest_event_id": 77782,
+   "recovered_note": "Select a proven mid-turn control transport or ratify typed unsupported behavior; W14 continuity is already shipped.",
+   "all_notes": [
+    {
+     "event_id": 77578,
+     "at": "2026-07-22T19:19:58.977219Z",
+     "source": "staged",
+     "note": "Select a proven mid-turn control transport or ratify typed unsupported behavior; W14 continuity is already shipped."
+    },
+    {
+     "event_id": 77782,
+     "at": "2026-07-22T19:35:00.475234Z",
+     "source": "engagement_lapsed",
+     "note": "Select a proven mid-turn control transport or ratify typed unsupported behavior; W14 continuity is already shipped."
+    }
+   ]
+  },
+  {
+   "doc_id": "connectors-cloud-sandbox-reaper",
+   "distinct_notes": 1,
+   "latest_event_id": 77718,
+   "recovered_note": "Approve destructive ownership/refusal design and a fake-provider harness before implementation.",
+   "all_notes": [
+    {
+     "event_id": 77517,
+     "at": "2026-07-22T19:15:32.371999Z",
+     "source": "staged",
+     "note": "Approve destructive ownership/refusal design and a fake-provider harness before implementation."
+    },
+    {
+     "event_id": 77718,
+     "at": "2026-07-22T19:31:00.477300Z",
+     "source": "engagement_lapsed",
+     "note": "Approve destructive ownership/refusal design and a fake-provider harness before implementation."
+    }
+   ]
+  },
+  {
+   "doc_id": "connectors-cloud-shim-sdk-auth",
+   "distinct_notes": 1,
+   "latest_event_id": 77879,
+   "recovered_note": "Requires approved SDK/REST contract and a human-provisioned least-privilege platform token.",
+   "all_notes": [
+    {
+     "event_id": 77653,
+     "at": "2026-07-22T19:26:15.804270Z",
+     "source": "staged",
+     "note": "Requires approved SDK/REST contract and a human-provisioned least-privilege platform token."
+    },
+    {
+     "event_id": 77879,
+     "at": "2026-07-22T19:42:00.547792Z",
+     "source": "engagement_lapsed",
+     "note": "Requires approved SDK/REST contract and a human-provisioned least-privilege platform token."
+    }
+   ]
+  },
+  {
+   "doc_id": "connectors-discord-gateway-modal-hold",
+   "distinct_notes": 1,
+   "latest_event_id": 78576,
+   "recovered_note": "No gateway-backed install currently requires modals; reactivate from a real product requirement, not transport symmetry.",
+   "all_notes": [
+    {
+     "event_id": 78418,
+     "at": "2026-07-22T20:30:39.810622Z",
+     "source": "staged",
+     "note": "No gateway-backed install currently requires modals; reactivate from a real product requirement, not transport symmetry."
+    },
+    {
+     "event_id": 78576,
+     "at": "2026-07-22T20:46:01.128948Z",
+     "source": "engagement_lapsed",
+     "note": "No gateway-backed install currently requires modals; reactivate from a real product requirement, not transport symmetry."
+    }
+   ]
+  },
+  {
+   "doc_id": "connectors-egress-reuse-rederive",
+   "distinct_notes": 1,
+   "latest_event_id": 78581,
+   "recovered_note": "Provider enforcement across stopped/auto-resumed reused sandboxes requires an authorized live probe before implementation.",
+   "all_notes": [
+    {
+     "event_id": 78419,
+     "at": "2026-07-22T20:30:39.950746Z",
+     "source": "staged",
+     "note": "Provider enforcement across stopped/auto-resumed reused sandboxes requires an authorized live probe before implementation."
+    },
+    {
+     "event_id": 78581,
+     "at": "2026-07-22T20:46:01.156585Z",
+     "source": "engagement_lapsed",
+     "note": "Provider enforcement across stopped/auto-resumed reused sandboxes requires an authorized live probe before implementation."
+    }
+   ]
+  },
+  {
+   "doc_id": "connectors-linear-live-oauth-gate",
+   "distinct_notes": 1,
+   "latest_event_id": 77981,
+   "recovered_note": "Human OAuth app and GitHub credential prerequisite; keep as an explicit external proof gate.",
+   "all_notes": [
+    {
+     "event_id": 77706,
+     "at": "2026-07-22T19:30:46.682630Z",
+     "source": "staged",
+     "note": "Human OAuth app and GitHub credential prerequisite; keep as an explicit external proof gate."
+    },
+    {
+     "event_id": 77981,
+     "at": "2026-07-22T19:46:00.591418Z",
+     "source": "engagement_lapsed",
+     "note": "Human OAuth app and GitHub credential prerequisite; keep as an explicit external proof gate."
+    }
+   ]
+  },
+  {
+   "doc_id": "connectors-p3-live-edit-streaming",
+   "distinct_notes": 1,
+   "latest_event_id": 78959,
+   "recovered_note": "Activate after post-once production evidence and a provider-specific incremental-reply need.",
+   "all_notes": [
+    {
+     "event_id": 78675,
+     "at": "2026-07-22T20:51:41.221784Z",
+     "source": "staged",
+     "note": "Activate after post-once production evidence and a provider-specific incremental-reply need."
+    },
+    {
+     "event_id": 78959,
+     "at": "2026-07-22T21:07:00.306496Z",
+     "source": "engagement_lapsed",
+     "note": "Activate after post-once production evidence and a provider-specific incremental-reply need."
+    }
+   ]
+  },
+  {
+   "doc_id": "connectors-p4-cross-channel-identity",
+   "distinct_notes": 1,
+   "latest_event_id": 77999,
+   "recovered_note": "Requires consent/threat-model decision before identity linkage.",
+   "all_notes": [
+    {
+     "event_id": 77773,
+     "at": "2026-07-22T19:34:41.882882Z",
+     "source": "staged",
+     "note": "Requires consent/threat-model decision before identity linkage."
+    },
+    {
+     "event_id": 77999,
+     "at": "2026-07-22T19:50:00.614912Z",
+     "source": "engagement_lapsed",
+     "note": "Requires consent/threat-model decision before identity linkage."
+    }
+   ]
+  },
+  {
+   "doc_id": "connectors-per-install-config-seam",
+   "distinct_notes": 1,
+   "latest_event_id": 78578,
+   "recovered_note": "No real per-install knob consumer exists; a dated product decision must name one before schema work.",
+   "all_notes": [
+    {
+     "event_id": 78417,
+     "at": "2026-07-22T20:30:39.665080Z",
+     "source": "staged",
+     "note": "No real per-install knob consumer exists; a dated product decision must name one before schema work."
+    },
+    {
+     "event_id": 78578,
+     "at": "2026-07-22T20:46:01.139646Z",
+     "source": "engagement_lapsed",
+     "note": "No real per-install knob consumer exists; a dated product decision must name one before schema work."
+    }
+   ]
+  },
+  {
+   "doc_id": "connectors-secrets-first-scoped-consumer",
+   "distinct_notes": 1,
+   "latest_event_id": 77617,
+   "recovered_note": "Promote only when a ratified feature genuinely needs a workspace-scoped runtime secret; do not manufacture a consumer.",
+   "all_notes": [
+    {
+     "event_id": 77454,
+     "at": "2026-07-22T19:08:31.534707Z",
+     "source": "staged",
+     "note": "Promote only when a ratified feature genuinely needs a workspace-scoped runtime secret; do not manufacture a consumer."
+    },
+    {
+     "event_id": 77617,
+     "at": "2026-07-22T19:24:00.405938Z",
+     "source": "engagement_lapsed",
+     "note": "Promote only when a ratified feature genuinely needs a workspace-scoped runtime secret; do not manufacture a consumer."
+    }
+   ]
+  },
+  {
+   "doc_id": "connectors-transcript-reseed-fallback",
+   "distinct_notes": 1,
+   "latest_event_id": 77783,
+   "recovered_note": "Ratify transcript data custody before any storage or restore implementation.",
+   "all_notes": [
+    {
+     "event_id": 77579,
+     "at": "2026-07-22T19:19:59.132401Z",
+     "source": "staged",
+     "note": "Ratify transcript data custody before any storage or restore implementation."
+    },
+    {
+     "event_id": 77783,
+     "at": "2026-07-22T19:35:00.481627Z",
+     "source": "engagement_lapsed",
+     "note": "Ratify transcript data custody before any storage or restore implementation."
+    }
+   ]
+  },
+  {
+   "doc_id": "ct-bl-render-cache",
+   "distinct_notes": 1,
+   "latest_event_id": 77484,
+   "recovered_note": "Promote to researching/open only when representative transcript telemetry approaches the declared latency or allocation threshold.",
+   "all_notes": [
+    {
+     "event_id": 77329,
+     "at": "2026-07-22T18:54:13.580806Z",
+     "source": "staged",
+     "note": "Promote to researching/open only when representative transcript telemetry approaches the declared latency or allocation threshold."
+    },
+    {
+     "event_id": 77484,
+     "at": "2026-07-22T19:10:00.294357Z",
+     "source": "engagement_lapsed",
+     "note": "Promote to researching/open only when representative transcript telemetry approaches the declared latency or allocation threshold."
+    }
+   ]
+  },
+  {
+   "doc_id": "ct-tasknodes-dedicated",
+   "distinct_notes": 1,
+   "latest_event_id": 79064,
+   "recovered_note": "Activate from organic non-showcase authoring demand for a named kind.",
+   "all_notes": [
+    {
+     "event_id": 78731,
+     "at": "2026-07-22T20:55:26.910592Z",
+     "source": "staged",
+     "note": "Activate from organic non-showcase authoring demand for a named kind."
+    },
+    {
+     "event_id": 79064,
+     "at": "2026-07-22T21:11:00.359319Z",
+     "source": "engagement_lapsed",
+     "note": "Activate from organic non-showcase authoring demand for a named kind."
+    }
+   ]
+  },
+  {
+   "doc_id": "era-hg-dpa-legal-signoff",
+   "distinct_notes": 1,
+   "latest_event_id": 78252,
+   "recovered_note": "Qualified counsel approval is an external human/legal gate.",
+   "all_notes": [
+    {
+     "event_id": 78095,
+     "at": "2026-07-22T19:56:09.628327Z",
+     "source": "staged",
+     "note": "Qualified counsel approval is an external human/legal gate."
+    },
+    {
+     "event_id": 78252,
+     "at": "2026-07-22T20:12:00.821865Z",
+     "source": "engagement_lapsed",
+     "note": "Qualified counsel approval is an external human/legal gate."
+    }
+   ]
+  },
+  {
+   "doc_id": "era-hg-pen-test",
+   "distinct_notes": 1,
+   "latest_event_id": 78446,
+   "recovered_note": "Requires authorized procurement, legal scope, an independent firm, and a staged engagement; not executable repository work.",
+   "all_notes": [
+    {
+     "event_id": 78296,
+     "at": "2026-07-22T20:18:00.488511Z",
+     "source": "staged",
+     "note": "Requires authorized procurement, legal scope, an independent firm, and a staged engagement; not executable repository work."
+    },
+    {
+     "event_id": 78446,
+     "at": "2026-07-22T20:33:00.999633Z",
+     "source": "engagement_lapsed",
+     "note": "Requires authorized procurement, legal scope, an independent firm, and a staged engagement; not executable repository work."
+    }
+   ]
+  },
+  {
+   "doc_id": "era-hg-soc2-type2-window",
+   "distinct_notes": 1,
+   "latest_event_id": 79068,
+   "recovered_note": "Activate after approved scope, audit firm, budget, and evidence-readiness review.",
+   "all_notes": [
+    {
+     "event_id": 78730,
+     "at": "2026-07-22T20:55:26.753806Z",
+     "source": "staged",
+     "note": "Activate after approved scope, audit firm, budget, and evidence-readiness review."
+    },
+    {
+     "event_id": 79068,
+     "at": "2026-07-22T21:11:00.378463Z",
+     "source": "engagement_lapsed",
+     "note": "Activate after approved scope, audit firm, budget, and evidence-readiness review."
+    }
+   ]
+  },
+  {
+   "doc_id": "github-bridge-w6-console-live-proof",
+   "distinct_notes": 1,
+   "latest_event_id": 78002,
+   "recovered_note": "Human authenticated browser evidence required; backend JSON is already live-proven.",
+   "all_notes": [
+    {
+     "event_id": 77777,
+     "at": "2026-07-22T19:34:42.470515Z",
+     "source": "staged",
+     "note": "Human authenticated browser evidence required; backend JSON is already live-proven."
+    },
+    {
+     "event_id": 78002,
+     "at": "2026-07-22T19:50:00.631058Z",
+     "source": "engagement_lapsed",
+     "note": "Human authenticated browser evidence required; backend JSON is already live-proven."
+    }
+   ]
+  },
+  {
+   "doc_id": "hq-heatmap-live-lever",
+   "distinct_notes": 1,
+   "latest_event_id": 78192,
+   "recovered_note": "Experiment design must choose a safe reversible production proof path before execution.",
+   "all_notes": [
+    {
+     "event_id": 78036,
+     "at": "2026-07-22T19:50:52.035019Z",
+     "source": "staged",
+     "note": "Experiment design must choose a safe reversible production proof path before execution."
+    },
+    {
+     "event_id": 78192,
+     "at": "2026-07-22T20:06:00.774400Z",
+     "source": "engagement_lapsed",
+     "note": "Experiment design must choose a safe reversible production proof path before execution."
+    }
+   ]
+  },
+  {
+   "doc_id": "hq-p7-billing",
+   "distinct_notes": 1,
+   "latest_event_id": 79066,
+   "recovered_note": "Human product decision required before any billing work.",
+   "all_notes": [
+    {
+     "event_id": 78729,
+     "at": "2026-07-22T20:55:26.608595Z",
+     "source": "staged",
+     "note": "Human product decision required before any billing work."
+    },
+    {
+     "event_id": 79066,
+     "at": "2026-07-22T21:11:00.369102Z",
+     "source": "engagement_lapsed",
+     "note": "Human product decision required before any billing work."
+    }
+   ]
+  },
+  {
+   "doc_id": "hq-p7-shard",
+   "distinct_notes": 1,
+   "latest_event_id": 79069,
+   "recovered_note": "Activate only from a reproducible single-node load ceiling below an approved target.",
+   "all_notes": [
+    {
+     "event_id": 78733,
+     "at": "2026-07-22T20:55:27.214574Z",
+     "source": "staged",
+     "note": "Activate only from a reproducible single-node load ceiling below an approved target."
+    },
+    {
+     "event_id": 79069,
+     "at": "2026-07-22T21:11:00.383637Z",
+     "source": "engagement_lapsed",
+     "note": "Activate only from a reproducible single-node load ceiling below an approved target."
+    }
+   ]
+  },
+  {
+   "doc_id": "isu-backlog-slot-box-branch-hygiene",
+   "distinct_notes": 1,
+   "latest_event_id": 78253,
+   "recovered_note": "Exact stale ref is proven, but remote branch deletion requires explicit destructive authority.",
+   "all_notes": [
+    {
+     "event_id": 78094,
+     "at": "2026-07-22T19:56:09.483107Z",
+     "source": "staged",
+     "note": "Exact stale ref is proven, but remote branch deletion requires explicit destructive authority."
+    },
+    {
+     "event_id": 78253,
+     "at": "2026-07-22T20:12:00.828143Z",
+     "source": "engagement_lapsed",
+     "note": "Exact stale ref is proven, but remote branch deletion requires explicit destructive authority."
+    }
+   ]
+  },
+  {
+   "doc_id": "lvd-t5-task",
+   "distinct_notes": 1,
+   "latest_event_id": 109856,
+   "recovered_note": "Restore an editorial draft version that was incorrectly classified as a separate duplicate.",
+   "all_notes": [
+    {
+     "event_id": 109856,
+     "at": "2026-07-23T08:09:34.265737Z",
+     "source": "staged",
+     "note": "Restore an editorial draft version that was incorrectly classified as a separate duplicate."
+    }
+   ]
+  },
+  {
+   "doc_id": "nn-bl-action-unify",
+   "distinct_notes": 1,
+   "latest_event_id": 77985,
+   "recovered_note": "Select a bounded first migration seam before changing four parallel action contracts.",
+   "all_notes": [
+    {
+     "event_id": 77708,
+     "at": "2026-07-22T19:30:46.969712Z",
+     "source": "staged",
+     "note": "Select a bounded first migration seam before changing four parallel action contracts."
+    },
+    {
+     "event_id": 77985,
+     "at": "2026-07-22T19:46:00.613045Z",
+     "source": "engagement_lapsed",
+     "note": "Select a bounded first migration seam before changing four parallel action contracts."
+    }
+   ]
+  },
+  {
+   "doc_id": "nn-bl-disable-class",
+   "distinct_notes": 1,
+   "latest_event_id": 77881,
+   "recovered_note": "Wait for one evidence-qualified unowned candidate; do not fill a numeric suggestion quota.",
+   "all_notes": [
+    {
+     "event_id": 77654,
+     "at": "2026-07-22T19:26:15.943540Z",
+     "source": "staged",
+     "note": "Wait for one evidence-qualified unowned candidate; do not fill a numeric suggestion quota."
+    },
+    {
+     "event_id": 77881,
+     "at": "2026-07-22T19:42:00.558220Z",
+     "source": "engagement_lapsed",
+     "note": "Wait for one evidence-qualified unowned candidate; do not fill a numeric suggestion quota."
+    }
+   ]
+  },
+  {
+   "doc_id": "nn-bl-snapshot-signal",
+   "distinct_notes": 1,
+   "latest_event_id": 77983,
+   "recovered_note": "Promote only from an affected Mac with material snapshot evidence.",
+   "all_notes": [
+    {
+     "event_id": 77707,
+     "at": "2026-07-22T19:30:46.826304Z",
+     "source": "staged",
+     "note": "Promote only from an affected Mac with material snapshot evidence."
+    },
+    {
+     "event_id": 77983,
+     "at": "2026-07-22T19:46:00.602451Z",
+     "source": "engagement_lapsed",
+     "note": "Promote only from an affected Mac with material snapshot evidence."
+    }
+   ]
+  },
+  {
+   "doc_id": "p-hollow-named-code",
+   "distinct_notes": 1,
+   "latest_event_id": 78447,
+   "recovered_note": "No current consumer needs to branch on document_hollow; activate only with a named client decision that generic halted cannot support.",
+   "all_notes": [
+    {
+     "event_id": 78293,
+     "at": "2026-07-22T20:18:00.317071Z",
+     "source": "staged",
+     "note": "No current consumer needs to branch on document_hollow; activate only with a named client decision that generic halted cannot support."
+    },
+    {
+     "event_id": 78447,
+     "at": "2026-07-22T20:33:01.006202Z",
+     "source": "engagement_lapsed",
+     "note": "No current consumer needs to branch on document_hollow; activate only with a named client decision that generic halted cannot support."
+    }
+   ]
+  },
+  {
+   "doc_id": "pbw-backlog-plugin-block-seam",
+   "distinct_notes": 1,
+   "latest_event_id": 77545,
+   "recovered_note": "Approve the extension architecture and a representative plugin block before opening implementation work.",
+   "all_notes": [
+    {
+     "event_id": 77382,
+     "at": "2026-07-22T19:02:16.540134Z",
+     "source": "staged",
+     "note": "Approve the extension architecture and a representative plugin block before opening implementation work."
+    },
+    {
+     "event_id": 77406,
+     "at": "2026-07-22T19:02:43.931138Z",
+     "source": "staged",
+     "note": "Approve the extension architecture and a representative plugin block before opening implementation work."
+    },
+    {
+     "event_id": 77545,
+     "at": "2026-07-22T19:18:00.315648Z",
+     "source": "engagement_lapsed",
+     "note": "Approve the extension architecture and a representative plugin block before opening implementation work."
+    }
+   ]
+  },
+  {
+   "doc_id": "pbw-backlog-scaffy-deep-recipes",
+   "distinct_notes": 1,
+   "latest_event_id": 77547,
+   "recovered_note": "Select the invariant edit layers and one safe pilot before promoting the recipe from design to build.",
+   "all_notes": [
+    {
+     "event_id": 77381,
+     "at": "2026-07-22T19:02:16.393517Z",
+     "source": "staged",
+     "note": "Select the invariant edit layers and one safe pilot before promoting the recipe from design to build."
+    },
+    {
+     "event_id": 77405,
+     "at": "2026-07-22T19:02:43.786134Z",
+     "source": "staged",
+     "note": "Select the invariant edit layers and one safe pilot before promoting the recipe from design to build."
+    },
+    {
+     "event_id": 77547,
+     "at": "2026-07-22T19:18:00.325834Z",
+     "source": "engagement_lapsed",
+     "note": "Select the invariant edit layers and one safe pilot before promoting the recipe from design to build."
+    }
+   ]
+  },
+  {
+   "doc_id": "pd-ee-dataviz-structured-editors",
+   "distinct_notes": 1,
+   "latest_event_id": 78254,
+   "recovered_note": "Successor UI waits for measured JSON-island authoring friction and a chosen first block.",
+   "all_notes": [
+    {
+     "event_id": 78093,
+     "at": "2026-07-22T19:56:09.348359Z",
+     "source": "staged",
+     "note": "Successor UI waits for measured JSON-island authoring friction and a chosen first block."
+    },
+    {
+     "event_id": 78254,
+     "at": "2026-07-22T20:12:00.834490Z",
+     "source": "engagement_lapsed",
+     "note": "Successor UI waits for measured JSON-island authoring friction and a chosen first block."
+    }
+   ]
+  },
+  {
+   "doc_id": "pdd-t5-migrate",
+   "distinct_notes": 1,
+   "latest_event_id": 78190,
+   "recovered_note": "Bulk corpus apply remains human-gated behind reviewed dry-run, snapshot rehearsal, and sign-off.",
+   "all_notes": [
+    {
+     "event_id": 78039,
+     "at": "2026-07-22T19:50:52.504180Z",
+     "source": "staged",
+     "note": "Bulk corpus apply remains human-gated behind reviewed dry-run, snapshot rehearsal, and sign-off."
+    },
+    {
+     "event_id": 78190,
+     "at": "2026-07-22T20:06:00.764880Z",
+     "source": "engagement_lapsed",
+     "note": "Bulk corpus apply remains human-gated behind reviewed dry-run, snapshot rehearsal, and sign-off."
+    }
+   ]
+  },
+  {
+   "doc_id": "ppcc-build-task-082",
+   "distinct_notes": 1,
+   "latest_event_id": 235450,
+   "recovered_note": "Disposition repaired by the lead: the row was terminal on lifecycle_status but carried no closed disposition, so it read open on one axis. Terminal state and criteria untouched.",
+   "all_notes": [
+    {
+     "event_id": 235450,
+     "at": "2026-08-23T15:20:53.145432Z",
+     "source": "staged",
+     "note": "Disposition repaired by the lead: the row was terminal on lifecycle_status but carried no closed disposition, so it read open on one axis. Terminal state and criteria untouched."
+    }
+   ]
+  },
+  {
+   "doc_id": "pt-backlog-renderer-digest-dependency-gap",
+   "distinct_notes": 1,
+   "latest_event_id": 76992,
+   "recovered_note": "Trigger-bound contingency: promote to open only after a dependency-only change demonstrably changes rendered bytes without a covered renderer-source change.",
+   "all_notes": [
+    {
+     "event_id": 76809,
+     "at": "2026-07-22T18:17:34.087987Z",
+     "source": "staged",
+     "note": "Trigger-bound contingency: promote to open only after a dependency-only change demonstrably changes rendered bytes without a covered renderer-source change."
+    },
+    {
+     "event_id": 76992,
+     "at": "2026-07-22T18:33:00.911883Z",
+     "source": "engagement_lapsed",
+     "note": "Trigger-bound contingency: promote to open only after a dependency-only change demonstrably changes rendered bytes without a covered renderer-source change."
+    }
+   ]
+  },
+  {
+   "doc_id": "scaffy-backlog-composition-primitive",
+   "distinct_notes": 1,
+   "latest_event_id": 78766,
+   "recovered_note": "Activate only from a real fixture that typed PathMissingError plus explicit orchestration cannot solve.",
+   "all_notes": [
+    {
+     "event_id": 78539,
+     "at": "2026-07-22T20:43:38.800537Z",
+     "source": "staged",
+     "note": "Activate only from a real fixture that typed PathMissingError plus explicit orchestration cannot solve."
+    },
+    {
+     "event_id": 78766,
+     "at": "2026-07-22T20:59:00.237432Z",
+     "source": "engagement_lapsed",
+     "note": "Activate only from a real fixture that typed PathMissingError plus explicit orchestration cannot solve."
+    }
+   ]
+  },
+  {
+   "doc_id": "scaffy-backlog-oban-cron-guard-gap",
+   "distinct_notes": 1,
+   "latest_event_id": 77715,
+   "recovered_note": "Decide create-only versus schedule upsert semantics before changing guards.",
+   "all_notes": [
+    {
+     "event_id": 77518,
+     "at": "2026-07-22T19:15:32.491797Z",
+     "source": "staged",
+     "note": "Decide create-only versus schedule upsert semantics before changing guards."
+    },
+    {
+     "event_id": 77715,
+     "at": "2026-07-22T19:31:00.459369Z",
+     "source": "engagement_lapsed",
+     "note": "Decide create-only versus schedule upsert semantics before changing guards."
+    }
+   ]
+  },
+  {
+   "doc_id": "scaffy-backlog-value-capture-primitive",
+   "distinct_notes": 1,
+   "latest_event_id": 78765,
+   "recovered_note": "Activate only when a third independent value-capture fixture crosses the charter evidence bar.",
+   "all_notes": [
+    {
+     "event_id": 78538,
+     "at": "2026-07-22T20:43:38.648006Z",
+     "source": "staged",
+     "note": "Activate only when a third independent value-capture fixture crosses the charter evidence bar."
+    },
+    {
+     "event_id": 78765,
+     "at": "2026-07-22T20:59:00.233054Z",
+     "source": "engagement_lapsed",
+     "note": "Activate only when a third independent value-capture fixture crosses the charter evidence bar."
+    }
+   ]
+  },
+  {
+   "doc_id": "stw-backlog-catalog-family",
+   "distinct_notes": 1,
+   "latest_event_id": 438481,
+   "recovered_note": "PR #18689 merged as dc754a9c8e1c2cfaa06fd3417af980bff43039d4 (ancestor of origin/main; control: pre-squash 3a1df1b10 is NOT). Row stays OPEN at 0/3 deliberately. WHAT SHIPPED: design/template-manifest-contract.test.mjs \u2014 the reader templates/barkpark.template.schema.json NEVER HAD. Nothing in the repo read it; Go's internal/template Validate runs a hand-written struct over its own embedded copies, so a create-barkpark-app manifest was validated by nothing at all. 34 assertions over 14 manifests across all four mirror roots, enrolled BY PREDICATE (any file named barkpark.template.json), and an UNKNOWN SCHEMA KEYWORD is a hard error so widening the schema announces itself. Three red arms, each mutation proven landed then reverted: unenrolled starter tree -> 2 fails; framework 'svelte' -> 1 fail; adding maxLength -> 14 fails. Quiet arm 34/34 rc=0. WHAT IS LEFT AND WHY IT IS NOT A STUDIO SLICE: eight of the nine touchpoints were already landed before this shift (verified by grep, not assumed). The ninth is create-barkpark-app, and it CANNOT be landed in this fence \u2014 a cba starter tree without its cloud/priv/templates mirror reds the required Cloud gate, so it must be ONE js+cloud PR. Filed task-f4ed4fbf924f7c0f with this new test as its checklist. Do not claim this row expecting a studio-only slice.",
+   "all_notes": [
+    {
+     "event_id": 438481,
+     "at": "2026-09-16T21:56:56.496459Z",
+     "source": "staged",
+     "note": "PR #18689 merged as dc754a9c8e1c2cfaa06fd3417af980bff43039d4 (ancestor of origin/main; control: pre-squash 3a1df1b10 is NOT). Row stays OPEN at 0/3 deliberately. WHAT SHIPPED: design/template-manifest-contract.test.mjs \u2014 the reader templates/barkpark.template.schema.json NEVER HAD. Nothing in the repo read it; Go's internal/template Validate runs a hand-written struct over its own embedded copies, so a create-barkpark-app manifest was validated by nothing at all. 34 assertions over 14 manifests across all four mirror roots, enrolled BY PREDICATE (any file named barkpark.template.json), and an UNKNOWN SCHEMA KEYWORD is a hard error so widening the schema announces itself. Three red arms, each mutation proven landed then reverted: unenrolled starter tree -> 2 fails; framework 'svelte' -> 1 fail; adding maxLength -> 14 fails. Quiet arm 34/34 rc=0. WHAT IS LEFT AND WHY IT IS NOT A STUDIO SLICE: eight of the nine touchpoints were already landed before this shift (verified by grep, not assumed). The ninth is create-barkpark-app, and it CANNOT be landed in this fence \u2014 a cba starter tree without its cloud/priv/templates mirror reds the required Cloud gate, so it must be ONE js+cloud PR. Filed task-f4ed4fbf924f7c0f with this new test as its checklist. Do not claim this row expecting a studio-only slice."
+    }
+   ]
+  },
+  {
+   "doc_id": "stw4-backlog-box-sse-subsecond",
+   "distinct_notes": 1,
+   "latest_event_id": 77784,
+   "recovered_note": "Require real Caddy/TLS streaming proof and recovery design before implementation.",
+   "all_notes": [
+    {
+     "event_id": 77577,
+     "at": "2026-07-22T19:19:58.833995Z",
+     "source": "staged",
+     "note": "Require real Caddy/TLS streaming proof and recovery design before implementation."
+    },
+    {
+     "event_id": 77784,
+     "at": "2026-07-22T19:35:00.486415Z",
+     "source": "engagement_lapsed",
+     "note": "Require real Caddy/TLS streaming proof and recovery design before implementation."
+    }
+   ]
+  },
+  {
+   "doc_id": "stw4-backlog-cli-watch-sse",
+   "distinct_notes": 1,
+   "latest_event_id": 77786,
+   "recovered_note": "Prioritize only after a streaming-versus-polling decision and measured operator value.",
+   "all_notes": [
+    {
+     "event_id": 77576,
+     "at": "2026-07-22T19:19:58.653175Z",
+     "source": "staged",
+     "note": "Prioritize only after a streaming-versus-polling decision and measured operator value."
+    },
+    {
+     "event_id": 77786,
+     "at": "2026-07-22T19:35:00.496953Z",
+     "source": "engagement_lapsed",
+     "note": "Prioritize only after a streaming-versus-polling decision and measured operator value."
+    }
+   ]
+  },
+  {
+   "doc_id": "stw4-backlog-history-pagination",
+   "distinct_notes": 1,
+   "latest_event_id": 77785,
+   "recovered_note": "Promote only when telemetry shows a real site nearing the 200-row cap.",
+   "all_notes": [
+    {
+     "event_id": 77575,
+     "at": "2026-07-22T19:19:58.192595Z",
+     "source": "staged",
+     "note": "Promote only when telemetry shows a real site nearing the 200-row cap."
+    },
+    {
+     "event_id": 77785,
+     "at": "2026-07-22T19:35:00.491919Z",
+     "source": "engagement_lapsed",
+     "note": "Promote only when telemetry shows a real site nearing the 200-row cap."
+    }
+   ]
+  },
+  {
+   "doc_id": "stw6-backlog-cp-poll-budget-long-builds",
+   "distinct_notes": 1,
+   "latest_event_id": 77356,
+   "recovered_note": "Telemetry-triggered contingency: promote to open only when a real build approaches or exceeds the 900s control-plane poll window, or a measured tail model justifies a size-aware budget.",
+   "all_notes": [
+    {
+     "event_id": 77298,
+     "at": "2026-07-22T18:45:04.481640Z",
+     "source": "staged",
+     "note": "Telemetry-triggered contingency: promote to open only when a real build approaches or exceeds the 900s control-plane poll window, or a measured tail model justifies a size-aware budget."
+    },
+    {
+     "event_id": 77356,
+     "at": "2026-07-22T19:01:00.214454Z",
+     "source": "engagement_lapsed",
+     "note": "Telemetry-triggered contingency: promote to open only when a real build approaches or exceeds the 900s control-plane poll window, or a measured tail model justifies a size-aware budget."
+    }
+   ]
+  },
+  {
+   "doc_id": "stw6-backlog-sigkill-release-cleanup",
+   "distinct_notes": 1,
+   "latest_event_id": 77613,
+   "recovered_note": "Select this disk-hygiene item only after higher-impact deployment work; its serving path is already crash-safe.",
+   "all_notes": [
+    {
+     "event_id": 77457,
+     "at": "2026-07-22T19:08:31.982124Z",
+     "source": "staged",
+     "note": "Select this disk-hygiene item only after higher-impact deployment work; its serving path is already crash-safe."
+    },
+    {
+     "event_id": 77613,
+     "at": "2026-07-22T19:24:00.387427Z",
+     "source": "engagement_lapsed",
+     "note": "Select this disk-hygiene item only after higher-impact deployment work; its serving path is already crash-safe."
+    }
+   ]
+  },
+  {
+   "doc_id": "stw7-backlog-shared-template-lib",
+   "distinct_notes": 1,
+   "latest_event_id": 77616,
+   "recovered_note": "Research keep-copy versus shared packaging before assigning implementation.",
+   "all_notes": [
+    {
+     "event_id": 77455,
+     "at": "2026-07-22T19:08:31.689737Z",
+     "source": "staged",
+     "note": "Research keep-copy versus shared packaging before assigning implementation."
+    },
+    {
+     "event_id": 77616,
+     "at": "2026-07-22T19:24:00.400721Z",
+     "source": "engagement_lapsed",
+     "note": "Research keep-copy versus shared packaging before assigning implementation."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-4780b75b68962056",
+   "distinct_notes": 1,
+   "latest_event_id": 78001,
+   "recovered_note": "Performance stretch gated on production-like sandbox latency and cost evidence.",
+   "all_notes": [
+    {
+     "event_id": 77776,
+     "at": "2026-07-22T19:34:42.341855Z",
+     "source": "staged",
+     "note": "Performance stretch gated on production-like sandbox latency and cost evidence."
+    },
+    {
+     "event_id": 78001,
+     "at": "2026-07-22T19:50:00.626354Z",
+     "source": "engagement_lapsed",
+     "note": "Performance stretch gated on production-like sandbox latency and cost evidence."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-781468f003071830",
+   "distinct_notes": 1,
+   "latest_event_id": 258035,
+   "recovered_note": "UNBLOCKING UPDATE from lead L1-API-AUTHZ, 2026-09-01. When this row was filed, its stated blocker was that Shared.Paper's grant_target_denied?/3 and all five of its helpers are defp, so the SheetGrid callsite could not share them and had to re-state the ladder over the public primitive Access.validate/3. THAT BLOCKER IS NOW PARTLY GONE. PR #14665 (pds-w42-bl-handle-info-write-seam-audit) promoted TWO of those helpers to public in api/lib/barkpark_web/live/studio/studio_live/shared/paper.ex \u2014 defp write_denied?/1 became def write_denied?/1, and defp refuse_write_denied/1 became def refuse_write_denied/1 \u2014 because a different seam (the {:autosave_form} handle_info write) needed to reuse the same refusal. Verified in the merged diff, not inferred. So the precedent for promoting a paper.ex predicate for cross-seam reuse now EXISTS in-tree, and whoever takes this row should check which of the remaining helpers grant_target_denied?/3 actually needs rather than assuming all five are still private. THE ONE DIFFERENCE THAT MUST SURVIVE ANY UNIFICATION, unchanged from the original filing: the paper path reloads grants fresh in handle_info, while the sheet path runs in RENDER and cannot query per render \u2014 it reads caller_context.grants and relies on the boolean short-circuit against @caps for expiry truth, so a stale set over-restricts and never under-restricts. A naive merge that gives the sheet path the paper path's fresh reload would put a query in render; one that gives the paper path the sheet path's cached read would weaken it. State which side each unified helper takes and why. ALSO NOTE the two test moduledocs in this area name symbols that do not exist (principal_chat_scope/1); do not trust moduledoc symbol names in this subtree without a grep.",
+   "all_notes": [
+    {
+     "event_id": 258035,
+     "at": "2026-09-01T11:15:30.407925Z",
+     "source": "staged",
+     "note": "UNBLOCKING UPDATE from lead L1-API-AUTHZ, 2026-09-01. When this row was filed, its stated blocker was that Shared.Paper's grant_target_denied?/3 and all five of its helpers are defp, so the SheetGrid callsite could not share them and had to re-state the ladder over the public primitive Access.validate/3. THAT BLOCKER IS NOW PARTLY GONE. PR #14665 (pds-w42-bl-handle-info-write-seam-audit) promoted TWO of those helpers to public in api/lib/barkpark_web/live/studio/studio_live/shared/paper.ex \u2014 defp write_denied?/1 became def write_denied?/1, and defp refuse_write_denied/1 became def refuse_write_denied/1 \u2014 because a different seam (the {:autosave_form} handle_info write) needed to reuse the same refusal. Verified in the merged diff, not inferred. So the precedent for promoting a paper.ex predicate for cross-seam reuse now EXISTS in-tree, and whoever takes this row should check which of the remaining helpers grant_target_denied?/3 actually needs rather than assuming all five are still private. THE ONE DIFFERENCE THAT MUST SURVIVE ANY UNIFICATION, unchanged from the original filing: the paper path reloads grants fresh in handle_info, while the sheet path runs in RENDER and cannot query per render \u2014 it reads caller_context.grants and relies on the boolean short-circuit against @caps for expiry truth, so a stale set over-restricts and never under-restricts. A naive merge that gives the sheet path the paper path's fresh reload would put a query in render; one that gives the paper path the sheet path's cached read would weaken it. State which side each unified helper takes and why. ALSO NOTE the two test moduledocs in this area name symbols that do not exist (principal_chat_scope/1); do not trust moduledoc symbol names in this subtree without a grep."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-7a4942b81f1d4656",
+   "distinct_notes": 1,
+   "latest_event_id": 258943,
+   "recovered_note": "EVIDENCE APPENDIX to the close (the close itself stands; this only adds detail the 537-byte close_reason could not hold). PR #14721 merged at head ef0c0f4cd8d289f971f7f28d78621bed5aefc00d, all four required contexts SUCCESS, 42 checks 0 pending. WHAT SHIPPED: Dedup.present/1 now carries published: <bool> derived from the RAW STORED ID before norm_id/1 erases the drafts. prefix, and refusal_message/1 adds a draft-recovery note ONLY when the refusing match is draft-only. DETECTION IS BYTE-IDENTICAL BY DESIGN \u2014 draft-only rows were deliberately NOT dropped from the candidate set, because a draft-only task is still filed work and unfetching it would open a real duplicate hole to paper over a reporting one. Additive on the wire; internal/apierr's Candidate ignores unknown fields. PROOF, structural only, no timing assertion anywhere: the mechanism test (draft debris refuses a byte-identical retry at similarity 0.7, relation cross) is GREEN BEFORE the change and PINS the loop; the two reporting tests are RED before (key absent) and green after, and the published:true case stops the flag being a constant. Three mutants each red exactly the one test that owns them, tree verified clean between runs. Post-rebase on origin/main 9c7993f115: 37/0 and 81/0; content 1215/0; web controllers 1825/0; format, docs-anchors and new-lineref-check all clean. CI's never-worse ratchet 'No NEW unreachable assert messages' passed \u2014 every message-carrying assertion uses the assert x == y, 'msg' form, so the dead-message trap did not catch this change. .sobelow-annotation-bindings pins tasks/validation.ex but not tasks/dedup.ex, so a ~70-line insertion shifted no line-pinned waiver. TWO SCOPE CORRECTIONS, recorded because the scarier version circulated first: the self-poisoning is NOT progressive \u2014 attempts 2..N are refused BEFORE the insert, so exactly ONE orphan exists per (title, description) identity and lanes were not compounding their own lockout; and a PARENTED create self-excludes via the :sibling arm, so only parentless creates are exposed, which is bp task create's default. METHOD WORTH REUSING \u2014 contamination was SEPARATED from defect rather than retried away: the full suite drifted 29 -> 31 failures across two consecutive runs of an UNCHANGED tree, which is itself the shared-database signature, and CI settled it on a clean per-run Postgres. Two Plugins.Github.HealthTest failures were proven not-ours by copying origin/main's own dedup.ex over the tree, re-running health_test.exs alone to an identical 21 tests / 2 failures, then restoring and re-verifying 37/0. Same defect class as task-cffe2b5183b6ec3e (an unscoped whole-table tally asserted exactly), different module \u2014 so that row was AMENDED rather than a near-duplicate filed, verified on the PUBLISHED row at 4471 bytes with no drafts. twin stranded. Filing a duplicate would have manufactured the exact debris this PR exists to report on. UPSTREAM CAUSE, not this row: task-a0ce4e18f6776400 \u2014 fetch_candidates/2's rescue is function-wide and the DBConnection.ConnectionError is raised outside it, so the write is ambiguous and the resulting 500 gets no retry grace from transient_refusal?/1. LEDGER NOTE: my own richer close attempt returned 409 stale_claim while the row already read done \u2014 the 'errored yet wrote' shape again. Only a re-read separated 'my write failed' from 'someone else already closed it'; the closer was l2core-dedupreport at epoch 1.",
+   "all_notes": [
+    {
+     "event_id": 258943,
+     "at": "2026-09-01T13:49:08.239580Z",
+     "source": "staged",
+     "note": "EVIDENCE APPENDIX to the close (the close itself stands; this only adds detail the 537-byte close_reason could not hold). PR #14721 merged at head ef0c0f4cd8d289f971f7f28d78621bed5aefc00d, all four required contexts SUCCESS, 42 checks 0 pending. WHAT SHIPPED: Dedup.present/1 now carries published: <bool> derived from the RAW STORED ID before norm_id/1 erases the drafts. prefix, and refusal_message/1 adds a draft-recovery note ONLY when the refusing match is draft-only. DETECTION IS BYTE-IDENTICAL BY DESIGN \u2014 draft-only rows were deliberately NOT dropped from the candidate set, because a draft-only task is still filed work and unfetching it would open a real duplicate hole to paper over a reporting one. Additive on the wire; internal/apierr's Candidate ignores unknown fields. PROOF, structural only, no timing assertion anywhere: the mechanism test (draft debris refuses a byte-identical retry at similarity 0.7, relation cross) is GREEN BEFORE the change and PINS the loop; the two reporting tests are RED before (key absent) and green after, and the published:true case stops the flag being a constant. Three mutants each red exactly the one test that owns them, tree verified clean between runs. Post-rebase on origin/main 9c7993f115: 37/0 and 81/0; content 1215/0; web controllers 1825/0; format, docs-anchors and new-lineref-check all clean. CI's never-worse ratchet 'No NEW unreachable assert messages' passed \u2014 every message-carrying assertion uses the assert x == y, 'msg' form, so the dead-message trap did not catch this change. .sobelow-annotation-bindings pins tasks/validation.ex but not tasks/dedup.ex, so a ~70-line insertion shifted no line-pinned waiver. TWO SCOPE CORRECTIONS, recorded because the scarier version circulated first: the self-poisoning is NOT progressive \u2014 attempts 2..N are refused BEFORE the insert, so exactly ONE orphan exists per (title, description) identity and lanes were not compounding their own lockout; and a PARENTED create self-excludes via the :sibling arm, so only parentless creates are exposed, which is bp task create's default. METHOD WORTH REUSING \u2014 contamination was SEPARATED from defect rather than retried away: the full suite drifted 29 -> 31 failures across two consecutive runs of an UNCHANGED tree, which is itself the shared-database signature, and CI settled it on a clean per-run Postgres. Two Plugins.Github.HealthTest failures were proven not-ours by copying origin/main's own dedup.ex over the tree, re-running health_test.exs alone to an identical 21 tests / 2 failures, then restoring and re-verifying 37/0. Same defect class as task-cffe2b5183b6ec3e (an unscoped whole-table tally asserted exactly), different module \u2014 so that row was AMENDED rather than a near-duplicate filed, verified on the PUBLISHED row at 4471 bytes with no drafts. twin stranded. Filing a duplicate would have manufactured the exact debris this PR exists to report on. UPSTREAM CAUSE, not this row: task-a0ce4e18f6776400 \u2014 fetch_candidates/2's rescue is function-wide and the DBConnection.ConnectionError is raised outside it, so the write is ambiguous and the resulting 500 gets no retry grace from transient_refusal?/1. LEDGER NOTE: my own richer close attempt returned 409 stale_claim while the row already read done \u2014 the 'errored yet wrote' shape again. Only a re-read separated 'my write failed' from 'someone else already closed it'; the closer was l2core-dedupreport at epoch 1."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-7dda395eb54c8a10",
+   "distinct_notes": 1,
+   "latest_event_id": 105863,
+   "recovered_note": "Repair an erroneous cancelled editorial shadow of the same canonical published task; restore canonical done content through the sanctioned lifecycle.",
+   "all_notes": [
+    {
+     "event_id": 105863,
+     "at": "2026-07-23T07:38:03.467407Z",
+     "source": "staged",
+     "note": "Repair an erroneous cancelled editorial shadow of the same canonical published task; restore canonical done content through the sanctioned lifecycle."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-ac19208623d00d35",
+   "distinct_notes": 1,
+   "latest_event_id": 258630,
+   "recovered_note": "ALREADY FIXED ON MAIN \u2014 do not re-open a PR for branch worktree-agent-a67557bcc385beb9e / commit cf2b5532377f. PR #14526 (identical title) merged 2026-09-01T04:20:08Z as merge commit 8943648dece592dc3763dd98c5def5f90cfdce27, adding both the facet drop and api/test/barkpark/plugins/indx/retriever_drops_engine_facets_test.exs. PR #14513 then merged 05:39:19Z partitioning the Indx index on a tenant-scoped index_key. cf2b5532377f predates both and would REVERT #14513 (Indexer.current_dataset(Indexer.index_key(scope, opts)) -> Indexer.current_dataset(scope)). Verified: origin/main do_search/6 returns %{} for meta on both the success and the error arm; no facets/truncation reach the caller.",
+   "all_notes": [
+    {
+     "event_id": 258630,
+     "at": "2026-09-01T12:47:31.103173Z",
+     "source": "staged",
+     "note": "ALREADY FIXED ON MAIN \u2014 do not re-open a PR for branch worktree-agent-a67557bcc385beb9e / commit cf2b5532377f. PR #14526 (identical title) merged 2026-09-01T04:20:08Z as merge commit 8943648dece592dc3763dd98c5def5f90cfdce27, adding both the facet drop and api/test/barkpark/plugins/indx/retriever_drops_engine_facets_test.exs. PR #14513 then merged 05:39:19Z partitioning the Indx index on a tenant-scoped index_key. cf2b5532377f predates both and would REVERT #14513 (Indexer.current_dataset(Indexer.index_key(scope, opts)) -> Indexer.current_dataset(scope)). Verified: origin/main do_search/6 returns %{} for meta on both the success and the error arm; no facets/truncation reach the caller."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-cth-bl-codex-lane",
+   "distinct_notes": 1,
+   "latest_event_id": 79063,
+   "recovered_note": "Activate when provider-horizon demand opens and after checking the ACP kill signal.",
+   "all_notes": [
+    {
+     "event_id": 78736,
+     "at": "2026-07-22T20:55:27.669197Z",
+     "source": "staged",
+     "note": "Activate when provider-horizon demand opens and after checking the ACP kill signal."
+    },
+    {
+     "event_id": 79063,
+     "at": "2026-07-22T21:11:00.353535Z",
+     "source": "engagement_lapsed",
+     "note": "Activate when provider-horizon demand opens and after checking the ACP kill signal."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-cth-bl-legacy-prod-host",
+   "distinct_notes": 1,
+   "latest_event_id": 79065,
+   "recovered_note": "Activate after owner scope decision and authorized access path.",
+   "all_notes": [
+    {
+     "event_id": 78732,
+     "at": "2026-07-22T20:55:27.052073Z",
+     "source": "staged",
+     "note": "Activate after owner scope decision and authorized access path."
+    },
+    {
+     "event_id": 79065,
+     "at": "2026-07-22T21:11:00.364644Z",
+     "source": "engagement_lapsed",
+     "note": "Activate after owner scope decision and authorized access path."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-e65c78b1cd214237",
+   "distinct_notes": 1,
+   "latest_event_id": 326297,
+   "recovered_note": "EVIDENCE FOR CRITERION 0, from lead-ledger-3, 2026-09-05 ~16:2xZ. An affected PR and the breaker's verbatim FAIL line, with the API read that contradicts it. AFFECTED PR: #16231, head dfc7a41799, whose diff is ONE file (api/lib/barkpark/tasks/edges.ex). THE BREAKER'S FAIL LINE, quoted from its own step in the Sobelow job: 'main-red-breaker: FAIL \u2014 Sobelow static analysis (regression gate, baseline .sobelow-skips) failed on: Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding). Main's newest completed run (33976825929) has this job GREEN or absent, so the red is this PR's own.' THE CONTRADICTION, against the run the breaker itself named: gh api repos/FRIKKern/barkpark/actions/runs/33976825929/jobs --paginate -q '.jobs[]|select(.name|test(\"Sobelow static\"))|\"\\(.conclusion)\\t\\(.name)\"' returns 'failure  Sobelow static analysis (regression gate, baseline .sobelow-skips) (27.0, 1.18.1)'; the run itself is head 015790df35, completed, conclusion failure. So on the named run the JOB is present and failing while the breaker reported it green-or-absent. I AM NOT ASSERTING WHICH OF YOUR TWO MECHANISMS FIRED \u2014 your T1 already showed the script selects per job at :143-153, which refutes the run-level explanation I would otherwise have guessed, and distinguishing main-run SELECTION (:133) from the signature compare is what criterion 0 asks the builder to do. Two things that may discriminate: the breaker names run 33976825929 explicitly, so if that IS the run it selected, selection is not the fault and the READ of it is; and 33976825929's head 015790df35 is the owner's paper PR commit, which may or may not have been main's newest completed run at the moment the breaker evaluated. WHAT THE GATE ACTUALLY FOUND on #16231, for whoever needs the ground truth: reading the GATE STEP alone (not the job log, and not the 'Reconcile baseline' step which enumerates everything), exactly one finding \u2014 Traversal.FileModule: Directory Traversal in File.rm, lib/barkpark/plugins/tickets/attachments.ex:292, against a baseline pinning 288, fingerprint 6BE392C. Pre-existing drift, routed to the plugins lane; zero findings in the file the PR touches. I filed a duplicate row (task-a5537d795907bf49) before checking and have cancelled it in favour of this one.",
+   "all_notes": [
+    {
+     "event_id": 326297,
+     "at": "2026-09-05T16:30:20.690793Z",
+     "source": "staged",
+     "note": "EVIDENCE FOR CRITERION 0, from lead-ledger-3, 2026-09-05 ~16:2xZ. An affected PR and the breaker's verbatim FAIL line, with the API read that contradicts it. AFFECTED PR: #16231, head dfc7a41799, whose diff is ONE file (api/lib/barkpark/tasks/edges.ex). THE BREAKER'S FAIL LINE, quoted from its own step in the Sobelow job: 'main-red-breaker: FAIL \u2014 Sobelow static analysis (regression gate, baseline .sobelow-skips) failed on: Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding). Main's newest completed run (33976825929) has this job GREEN or absent, so the red is this PR's own.' THE CONTRADICTION, against the run the breaker itself named: gh api repos/FRIKKern/barkpark/actions/runs/33976825929/jobs --paginate -q '.jobs[]|select(.name|test(\"Sobelow static\"))|\"\\(.conclusion)\\t\\(.name)\"' returns 'failure  Sobelow static analysis (regression gate, baseline .sobelow-skips) (27.0, 1.18.1)'; the run itself is head 015790df35, completed, conclusion failure. So on the named run the JOB is present and failing while the breaker reported it green-or-absent. I AM NOT ASSERTING WHICH OF YOUR TWO MECHANISMS FIRED \u2014 your T1 already showed the script selects per job at :143-153, which refutes the run-level explanation I would otherwise have guessed, and distinguishing main-run SELECTION (:133) from the signature compare is what criterion 0 asks the builder to do. Two things that may discriminate: the breaker names run 33976825929 explicitly, so if that IS the run it selected, selection is not the fault and the READ of it is; and 33976825929's head 015790df35 is the owner's paper PR commit, which may or may not have been main's newest completed run at the moment the breaker evaluated. WHAT THE GATE ACTUALLY FOUND on #16231, for whoever needs the ground truth: reading the GATE STEP alone (not the job log, and not the 'Reconcile baseline' step which enumerates everything), exactly one finding \u2014 Traversal.FileModule: Directory Traversal in File.rm, lib/barkpark/plugins/tickets/attachments.ex:292, against a baseline pinning 288, fingerprint 6BE392C. Pre-existing drift, routed to the plugins lane; zero findings in the file the PR touches. I filed a duplicate row (task-a5537d795907bf49) before checking and have cancelled it in favour of this one."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-eal-bl-events-cold-index",
+   "distinct_notes": 1,
+   "latest_event_id": 78191,
+   "recovered_note": "Promote only when a named consumer, size trigger, or cold-replay latency budget is crossed.",
+   "all_notes": [
+    {
+     "event_id": 78038,
+     "at": "2026-07-22T19:50:52.341520Z",
+     "source": "staged",
+     "note": "Promote only when a named consumer, size trigger, or cold-replay latency budget is crossed."
+    },
+    {
+     "event_id": 78191,
+     "at": "2026-07-22T20:06:00.769269Z",
+     "source": "engagement_lapsed",
+     "note": "Promote only when a named consumer, size trigger, or cold-replay latency budget is crossed."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-felix-runtime-env-integer-graceful-parse",
+   "distinct_notes": 1,
+   "latest_event_id": 78963,
+   "recovered_note": "Activate from a real malformed-env operator incident or an approved per-setting fail/default doctrine.",
+   "all_notes": [
+    {
+     "event_id": 78673,
+     "at": "2026-07-22T20:51:40.900138Z",
+     "source": "staged",
+     "note": "Activate from a real malformed-env operator incident or an approved per-setting fail/default doctrine."
+    },
+    {
+     "event_id": 78963,
+     "at": "2026-07-22T21:07:00.325645Z",
+     "source": "engagement_lapsed",
+     "note": "Activate from a real malformed-env operator incident or an approved per-setting fail/default doctrine."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-felix-studio-chat-onexit-nil-guard",
+   "distinct_notes": 1,
+   "latest_event_id": 77877,
+   "recovered_note": "Dormant while test config always seeds StudioChat; promote when nil becomes reachable or an isolation sweep is selected.",
+   "all_notes": [
+    {
+     "event_id": 77656,
+     "at": "2026-07-22T19:26:16.245967Z",
+     "source": "staged",
+     "note": "Dormant while test config always seeds StudioChat; promote when nil becomes reachable or an isolation sweep is selected."
+    },
+    {
+     "event_id": 77877,
+     "at": "2026-07-22T19:42:00.535632Z",
+     "source": "engagement_lapsed",
+     "note": "Dormant while test config always seeds StudioChat; promote when nil becomes reachable or an isolation sweep is selected."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-felix-suite-seed-determinism",
+   "distinct_notes": 1,
+   "latest_event_id": 78964,
+   "recovered_note": "Activate from a genuine order-dependent flake or measured CI sharding need.",
+   "all_notes": [
+    {
+     "event_id": 78674,
+     "at": "2026-07-22T20:51:41.060248Z",
+     "source": "staged",
+     "note": "Activate from a genuine order-dependent flake or measured CI sharding need."
+    },
+    {
+     "event_id": 78964,
+     "at": "2026-07-22T21:07:00.331040Z",
+     "source": "engagement_lapsed",
+     "note": "Activate from a genuine order-dependent flake or measured CI sharding need."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-felix-sweep-worker-unique-guard",
+   "distinct_notes": 1,
+   "latest_event_id": 78960,
+   "recovered_note": "Activate only if Pulse.sweep gains a non-idempotent external effect.",
+   "all_notes": [
+    {
+     "event_id": 78677,
+     "at": "2026-07-22T20:51:41.516202Z",
+     "source": "staged",
+     "note": "Activate only if Pulse.sweep gains a non-idempotent external effect."
+    },
+    {
+     "event_id": 78960,
+     "at": "2026-07-22T21:07:00.311668Z",
+     "source": "engagement_lapsed",
+     "note": "Activate only if Pulse.sweep gains a non-idempotent external effect."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-felix-tenancy-media-cdn-onexit-align",
+   "distinct_notes": 1,
+   "latest_event_id": 77880,
+   "recovered_note": "Dormant isolation alignment; promote on concrete config divergence or a selected hygiene wave.",
+   "all_notes": [
+    {
+     "event_id": 77655,
+     "at": "2026-07-22T19:26:16.090728Z",
+     "source": "staged",
+     "note": "Dormant isolation alignment; promote on concrete config divergence or a selected hygiene wave."
+    },
+    {
+     "event_id": 77880,
+     "at": "2026-07-22T19:42:00.553227Z",
+     "source": "engagement_lapsed",
+     "note": "Dormant isolation alignment; promote on concrete config divergence or a selected hygiene wave."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-felix-w13-bounded-read-watch",
+   "distinct_notes": 1,
+   "latest_event_id": 78575,
+   "recovered_note": "Both full reads are intentional complete admin views; activate only when a corpus benchmark proves a named memory or latency failure.",
+   "all_notes": [
+    {
+     "event_id": 78421,
+     "at": "2026-07-22T20:30:40.258825Z",
+     "source": "staged",
+     "note": "Both full reads are intentional complete admin views; activate only when a corpus benchmark proves a named memory or latency failure."
+    },
+    {
+     "event_id": 78575,
+     "at": "2026-07-22T20:46:01.123126Z",
+     "source": "engagement_lapsed",
+     "note": "Both full reads are intentional complete admin views; activate only when a corpus benchmark proves a named memory or latency failure."
+    }
+   ]
+  },
+  {
+   "doc_id": "task-felix-w13-cyclefleet-reconcile-nplus1",
+   "distinct_notes": 1,
+   "latest_event_id": 78577,
+   "recovered_note": "Cold bounded N+1 has no reproducible failure; activate only with a measured query budget breach or adjacent CycleFleet change.",
+   "all_notes": [
+    {
+     "event_id": 78420,
+     "at": "2026-07-22T20:30:40.108851Z",
+     "source": "staged",
+     "note": "Cold bounded N+1 has no reproducible failure; activate only with a measured query budget breach or adjacent CycleFleet change."
+    },
+    {
+     "event_id": 78577,
+     "at": "2026-07-22T20:46:01.134119Z",
+     "source": "engagement_lapsed",
+     "note": "Cold bounded N+1 has no reproducible failure; activate only with a measured query budget breach or adjacent CycleFleet change."
+    }
+   ]
+  },
+  {
+   "doc_id": "tgw-bl-epic-cycle-minitems-comment",
+   "distinct_notes": 1,
+   "latest_event_id": 122896,
+   "recovered_note": "A stale justification comment in a file this epic is explicitly fenced OUT of; editing it now collides with two open PRs for a prose correction.  ||  REACTIVATE: reactivate when bp-epic-cycle.workflow.js re-enters the fence (D103/D118 dropped it: two open PRs plus an uncommitted edit in the shared checkout)",
+   "all_notes": [
+    {
+     "event_id": 122722,
+     "at": "2026-07-27T15:08:13.380966Z",
+     "source": "staged",
+     "note": "A stale justification comment in a file this epic is explicitly fenced OUT of; editing it now collides with two open PRs for a prose correction.  ||  REACTIVATE: reactivate when bp-epic-cycle.workflow.js re-enters the fence (D103/D118 dropped it: two open PRs plus an uncommitted edit in the shared checkout)"
+    },
+    {
+     "event_id": 122896,
+     "at": "2026-07-27T15:24:01.542830Z",
+     "source": "engagement_lapsed",
+     "note": "A stale justification comment in a file this epic is explicitly fenced OUT of; editing it now collides with two open PRs for a prose correction.  ||  REACTIVATE: reactivate when bp-epic-cycle.workflow.js re-enters the fence (D103/D118 dropped it: two open PRs plus an uncommitted edit in the shared checkout)"
+    }
+   ]
+  },
+  {
+   "doc_id": "tgw-bl-fanout-floor-harness",
+   "distinct_notes": 1,
+   "latest_event_id": 122891,
+   "recovered_note": "The floors are unguarded by a committed harness, but both workflow files are outside the D118 fence and the floors have not changed since.  ||  REACTIVATE: reactivate on the next edit to either workflow's fan-out floors, or when tgw2-bl-throw-liveness-observation produces a real firing",
+   "all_notes": [
+    {
+     "event_id": 122725,
+     "at": "2026-07-27T15:08:19.191662Z",
+     "source": "staged",
+     "note": "The floors are unguarded by a committed harness, but both workflow files are outside the D118 fence and the floors have not changed since.  ||  REACTIVATE: reactivate on the next edit to either workflow's fan-out floors, or when tgw2-bl-throw-liveness-observation produces a real firing"
+    },
+    {
+     "event_id": 122891,
+     "at": "2026-07-27T15:24:01.293984Z",
+     "source": "engagement_lapsed",
+     "note": "The floors are unguarded by a committed harness, but both workflow files are outside the D118 fence and the floors have not changed since.  ||  REACTIVATE: reactivate on the next edit to either workflow's fan-out floors, or when tgw2-bl-throw-liveness-observation produces a real firing"
+    }
+   ]
+  },
+  {
+   "doc_id": "tgw-bl-interpreter-denylist-census",
+   "distinct_notes": 1,
+   "latest_event_id": 122890,
+   "recovered_note": "Hand-seeded denylists that the code itself documents as unbounded. Real, but it is the tail this epic's own thesis says a denylist can never finish; the enumeration belongs to tgw10-bl-hardening-tail-unenumerated first.  ||  REACTIVATE: reactivate the moment a new interpreter or mutating-API shape is found admitted (the census is the trigger, not the calendar)",
+   "all_notes": [
+    {
+     "event_id": 122730,
+     "at": "2026-07-27T15:08:23.018272Z",
+     "source": "staged",
+     "note": "Hand-seeded denylists that the code itself documents as unbounded. Real, but it is the tail this epic's own thesis says a denylist can never finish; the enumeration belongs to tgw10-bl-hardening-tail-unenumerated first.  ||  REACTIVATE: reactivate the moment a new interpreter or mutating-API shape is found admitted (the census is the trigger, not the calendar)"
+    },
+    {
+     "event_id": 122890,
+     "at": "2026-07-27T15:24:01.207247Z",
+     "source": "engagement_lapsed",
+     "note": "Hand-seeded denylists that the code itself documents as unbounded. Real, but it is the tail this epic's own thesis says a denylist can never finish; the enumeration belongs to tgw10-bl-hardening-tail-unenumerated first.  ||  REACTIVATE: reactivate the moment a new interpreter or mutating-API shape is found admitted (the census is the trigger, not the calendar)"
+    }
+   ]
+  },
+  {
+   "doc_id": "tgw-bl-wild-bulk-roster-floor",
+   "distinct_notes": 1,
+   "latest_event_id": 122889,
+   "recovered_note": "A fifth unguarded fan-out site in a workflow this epic has run zero times since the floors landed.  ||  REACTIVATE: reactivate on the next wild-bulk-cycle run, or when the harmonizer shrinks a roster in a real wave",
+   "all_notes": [
+    {
+     "event_id": 122740,
+     "at": "2026-07-27T15:08:47.738041Z",
+     "source": "staged",
+     "note": "A fifth unguarded fan-out site in a workflow this epic has run zero times since the floors landed.  ||  REACTIVATE: reactivate on the next wild-bulk-cycle run, or when the harmonizer shrinks a roster in a real wave"
+    },
+    {
+     "event_id": 122889,
+     "at": "2026-07-27T15:24:01.164773Z",
+     "source": "engagement_lapsed",
+     "note": "A fifth unguarded fan-out site in a workflow this epic has run zero times since the floors landed.  ||  REACTIVATE: reactivate on the next wild-bulk-cycle run, or when the harmonizer shrinks a roster in a real wave"
+    }
+   ]
+  },
+  {
+   "doc_id": "tgw2-l4-grip-corpus-selfref",
+   "distinct_notes": 1,
+   "latest_event_id": 122934,
+   "recovered_note": "A rule-making question with a deliberate, documented current answer (left out of the patterns because L4 sits BELOW L3 and would demote the epic's own evidence).  ||  REACTIVATE: reactivate when the L3/L4 ordering question is next load-bearing for a stored fact",
+   "all_notes": [
+    {
+     "event_id": 122769,
+     "at": "2026-07-27T15:10:17.507461Z",
+     "source": "staged",
+     "note": "A rule-making question with a deliberate, documented current answer (left out of the patterns because L4 sits BELOW L3 and would demote the epic's own evidence).  ||  REACTIVATE: reactivate when the L3/L4 ordering question is next load-bearing for a stored fact"
+    },
+    {
+     "event_id": 122934,
+     "at": "2026-07-27T15:26:02.669901Z",
+     "source": "engagement_lapsed",
+     "note": "A rule-making question with a deliberate, documented current answer (left out of the patterns because L4 sits BELOW L3 and would demote the epic's own evidence).  ||  REACTIVATE: reactivate when the L3/L4 ordering question is next load-bearing for a stored fact"
+    }
+   ]
+  },
+  {
+   "doc_id": "ve-w3-onramp-longtail",
+   "distinct_notes": 1,
+   "latest_event_id": 78189,
+   "recovered_note": "Later-wave placeholder; re-confirm current client formats before building merge logic.",
+   "all_notes": [
+    {
+     "event_id": 78037,
+     "at": "2026-07-22T19:50:52.194391Z",
+     "source": "staged",
+     "note": "Later-wave placeholder; re-confirm current client formats before building merge logic."
+    },
+    {
+     "event_id": 78189,
+     "at": "2026-07-22T20:06:00.759513Z",
+     "source": "engagement_lapsed",
+     "note": "Later-wave placeholder; re-confirm current client formats before building merge logic."
+    }
+   ]
+  },
+  {
+   "doc_id": "wsc-bl-busiest-child",
+   "distinct_notes": 1,
+   "latest_event_id": 77614,
+   "recovered_note": "Approve a comparable per-child ranking signal before rendering.",
+   "all_notes": [
+    {
+     "event_id": 77458,
+     "at": "2026-07-22T19:08:32.110911Z",
+     "source": "staged",
+     "note": "Approve a comparable per-child ranking signal before rendering."
+    },
+    {
+     "event_id": 77614,
+     "at": "2026-07-22T19:24:00.392063Z",
+     "source": "engagement_lapsed",
+     "note": "Approve a comparable per-child ranking signal before rendering."
+    }
+   ]
+  },
+  {
+   "doc_id": "wsc-bl-completed-line-source",
+   "distinct_notes": 1,
+   "latest_event_id": 77612,
+   "recovered_note": "Find an authoritative grade/merge source or amend the design before renderer work.",
+   "all_notes": [
+    {
+     "event_id": 77456,
+     "at": "2026-07-22T19:08:31.834789Z",
+     "source": "staged",
+     "note": "Find an authoritative grade/merge source or amend the design before renderer work."
+    },
+    {
+     "event_id": 77612,
+     "at": "2026-07-22T19:24:00.381210Z",
+     "source": "engagement_lapsed",
+     "note": "Find an authoritative grade/merge source or amend the design before renderer work."
+    }
+   ]
+  },
+  {
+   "doc_id": "wsc-bl-prs-open",
+   "distinct_notes": 1,
+   "latest_event_id": 77615,
+   "recovered_note": "Design epic-to-PR attribution and freshness before opening implementation.",
+   "all_notes": [
+    {
+     "event_id": 77459,
+     "at": "2026-07-22T19:08:32.253240Z",
+     "source": "staged",
+     "note": "Design epic-to-PR attribution and freshness before opening implementation."
+    },
+    {
+     "event_id": 77615,
+     "at": "2026-07-22T19:24:00.396019Z",
+     "source": "engagement_lapsed",
+     "note": "Design epic-to-PR attribution and freshness before opening implementation."
+    }
+   ]
+  }
+ ]
+}

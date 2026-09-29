@@ -3,7 +3,8 @@
 // api/priv/static/assets/bp-media-picker.js in a node:vm with minimal DOM stubs
 // (the __picker_chrome.test.mjs harness) and asserts window.__bpMediaPickerTestHook:
 //
-//   * parse: a bare URL, {url,assetId}, and {url,assetId,alt,focalX,focalY} all read;
+//   * parse: a bare URL, {url,assetId}, and {url,assetId,alt,focalX,focalY} all read
+//     (the shape also carries width/height/lqip since E1.7 — null when unknown);
 //     a focal outside 0..1 is clamped; garbage is null
 //   * serialize: a bare URL stays a bare URL; {url,assetId} stays TWO keys; alt /
 //     focalX / focalY are written ONLY when set — every value the picker ever
@@ -56,21 +57,21 @@ const hook = {
 assert.ok(rawHook && rawHook.parseValue && rawHook.serializeValue && rawHook.focalFromClick, "test hook exposes parse/serialize/focal");
 
 check("parse: bare URL, {url,assetId}, and the rich shape all read; focal is clamped; garbage is null", () => {
-  assert.deepEqual(hook.parseValue("/x.png"), { url: "/x.png", assetId: "", alt: "", focalX: null, focalY: null });
+  assert.deepEqual(hook.parseValue("/x.png"), { url: "/x.png", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null });
   assert.deepEqual(hook.parseValue(JSON.stringify({ url: "/x.png", assetId: "a1" })), {
-    url: "/x.png", assetId: "a1", alt: "", focalX: null, focalY: null,
+    url: "/x.png", assetId: "a1", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null,
   });
   assert.deepEqual(
     hook.parseValue(JSON.stringify({ url: "/x.png", assetId: "a1", alt: "Cover", focalX: 0.25, focalY: 1.7 })),
-    { url: "/x.png", assetId: "a1", alt: "Cover", focalX: 0.25, focalY: 1 },
+    { url: "/x.png", assetId: "a1", alt: "Cover", focalX: 0.25, focalY: 1, width: null, height: null, lqip: null },
   );
   assert.equal(hook.parseValue(JSON.stringify({ url: "/x.png", focalX: "nope" })).focalX, null);
-  assert.deepEqual(hook.parseValue(""), { url: "", assetId: "", alt: "", focalX: null, focalY: null });
+  assert.deepEqual(hook.parseValue(""), { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null });
 });
 
 check("serialize: legacy shapes stay byte-identical; alt / focal are written only when set", () => {
   assert.equal(hook.serializeValue("/x.png", ""), "/x.png");
-  assert.equal(hook.serializeValue("/x.png", "", { alt: "", focalX: null, focalY: null }), "/x.png");
+  assert.equal(hook.serializeValue("/x.png", "", { alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null }), "/x.png");
   assert.equal(hook.serializeValue("/x.png", "a1"), JSON.stringify({ url: "/x.png", assetId: "a1" }));
   assert.equal(
     hook.serializeValue("/x.png", "a1", { alt: "Cover", focalX: 0.5, focalY: 0.25 }),
@@ -82,7 +83,7 @@ check("serialize: legacy shapes stay byte-identical; alt / focal are written onl
 
 check("round trip: parse(serialize(x)) == x for the rich shape", () => {
   const v = hook.serializeValue("/x.png", "a1", { alt: "Cover", focalX: 0.5, focalY: 0.25 });
-  assert.deepEqual(hook.parseValue(v), { url: "/x.png", assetId: "a1", alt: "Cover", focalX: 0.5, focalY: 0.25 });
+  assert.deepEqual(hook.parseValue(v), { url: "/x.png", assetId: "a1", alt: "Cover", focalX: 0.5, focalY: 0.25, width: null, height: null, lqip: null });
 });
 
 check("focalFromClick: the fraction inside the box, clamped; a degenerate box is null", () => {

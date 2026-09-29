@@ -134,6 +134,12 @@ func runCloud(out *writer, g globals, args []string) int {
 		return runCloudUsage(out, g, args[1:])
 	case "members", "member":
 		return runCloudMembers(out, g, args[1:])
+	// `token` is the CONTROL-PLANE credential (a Personal Access Token) a CI job
+	// bears. Deliberately NOT the same noun as top-level `bp token`, which mints
+	// a WORKSPACE token on a content server: two services, two credentials, and
+	// conflating them is how an operator ends up pasting the wrong one into CI.
+	case "token", "tokens":
+		return runCloudToken(out, g, args[1:])
 	case "autoupdate":
 		return runCloudAutoupdate(out, g, args[1:])
 	case "rollout":
@@ -1133,10 +1139,10 @@ var hzServerPostConditionExemptions = map[string]string{
 		"`quiesced`, because a --stop archive whose SSH quiesce failed is a crash-consistent snapshot",
 	"resurrect": "the server in a resurrect receipt IS a post-action read-back: instCreateFromArchive polls " +
 		"hc.Server.GetByID until the box reports running WITH an IPv4 before returning, and the receipt's health key " +
-		"is an observed probe of https://<fqdn>/api/schemas. Residue filed separately: image_id is still a request " +
+		"is an observed probe of https://<fqdn>/status.json. Residue filed separately: image_id is still a request " +
 		"echo and --no-health omits `health` rather than saying it was skipped (pds-w27-bl-hetzner-instance-verb-receipt-residue)",
 	"adopt": "the server in an adopt receipt is the CLONE instCloneSwap built and health-gated — created through the same " +
-		"running+IPv4 read-back poll, then confirmed against https://<fqdn>/api/schemas before the old box is destroyed. " +
+		"running+IPv4 read-back poll, then confirmed against https://<fqdn>/status.json before the old box is destroyed. " +
 		"Residue filed separately: registry_id/team_id are cp.Adopt response echoes never re-read " +
 		"(pds-w27-bl-hetzner-instance-verb-receipt-residue)",
 	"eject": "the server in an eject receipt is the health-gated clone (same read-back as adopt); eject's OWN post-condition " +

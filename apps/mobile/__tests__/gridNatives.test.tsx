@@ -216,6 +216,20 @@ function lanesIn(node: ReactNode): Lane[] {
   return out
 }
 
+/** Each lane's opacity, in render order — how the terminal lane's de-emphasis is
+ * measured (the web twin is `.bp-board__col--cancel { opacity: .55 }`). A lane
+ * with no explicit opacity reads as 1, so a live lane and a de-emphasised one are
+ * distinguishable rather than both undefined. */
+function laneOpacities(node: ReactNode): number[] {
+  const out: number[] = []
+  visit(node, (el) => {
+    const s = flatStyle(props(el).style)
+    if (s.borderTopWidth !== 3) return
+    out.push(typeof s.opacity === 'number' ? s.opacity : 1)
+  })
+  return out
+}
+
 /** Every board card (borderRadius 7) — the count that must equal the input row
  * count for "a row is never dropped" to mean anything. */
 function cardCount(node: ReactNode): number {
@@ -448,16 +462,19 @@ describe('sheet — unresolved and empty are different facts', () => {
 /* ══ task-board ═════════════════════════════════════════════════════════════ */
 
 describe('task-board — seven lanes, ladder order, empties collapse (D46c)', () => {
-  it('renders react BOARD_ROLES in ladder order', () => {
+  it('renders react BOARD_ROLES in ladder order, terminal cancel LAST', () => {
     const board = boardOf([
       { title: 'o', status: 'open' },
       { title: 'r', status: 'ready' },
       { title: 'p', status: 'in_progress' },
       { title: 'b', status: 'blocked' },
       { title: 'd', status: 'done' },
+      { title: 'x', status: 'cancelled' },
       { title: 'k', status: 'considering' },
       { title: 's', status: 'researching' },
     ])
+    // Manifest order with the terminal rung moved last — `cancelled` is fed in at
+    // its MANIFEST position (after done) and must still come out at the END.
     expect(lanesIn(render(board)).map((l) => l.label)).toEqual([
       'OPEN',
       'READY',
@@ -466,6 +483,7 @@ describe('task-board — seven lanes, ladder order, empties collapse (D46c)', ()
       'DONE',
       'CONSIDERING',
       'RESEARCHING',
+      'CANCELLED',
     ])
   })
 
@@ -507,22 +525,45 @@ describe('task-board — a row is NEVER dropped', () => {
     }
   })
 
-  it('homes the laneless roles in OPEN — cancel and unknown are not lanes', () => {
+  // THE CANCEL LANE (task-881952f8d8417f4b). This case used to assert the exact
+  // behaviour the ruling overturns: cancelled rows homed in OPEN, lanes
+  // ['OPEN','DONE'], open count 5. `open` is the CLAIMABLE lane — `bp task ready`
+  // serves it and agents read it as work available to take — so filing abandoned
+  // work there manufactures phantom ready work on a surface people act from.
+  //
+  // FAIL-BEFORE (c1/c2): with src/papers/portabledoc/blocks/taskboard.tsx reverted
+  // to origin/main, this reds — `Expected ["OPEN","DONE","CANCELLED"], received
+  // ["OPEN","DONE"]` — because `cancel` is not a lane and the row falls back.
+  it('gives the cancelled row its OWN lane, LAST — the open lane stays claimable', () => {
     const lanes = lanesIn(render(boardOf(ROWS)))
-    expect(lanes.map((l) => l.label)).toEqual(['OPEN', 'DONE'])
+    expect(lanes.map((l) => l.label)).toEqual(['OPEN', 'DONE', 'CANCELLED'])
+
     const open = lanes[0]
-    expect(open?.count).toBe('5')
-    expect(open?.text).toContain('row-cancel')
+    const cancelled = lanes[lanes.length - 1]
+    // open keeps its own rows and the fail-open sentinel ONLY: open, weird,
+    // blank, non-map = 4. The cancelled row left it.
+    expect(open?.count).toBe('4')
+    expect(open?.text).not.toContain('row-cancel')
     expect(open?.text).toContain('row-weird')
+    // and it renders, in the terminal lane, with the manifest ✕.
+    expect(cancelled?.count).toBe('1')
+    expect(cancelled?.text).toContain('row-cancel')
+    expect(cancelled?.text).toContain('✕')
+  })
+
+  it('de-emphasises the terminal lane and nothing else', () => {
+    const opacities = laneOpacities(render(boardOf(ROWS)))
+    // Lane order is OPEN · DONE · CANCELLED; only the last one drops back.
+    expect(opacities).toEqual([1, 1, 0.55])
   })
 
   it('paints each row its OWN glyph, not the lane role (placement ⊥ styling)', () => {
     const open = lanesIn(render(boardOf(ROWS)))[0]
-    // ○ open/blank/non-map · ✕ cancelled · ◦ the fail-open unknown sentinel —
-    // all three sitting inside the ONE open lane.
+    // ○ open/blank/non-map · ◦ the fail-open unknown sentinel — both inside the
+    // ONE open lane; ✕ now rides its own terminal lane (asserted above).
     expect(open?.text).toContain('○')
-    expect(open?.text).toContain('✕')
     expect(open?.text).toContain('◦')
+    expect(open?.text).not.toContain('✕')
   })
 
   it('the harness can fail: a dropped row would move the card count', () => {

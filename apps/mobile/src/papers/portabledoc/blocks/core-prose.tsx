@@ -90,6 +90,32 @@ const byline: Render = (b, ctx, key) => {
   )
 }
 
+// The reader-synthesised pre-gate badge (#17199). Elixir's
+// `Content.Papers.PreGateRegister.annotate/3` mints it into the block stream of a
+// grandfathered Paper — never authored, never stored — so it arrives here like any
+// other block and must not unknown-box. The web mark is a quiet caps-mono line
+// under the byline rule; the native equivalent is the same eyebrow measure in the
+// muted colour, switching to this file's existing warning hue (via calloutTone,
+// so the badge introduces no new colour) on the ONE warning tone the register
+// mints (`blank_header_cell`). Any other tone is neutral — the same two-value
+// whitelist compose.ex applies, so a stray value can never pick a colour.
+// `title` is a hover explanation the web has and a phone does not, so it is
+// deliberately not rendered here.
+const preGateBadge: Render = (b, ctx, key) => (
+  <Text
+    key={key}
+    style={{
+      ...scale.xs,
+      letterSpacing: 1.2,
+      textTransform: 'uppercase',
+      color: str(b.tone) === 'warning' ? calloutTone(ctx.theme, 'warning') : ctx.theme.textMuted,
+      marginBottom: 10,
+    }}
+  >
+    {str(b.label)}
+  </Text>
+)
+
 /* ── the two serif outliers, made register-aware (D50) ─────────────────────────
  * The paperIngress and paperPullquote tokens carry `fontFamily: 'serif'` ON THE
  * TOKEN. Reaching for either unconditionally painted a serif lede and a serif
@@ -293,6 +319,7 @@ export const coreProseRenderers: Record<string, Render> = {
   paragraph,
   eyebrow,
   byline,
+  'pre-gate-badge': preGateBadge,
   ingress,
   pullquote,
   list,

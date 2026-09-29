@@ -7,6 +7,7 @@ defmodule Barkpark.Tasks.Dedup do
   REFUSE the create if a near-duplicate survives structural exclusion — unless
   the author declared it distinct.
 
+
   ## Escape hatches ride existing content fields (no new API/CLI surface)
 
     * **`content.parent_id`** — a task filed under a parent is automatically
@@ -17,6 +18,13 @@ defmodule Barkpark.Tasks.Dedup do
       queryable rejection trail (acceptance criterion 3): it lives in the doc's
       content, so a `bp task get` / query shows exactly which matches were waved
       through and by whose decision.
+
+    * **`content.distinct_from_reason`** — a map of `id => why`, required once
+      the override is being used against MORE THAN ONE existing row carrying the
+      same normalized title as the new task. See `override_toll/5`: the
+      four-copies-in-127-seconds incident was four correct refusals dismissed by
+      a field value, so past the first same-title row the assertion has to be
+      explained, per id, in words that are not repeated.
 
   A bogus `distinct_from` id cannot bypass a real duplicate: it only removes the
   named candidate from consideration, so any OTHER refusing candidate still
@@ -66,12 +74,30 @@ defmodule Barkpark.Tasks.Dedup do
       modelled on `Content.DedupWall`'s (at its own measured floor — the two
       corpora do not share one), and that function's comment states exactly what
       the net can miss.
+
+  ## The `catch :exit` arm is PROVEN, not asserted
+
+  That exit clause used to be unfalsifiable from a test: inside the Ecto SQL
+  sandbox every stageable failure (dead or live dummy dynamic repo, ownership
+  timeout, unallowed process, `pg_terminate_backend`, query/transaction timeout
+  0 and 1) arrives as an EXCEPTION and lands in the `rescue`. Deleting the
+  clause left the whole dedup suite green.
+
+  `Barkpark.Dedup.ScanSeam` closes that. It is a one-verb fault injector
+  (`exit/1` and nothing else) called from inside this module's candidate fetch,
+  compiled in ONLY when `:dedup_scan_seam` is set — which only `config/test.exs`
+  does. Outside that build the compiler emits `check!/1` as a literal `:ok` and
+  the arming functions do not exist in the BEAM at all; inside it, an unarmed
+  process is byte-identical to today. Its moduledoc states all three layers.
+  The coverage lives in `test/barkpark/dedup/scan_exit_seam_test.exs`, whose two
+  cases red INDEPENDENTLY when the matching `catch :exit` clause is deleted.
   """
   import Ecto.Query, only: [from: 2]
 
   require Logger
 
-  alias Barkpark.Content.{Document, Scope}
+  alias Barkpark.Content.{Document, Scope, Warnings, WriteScope}
+  alias Barkpark.Dedup.ScanSeam
   alias Barkpark.Repo
   alias Barkpark.Tasks.{Judge, Similarity}
 
@@ -130,6 +156,39 @@ defmodule Barkpark.Tasks.Dedup do
   # exactly the state the truncation tripwire should be reporting.
   @candidate_limit 500
 
+  # THE FALLBACK SHAPES DO NOT GET THE KNN CAP, BECAUSE THEY DO NOT GET THE KNN
+  # ORDERING. `@candidate_limit` is 500 ONLY because `fetch_rows/6`'s probe
+  # clause hands the scorer the 500 MOST TITLE-SIMILAR rows: the cut is made by
+  # dissimilarity, so what falls off the end is what was least likely to be a
+  # duplicate. Both unfiltered clauses — the blank probe and the pg_trgm rescue —
+  # have no `<->` term at all; they are `DISTINCT ON (canonical doc_id)` in
+  # ASCENDING id order, so their cut is made by ALPHABET, exactly the blind spot
+  # the KNN change retired on the working path.
+  #
+  # Letting them inherit 500 would therefore not preserve the old fallback, it
+  # would shrink it 10x: this module's pre-#14061 unfiltered scan ran at 5,000
+  # (`git show 2403c0c28b^:api/lib/barkpark/tasks/dedup.ex`, `@candidate_limit
+  # 5000`). So the safety net keeps the number the safety net always had, and the
+  # ordering-justified cut applies only where the ordering exists.
+  #
+  # RE-MEASURED 2026-09-12 (`bp task ls --all`, guerrilla `production`, the
+  # scan's own non-cancelled predicate): 9,160 task rows, 991 cancelled, 410
+  # `drafts.` twins -> 8,169 eligible rows -> **8,159 distinct canonical ids**.
+  # So on the unfiltered shape the cap reaches 61.3% of the corpus at 5,000 and
+  # would have reached 6.1% at 500 — the 10x is real and current, not inherited
+  # from the 7,064-id figure above.
+  #
+  # AND THE HONEST HALF: 5,000 does NOT buy back the `task-*` family here. The
+  # 2,386 `task-*` canonical ids start at ASC index 5,363 of 8,159, so the
+  # alphabetic fallback misses 100% of them at BOTH caps. Only the KNN path
+  # reaches them. This constant restores the pre-#14061 safety net's SIZE; it
+  # does not pretend to restore its coverage, which it never had.
+  #
+  # The scorer cost is the documented one (6,217 ms at 5,000 vs 89 ms at 500) and
+  # it is the price of the fallback being a fallback: both clauses are off the
+  # hot path by construction.
+  @unfiltered_candidate_limit 5_000
+
   # Trgm net for the candidate FETCH only: over-fetch here, then let the precise
   # token-Jaccard in `Similarity.assess/3` score it down.
   #
@@ -156,8 +215,18 @@ defmodule Barkpark.Tasks.Dedup do
   # reading zero is not a warning sign: these probes have no duplicate in the
   # corpus, and answering "no candidates" is the correct result for them.
   #
-  # It is still BELOW pg_trgm's 0.3 default, so the fetch must run inside a
-  # transaction that sets the threshold first (see `fetch_rows/6`).
+  # IT IS NOT A SCAN PREDICATE. As `WHERE title % $1` it bounded NOTHING: GIN
+  # cannot order, so every row surviving the net was fetched, scored by
+  # `similarity()` and top-N heapsorted, and that sort INPUT grew linearly with
+  # the corpus while the `LIMIT` capped only the output. The scan now rides the
+  # KNN distance `title <-> $1` over `documents_title_trgm_gist_idx` (migration
+  # 20260910100000), which RETURNS rows already ordered, so the LIMIT stops the
+  # scan — and this floor is applied in Elixir to the @candidate_limit rows that
+  # come back. Same predicate, same admitted set: `%` admitted exactly
+  # `similarity >= @candidate_trgm_floor`, and filtering an already
+  # similarity-ordered list at the same number can only drop its tail. The
+  # pg_trgm `similarity_threshold` GUC no longer participates — `<->` is not
+  # threshold-gated, so `SET LOCAL` here would be decoration.
   @candidate_trgm_floor 0.2
 
   # The truncation tripwire: ask for ONE row more than the cap. If that extra row
@@ -209,6 +278,8 @@ defmodule Barkpark.Tasks.Dedup do
     distinct =
       string_list(Map.get(content, "distinct_from") || Map.get(content, :distinct_from))
 
+    reasons = reason_map(content)
+
     # The new task's title IS the trgm probe. Passed as an opt rather than a
     # positional argument so a caller that already set `:probe_title` (tests
     # driving the empty-probe fallback) keeps control of it.
@@ -232,7 +303,10 @@ defmodule Barkpark.Tasks.Dedup do
 
         case refuse do
           [] ->
-            :ok
+            case override_toll(new_task, candidates, assessment.excluded, reasons, scan) do
+              :ok -> warn_advise(remaining_advise)
+              refused -> refused
+            end
 
           _ ->
             {:error,
@@ -245,6 +319,37 @@ defmodule Barkpark.Tasks.Dedup do
               }}}
         end
     end
+  end
+
+  # ── the advise band reaches the AUTHOR on an ALLOWED create ──────────────
+  #
+  # task-a0cd11dd35788460. Until this, an allowed create DROPPED the advise list:
+  # it was read only by `judge_escalate/3`, and with no judge configured (or a
+  # judge that answered "distinct") nothing below @refuse was ever said to
+  # anyone. spd-b37 re-filed spd-b27's serif-stack finding at 0.2833 and the
+  # create returned a clean 2xx — a gray-zone match is exactly the case the
+  # author can settle in one read, and the gate kept it to itself.
+  #
+  # The channel is the one the publish wall already uses for its advise band
+  # (`Content.DedupWall`): `Content.Warnings`, code `possible_duplicate`,
+  # severity `warning`, drained into the mutate SUCCESS envelope's `warnings`
+  # and printed by `bp task create`. It NEVER blocks — the create's result is
+  # `:ok` exactly as before; only the advisory is new. One entry per match, so
+  # every matched id and its score is named.
+  defp warn_advise(advise) do
+    Enum.each(advise, fn match ->
+      %{id: id, similarity: sim, lifecycle_status: lc} = present(match)
+      state = if lc in [nil, ""], do: "", else: ", #{lc}"
+
+      Warnings.put(
+        "possible_duplicate",
+        "this task may duplicate #{id} (similarity #{sim}#{state}) — under the " <>
+          "#{Similarity.thresholds().refuse} refuse threshold, so the create went " <>
+          "through; if it is the same finding, extend #{id} instead, or name it in " <>
+          "content.distinct_from to record that it is not",
+        "warning"
+      )
+    end)
   end
 
   # ── the refusal must name an id the caller can actually ACT on ─────────────
@@ -307,6 +412,164 @@ defmodule Barkpark.Tasks.Dedup do
     end
   end
 
+  # ── THE OVERRIDE HAS TO COST SOMETHING ─────────────────────────────────────
+  #
+  # MEASURED on the production ledger 2026-08-24. Four copies of one task were
+  # created inside 127 seconds on 2026-08-02, each one naming its predecessors
+  # in its own `distinct_from`:
+  #
+  #   11:25:41  drafts.task-834b13e3…  distinct_from = []
+  #   11:26:52  drafts.task-3a889e08…  distinct_from = [834b13e3]
+  #   11:27:12  drafts.task-d2954ebb…  distinct_from = [834b13e3, 3a889e08]
+  #   11:27:48  task-42ad3595…         distinct_from = [834b13e3, 3a889e08, d2954ebb]
+  #
+  # All four carry the identical title. THE WALL WAS RIGHT FOUR TIMES OUT OF
+  # FOUR and was told to stand down every time — a populated `distinct_from` is
+  # the AFFIRMATIVE RECORD that it fired and the author dismissed it, since the
+  # field cannot be populated by accident. The list GREW monotonically, so the
+  # gate got LOUDER at each copy and was overruled anyway. This is not a
+  # sensitivity defect (a detector failing to fire is a DIFFERENT row and a
+  # different lane); it is the override being the cheapest way past a wall that
+  # worked.
+  #
+  # THE TOLL, AND WHY IT IS SHAPED LIKE THIS:
+  #
+  #   * It fires on SAME NORMALIZED TITLE only. By copy 4 the author was
+  #     asserting distinctness against three rows carrying the same title, which
+  #     is the point where the assertion has stopped meaning anything. A
+  #     different-titled override is an ordinary judgement call and stays free.
+  #   * THE FIRST SAME-TITLE OVERRIDE IS FREE (`@free_same_title_overrides`).
+  #     One row that happens to share a title with yours is a coincidence a
+  #     human resolves in one word; a SECOND one is the beginning of the
+  #     observed pattern. Refusing the first would break every legitimate
+  #     one-id override (`DedupTest` "distinct_from naming the match ALLOWS the
+  #     create") for a population the evidence does not support.
+  #   * STRUCTURE STILL WINS. A match excluded because it is a `:sibling` or a
+  #     `:chain` was never saved by `distinct_from` — `Similarity.score/6`
+  #     checks the distinct set first, so an id can carry BOTH — and charging a
+  #     toll for it would tax a fixture that names its own epic peers rather
+  #     than the override this row is about.
+  #   * REASONS MUST BE NON-EMPTY AND MUTUALLY DISTINCT. One reason
+  #     copy-pasted across three ids is the bulk assertion in a costume; the
+  #     row's remedy (a) names "an empty or duplicated reason" explicitly.
+  #
+  # The toll runs ONLY on the `refuse == []` path — i.e. only when the override
+  # actually bought the create its passage. A create that is refused on its
+  # merits is refused with the ordinary message, unchanged.
+  @free_same_title_overrides 1
+
+  defp override_toll(new_task, candidates, excluded, reasons, scan) do
+    probe = normalized_title(Map.get(new_task, :title))
+
+    titles =
+      Map.new(candidates, fn c ->
+        {Similarity.norm_id(Map.get(c, :id)), Map.get(c, :title)}
+      end)
+
+    waved =
+      Enum.filter(excluded, fn m ->
+        Map.get(m, :structural) not in [:sibling, :chain] and probe != "" and
+          normalized_title(Map.get(titles, Similarity.norm_id(Map.get(m, :id)))) == probe
+      end)
+
+    if length(waved) > @free_same_title_overrides do
+      audit_override(waved, reasons, scan)
+    else
+      :ok
+    end
+  end
+
+  defp audit_override(waved, reasons, scan) do
+    ids = Enum.map(waved, fn m -> Similarity.norm_id(Map.get(m, :id)) end)
+    given = Enum.map(ids, fn id -> {id, Map.get(reasons, id)} end)
+
+    blank = for {id, r} <- given, blank_reason?(r), do: id
+
+    repeated =
+      given
+      |> Enum.reject(fn {_id, r} -> blank_reason?(r) end)
+      |> Enum.group_by(fn {_id, r} -> String.downcase(String.trim(r)) end)
+      |> Enum.filter(fn {_r, group} -> length(group) > 1 end)
+      |> Enum.flat_map(fn {_r, group} -> Enum.map(group, &elem(&1, 0)) end)
+      |> Enum.sort()
+
+    case {blank, repeated} do
+      {[], []} ->
+        :ok
+
+      _ ->
+        {:error,
+         {:duplicate_task,
+          %{
+            message: override_toll_message(ids, blank, repeated),
+            similar: Enum.map(waved, &present/1),
+            advise: [],
+            scan: scan
+          }}}
+    end
+  end
+
+  defp override_toll_message(ids, blank, repeated) do
+    base =
+      "this create names #{length(ids)} existing row(s) with the SAME normalized title in " <>
+        "`distinct_from` (#{Enum.join(Enum.take(ids, 5), ", ")}) — the duplicate wall fired " <>
+        "against each of them and was waved through. Past the first, that assertion has to be " <>
+        "EXPLAINED: set `content.distinct_from_reason` to a map of id => why that row is " <>
+        "genuinely different, one entry per id, each non-empty and each saying something " <>
+        "different from the others. (Four copies of one task were filed in 127 seconds on " <>
+        "2026-08-02 exactly this way, each naming its predecessors and none of them saying why.)"
+
+    base
+    |> then(fn m ->
+      case blank do
+        [] -> m
+        _ -> m <> " · NO REASON GIVEN FOR: #{Enum.join(blank, ", ")}."
+      end
+    end)
+    |> then(fn m ->
+      case repeated do
+        [] -> m
+        _ -> m <> " · THE SAME REASON IS REUSED FOR: #{Enum.join(repeated, ", ")}."
+      end
+    end)
+  end
+
+  defp blank_reason?(r) when is_binary(r), do: String.trim(r) == ""
+  defp blank_reason?(_), do: true
+
+  # `distinct_from_reason` is read as a map of id => reason. It rides content
+  # like every other escape hatch (`distinct_from`, `dedup_bypass`) so there is
+  # no new API or CLI surface, and `Tasks.Validation` leaves an unlisted content
+  # map alone — the same latitude `claim`/`engagement` already take.
+  #
+  # It FAILS CLOSED on a typo: a misspelled key yields no reasons, so the toll
+  # refuses rather than reads the absence as permission.
+  defp reason_map(content) do
+    case Map.get(content, "distinct_from_reason") || Map.get(content, :distinct_from_reason) do
+      map when is_map(map) ->
+        Map.new(map, fn {k, v} ->
+          {Similarity.norm_id(to_string(k)), if(is_binary(v), do: v, else: nil)}
+        end)
+
+      _ ->
+        %{}
+    end
+  end
+
+  # Titles are compared on their ALPHANUMERIC SKELETON: downcased, every run of
+  # non-alphanumerics collapsed to one space, trimmed. Not `Similarity.tokens/1`
+  # — that drops stopwords and ≤2-char tokens, which would fold two genuinely
+  # different short titles onto each other, and it emits a telemetry event per
+  # call. This comparison is exact-title-or-nothing by design.
+  defp normalized_title(title) when is_binary(title) do
+    title
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/u, " ")
+    |> String.trim()
+  end
+
+  defp normalized_title(_), do: ""
+
   # A stored row is published unless it carries the `drafts.` prefix. The
   # DISTINCT ON in `base_query/3` prefers the PUBLISHED row of a twin pair, so a
   # kept row still wearing the prefix is a draft with no published counterpart —
@@ -317,7 +580,28 @@ defmodule Barkpark.Tasks.Dedup do
 
   # The refusal SAYS WHAT IT COULD NOT DO, in the response body, and names the
   # one action that gets the owner unstuck. Never `unknown error`.
-  defp degraded_message(reason) do
+  #
+  # TWO MESSAGES FROM ONE DOOR, because two different people need to act — the
+  # same split `Content.DedupWall` makes, for the same reason.
+  #
+  # OUTAGE (a binary reason): the database was slow, gone, or the scan could not
+  # be scoped. The filer can wait it out or, deliberately, file unchecked — so
+  # the remedy is named.
+  #
+  # DEFECT (`{:defect, phrase}`): OUR code raised. Offering `dedup_bypass` here
+  # would teach the filer to disable the gate permanently for a bug that is
+  # never reported — the exact misread this arm exists to prevent. No remedy is
+  # offered because the filer has none; the sentence tells them whose bug it is
+  # and to report it.
+  defp degraded_message({:defect, phrase}) do
+    "task dedup gate hit a DEFECT, not an outage: #{phrase}. The create was " <>
+      "REFUSED rather than filed unchecked — no duplicate check ran, so nothing " <>
+      "here claims this task is new. This is a bug in Barkpark, not a slow " <>
+      "database: retrying will not help and there is no filer escape for it. " <>
+      "Report it with this message so the defect gets fixed."
+  end
+
+  defp degraded_message(reason) when is_binary(reason) do
     "task dedup gate could not complete: #{reason}. The create was REFUSED rather " <>
       "than filed unchecked — no duplicate check ran, so nothing here claims this " <>
       "task is new. Retry, or resend with content.dedup_bypass: true to file it " <>
@@ -339,7 +623,8 @@ defmodule Barkpark.Tasks.Dedup do
   @judge_confidence 0.7
 
   # Returns {escalated, remaining_advise}. No judge configured → escalate
-  # nothing (tier-1 stands). The advise band is top-K-bounded, so this is a
+  # nothing (tier-1 stands); `remaining_advise` becomes the create's
+  # `possible_duplicate` warnings (`warn_advise/1`). The advise band is top-K-bounded, so this is a
   # handful of calls at most, only on the gray-zone matches.
   defp judge_escalate(_new_task, _candidates, []), do: {[], []}
 
@@ -389,7 +674,9 @@ defmodule Barkpark.Tasks.Dedup do
   #     still has exactly one row and is still detected.
   #   * **NEW: a trgm pre-filter on the title, so the scorer sees hundreds of
   #     candidates instead of thousands.** This one DOES narrow, and the
-  #     narrowing is stated below rather than left to be discovered.
+  #     narrowing is stated below rather than left to be discovered. It is a
+  #     KNN-ORDERED index scan (`ORDER BY title <-> $1 LIMIT N`), so the cap
+  #     bounds the rows Postgres READS, not merely the rows it returns.
   #
   # ## Why the pre-filter had to exist (the cost was never in the query)
   #
@@ -417,9 +704,10 @@ defmodule Barkpark.Tasks.Dedup do
   #
   # ## What the trgm net can now MISS, said plainly
   #
-  # The `%` operator matches on the TITLE only, because `documents_title_trgm_idx`
-  # (GIN, migration 20260526181000) is a title index — the same index and the
-  # same operator `Content.DedupWall` runs on this table. But `Similarity` scores
+  # The `<->` distance ranks on the TITLE only, because
+  # `documents_title_trgm_gist_idx` (GiST, migration 20260910100000) is a title
+  # index — the same index and the same operator `Content.DedupWall` runs on this
+  # table. But `Similarity` scores
   # title AND description as one combined token bag. So a candidate whose title
   # is trigram-dissimilar to the new title, yet whose DESCRIPTION overlaps enough
   # to have crossed 0.55, is no longer fetched and no longer refused.
@@ -434,17 +722,135 @@ defmodule Barkpark.Tasks.Dedup do
   # a duplicate — and every id in the corpus is now reachable, because the index
   # is consulted over all of it instead of a sorted prefix.
   #
+  # THAT LAST SENTENCE IS TRUE OF THIS CLAUSE ONLY. The two UNFILTERED shapes
+  # below (blank probe title, missing pg_trgm) still read a sorted prefix, and
+  # they always did; see `@unfiltered_candidate_limit` for what they actually
+  # scan today and for why they do not inherit `@candidate_limit`.
+  #
   # An empty probe title cannot be allowed to silently match nothing (that would
   # be a fail-OPEN gate wearing a green light), so it falls back to the
   # unfiltered scan — see `fetch_rows/6`.
+  #
+  # ## THE SCAN MUST BE SCOPED TO THE TENANT THE WRITE WILL LAND IN
+  #
+  # task-893cf2751bac7428. This used to read `opts[:workspace_id]` RAW and hand
+  # the result to `Content.Scope.scope_to_workspace/3`. That is correct for a
+  # caller who threads a tenant and WRONG for one who threads none, because the
+  # two halves of this find-or-create then resolve tenancy by two DIFFERENT
+  # rules:
+  #
+  #   * the WRITE resolves through `Content.WriteScope.resolve_write_scope/1`,
+  #     which falls back to the seeded Default workspace when no `:workspace_id`
+  #     opt is present;
+  #   * the READ took `nil` straight to `scope_to_workspace/3`, whose nil arm
+  #     fails CLOSED (`where: false`, scope.ex — CORRECT, and untouched here).
+  #
+  # So on the GitHub webhook path — which carries NO scope plug, and whose
+  # `ingest_opts/0` threads `:workspace_id` only when
+  # `Plugins.Github.Settings.intake_workspace_id/0` (charter D15) returns one —
+  # the gate scanned ZERO rows, matched nothing, and every outsider issue was
+  # born beside the look-alike it was supposed to be refused against. Nothing
+  # errored and nothing logged: a correct-looking green from a gate that never
+  # ran, and the failure direction is the severity — it did not refuse work, it
+  # ADMITTED duplicates.
+  #
+  # WHY NOT "REQUIRE THE INTAKE WORKSPACE / REFUSE LOUDLY WHEN IT IS ABSENT":
+  # an absent `BARKPARK_GITHUB_INTAKE_WORKSPACE_ID` is a SUPPORTED configuration,
+  # not an outage. The controller's own moduledoc says "absent → today's
+  # default-workspace behavior byte-identical, no `:workspace_id` key threaded",
+  # and that default-workspace write is where the row actually goes. A loud
+  # refusal would 5xx every legitimate outsider issue on an instance that is
+  # configured exactly as designed. The defect is the ASYMMETRY, so the fix is
+  # the scoping verb: bind the read to the write's own resolver.
+  #
+  # AND IT STILL SAYS SO WHEN IT CANNOT RUN: if that resolution yields no
+  # workspace at all (no scope threaded AND no seeded Default) or refuses, the
+  # gate degrades to the module's existing `{:dedup_unavailable, _}` refusal
+  # rather than scanning an empty set — the one thing this module promises never
+  # to do silently.
+  #
+  # NARROW BY CONSTRUCTION: only the key-absent/`nil` case changes. A caller that
+  # threads a workspace id, and the `:shared_only` request sentinel, both reach
+  # `scope_to_workspace/3` exactly as before.
   defp fetch_candidates(dataset, opts) do
-    workspace_id = Keyword.get(opts, :workspace_id)
+    # THE EXIT SEAM. Inert by construction outside `MIX_ENV=test` — see
+    # `Barkpark.Dedup.ScanSeam`'s moduledoc for the three layers that make it so.
+    # It sits INSIDE this function's try body on purpose: the `catch :exit` arm
+    # below is the thing under test, and an injection point outside the try would
+    # prove nothing about it.
+    ScanSeam.check!(:tasks_dedup)
+
+    with {:ok, workspace_id} <- candidate_workspace(opts) do
+      scan_candidates(dataset, opts, workspace_id)
+    end
+  rescue
+    # A code DEFECT and a database OUTAGE both land here, and they used to leave
+    # wearing the same clothes: `:warning`, "the backlog scan failed (Mod)", and
+    # a `content.dedup_bypass` remedy that is actively wrong for a bug. The
+    # classification below is the SAME one `Content.DedupWall` makes — see
+    # `@code_error_modules` and the agreement test in
+    # `dedup_defect_classification_test.exs`.
+    e ->
+      if code_error?(e) do
+        {:degraded, defect_reason("candidate fetch failed", e)}
+      else
+        Logger.warning("Tasks.Dedup degraded: candidate fetch failed: #{inspect(e)}")
+        {:degraded, reason_phrase(e, Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms))}
+      end
+  catch
+    :exit, reason ->
+      Logger.warning("Tasks.Dedup degraded: candidate fetch exited: #{inspect(reason)}")
+      {:degraded, "the backlog scan was cut off by the database"}
+  end
+
+  # The candidate scope. Present key → the caller's own tenant, untouched.
+  # Absent/nil → whatever `put_scope_attrs/2` would stamp on the write this gate
+  # is guarding, so read and write see one tenant.
+  defp candidate_workspace(opts) do
+    case Keyword.get(opts, :workspace_id) do
+      nil -> resolved_write_workspace(opts)
+      workspace_id -> {:ok, workspace_id}
+    end
+  end
+
+  defp resolved_write_workspace(opts) do
+    case WriteScope.resolve_write_scope(opts) do
+      {:ok, {workspace_id, _project_id}} when not is_nil(workspace_id) ->
+        {:ok, workspace_id}
+
+      {:ok, {nil, _project_id}} ->
+        {:degraded,
+         "the backlog scan could not be scoped — this write threads no workspace and no " <>
+           "default workspace is seeded, so there is no candidate set to compare against"}
+
+      {:error, reason} ->
+        {:degraded,
+         "the backlog scan could not be scoped: the workspace this task would be written " <>
+           "to could not be resolved (#{inspect(reason)})"}
+    end
+  end
+
+  defp scan_candidates(dataset, opts, workspace_id) do
     project_id = Keyword.get(opts, :project_id)
     timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
-    limit = Keyword.get(opts, :dedup_candidate_limit, @candidate_limit)
+    # TWO CAPS, TWO OVERRIDES, BECAUSE THEY ARE TWO DIFFERENT NUMBERS.
+    # `:dedup_candidate_limit` bounds the KNN shape ONLY — a test that shrinks it
+    # to prove the truncation tripwire must not also, silently, shrink the
+    # unfiltered fallback, because "the fallback inherits the KNN cap" is exactly
+    # the defect this pair exists to stop (task-4671d136b2c568b4).
+    limits = {
+      Keyword.get(opts, :dedup_candidate_limit, @candidate_limit),
+      Keyword.get(opts, :dedup_unfiltered_candidate_limit, @unfiltered_candidate_limit)
+    }
+
     probe_title = Keyword.get(opts, :probe_title) || ""
 
-    rows = fetch_rows(dataset, workspace_id, project_id, timeout, limit, probe_title)
+    # The cap that BOUND the scan is whatever the clause that actually ran
+    # applied — the pg_trgm rescue switches shapes mid-call, so this cannot be
+    # read off `limits` at the call site. Truncation maths and every honesty
+    # channel below use the returned one.
+    {shape, limit, rows} =
+      fetch_rows(dataset, workspace_id, project_id, timeout, limits, probe_title)
 
     # The probe row is the ONLY thing that distinguishes "the backlog happens to
     # be exactly `limit` rows" from "the backlog is larger than this scan saw".
@@ -453,17 +859,30 @@ defmodule Barkpark.Tasks.Dedup do
     {kept, truncated?} =
       if length(rows) > limit, do: {Enum.take(rows, limit), true}, else: {rows, false}
 
-    report_scan(truncated?, length(kept), limit, dataset)
+    report_scan(truncated?, length(kept), limit, dataset, shape)
+    report_scanned(length(kept), workspace_id, dataset, shape, truncated?)
 
     {:ok, to_tasks(kept), scan_report(truncated?, length(kept), limit)}
-  rescue
-    e ->
-      Logger.warning("Tasks.Dedup degraded: candidate fetch failed: #{inspect(e)}")
-      {:degraded, reason_phrase(e, Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms))}
-  catch
-    :exit, reason ->
-      Logger.warning("Tasks.Dedup degraded: candidate fetch exited: #{inspect(reason)}")
-      {:degraded, "the backlog scan was cut off by the database"}
+  end
+
+  # EVERY scan, not only a truncated one. `scan_report/3`'s
+  # `candidates_scanned` rides out only on a REFUSAL payload, so on the birth
+  # path — the exact path an inert gate takes — nothing observable distinguished
+  # "scanned the backlog and found no look-alike" from "scanned nothing". This
+  # event is that distinction, and it is what
+  # `github_webhook_dedup_scope_test.exs` asserts on: a test that reads only the
+  # final receipt cannot tell an inert gate from a gate that ran and disagreed.
+  defp report_scanned(candidates, workspace_id, dataset, shape, truncated?) do
+    :telemetry.execute(
+      [:barkpark, :tasks, :dedup, :scan],
+      %{candidates: candidates},
+      %{
+        workspace_id: workspace_id,
+        dataset: dataset,
+        shape: shape,
+        truncated: truncated?
+      }
+    )
   end
 
   # ── the cap CANNOT bind silently ───────────────────────────────────────────
@@ -496,51 +915,63 @@ defmodule Barkpark.Tasks.Dedup do
   # empty case keeps the old whole-corpus behaviour (slow, but honest) instead.
   # `check_new_task/5` already short-circuits when title AND description are both
   # blank; this covers the title-blank-description-present remainder.
-  defp fetch_rows(dataset, workspace_id, project_id, timeout, limit, "") do
-    base_query(dataset, workspace_id, project_id)
-    |> limited(limit)
-    |> Repo.all(timeout: timeout)
+  #
+  # SAID PLAINLY, BECAUSE THE OLD WORDING HERE WAS FALSE: this is NOT the
+  # "whole-corpus behaviour". It is `DISTINCT ON (canonical doc_id)` ASCENDING
+  # under a LIMIT, i.e. the alphabetically-first `@unfiltered_candidate_limit`
+  # rows and nothing after them — the alphabetic truncation the trgm change
+  # retired on the probe path, still present here. What it keeps is the old
+  # fallback's SIZE (5,000, see `@unfiltered_candidate_limit`), not a full scan:
+  # against the 8,159 canonical ids measured 2026-09-12 it reads 61.3% of them,
+  # and none of the 2,386 `task-*` ids, which sort past index 5,363.
+  # It is kept because a partial honest scan is still a scan, where
+  # `similarity(x, '')` would have been a gate that matched nothing and reported
+  # success.
+  defp fetch_rows(dataset, workspace_id, project_id, timeout, {_knn, unfiltered}, "") do
+    rows =
+      base_query(dataset, workspace_id, project_id)
+      |> twin_collapsed()
+      |> limited(unfiltered)
+      |> Repo.all(timeout: timeout)
+
+    {:unfiltered, unfiltered, rows}
   end
 
-  defp fetch_rows(dataset, workspace_id, project_id, timeout, limit, probe_title) do
-    inner =
+  defp fetch_rows(dataset, workspace_id, project_id, timeout, {limit, _un} = limits, probe_title) do
+    # ONE QUERY, AND IT MUST STAY ONE. The old shape was a `DISTINCT ON`
+    # subquery under an outer `ORDER BY similarity(...) DESC, doc_id`: two
+    # stages, because `DISTINCT ON` requires its expression to lead the
+    # `ORDER BY`, so a single query could be ordered by canonical id OR by
+    # similarity, never both. That outer sort had no ordered index path at any
+    # cost, so Postgres materialized every trgm-matched row and heapsorted it —
+    # the LIMIT trimmed the OUTPUT while the sort INPUT grew with the corpus.
+    #
+    # `ORDER BY title <-> $1 LIMIT N` is the shape `documents_title_trgm_gist_idx`
+    # (migration 20260910100000) can SERVE, so the scan stops at N rows at every
+    # corpus size. The coupling is load-bearing and silent when broken: adding a
+    # second sort key, or putting `similarity()` back in the ORDER BY, makes the
+    # ordered path unreachable and the query falls back to seq-scan + sort with
+    # no error and no warning. That is why the trgm floor AND the draft/published
+    # twin collapse both happen in Elixir below, on the bounded rows, instead of
+    # as SQL that would cost the ordered path.
+    query =
       dataset
       |> base_query(workspace_id, project_id)
-      |> trgm_filtered(probe_title)
+      |> knn_ordered(probe_title, limit + @candidate_probe)
 
-    # TWO STAGES, and they cannot collapse into one. `DISTINCT ON` requires its
-    # expression to lead the `ORDER BY`, so a single query can be ordered by
-    # canonical id (to collapse twins) or by similarity (to make the cap keep the
-    # right rows) — never both. The subquery collapses twins over the whole
-    # trgm-matched set; the outer query then ranks the survivors by similarity
-    # and applies the cap. Ordering the cap is the entire reason the cap is now
-    # safe to lower.
-    query =
-      from(c in Ecto.Query.subquery(inner),
-        order_by: [desc: c.sim, asc: c.doc_id],
-        limit: ^(limit + @candidate_probe)
-      )
-
-    # `SET LOCAL` is a no-op outside a transaction, and @candidate_trgm_floor
-    # (0.2) sits below pg_trgm's 0.3 default — so without the txn the `%` net
-    # would silently TIGHTEN to 0.3 and drop exactly the gray-zone near-duplicates
-    # the advise band exists to catch. Same cliff, same remedy, as
-    # Content.DedupWall. SET takes no bind params, so the floor is interpolated;
-    # the module attribute stays the single source of truth.
-    case Repo.transaction(
-           fn ->
-             Repo.query!(
-               "SET LOCAL pg_trgm.similarity_threshold = #{@candidate_trgm_floor}",
-               [],
-               timeout: timeout
-             )
-
-             Repo.all(query, timeout: timeout)
-           end,
-           timeout: timeout
-         ) do
+    # The txn no longer carries session state (`SET LOCAL
+    # pg_trgm.similarity_threshold` is gone with the `%` operator it configured;
+    # `<->` is not threshold-gated). It stays because it is what carries ONE
+    # budget over the connection checkout AND the scan, and what turns a
+    # pool-checkout death into `{:error, reason}` instead of an escaped exit.
+    case Repo.transaction(fn -> Repo.all(query, timeout: timeout) end, timeout: timeout) do
       {:ok, rows} ->
-        rows
+        kept =
+          rows
+          |> Enum.filter(&(&1.sim >= @candidate_trgm_floor))
+          |> collapse_twins()
+
+        {:knn, limit, kept}
 
       # A rolled-back txn is a DEGRADED scan, not an empty corpus. Raising here
       # routes it into the `rescue` in `fetch_candidates/2`, which is what turns
@@ -552,11 +983,11 @@ defmodule Barkpark.Tasks.Dedup do
   rescue
     # FRESH-INSTALL FALLBACK, and ONLY this error. `pg_trgm` is optional —
     # `Application.check_pg_trgm/0` warns rather than crashes when it is absent,
-    # so a legitimate Barkpark can be running without the `%` operator or
-    # `similarity()`. On such a box every statement here fails with SQLSTATE
-    # 42883, and without this clause that would turn into `{:degraded, …}` and
-    # REFUSE every single task create — a fresh install unable to file its first
-    # task, caused by a performance fix.
+    # so a legitimate Barkpark can be running without the `<->` operator. On such
+    # a box every statement here fails with SQLSTATE 42883, and without this
+    # clause that would turn into `{:degraded, …}` and REFUSE every single task
+    # create — a fresh install unable to file its first task, caused by a
+    # performance fix.
     #
     # The fallback is narrow on purpose. It matches the missing-function code and
     # nothing else, so a timeout, a pool death or any other Postgres error still
@@ -567,16 +998,51 @@ defmodule Barkpark.Tasks.Dedup do
       if trgm_unavailable?(e) do
         Logger.warning(
           "Tasks.Dedup: pg_trgm is unavailable, falling back to the UNFILTERED backlog " <>
-            "scan. Detection is unaffected; the scan is slow and the candidate cap is " <>
-            "alphabetical again. Run `CREATE EXTENSION IF NOT EXISTS pg_trgm;` to restore " <>
-            "the pre-filter."
+            "scan. The scan is slow, its candidate cap is ALPHABETICAL again (DISTINCT ON " <>
+            "canonical doc_id ASCENDING), and detection is therefore NOT unaffected: rows " <>
+            "sorting after the first #{elem(limits, 1)} canonical ids are invisible to this " <>
+            "check, including every `task-*` id if the corpus is larger than that. Run " <>
+            "`CREATE EXTENSION IF NOT EXISTS pg_trgm;` to restore the pre-filter."
         )
 
-        fetch_rows(dataset, workspace_id, project_id, timeout, limit, "")
+        # The rescue re-enters through the unfiltered clause, which applies the
+        # UNFILTERED cap — it must not inherit `limit`, which is sized for an
+        # ordering this shape does not have.
+        fetch_rows(dataset, workspace_id, project_id, timeout, limits, "")
       else
         reraise e, __STACKTRACE__
       end
   end
+
+  # THE TWIN COLLAPSE MOVED OUT OF SQL, NOT OUT OF EXISTENCE. `DISTINCT ON` on
+  # the canonical (drafts-stripped) id used to fold a draft/published pair to one
+  # row, preferring the published one; it cannot coexist with the KNN `ORDER BY`
+  # (see above). This is the same rule over the bounded rows: one row per
+  # canonical id, published beating `drafts.`, input order preserved (which is
+  # KNN order, i.e. descending similarity).
+  #
+  # Twins carry the SAME title, so they carry the same `<->` distance and sit
+  # adjacent in the scan — the only cost of collapsing late is that a twin pair
+  # occupies two of the @candidate_limit slots instead of one. Detection is
+  # unchanged: both rows normalize to the same id and score identically, so the
+  # extra row only ever bought a duplicate entry in `similar`.
+  defp collapse_twins(rows) do
+    winners =
+      rows
+      |> Enum.group_by(&canonical_doc_id(&1.doc_id))
+      |> Map.new(fn {canon, group} -> {canon, Enum.min_by(group, &draft_rank/1).doc_id} end)
+
+    Enum.filter(rows, fn row ->
+      Map.get(winners, canonical_doc_id(row.doc_id)) == row.doc_id
+    end)
+  end
+
+  defp canonical_doc_id(doc_id), do: String.replace_prefix(doc_id, "drafts.", "")
+
+  # `false` sorted before `true` in the old SQL `ORDER BY ? LIKE 'drafts.%'`;
+  # 0 sorts before 1 here. Same preference: the PUBLISHED row of a twin wins.
+  defp draft_rank(%{doc_id: doc_id}),
+    do: if(String.starts_with?(doc_id, "drafts."), do: 1, else: 0)
 
   defp trgm_unavailable?(%Postgrex.Error{postgres: %{code: code}}),
     do: code in [:undefined_function, :undefined_object, :undefined_table]
@@ -592,10 +1058,6 @@ defmodule Barkpark.Tasks.Dedup do
       # (acceptance criterion 4). Done tasks stay in — a match against a done
       # task is a real "already landed" signal.
       where: fragment("COALESCE(?->>'lifecycle_status', '')", d.content) != "cancelled",
-      distinct: [asc: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)],
-      # Second key: `false` sorts before `true`, so the PUBLISHED row of a twin
-      # pair wins the DISTINCT ON.
-      order_by: [asc: fragment("? LIKE 'drafts.%'", d.doc_id)],
       select: %{
         doc_id: d.doc_id,
         title: d.title,
@@ -609,48 +1071,79 @@ defmodule Barkpark.Tasks.Dedup do
     |> Scope.scope_to_workspace(workspace_id, project_id)
   end
 
-  # `? % ?` (not `similarity(?, ?) > x`) is the form that CAN use the GIN
-  # `documents_title_trgm_idx`; the `similarity()` form can only seq-scan. Said
-  # honestly, though: at this table size the planner still picks a seq scan, and
-  # measured on the real corpus the pre-filtered query is not cheaper than the
-  # unfiltered one — both make one pass over the same rows. THE SQL IS NOT WHERE
-  # THE WIN IS, and this comment used to imply otherwise.
+  # THE SHAPE IS THE BOUND. `ORDER BY title <-> $1 LIMIT N` is the only form a
+  # `gist_trgm_ops` index can answer as an ORDERED index scan, and an ordered
+  # index scan is what makes the LIMIT stop the SCAN rather than trim its
+  # output. `<->` is `1 - similarity`, so ascending distance IS descending
+  # similarity — same ranking as the `ORDER BY similarity(...) DESC` it
+  # replaces, with the sort input capped at N instead of growing with the
+  # corpus.
   #
-  # The win is that the scorer's input shrinks. `Similarity.assess/3` is linear in
-  # the candidate count and unbounded by any timeout: 6,217 ms at 5,000 rows,
-  # 89 ms at 500. Bounding what reaches it is the whole fix; the operator choice
-  # only keeps the index reachable for when the corpus makes it worth planning.
-  # The score is also SELECTed so the outer query can rank by it without
-  # recomputing.
-  defp trgm_filtered(query, probe_title) do
+  # DO NOT add a second `order_by` key and do not put `similarity()` back: either
+  # edit makes the ordered path unreachable, and the planner falls back to a full
+  # scan plus a top-N heapsort with no error to notice. `sim` is SELECTed off the
+  # same `<->` the index just computed (free) so `@candidate_trgm_floor` can be
+  # applied to the bounded rows in Elixir.
+  #
+  # Said honestly about the WIN: the scorer's input shrinking is still the bigger
+  # half. `Similarity.assess/3` is linear in the candidate count and unbounded by
+  # any timeout — 6,217 ms at 5,000 rows, 89 ms at 500. This shape is what stops
+  # the QUERY half from growing into the same problem as the corpus does.
+  defp knn_ordered(query, probe_title, limit) do
     from([doc: d] in query,
-      where: fragment("? % ?", d.title, ^probe_title),
-      select_merge: %{sim: fragment("similarity(?, ?)", d.title, ^probe_title)}
+      order_by: [asc: fragment("? <-> ?", d.title, ^probe_title)],
+      select_merge: %{sim: fragment("1 - (? <-> ?)", d.title, ^probe_title)},
+      limit: ^limit
+    )
+  end
+
+  # The draft/published twin collapse, as SQL. Used ONLY by the blank-probe
+  # fallback, which has no `<->` ordering to protect.
+  defp twin_collapsed(query) do
+    from([doc: d] in query,
+      distinct: [asc: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)],
+      # Second key: `false` sorts before `true`, so the PUBLISHED row of a twin
+      # pair wins the DISTINCT ON.
+      order_by: [asc: fragment("? LIKE 'drafts.%'", d.doc_id)]
     )
   end
 
   defp limited(query, limit), do: from(d in query, limit: ^(limit + @candidate_probe))
 
-  defp report_scan(false, _returned, _limit, _dataset), do: :ok
+  defp report_scan(false, _returned, _limit, _dataset, _shape), do: :ok
 
-  defp report_scan(true, returned, limit, dataset) do
+  defp report_scan(true, returned, limit, dataset, shape) do
     Logger.warning(
       "Tasks.Dedup scan TRUNCATED: returned #{returned} of a larger candidate set at " <>
         "limit #{limit} (dataset=#{inspect(dataset)}). The duplicate check ran over a " <>
         "PARTIAL candidate set — an :ok from this scan means 'no duplicate among the " <>
-        "#{returned} rows scanned', not 'no duplicate'. This now means something " <>
-        "DIFFERENT and much rarer than it used to: the rows kept are the #{limit} MOST " <>
-        "TITLE-SIMILAR, not the alphabetically-first, so a bind here says the new title " <>
-        "trigram-matches more than #{limit} existing tasks — a generic title, or a " <>
-        "corpus that has outgrown the floor. Tighten @candidate_trgm_floor before you " <>
-        "raise the limit."
+        "#{returned} rows scanned', not 'no duplicate'. " <> truncation_shape_note(shape, limit)
     )
 
     :telemetry.execute(
       [:barkpark, :tasks, :dedup, :scan_truncated],
       %{returned: returned, limit: limit},
-      %{dataset: dataset}
+      %{dataset: dataset, shape: shape}
     )
+  end
+
+  # THE SAME BIND MEANS TWO DIFFERENT THINGS, so it must not be reported in one
+  # sentence. On the KNN path a bind is rare and benign-ish; on the unfiltered
+  # fallback it is the alphabetic blind spot, and saying "the MOST TITLE-SIMILAR"
+  # there would be the module vouching for a property that branch does not have.
+  defp truncation_shape_note(:knn, limit) do
+    "This now means something DIFFERENT and much rarer than it used to: the rows kept " <>
+      "are the #{limit} MOST TITLE-SIMILAR, not the alphabetically-first, so a bind here " <>
+      "says the new title trigram-matches more than #{limit} existing tasks — a generic " <>
+      "title, or a corpus that has outgrown the floor. Tighten @candidate_trgm_floor " <>
+      "before you raise the limit."
+  end
+
+  defp truncation_shape_note(:unfiltered, limit) do
+    "This is the UNFILTERED fallback (blank probe title, or pg_trgm missing), which has " <>
+      "no similarity ordering at all: the rows kept are the ALPHABETICALLY-FIRST #{limit} " <>
+      "canonical ids, so every id sorting after them was never compared. Restore pg_trgm " <>
+      "(or a non-blank probe title) rather than raising this limit."
   end
 
   defp scan_report(truncated?, returned, limit) do
@@ -664,6 +1157,62 @@ defmodule Barkpark.Tasks.Dedup do
     do: "the backlog scan failed (#{inspect(mod)})"
 
   defp reason_phrase(_, _timeout), do: "the backlog scan failed"
+
+  # ── DEFECT vs OUTAGE: one list, two modules, and a test that locks them ──────
+  #
+  # This list is a VERBATIM MIRROR of `Barkpark.Content.DedupWall`'s
+  # `@code_error_modules`. It is duplicated rather than shared because the wall
+  # lives in the kernel (`Barkpark.Content`) and this module must not reach into
+  # a sibling's private classifier; the lock against drift is mechanical, not a
+  # comment: `api/test/barkpark/tasks/dedup_defect_classification_test.exs`
+  # reads BOTH modules' source, evaluates both lists, and reds the moment they
+  # differ by a single module.
+  @code_error_modules [
+    ArgumentError,
+    ArithmeticError,
+    BadArityError,
+    BadBooleanError,
+    BadFunctionError,
+    BadMapError,
+    BadStructError,
+    CaseClauseError,
+    CondClauseError,
+    FunctionClauseError,
+    KeyError,
+    MatchError,
+    Protocol.UndefinedError,
+    TryClauseError,
+    UndefinedFunctionError,
+    WithClauseError
+  ]
+
+  defp code_error?(%{__struct__: mod}), do: mod in @code_error_modules
+  defp code_error?(_), do: false
+
+  # Same fail-CLOSED verdict as an outage, DIFFERENT clothes:
+  #
+  #   * `Logger.error`, not `.warning` — an outage is watched, a defect is
+  #     paged. The `DEFECT` prefix is the string an alert can key on; the infra
+  #     arms keep `degraded:` and stay at warning.
+  #   * `[:barkpark, :tasks, :dedup, :defect]` telemetry carrying the exception
+  #     module, for anyone who alerts on events rather than log lines. The
+  #     namespace is this module's own (`[:barkpark, :tasks, :dedup, :scan]`
+  #     already ships from `report_scanned/5`), not the wall's `:dedup_wall`.
+  #   * a `{:defect, phrase}` reason, so `degraded_message/1` renders the
+  #     message that does NOT offer `content.dedup_bypass`.
+  defp defect_reason(where, %{__struct__: mod} = e) do
+    Logger.error(
+      "Tasks.Dedup DEFECT (not an outage): #{where} with a code error " <>
+        "in Barkpark, #{inspect(e)}"
+    )
+
+    :telemetry.execute([:barkpark, :tasks, :dedup, :defect], %{count: 1}, %{
+      exception: mod,
+      where: where
+    })
+
+    {:defect, "the backlog scan could not run because of a bug in Barkpark (#{inspect(mod)})"}
+  end
 
   defp maybe_filter_dataset(query, nil), do: query
 

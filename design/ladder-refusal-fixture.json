@@ -1,0 +1,62 @@
+{
+  "_note": "THE ONE FIXTURE OF MALFORMED LADDER FAMILIES. Every implementation of the type-ladder derivation is driven against THESE cases and no others, so the four ways a ladder can go blind are stated once. Read design/ladder-refusal-conformance.test.mjs for the roster, the drivers and why the three implementations are NOT shared.",
+  "_contract": "A malformed family must REFUSE — throw, or return an { err } carrying the sentinel, or exit non-zero naming it. Returning [] or a partial list is the defect: every downstream ladder assertion then passes vacuously.",
+  "sentinel": "REFUSING TO MEASURE",
+  "implementations": [
+    {
+      "id": "emit",
+      "file": "design/emit.mjs",
+      "symbol": "typeLadderFrom",
+      "direction": "descending",
+      "refuses_by": "throw",
+      "added_by": "PR #18275",
+      "driven_by": "design/ladder-refusal-conformance.test.mjs (in-process import)"
+    },
+    {
+      "id": "validate",
+      "file": "design/validate.mjs",
+      "symbol": "chromeLadderAscending",
+      "direction": "ascending",
+      "refuses_by": "return { err }, collected into the numbered problem report, non-zero exit",
+      "added_by": "PR #18322",
+      "driven_by": "design/ladder-refusal-conformance.test.mjs (real CLI, throwaway copy of design/)"
+    },
+    {
+      "id": "web",
+      "file": "web/__tests__/type-ladder-emitted.test.ts",
+      "symbol": "ladderFrom",
+      "direction": "descending",
+      "refuses_by": "throw",
+      "added_by": "PR #18142",
+      "driven_by": "web/__tests__/type-ladder-emitted.test.ts itself — the doc-gates design job runs Node 20, which cannot execute TypeScript, so the web arm is driven where TypeScript already runs. Same fixture, different runner."
+    }
+  ],
+  "cases": [
+    {
+      "id": "missing-family",
+      "kind": "omit",
+      "why": "type.chrome absent entirely — the derivation has nothing to read and must not hand back []"
+    },
+    {
+      "id": "non-object-family",
+      "kind": "value",
+      "family": 7,
+      "why": "type.chrome is a scalar — Object.entries(7) is [] and every assertion downstream passes vacuously"
+    },
+    {
+      "id": "zero-rung-family",
+      "kind": "value",
+      "family": { "_note": "prose only, no rungs" },
+      "why": "an object with no entry carrying a finite positive size — the ladder derives to nothing"
+    },
+    {
+      "id": "tied-size-family",
+      "kind": "value",
+      "family": {
+        "a": { "size": 12, "lineHeight": 1.4, "weight": 400 },
+        "b": { "size": 12, "lineHeight": 1.4, "weight": 400 }
+      },
+      "why": "two rungs of the same size do not name ONE order, so neither 'largest to smallest' nor its reverse is defined"
+    }
+  ]
+}

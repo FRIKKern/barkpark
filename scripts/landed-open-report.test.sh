@@ -124,6 +124,28 @@ mutate_must_red "met-boolean" py \
   '        if c.get("met") is True:' \
   '        if c.get("met") is not None:'
 
+# 9. THE NO-OVERLAP FLAG (task-c3c9922e7d8e3815). Disarm it and the #15403
+#    shape — a Dockerfile-only unblocker that named a Studio row — goes back to
+#    reading exactly like a row whose work shipped.
+mutate_must_red "no-overlap-flag" py \
+  '        if overlap == "none":' \
+  '        if False:'
+
+# 10. THE MARKER STRING ITSELF. It is a CONSTANT shared with
+#     scripts/landed-mark.sh; a reworded marker silently stops flagging, which
+#     is indistinguishable from a ledger with no such landings in it.
+mutate_must_red "no-overlap-marker" py \
+  'NO_OVERLAP_MARK = "[no overlap with the paths this row names]"' \
+  'NO_OVERLAP_MARK = "[a phrase landed-mark never writes]"'
+
+# 11. THE ABSENT-VERDICT ARM. `?` must not collapse into "yes": every row
+#     marked before paths were recorded would then read as a verified overlap.
+mutate_must_red "no-overlap-absent-verdict" py \
+  '    if not mine:
+        return "?"' \
+  '    if not mine:
+        return "none"'
+
 echo
 if [ "$FAIL" -eq 0 ]; then
   echo "landed-open-report.test.sh: $PASS/$PASS mutations caught — every assertion is load-bearing"

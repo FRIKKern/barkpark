@@ -70,7 +70,8 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     // scaffy:add-block-type ApiEndpoint MARK:typekeyed-corpus-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:typekeyed-corpus-code-tabs
     // scaffy:add-block-type Tabs MARK:typekeyed-corpus-tabs
-    expect(cases.length).toBe(64)
+    // docgates-s27: 64 -> 65 (pre-gate-badge golden seeded).
+    expect(cases.length).toBe(65)
   })
 
   it('every golden type is partitioned into EXACTLY ONE of PROSE / TEXTLESS', () => {
@@ -95,7 +96,7 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     }
   })
 
-  it('the partition is 27 prose + 37 textless = 64', () => {
+  it('the partition is 27 prose + 38 textless = 65', () => {
     // grown (pbw-stier-equation): tex source is reading content, the `code` precedent
     // grown (pbw-stier-tabs): each tab's label + nested blocks' prose, the `steps` precedent
     // grown (jarl-dogfood): expandable's summary + nested blocks are reading prose
@@ -109,7 +110,8 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     // scaffy:add-block-type Video MARK:typekeyed-textless-video
     // scaffy:add-block-type ApiEndpoint MARK:typekeyed-textless-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:typekeyed-textless-code-tabs
-    expect(Object.keys(TEXTLESS_SKIP).length).toBe(37)
+    // docgates-s27: +pre-gate-badge (reader chrome, never authored prose).
+    expect(Object.keys(TEXTLESS_SKIP).length).toBe(38)
     expect(Object.keys(PROSE_GOLDEN).length + Object.keys(TEXTLESS_SKIP).length).toBe(cases.length)
   })
 

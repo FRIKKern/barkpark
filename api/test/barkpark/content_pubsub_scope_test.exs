@@ -2,12 +2,13 @@ defmodule Barkpark.ContentPubsubScopeTest do
   @moduledoc """
   w1-s7: realtime PubSub carries additive workspace/project context.
 
-  LOCKED #10 — the broadcast is ADDITIVE: the existing `documents:<dataset>`
-  topic keeps firing for live subscribers, and the message body now also
-  carries `workspace_id` / `project_id` so the nextjs revalidate consumer
-  (sibling s15) and workspace-scoped subscribers can filter. A NEW
-  workspace-scoped topic `documents:ws:<ws_id>:<dataset>` is added without
-  touching the original.
+  LOCKED #10 (as amended by task-b7e81f26e959106c): the message body carries
+  `workspace_id` / `project_id` so the nextjs revalidate consumer (sibling s15)
+  and workspace-scoped subscribers can filter. A workspace-owned document is
+  announced on `documents:ws:<ws_id>:<dataset>` ALONE; the bare
+  `documents:<dataset>` topic is the shared layer's (nil-workspace) and hears
+  nothing about a tenant's document — `content_pubsub_global_topic_leak_test`
+  pins that half.
   """
   use Barkpark.DataCase, async: false
 
@@ -27,10 +28,12 @@ defmodule Barkpark.ContentPubsubScopeTest do
     %{ws: ws, project: project}
   end
 
-  test "existing documents:<dataset> topic still fires AND carries workspace/project context",
+  test "the workspace-keyed topic fires AND carries workspace/project context",
        %{ws: ws, project: project} do
-    # The original topic must keep working for live subscribers (no rename).
-    Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+    # A workspace-owned document's ONLY document-list announcement. (The bare
+    # `documents:<dataset>` topic is silent for it — ruling (b) on
+    # task-b7e81f26e959106c.)
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:ws:#{ws.id}:#{@dataset}")
 
     {:ok, doc} =
       Content.create_document(
@@ -72,18 +75,18 @@ defmodule Barkpark.ContentPubsubScopeTest do
     assert msg.project_id == project.id
   end
 
-  test "unscoped write still broadcasts on documents:<dataset>, carrying the Default scope" do
+  test "unscoped write broadcasts on the DEFAULT workspace's keyed topic, carrying that scope" do
     # A write with NO scope opts now lands in the seeded Default Workspace /
     # Default Project (the backfill migration seeds them into every db,
-    # including test sandboxes) — see Content.put_scope_attrs. The broadcast
-    # carries that Default scope, not nil.
-    Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+    # including test sandboxes) — see Content.put_scope_attrs. It is therefore
+    # a WORKSPACE-OWNED document: announced on the Default workspace's keyed
+    # topic, never on the bare `documents:<dataset>` topic.
+    default_ws = Tenancy.get_default_workspace()
+    default_project = Tenancy.get_default_project()
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:ws:#{default_ws.id}:#{@dataset}")
 
     {:ok, _doc} =
       Content.create_document("widget", %{"_id" => "ps-unscoped", "title" => "t"}, @dataset)
-
-    default_ws = Tenancy.get_default_workspace()
-    default_project = Tenancy.get_default_project()
 
     assert_receive {:document_changed, msg}, 1_000
     assert msg.workspace_id == default_ws.id

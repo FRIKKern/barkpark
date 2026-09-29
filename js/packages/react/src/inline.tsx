@@ -93,6 +93,57 @@ export function textLeafValue(n: Record<string, unknown>): string {
   return str(n.value) || str(n.text)
 }
 
+/* ── THE code-block source-field contract (task-e9af9f95d290307d) ─────────────
+ *
+ * A standalone `code` block carries its source under one of FOUR keys. This is
+ * not a design, it is the corpus: measured over all 1050 `paper` + 8671 `task`
+ * documents on guerrilla.barkpark.cloud (10,608 block-level `code` nodes) —
+ * `value` 9711, `text` 460, `code` 327, `content` 30, and ZERO rows carrying two
+ * non-blank source keys.
+ *
+ * This SDK is the THIRD reader of that contract. Until this helper existed both
+ * JS readers (`blocks/core.ts` `code`, `toPlainText.ts` `case 'code'`) read
+ * `value` ONLY, so the 817 non-`value` blocks rendered hollow here exactly as
+ * they did on the web before compose.ex was fixed — while the Go TUI showed 327
+ * of them. The twins are `api/lib/barkpark/portable_doc/render/compose.ex`
+ * `code_source/1` and `internal/pdrender/code.go` `codeSource`, and all three
+ * answer to ONE fixture: `api/test/support/fixtures/code-source-aliases.json`
+ * (read here by `tests/code-source-aliases.parity.test.ts`).
+ *
+ * PRECEDENCE is FIRST NON-BLANK, not first-present: a leading key holding "" or
+ * whitespace falls through, so the Studio's seeded `value: ""` on every new code
+ * block cannot mask a real `code`. `value` leads because it is the canonical
+ * field and because bpml/printer.ex has printed exactly this order since it was
+ * written. `content` is an array of inline nodes and flattens to its text.
+ * Anything non-stringish coerces to '' through `str` and falls through.
+ *
+ * The winning key is returned VERBATIM (untrimmed): trimming is the SELECTION
+ * rule, never a transform on the source — a `<pre>` shows leading indentation
+ * and trailing newlines exactly as authored, so every `value`-shaped block
+ * renders byte-identically to before. */
+export const CODE_SOURCE_KEYS = ['value', 'code', 'content', 'text'] as const
+
+export function codeSource(b: Record<string, unknown> | null | undefined): string {
+  if (!isMap(b)) return ''
+  for (const key of CODE_SOURCE_KEYS) {
+    const source = codeSourceText(b[key])
+    if (source.trim() !== '') return source
+  }
+  return ''
+}
+
+/** ONE source key read as text: a stringish leaf through `str`, or an
+ * inline-node ARRAY (the `content` shape) flattened to its concatenated text.
+ * Twins: compose.ex `code_source_text/1`, code.go `codeSourceText`. */
+function codeSourceText(v: unknown): string {
+  if (Array.isArray(v)) {
+    return v
+      .map((n) => (typeof n === 'string' ? n : isMap(n) ? textLeafValue(n) : ''))
+      .join('')
+  }
+  return str(v)
+}
+
 /** Positive finite number from a number or numeric string, else undefined. */
 export function num(v: unknown): number | undefined {
   if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? v : undefined
@@ -122,98 +173,46 @@ export function isMap(v: unknown): v is Record<string, unknown> {
 
 /* ── the status ladder (white ladder) — D15 ───────────────────────────────────
  *
- * HAND-COPIED from design/status-manifest.json (the ONE source of truth). The
- * Elixir side (Render.StatusVocab) inlines the manifest at compile time so it
- * cannot drift; this JS copy CAN. DRIFT RISK: if a role/glyph/label/meaning is
- * added or changed in design/status-manifest.json, update this table in lockstep.
- * A later wave wires a manifest→JS generator + drift guard (charter D15 backlog
- * child); until then this comment IS the guard. `scripts/status-manifest-check.sh`
- * gates the Elixir/CSS surfaces against the manifest — extend it to this file. */
+ * GENERATED from design/status-manifest.json by design/emit.mjs (see
+ * ./status-vocab.gen). Until tlv-bl-js-vocab-generator this table was typed by
+ * HAND here; a comment, then scripts/status-manifest-check.sh Part 5's
+ * byte-check, stood in for generation. Both are retired: the manifest roles, the
+ * status→role map and the default role now come from the generated module, so a
+ * manifest edit re-emits them and drift is impossible rather than merely
+ * detected. `node design/emit.mjs --write` regenerates; design/check.mjs Part A
+ * reds if the generated file is hand-edited.
+ *
+ * What is still authored HERE, on purpose: the fail-open `unknown` sentinel
+ * (D11). It is JS-only, never a lifecycle state, and appears in no manifest. */
 
-export interface StatusRole {
-  role: string
-  glyph: string
-  spinner: boolean
-  label: string
-  meaning: string
+export type { StatusRole } from './status-vocab.gen'
+import type { StatusRole } from './status-vocab.gen'
+import {
+  MANIFEST_DEFAULT_ROLE,
+  MANIFEST_STATUS_ROLES,
+  MANIFEST_STATUS_TO_ROLE,
+} from './status-vocab.gen'
+
+/** The fail-open sentinel (D11): an UNRECOGNIZED non-empty status renders here —
+ * a dim neutral glyph, never masquerading as the bright `open` circle. Absent/
+ * empty status still defaults to `open` (see roleOf). JS-only: the manifest has
+ * no such state, so this row is authored, not generated. */
+const UNKNOWN_STATUS_ROLE: StatusRole = {
+  role: 'unknown',
+  glyph: '◦', // U+25E6 white bullet — dim neutral, distinct from open's ○
+  spinner: false,
+  label: 'unknown',
+  meaning: 'unrecognized status — shown dim until the vocabulary catches up',
 }
 
-export const STATUS_ROLES: StatusRole[] = [
-  { role: 'open', glyph: '○', spinner: false, label: 'open', meaning: 'backlog — not ready yet' },
-  {
-    role: 'ready',
-    glyph: '○',
-    spinner: false,
-    label: 'ready',
-    meaning: 'unchecked — claim it now',
-  },
-  {
-    role: 'progress',
-    glyph: '',
-    spinner: true,
-    label: 'in progress',
-    meaning: 'being worked right now',
-  },
-  {
-    role: 'blocked',
-    glyph: '!',
-    spinner: false,
-    label: 'blocked',
-    meaning: 'something is required first',
-  },
-  { role: 'done', glyph: '✓', spinner: false, label: 'done', meaning: 'complete' },
-  {
-    role: 'cancel',
-    glyph: '✕',
-    spinner: false,
-    label: 'cancelled',
-    meaning: 'abandoned or superseded',
-  },
-  // ── thought states (task-lifecycle-visibility): a task is contemplated before
-  // it is ever ready. Dim, glyph-only, at the tail of the ladder. `considering` =
-  // a candidate the strategizer named; `researching` = under investigation.
-  {
-    role: 'considering',
-    glyph: '◌', // U+25CC dotted circle — a candidate, not yet committed
-    spinner: false,
-    label: 'considering',
-    meaning: 'a candidate being weighed',
-  },
-  {
-    role: 'researching',
-    glyph: '◎', // U+25CE bullseye — under investigation before it is ready
-    spinner: false,
-    label: 'researching',
-    meaning: 'under active investigation',
-  },
-  // ── fail-open sentinel (D11): an UNRECOGNIZED non-empty status renders here —
-  // a dim neutral glyph, never masquerading as the bright `open` circle. Absent/
-  // empty status still defaults to `open` (see roleOf).
-  {
-    role: 'unknown',
-    glyph: '◦', // U+25E6 white bullet — dim neutral, distinct from open's ○
-    spinner: false,
-    label: 'unknown',
-    meaning: 'unrecognized status — shown dim until the vocabulary catches up',
-  },
-]
+export const STATUS_ROLES: StatusRole[] = [...MANIFEST_STATUS_ROLES, UNKNOWN_STATUS_ROLE]
 
-const STATUS_TO_ROLE: Record<string, string> = {
-  open: 'open',
-  ready: 'ready',
-  in_progress: 'progress',
-  blocked: 'blocked',
-  done: 'done',
-  closed: 'done',
-  cancelled: 'cancel',
-  considering: 'considering',
-  researching: 'researching',
-}
+const STATUS_TO_ROLE: Record<string, string> = MANIFEST_STATUS_TO_ROLE
 
-const DEFAULT_ROLE = 'open'
+const DEFAULT_ROLE = MANIFEST_DEFAULT_ROLE
 // The fail-open role for an unrecognized NON-EMPTY status (D11). Absent/empty
 // stays on DEFAULT_ROLE so nothing about today's blank-status rows changes.
-const UNKNOWN_ROLE = 'unknown'
+const UNKNOWN_ROLE = UNKNOWN_STATUS_ROLE.role
 const ROLE_BY_NAME: Record<string, StatusRole> = Object.fromEntries(
   STATUS_ROLES.map((r) => [r.role, r]),
 )
@@ -421,12 +420,85 @@ function valuerefHtml(v: {
 /** The concatenated, UNESCAPED text of an inline-node tree — no markup. Used by
  * text-leaf emitters (inline code) that must fold nested `children` into a flat
  * string rather than nested elements. */
-function inlineText(nodes: unknown): string {
+export function inlineText(nodes: unknown): string {
   if (typeof nodes === 'string' || typeof nodes === 'number') return String(nodes)
   if (!Array.isArray(nodes)) return ''
   return nodes
     .map((n) => (isMap(n) ? textLeafValue(n) || inlineText(n.children) : inlineText(n)))
     .join('')
+}
+
+/* ── THE INLINE `code` node source contract (task-e4833f198e293ed1) ───────────
+ *
+ * An inline code chip's body is a FLAT STRING, never inlines — but 66 published
+ * paragraphs (2026-07-25 census) author it as `children` inline nodes with no
+ * `value`, which rendered an empty `<code></code>` here and composed an empty
+ * PdInlineCode in Elixir. THE LAW: `value` when it is a non-empty string, else
+ * the flattened plain text of `children`.
+ *
+ * FIRST NON-EMPTY, not first-non-blank — a `value` of `' '` WINS and keeps its
+ * space. That is deliberately the OPPOSITE of the BLOCK-level `code` contract
+ * (`codeSource` above, which trims to select among value|code|content|text): a
+ * block's source key is a choice among aliases, an inline chip's `value` is the
+ * authored body verbatim.
+ *
+ * Twins: `Render.Inline.inline_code_source/1`
+ * (api/lib/barkpark/portable_doc/render/inline.ex) and `inlineCodeSource`
+ * (internal/pdrender/inline.go). All three answer to ONE fixture,
+ * `api/test/support/fixtures/inline-code-source.json`, read here by
+ * `tests/inline-code-source.parity.test.ts`. */
+export function inlineCodeSource(node: Record<string, unknown>): string {
+  return str(node.value) || inlineText(node.children)
+}
+
+/* ── THE BLOCK-WRAPPER-IN-AN-INLINE-ARRAY law (task-3fd604e7c89d6150) ─────────
+ *
+ * A BLOCK-level node sitting inside an INLINE array —
+ * `{"type":"paragraph","content":[…]}` or `{"type":"list-item","content":[…]}`
+ * — carries its text ONE LEVEL DEEPER than this walk looks: `renderInline`
+ * dispatches on `children` throughout, so such a node falls to the unknown-type
+ * arm, finds no children and emits ''. Measured 2026-09-02 on the live corpus:
+ * 75 list items across 4 published papers render as an empty bullet with their
+ * prose intact in storage. Measured HERE by running the shape through
+ * `renderInlines` on 825a432e9: both spellings returned ''.
+ *
+ * THE LAW, set by inline.ex `unwrap_block_wrappers/1` (PR #15701): before
+ * walking a RUN of inline nodes, replace any node carrying a NON-EMPTY LIST
+ * under `content` with that list. ONE level, never recursively — a wrapper with
+ * empty content keeps today's behaviour, and anything nesting deeper is a
+ * separate finding. Keyed on `content` rather than a type allowlist because no
+ * inline node type in this file reads `content` at all (inline nodes carry
+ * `value`, `text`, `children` and marks), so the key cannot shadow a legitimate
+ * inline node while it does catch a block wrapper this corpus has not produced
+ * yet.
+ *
+ * RUN WALK ONLY. `renderInlines` is the block-level run walker (the twin of
+ * `compose_inline_children/1` and `InlineRenderer.Inline`); a mark node's own
+ * children go through `renderInlineChildren`, which does NOT unwrap — the
+ * Elixir twin likewise maps `compose_inline/2` over `strong`/`em`/`link`
+ * children rather than routing them back through `compose_inline_children/1`.
+ *
+ * Twins: `Render.Inline.unwrap_block_wrappers/1`
+ * (api/lib/barkpark/portable_doc/render/inline.ex) and `unwrapBlockWrappers`
+ * (internal/pdrender/inline.go). All three answer to ONE fixture,
+ * `api/test/support/fixtures/inline-block-wrapper.json`, read here by
+ * `tests/inline-block-wrapper.parity.test.ts`. */
+export function unwrapBlockWrappers(nodes: unknown[]): unknown[] {
+  // Pre-scan so the overwhelmingly common wrapper-free run keeps its own array
+  // instead of allocating a copy on every inline run in the document.
+  if (!nodes.some(isBlockWrapper)) return nodes
+  const out: unknown[] = []
+  for (const n of nodes) {
+    if (isBlockWrapper(n)) out.push(...(n.content as unknown[]))
+    else out.push(n)
+  }
+  return out
+}
+
+/** A node is a block wrapper when it carries a NON-EMPTY list under `content` —
+ * the single predicate the unwrap is keyed on. */
+function isBlockWrapper(n: unknown): n is Record<string, unknown> {
+  return isMap(n) && Array.isArray(n.content) && n.content.length > 0
 }
 
 /** Render one inline node to an HTML string. */
@@ -455,16 +527,16 @@ export function renderInline(node: Inline): string {
     }
     case 'strong':
     case 'bold':
-      return `<span style="font-weight:bold">${renderInlines(node.children)}</span>`
+      return `<span style="font-weight:bold">${renderInlineChildren(node.children)}</span>`
     case 'em':
     case 'italic':
-      return `<span style="font-style:italic">${renderInlines(node.children)}</span>`
+      return `<span style="font-style:italic">${renderInlineChildren(node.children)}</span>`
     case 'underline':
-      return `<span style="text-decoration:underline">${renderInlines(node.children)}</span>`
+      return `<span style="text-decoration:underline">${renderInlineChildren(node.children)}</span>`
     case 'strike':
     case 's':
     case 'strikethrough':
-      return `<span style="text-decoration:line-through">${renderInlines(node.children)}</span>`
+      return `<span style="text-decoration:line-through">${renderInlineChildren(node.children)}</span>`
     case 'code':
       // Swept sibling of the block-level content[] defect, at inline level: an
       // inline code node authored with `children` inline nodes (rather than a
@@ -472,13 +544,13 @@ export function renderInline(node: Inline): string {
       // carry that shape. Inline code is a TEXT leaf — the children are folded
       // to their concatenated text, never to nested markup, so the emitted
       // `<code>` body stays escaped plain text exactly as the `value` path.
-      return `<code>${escapeHtml(str(node.value) || inlineText(node.children))}</code>`
+      return `<code>${escapeHtml(inlineCodeSource(node))}</code>`
     case 'link':
-      return `<a href="${safeUrl(str(node.href))}" style="${LINK_STYLE}">${renderInlines(node.children)}</a>`
+      return `<a href="${safeUrl(str(node.href))}" style="${LINK_STYLE}">${renderInlineChildren(node.children)}</a>`
     case 'wikilink': {
       const target = escapeHtml(str(node.target))
       const alias = str(node.alias)
-      const kids = renderInlines(node.children)
+      const kids = renderInlineChildren(node.children)
       const label =
         alias !== '' ? escapeHtml(alias) : kids !== '' ? kids : escapeHtml(str(node.target))
       return `<span data-wikilink="${target}" class="bp-wikilink bp-wikilink--unresolved">${label}</span>`
@@ -502,13 +574,30 @@ export function renderInline(node: Inline): string {
     default: {
       // Unknown inline → degrade to its children when present, else nothing.
       const kids = asList(node.children)
-      return kids.length ? renderInlines(kids) : ''
+      return kids.length ? renderInlineChildren(kids) : ''
     }
   }
 }
 
-/** Render an inline-node array (or a scalar cell) to an HTML string. */
+/** Render an inline-node RUN — a block's inline array, or a scalar cell — to an
+ * HTML string. This is the twin of `compose_inline_children/1` and
+ * `InlineRenderer.Inline`, and the ONE place the block-wrapper unwrap above
+ * applies. */
 export function renderInlines(nodes: unknown): string {
+  if (typeof nodes === 'string') return escapeHtml(nodes)
+  if (typeof nodes === 'number') return escapeHtml(String(nodes))
+  if (!Array.isArray(nodes)) return ''
+  return unwrapBlockWrappers(nodes)
+    .map((n) => renderInline(n as Inline))
+    .join('')
+}
+
+/** Render a MARK node's own children (strong/em/underline/strike/link/unknown).
+ * Identical to {@link renderInlines} except that it does NOT unwrap a block
+ * wrapper — the Elixir twin maps `compose_inline/2` over those children rather
+ * than routing them back through `compose_inline_children/1`, and this leg is
+ * bounded exactly as that one. */
+function renderInlineChildren(nodes: unknown): string {
   if (typeof nodes === 'string') return escapeHtml(nodes)
   if (typeof nodes === 'number') return escapeHtml(String(nodes))
   if (!Array.isArray(nodes)) return ''

@@ -21,8 +21,8 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"math"
-	"os"
 	"path/filepath"
 
 	"golang.org/x/image/font"
@@ -150,6 +150,13 @@ type contextPage struct {
 	Tokens int    `json:"tokens"`
 }
 
+// ctxPNGEncode is the page encoder, a package var so a test can make the write
+// FAIL mid-stream. There is no natural way to fail png.Encode against a real
+// file on a healthy disk, and the property under test — a failed write leaves
+// NO partial page in outdir — is exactly the one that cannot be observed
+// without an induced failure. Production always holds png.Encode.
+var ctxPNGEncode = png.Encode
+
 // renderContextBundle paginates body lines so each delivered page clears the
 // cap at the requested scale, renders and downscales each page, and writes
 // page_N.png files into outdir. Returns the page manifest.
@@ -174,15 +181,15 @@ func renderContextBundle(lines []string, scale float64, outdir string) ([]contex
 			return nil, fmt.Errorf("page %d is %dx%d, over the %dpx cap — refusing to emit a page the provider would re-downscale", pi+1, w, h, ctxImgLongEdgeCap)
 		}
 		name := fmt.Sprintf("page_%d.png", pi+1)
-		f, err := os.Create(filepath.Join(outdir, name))
-		if err != nil {
-			return nil, err
-		}
-		if err := png.Encode(f, img); err != nil {
-			f.Close()
-			return nil, err
-		}
-		if err := f.Close(); err != nil {
+		// atomicWriteStream, not os.Create: a bare Create truncates/creates the
+		// page BEFORE png.Encode writes its first byte, so an encode failure
+		// mid-bundle left a 0-byte or half-PNG page_N.png sitting in the
+		// caller's outdir looking like a delivered page. The shared seam
+		// (onramp_write.go) encodes into a same-directory temp and promotes by
+		// rename only on success — on failure outdir gains nothing at all.
+		if err := atomicWriteStream(filepath.Join(outdir, name), func(w io.Writer) error {
+			return ctxPNGEncode(w, img)
+		}); err != nil {
 			return nil, err
 		}
 		pages = append(pages, contextPage{Name: name, Width: w, Height: h, Tokens: imageTokensFor(w, h)})

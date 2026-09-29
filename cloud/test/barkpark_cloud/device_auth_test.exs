@@ -18,6 +18,7 @@ defmodule BarkparkCloud.DeviceAuthTest do
   alias BarkparkCloud.DeviceAuth.RateLimiter
   alias BarkparkCloud.DeviceAuth.Request
   alias BarkparkCloud.Repo
+  alias BarkparkCloud.RateLimitWindow
   alias BarkparkCloud.Web.Router
 
   @router_opts Router.init([])
@@ -261,30 +262,50 @@ defmodule BarkparkCloud.DeviceAuthTest do
 
   describe "RateLimiter.check/1" do
     test "poll allows 20/window then trips slow_down" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       key = "poll:#{:crypto.strong_rand_bytes(8) |> Base.encode16()}"
       for _ <- 1..20, do: assert(:ok = RateLimiter.check(key))
       assert {:error, :rate_limited} = RateLimiter.check(key)
     end
 
     test "start allows 10/window then trips" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       key = "start:1.2.3.4"
       for _ <- 1..10, do: assert(:ok = RateLimiter.check(key))
       assert {:error, :rate_limited} = RateLimiter.check(key)
     end
 
     test "approve allows 10/window then trips" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       key = "approve:#{Ecto.UUID.generate()}"
       for _ <- 1..10, do: assert(:ok = RateLimiter.check(key))
       assert {:error, :rate_limited} = RateLimiter.check(key)
     end
 
     test "distinct keys have independent budgets" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       for _ <- 1..10, do: RateLimiter.check("start:a")
       assert {:error, :rate_limited} = RateLimiter.check("start:a")
       assert :ok = RateLimiter.check("start:b")
     end
 
     test "an unknown prefix falls back to the default limit" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       for _ <- 1..10, do: assert(:ok = RateLimiter.check("mystery:x"))
       assert {:error, :rate_limited} = RateLimiter.check("mystery:x")
     end
@@ -403,6 +424,10 @@ defmodule BarkparkCloud.DeviceAuthTest do
 
   describe "HTTP: inspect shares the approve budget (no unmetered user_code oracle)" do
     test "the 11th inspect in a window is 429 rate_limited" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       user = user_fixture()
       {:ok, session} = Accounts.create_user_session_token(user)
       {:ok, %{user_code: uc}} = DeviceAuth.start(%{})
@@ -419,6 +444,10 @@ defmodule BarkparkCloud.DeviceAuthTest do
 
   describe "HTTP: poll rate limit → slow_down" do
     test "the 21st poll in a window is 429 slow_down" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       {:ok, %{device_code: dc}} = DeviceAuth.start(%{})
 
       for _ <- 1..20 do

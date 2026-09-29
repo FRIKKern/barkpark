@@ -75,6 +75,11 @@ defmodule BarkparkCloud.Sites.Deploy do
   # for "on the box, going live"), and only then `live`.
   @switch_stage "SWITCH"
 
+  # The stage that COPIES the bytes into the release dir. charter D188: it is
+  # where the box takes its first digest of the tree, against which SWITCH's
+  # independent re-reading is compared.
+  @stage_stage "STAGE"
+
   # The `code_rev` a box that has reported NEITHER a git commit NOR a version
   # falls back to. It is a constant, so it freezes that half of `build_id` — see
   # `code_rev_known?/1`, which exists so a scheduled caller can SEE that.
@@ -139,7 +144,7 @@ defmodule BarkparkCloud.Sites.Deploy do
   # INSIDE the shape the scrubber matches on and the secret walks out in
   # cleartext (with raw 0x1B bytes attached, which a console then interprets).
   # Strip first, then redact — the order is the fix (dr-w8-s2).
-  # dr-w23-bl: that composition IS `FailureCopy.raw/1` (`failure_copy.ex:548`),
+  # dr-w23-bl: that composition IS `FailureCopy.raw/1` (`failure_copy.ex`, `raw/1`),
   # so the boundary names the entry point rather than re-deriving the order.
   def stage_caption(_status, detail), do: FailureCopy.raw(detail)
 
@@ -746,7 +751,12 @@ defmodule BarkparkCloud.Sites.Deploy do
       # every recovery pass and nothing re-enqueued. It becomes a COUNTED
       # `deferred` row plus a re-fired debounce instead.
       {:ok, 409, body} ->
-        defer(ctx, deployment, box_refusal(409, body, :start))
+        # THE CODE TRAVELS AS DATA, BESIDE THE STRING
+        # (dr-w4-bl-deferral-raw-column-ambiguous). `box_refusal/3` renders the
+        # operator's sentence; `box_refusal_code/1` reads the box's `code` key
+        # off the SAME decoded envelope, before any string exists. Two values,
+        # one body, one call site — they cannot describe different refusals.
+        defer(ctx, deployment, box_refusal(409, body, :start), box_refusal_code(body))
 
       # THE POOL BLIP ON THE TRIGGER (deploy-truth W2). An UNTYPED 5xx is not the
       # box saying no — it is the door's own auth plug dying on a starved
@@ -760,6 +770,12 @@ defmodule BarkparkCloud.Sites.Deploy do
       # and stays terminal on the first answer.
       {:ok, status, body} when status >= 500 ->
         if retries_left > 0 and transient_refusal?(body) do
+          # THE RETRY IS A SAVE, AND A SAVE MUST BE COUNTED (dr-bl-w8). This arm
+          # recorded nothing, in any outcome: a retry that WORKED left the row
+          # indistinguishable from a deploy the box took first time, so the
+          # 3-retry budget charter D114 shows a one-literal rename can delete was
+          # worth exactly zero observable units.
+          record_grace(ctx, :start_retry, box_refusal(status, body, :start))
           Process.sleep(poll_ms())
           start_on_box(ctx, deployment, site, bp, read_token, retries_left - 1)
         else
@@ -835,6 +851,7 @@ defmodule BarkparkCloud.Sites.Deploy do
     |> maybe_put_target_port(site)
     |> maybe_put_template(site)
     |> maybe_put_theme(site)
+    |> maybe_put_forms_url(site, bp)
     |> maybe_put_artifact(deployment)
   end
 
@@ -879,6 +896,21 @@ defmodule BarkparkCloud.Sites.Deploy do
   defp maybe_put_theme(payload, %Site{theme: theme}) when is_binary(theme) do
     put_in(payload, [:env, :BARKPARK_THEME], theme)
   end
+
+  # task-71082f5541c13b53 (N-08): the template's form opt-in. The key rides the
+  # env ONLY when the owner turned forms on for this site (`forms_enabled`,
+  # written after the box accepted the `form_endpoint` write), so a site without
+  # forms deploys byte-identical to before. The value is the box's public intake
+  # URL for this site's binding (`Sites.Forms.endpoint_url/2`); the box engines
+  # allow-list BARKPARK_FORMS_URL (DeployRequest + BUILD_ALLOW).
+  defp maybe_put_forms_url(payload, %Site{forms_enabled: true} = site, %Barkpark{} = bp) do
+    case BarkparkCloud.Sites.Forms.endpoint_url(site, bp) do
+      url when is_binary(url) -> put_in(payload, [:env, :BARKPARK_FORMS_URL], url)
+      nil -> payload
+    end
+  end
+
+  defp maybe_put_forms_url(payload, _site, _bp), do: payload
 
   # site-spawner W7 (charter D63): the runtime target the box switches to, mapped
   # from `kind` — node sites boot a process, everything else swaps a symlink.
@@ -1061,9 +1093,80 @@ defmodule BarkparkCloud.Sites.Deploy do
   # the same reset rule `grace_left` follows, so an old blip never colours a
   # later, unrelated verdict.
   defp record_graced_refusal(ctx, caption) do
+    # The ctx tally below feeds the CAPTION and is cleared by the next reaching
+    # poll. The durable signal is emitted HERE, at the same instant, precisely
+    # because it must OUTLIVE that reset — see `record_grace/3`.
+    record_grace(ctx, :poll_refusal, caption)
+
     ctx
     |> Map.update(:graced_refusals, 1, &(&1 + 1))
     |> Map.put(:last_graced_refusal, caption)
+  end
+
+  # THE SAVE, MADE COUNTABLE (dr-bl-w8-graced-deploys-are-uncounted).
+  #
+  # Grace produces two populations: the deploys it could not save (which say so
+  # in `failure_reason`, via `with_graced_note/2`) and the deploys it DID save —
+  # which, until this call existed, said nothing anywhere. `forget_graced_refusals/1`
+  # is why: it `Map.drop`s the ctx tally on any poll that reached the box, which
+  # is the right rule for a caption and erases exactly the successes.
+  #
+  # Charter D114 is the cost of that silence. A one-literal rename of the box's
+  # wire vocabulary drops a code out of `transient_refusal?/1` and kills 3 start
+  # retries and 45 poll-grace beats per deploy; with no counter, the loss shows
+  # up only as a higher failure rate with NO LINE SAYING WHY.
+  #
+  # THREE SURFACES, the shape `Notifications.account_fleet_digest/2` established:
+  #
+  #   * a telemetry event, for anything attached in-process;
+  #   * a ROW IN POSTGRES (`Registry.record_deploy_grace/2`) — the only copy a
+  #     container recreate cannot take with it, and the only one that is
+  #     QUERYABLE rather than greppable. Read it back with
+  #     `Registry.deploy_grace_census/3`;
+  #   * one key=value line `grep site_deploy_grace` finds in the container log,
+  #     because that is what a human tailing a deploy actually reads.
+  #
+  # Each is wrapped: accounting is a side path on a build. It must never be able
+  # to break the deploy it is counting.
+  defp record_grace(ctx, kind, caption) do
+    slug =
+      case Map.get(ctx, :site) do
+        %Site{slug: slug} -> slug
+        _ -> nil
+      end
+
+    safely(fn ->
+      :telemetry.execute(
+        [:barkpark_cloud, :sites, :deploy, :grace],
+        %{count: 1},
+        %{kind: kind, deployment_id: ctx.id, site_slug: slug, caption: caption}
+      )
+    end)
+
+    safely(fn -> Registry.record_deploy_grace(ctx.id, kind) end)
+
+    safely(fn ->
+      Logger.warning(
+        "site_deploy_grace kind=#{kind} deployment=#{ctx.id} site=#{slug} caption=#{inspect(caption)}"
+      )
+    end)
+
+    :ok
+  end
+
+  # A side path that cannot take the build with it. Mirrors
+  # `Notifications.safely/1` — the accounting logs its own failure and returns.
+  defp safely(fun) do
+    fun.()
+    :ok
+  rescue
+    error ->
+      Logger.error("site deploy grace accounting failed: #{Exception.message(error)}")
+      :ok
+  catch
+    kind, reason ->
+      Logger.error("site deploy grace accounting #{kind}: #{inspect(reason)}")
+      :ok
   end
 
   defp forget_graced_refusals(ctx), do: Map.drop(ctx, [:graced_refusals, :last_graced_refusal])
@@ -1111,28 +1214,26 @@ defmodule BarkparkCloud.Sites.Deploy do
     attrs = %{
       stage: stage.name,
       detail: stage.detail || stage_line(stage),
-      # cch-w33-bl, NAMED CONSENT — this is the ONE console writer that does not
-      # go through `Registry.cap_console/1`; the other three do
-      # (`append_deployment_console/2`, `cancel_preview/2`, and the provision
-      # twin). The bound holds by ARITHMETIC, not by enforcement: `apply_stages/2`
-      # records a stage at most once per {name, status} pair (`recorded?/2`), and
-      # six stages over three terminal statuses ceilings this at eighteen entries
-      # against `@max_console_lines` 300.
+      # dwb-18 — the consent of cch-w33-bl is DISCHARGED. This writer used to be
+      # the ONE console writer that did not go through `Registry.cap_console/1`
+      # (the other three do: `append_deployment_console/2`, `cancel_preview/2`,
+      # and the provision twin), on the argument that the bound held by
+      # ARITHMETIC: `apply_stages/2` records a stage at most once per
+      # {name, status} pair (`recorded?/2`), so six stages over three terminal
+      # statuses ceilinged this at eighteen entries against a cap of 300.
       #
-      # Latent is not harmless. Nothing here would notice the cap being lowered,
-      # and if this writer ever appends onto a console another path already
-      # capped, the row silently exceeds the cap and loses `cap_console/1`'s
-      # `dropped_before` disclosure — a console that dropped its head would then
-      # be indistinguishable from a complete one, which is the exact defect class
-      # this epic exists to remove.
+      # Arithmetic is not a bound. Nothing here noticed the cap being lowered,
+      # and this writer appends onto WHATEVER console the row already holds —
+      # including one the builder filled through `append_deployment_console/2`
+      # and `cap_console/1` already capped. The row then silently exceeded the
+      # cap and lost the `dropped_before` disclosure, making a console that had
+      # dropped its head indistinguishable from a complete one.
       #
-      # CONSENTED RATHER THAN FIXED, deliberately: capping here means either
-      # promoting `cap_console/1` to public in `registry.ex`, or re-deriving the
-      # ring locally — and a local `Enum.take/2` would drop the head SILENTLY,
-      # buying the bound by committing the very defect above. The honest fix is
-      # to promote the one canonical implementation, which is a `registry.ex`
-      # change and belongs with whoever holds that file.
-      console: (deployment.console || []) ++ [entry],
+      # `cap_console/1` is now public in `registry.ex` and called here, so the
+      # bound is ENFORCED by the one canonical implementation and every drop is
+      # disclosed. Not re-derived locally: a local `Enum.take/2` would drop the
+      # head SILENTLY, buying the bound by committing the very defect above.
+      console: Registry.cap_console((deployment.console || []) ++ [entry]),
       status: status_for_stage(deployment.status, stage),
       # Heartbeat: every stage CAS refreshes the lease so the reaper doesn't
       # mistake a long-but-healthy BUILD for an abandoned claim.
@@ -1249,6 +1350,24 @@ defmodule BarkparkCloud.Sites.Deploy do
     |> maybe_put(:port, report.served_port)
     |> maybe_put(:slot, slot_name(ctx.site, report.served_port, report.served_slot))
     |> maybe_put(:health_exit_code, report.health_exit_code)
+    # charter D608 — THE ARM DECISION REACHES THE CONTROL PLANE. Written to
+    # COLUMNS, not to a console entry: `console` is capped at @max_console_lines
+    # (300) and drops its oldest lines, so a ROUTE entry on a chatty build is
+    # droppable and therefore uncountable — and "count the rows whose arm
+    # failed" is the whole question this wave could not answer.
+    #
+    # Omitted when nil, like every other measurement here: a box that predates
+    # the ROUTE engines must not overwrite a column with a decision it never
+    # made. That omission is what lets this land BEFORE the boxes are pulled.
+    |> maybe_put(:route_status, report.route_status)
+    |> maybe_put(:route_detail, report.route_detail)
+    # charter D188. The SERVED reading, not the staged one: `build_sha256` is
+    # the row's claim about the bytes in front of users, so it must be the
+    # measurement taken through `current` after SWITCH. Omitted (never nil-ed)
+    # when the box narrated none, for the same reason `health_exit_code` is —
+    # a column overwritten with a value nobody measured is worse than an empty
+    # one.
+    |> maybe_put(:build_sha256, report.served_sha256)
   end
 
   defp maybe_put(attrs, _key, nil), do: attrs
@@ -1299,6 +1418,42 @@ defmodule BarkparkCloud.Sites.Deploy do
   # and the deployment together, in ONE transaction — no window where the
   # deployment says `live` but the site still points at the previous build.
   defp settle_live(ctx, report) do
+    case artifact_receipt(report) do
+      :ok -> settle_live_now(ctx, report)
+      {:error, reason} -> fail(ctx, reason, measured(ctx, report))
+    end
+  end
+
+  # THE SERVED ARTIFACT AGAINST THE ROW'S CLAIM (charter D188).
+  #
+  # The box takes TWO independent digests of the release tree: one at STAGE, over
+  # what it just copied in, and one at SWITCH, over whatever `current` resolves
+  # to once the flip has committed. They are the same quantity measured twice
+  # across the one operation that can change which bytes are live.
+  #
+  # Equal is the whole story of a correct deploy. UNEQUAL means the tree that
+  # went live is not the tree this run staged — a release dir swapped underneath
+  # the flip, a `current` left pointing at a neighbour, an out-of-band write
+  # between the copy and the symlink. Before this, nothing on the box and nothing
+  # on the row could raise that disagreement for a box build: 30,627 of 30,633
+  # prod rows carried `artifact_sha256` NULL and the box wrote
+  # `.bp-prebuilt-sha256` only on the prebuilt arm, so a wrong artifact could be
+  # served with every instrument agreeing.
+  #
+  # SILENCE IS NOT A MISMATCH. A box that predates the D188 markers narrates
+  # neither token, and one that has no sha256 tool narrates `none`, which
+  # `stage_digest/3` already answers nil for — both leave the deployment alone.
+  # Only two digests that BOTH exist and DIFFER fail the row. A gate that read
+  # "missing" as "wrong" would fail every deploy on the fleet the day it shipped.
+  defp artifact_receipt(%{built_sha256: built, served_sha256: served})
+       when is_binary(built) and is_binary(served) and built != served do
+    {:error,
+     "the box served a different release than the one it staged (staged #{built}, serving #{served}) — the bytes in front of users are not this build's; the live release was NOT recorded, re-deploy this build_id"}
+  end
+
+  defp artifact_receipt(_report), do: :ok
+
+  defp settle_live_now(ctx, report) do
     attrs =
       Map.merge(measured(ctx, report), %{
         status: "live",
@@ -1552,10 +1707,17 @@ defmodule BarkparkCloud.Sites.Deploy do
   # own row, the debounce path refuses prebuilt sites outright (it would rebuild
   # from source and overwrite bytes this fleet cannot reproduce), so promising a
   # rebuild we will not perform would be a lie. It fails honestly instead.
-  defp defer(ctx, %Deployment{} = deployment, reason) do
+  defp defer(ctx, %Deployment{} = deployment, reason, box_code) do
     site = ctx.site
-    cause = deferral_cause(deployment.stage, reason)
-    prior = consecutive_deferrals(site, cause)
+    cause = deferral_cause(deployment.stage, reason, box_code)
+
+    # THE CHAIN ITSELF, not only its length (dr-bl-deferral-scheduled-vs-actual-gap).
+    # `consecutive_deferrals/2` already walked these rows to count them; the
+    # PREVIOUS row's `inserted_at` is the other half of the pace measurement and
+    # it was being dropped on the floor. One scan, both facts.
+    chain = deferral_chain(site, cause)
+    prior = length(chain)
+    pacing = deferral_pacing(deployment, chain)
 
     cond do
       Deployment.prebuilt?(deployment) ->
@@ -1583,11 +1745,25 @@ defmodule BarkparkCloud.Sites.Deploy do
         # written `failed` and never `deferred`: the highest depth a DEFERRED
         # row can carry is 11 (capacity) / 5 (busy), and the abandonment that
         # follows it is 12 / 6 — the same number the sentence interpolates.
-        fail(ctx, abandonment_reason(reason, prior + 1, cause), %{
-          deferral_depth: prior + 1,
-          deferral_bound: max_consecutive_deferrals(cause),
-          deferral_cause: cause
-        })
+        # THE PACE RIDES ALONG (dr-bl-deferral-scheduled-vs-actual-gap). The
+        # terminal round is a real elapsed interval like any other — and it is
+        # the one round where "the box was slow" and "our ladder was slow" have
+        # the most different remedies — so it stamps the pair too. Excluding it
+        # would put a hole at exactly the depth an operator looks at first.
+        fail(
+          ctx,
+          abandonment_reason(reason, prior + 1, cause),
+          Map.merge(pacing, %{
+            deferral_depth: prior + 1,
+            deferral_bound: max_consecutive_deferrals(cause),
+            deferral_cause: cause,
+            # The terminal round carries the box's code too, for the same reason
+            # it carries the chain columns: it is the row an operator reaches
+            # first, and "which cause did we give up on" must not be a re-read of
+            # the sentence beside it (dr-w4-bl-deferral-raw-column-ambiguous).
+            box_refusal_code: box_code
+          })
+        )
 
       true ->
         # THE DEPTH TRAVELS (deploy-reliability charter D99, PR #9905). `prior`
@@ -1657,9 +1833,35 @@ defmodule BarkparkCloud.Sites.Deploy do
                 # classifies off the reason string this wave. Write first, read
                 # next wave — a reader flipped in the same change as its producer
                 # cannot be proven to have been broken before.
+                # THE PACE, IN THE SAME WRITE AS THE SHAPE
+                # (dr-bl-deferral-scheduled-vs-actual-gap). `deferral_depth` says
+                # how deep this chain went; these two say how fast, and BOTH
+                # describe the same interval — the gap between the previous
+                # round of this chain and this one — so the ratio an operator
+                # wants is one row's arithmetic and never a self-join.
+                #
+                # A ratio near 1.0 says the chain is CLOCK-paced and the lever is
+                # our OWN ladder (config, in-fence, free). A ratio far above 1.0
+                # says the wait is real contention on the box, and only then does
+                # the concurrency-cap experiment earn its 32 hours. That question
+                # was previously answerable only by hand SQL in a session.
+                #
+                # NULL on depth 1 — no previous round means NO interval, and 0
+                # would read as "the rebuild fired instantly".
                 deferral_depth: prior + 1,
                 deferral_bound: bound,
-                deferral_cause: cause
+                deferral_cause: cause,
+                deferral_scheduled_s: pacing.deferral_scheduled_s,
+                deferral_actual_gap_s: pacing.deferral_actual_gap_s,
+                # THE BOX'S OWN CODE WORD (dr-w4-bl-deferral-raw-column-
+                # ambiguous). `deferral_cause` beside it is the LEDGER'S name;
+                # this is what the box said. `DeployLedger.classify/1` reads
+                # THIS, and only falls back to parsing `failure_reason` on rows
+                # that predate the column — because a codeless envelope whose
+                # message is byte-for-byte `box_at_capacity — <prose>` persists
+                # to the same string as a genuine coded refusal, and no rule over
+                # that string can tell them apart.
+                box_refusal_code: box_code
               })
 
             # A COUNTING DEFECT, not merely a narration one (deploy-reliability
@@ -1743,12 +1945,67 @@ defmodule BarkparkCloud.Sites.Deploy do
       " — and it has now refused #{rounds} rebuilds in a row for this site, #{terminal_verdict(cause)}"
   end
 
-  # The deferral's NAMED cause, from the same classifier the ledger reports with —
-  # one owner for the taxonomy, so a chain and a census can never disagree about
-  # what a row is.
-  defp deferral_cause(stage, reason) do
-    DeployLedger.classify(%{status: "deferred", stage: stage, failure_reason: reason})
+  # The deferral's NAMED cause for the round BEING CREATED, from the same
+  # classifier the ledger reports with — one owner for the taxonomy, so a chain
+  # and a census can never disagree about what a row is.
+  #
+  # THIS ARM IS THE ONE PLACE A SYNTHESISED MAP IS CORRECT, and it stays private
+  # for that reason. `defer/3` calls it on the round it is about to write: no row
+  # carrying this round's chain columns EXISTS yet (they are stamped a few lines
+  # below, out of the value this returns), and the `%Deployment{}` in hand is
+  # still `queued`/`building`, whose `classify/1` arm answers `nil`. So the
+  # status is asserted, not read. Every reader of an ALREADY-WRITTEN row goes
+  # through `deferral_cause_of/1` instead.
+  defp deferral_cause(stage, reason, box_code) do
+    DeployLedger.classify(%{
+      status: "deferred",
+      stage: stage,
+      failure_reason: reason,
+      # The synthesised map carries the code THIS round is about to write, so
+      # the cause it stamps is column-derived exactly like every later read of
+      # the written row (dr-w4-bl-deferral-raw-column-ambiguous). Omitting it
+      # would make the producer the one reader still classifying off the prose.
+      box_refusal_code: box_code
+    })
   end
+
+  @doc """
+  The NAMED cause of a deployment row that is ALREADY WRITTEN — the whole row,
+  handed to `DeployLedger.classify/1` untouched.
+
+  ## THE RULING (dr-w13-bl-column-first-classify-bypass)
+
+  The chain readers below used to call `deferral_cause/2` with `d.stage` and
+  `d.failure_reason`, which SYNTHESISES `%{status: "deferred", stage: …,
+  failure_reason: …}` — a map carrying no `deferral_depth` / `deferral_bound` /
+  `deferral_cause` key. That made the producer's own chain counter a SECOND
+  reader of the same fact, structurally incapable of seeing a column: the moment
+  `DeployLedger.classify/1` grew a column arm (`abandoned_by_columns/1`,
+  PR #17352) the two readers could name the same row differently, with nothing
+  failing anywhere. Today the divergence is latent — the column arm sits on the
+  `failed` clause only, and the chain scan takes `deferred` rows — but "latent"
+  is a property of the ledger's current shape, not of this call site.
+
+  The ruling is THREADING, not pinning: the chain readers pass the row. Whatever
+  `classify/1` prefers, both readers prefer the same thing, and a future
+  column-first `deferred` arm is honoured here for free instead of silently
+  bypassed.
+
+  ## THE COST OF THE SHAPE, STATED AS A RULING AND NOT LEFT AS A DISCOVERY
+
+  `deferral_cause` on a row holds the LEDGER CLASS (`BOX_AT_CAPACITY_DEFERRED`),
+  because `defer/3` computes it by calling `DeployLedger.classify/1` and stamps
+  the answer. So a column-first read is `classify/1` reading back ITS OWN FROZEN
+  PAST OUTPUT. That is defensible — the class at defer time is the truthful one
+  for that moment — but it means A FUTURE TAXONOMY REPAIR WILL NOT
+  RETROACTIVELY APPLY TO ANY DEFERRED ROW WRITTEN AFTER 2026-08-07. Rename a
+  class, or split one, and the ~1,665 stamped rows keep answering the old name
+  while the NULL-column corpus before that instant is re-read by the new prose
+  rules and answers the new one. Any such repair therefore has to carry a
+  backfill of this column, or accept a dated seam in its own numbers.
+  """
+  @spec deferral_cause_of(map()) :: String.t() | nil
+  def deferral_cause_of(row), do: DeployLedger.classify(row)
 
   defp max_consecutive_deferrals("BOX_AT_CAPACITY_DEFERRED"),
     do: @max_consecutive_capacity_deferrals
@@ -1779,7 +2036,7 @@ defmodule BarkparkCloud.Sites.Deploy do
     |> Enum.drop_while(&(&1.status in ["queued", "building", "pushing"]))
     |> case do
       [%{status: "deferred"} = head | _] ->
-        consecutive_deferrals(site, deferral_cause(head.stage, head.failure_reason))
+        consecutive_deferrals(site, deferral_cause_of(head))
 
       _ ->
         0
@@ -1792,14 +2049,56 @@ defmodule BarkparkCloud.Sites.Deploy do
   # two different stories, and counting them as one chain spends a site's whole
   # budget on causes that never repeated.
   defp consecutive_deferrals(%Site{} = site, cause) do
+    site |> deferral_chain(cause) |> length()
+  end
+
+  # The SAME scan, returning the rows instead of only their count — most recent
+  # first, so `List.first/1` is the round immediately before the one now being
+  # deferred. `consecutive_deferrals/2` is its length and nothing else, so the
+  # two can never disagree about where a chain starts.
+  defp deferral_chain(%Site{} = site, cause) do
     site
     |> Registry.list_deployments(@deferral_scan_depth, environment: "production")
     |> Enum.drop_while(&(&1.status in ["queued", "building", "pushing"]))
     |> Enum.take_while(fn d ->
-      d.status == "deferred" and deferral_cause(d.stage, d.failure_reason) == cause
+      d.status == "deferred" and deferral_cause_of(d) == cause
     end)
-    |> length()
   end
+
+  # THE PACE OF THE INTERVAL THAT JUST ELAPSED
+  # (dr-bl-deferral-scheduled-vs-actual-gap).
+  #
+  # Both numbers describe ONE interval — previous round of this chain → this
+  # round — which is what makes the ratio per-row arithmetic:
+  #
+  #   * SCHEDULED is `deferral_backoff_seconds(length(chain))`. That is not a
+  #     re-derivation from a different rule: the previous round held
+  #     `prior = length(chain) - 1` and re-queued with
+  #     `deferral_backoff_seconds(prior + 1)` — the same expression, the same
+  #     ladder, one owner.
+  #   * ACTUAL is the difference of the two rows' `inserted_at`, which is the
+  #     column the 2,262-deferral hand measurement used, so the recorded field
+  #     and the historical figure are the same quantity.
+  #
+  # AN EMPTY CHAIN RECORDS NOTHING. Depth 1 has no previous round, so there is
+  # no interval to measure, and NULL says that where 0 would claim an instant
+  # rebuild. Same discipline as `health_exit_code`.
+  defp deferral_pacing(%Deployment{} = deployment, chain) do
+    case chain do
+      [] ->
+        %{deferral_scheduled_s: nil, deferral_actual_gap_s: nil}
+
+      [previous | _] ->
+        %{
+          deferral_scheduled_s: deferral_backoff_seconds(length(chain)),
+          deferral_actual_gap_s: elapsed_seconds(previous.inserted_at, deployment.inserted_at)
+        }
+    end
+  end
+
+  # Unmeasurable rather than wrong: a row missing either stamp records NULL.
+  defp elapsed_seconds(%DateTime{} = from, %DateTime{} = to), do: DateTime.diff(to, from)
+  defp elapsed_seconds(_from, _to), do: nil
 
   # The re-queue seam. A PROCESS-LOCAL override wins over the real worker for the
   # same reason `starter/0` documents its own: under `Oban testing: :manual` an
@@ -2028,6 +2327,34 @@ defmodule BarkparkCloud.Sites.Deploy do
   # route that answers a bare string reason.
   defp refusal_detail(body),
     do: body["error"] || body["detail"] || body["reason"] || body["failure_reason"]
+
+  # THE BOX'S CODE, OFF THE ENVELOPE AND NEVER OFF THE SENTENCE
+  # (dr-w4-bl-deferral-raw-column-ambiguous).
+  #
+  # `refusal_detail/1` above renders `{code, message}` as `"code — message"` and
+  # `{nil, message}` as the bare message, so the two become the same bytes the
+  # moment a codeless message happens to begin with a code word. This reader
+  # never sees a message: it takes `err["code"]` from the decoded map, which
+  # NOTHING a box writes into `message` can reach.
+  #
+  # It always answers a STRING, never nil, and that is the point. `nil` on the
+  # column means "no code-aware writer touched this row" — the whole pre-column
+  # corpus, which must keep its prose fallback (D115). A refusal this function
+  # looked at and found codeless is `DeployLedger.no_box_code()`, a DIFFERENT
+  # fact, read as D7's codeless 409.
+  #
+  # The flat arm takes the bare `error` string as the code: on that shape the
+  # value IS the box's code slot, not a message field, so it carries no forgery
+  # vector. It is deliberately NOT split on `" — "` — a flat error carrying
+  # prose reads as an unnamed cause and rises in the tail, which is stricter
+  # than the prose reader it replaces, never looser.
+  defp box_refusal_code(%{"error" => %{} = err}),
+    do: string_or_nil(err["code"]) || DeployLedger.no_box_code()
+
+  defp box_refusal_code(body) when is_map(body),
+    do: string_or_nil(body["error"]) || DeployLedger.no_box_code()
+
+  defp box_refusal_code(_body), do: DeployLedger.no_box_code()
 
   defp string_or_nil(s) when is_binary(s) do
     case String.trim(s) do
@@ -2508,7 +2835,11 @@ defmodule BarkparkCloud.Sites.Deploy do
           failure_reason: String.t() | nil,
           served_port: pos_integer() | nil,
           served_slot: String.t() | nil,
-          health_exit_code: non_neg_integer() | nil
+          health_exit_code: non_neg_integer() | nil,
+          route_status: String.t() | nil,
+          route_detail: String.t() | nil,
+          built_sha256: String.t() | nil,
+          served_sha256: String.t() | nil
         }
   def normalize_report(body) when is_map(body) do
     stages =
@@ -2544,7 +2875,33 @@ defmodule BarkparkCloud.Sites.Deploy do
       #     "this box never measured health" into "its health gate passed".
       served_port: nonneg_int(body["served_port"]),
       served_slot: nonblank(body["served_slot"]),
-      health_exit_code: nonneg_int(body["health_exit_code"])
+      health_exit_code: nonneg_int(body["health_exit_code"]),
+      #   * `route_status` / `route_detail` — charter D608, THE ARM DECISION.
+      #     `BPSTAGE name=ROUTE status=<ok|failed> detail="…"` is what both
+      #     engines emit after their Caddy arming attempt; the box lifts it off
+      #     its durable status file and this door is where it enters the control
+      #     plane. A box older than the ROUTE engines sends neither key and nil
+      #     is the honest answer — `nonblank/1`, so a JSON null, a missing key
+      #     and an empty string are the same "not measured".
+      #
+      #     They ride TOP-LEVEL keys rather than a stage-detail token (the way
+      #     the D188 receipts do) because ROUTE is deliberately NOT in the box's
+      #     `@stage_names`: admitting it would make a failed arm reach
+      #     `stage_exit_code/1` and re-decide a run that already emitted SWITCH
+      #     ok. Outside `stages`, the only transport left is a key of its own.
+      route_status: nonblank(body["route_status"]),
+      route_detail: nonblank(body["route_detail"]),
+      # charter D188 — THE TWO RECEIPTS, read out of the stage details the box
+      # already narrates. They ride the DETAIL rather than a new top-level key
+      # on purpose: `served_port` and `health_exit_code` reach this map only
+      # because `api/lib/barkpark/sites/deploy_runner.ex` and its controller
+      # lift them into the status body, and that surface is a different tree
+      # from this one. The stage array is already transported verbatim, so a
+      # detail token needs no producer change and cannot be dropped by a box
+      # that predates it — such a box simply narrates no token, and nil is the
+      # honest "not measured".
+      built_sha256: stage_digest(stages, @stage_stage, "bp-build-sha256"),
+      served_sha256: stage_digest(stages, @switch_stage, "bp-served-sha256")
     }
   end
 
@@ -2556,7 +2913,11 @@ defmodule BarkparkCloud.Sites.Deploy do
       failure_reason: nil,
       served_port: nil,
       served_slot: nil,
-      health_exit_code: nil
+      health_exit_code: nil,
+      route_status: nil,
+      route_detail: nil,
+      built_sha256: nil,
+      served_sha256: nil
     }
 
   # An integer the box measured, or nil. A JSON `null`, a missing key, a blank
@@ -2572,6 +2933,34 @@ defmodule BarkparkCloud.Sites.Deploy do
   end
 
   defp nonneg_int(_), do: nil
+
+  # A 64-hex digest the box narrated in ONE named stage's detail, or nil.
+  #
+  # Scoped to the stage, never to the whole log: the two tokens name two
+  # INDEPENDENT readings of the same tree (STAGE measures what it just staged,
+  # SWITCH re-measures what `current` resolves to after the flip), and the whole
+  # point is that they can disagree. A search across all stages would find
+  # whichever came first and quietly make the comparison self-satisfying.
+  #
+  # Anything that is not 64 lowercase hex is nil — including the literal `none`
+  # the box narrates on a host with no sha256 tool. "Could not measure" must
+  # never render as a digest.
+  defp stage_digest(stages, stage_name, token) when is_list(stages) do
+    stages
+    |> Enum.filter(&(&1.name == stage_name))
+    |> Enum.find_value(fn stage -> digest_token(stage[:detail] || stage["detail"], token) end)
+  end
+
+  defp stage_digest(_stages, _stage_name, _token), do: nil
+
+  defp digest_token(detail, token) when is_binary(detail) do
+    case Regex.run(~r/\b#{Regex.escape(token)}=([0-9a-f]{64})\b/, detail) do
+      [_, sha] -> sha
+      _ -> nil
+    end
+  end
+
+  defp digest_token(_detail, _token), do: nil
 
   defp normalize_stage(%{} = s) do
     name = s["name"] || s["stage"]

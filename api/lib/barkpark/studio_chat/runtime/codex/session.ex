@@ -594,7 +594,7 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
            ) do
         {:ok, {raw, token}} ->
           worker_id = "codex-chat-#{session_id}"
-          api_url = BarkparkWeb.Studio.ClaudeChat.mcp_api_url()
+          api_url = Barkpark.StudioChat.Provider.Claude.mcp_api_url()
 
           %{
             status: :minted,
@@ -608,7 +608,10 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
               "mcp_servers" => %{
                 "barkpark" => %{
                   "command" => "bp",
-                  "args" => ["mcp", "serve", "--tools", "all"],
+                  # --tools chat, NOT --tools all — the curated loopback surface
+                  # (task-scc-bl-mcp-chat-toolset); same selector the Claude
+                  # provider spawns, so both runtimes advertise one reviewed set.
+                  "args" => ["mcp", "serve", "--tools", "chat"],
                   "env_vars" => [
                     "BARKPARK_API_TOKEN",
                     "BARKPARK_API_URL",

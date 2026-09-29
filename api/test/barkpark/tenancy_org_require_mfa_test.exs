@@ -58,7 +58,7 @@ defmodule Barkpark.TenancyOrgRequireMfaTest do
     assert {:error, :not_found} =
              Tenancy.set_organization_require_mfa(Ecto.UUID.generate(), true)
 
-    # a non-UUID id must not raise Ecto.CastError
+    # a non-UUID id must not raise Ecto.Query.CastError
     assert {:error, :not_found} = Tenancy.set_organization_require_mfa("not-a-uuid", true)
   end
 

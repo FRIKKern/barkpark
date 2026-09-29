@@ -384,9 +384,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   # it did not check is the same defect this handler was repaired for.
   defp still_shared_reason(ws, proj, dataset) do
     if in_env_baseline?(ws, proj, dataset) do
-      "the stored share is gone, but this scope is also declared in the BARKPARK_SHARES " <>
-        "environment baseline, which the Studio cannot remove. Change BARKPARK_SHARES and " <>
-        "restart to make it private."
+      "the stored share is gone, but this scope is also declared in " <>
+        BarkparkWeb.StudioComponents.Modals.env_baseline_immutable()
     else
       "the stored share is gone and it is NOT in the BARKPARK_SHARES baseline, so something " <>
         "else is still exposing it. The Studio cannot name the source — check the share " <>

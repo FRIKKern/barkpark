@@ -1,4 +1,16 @@
 defmodule BarkparkWeb.SiteDeployController do
+  # THE CODE LISTS BELOW ARE READ FROM THE MODULE THAT EMITS THEM, not typed
+  # out here. A hand-kept copy is what let this moduledoc document 19 of the
+  # extractor's 22 codes — and the three it silently omitted were exactly the
+  # three whose status class was wrong. The doc cannot drift from the code set
+  # any more, because it no longer holds a second copy of it, and the count is
+  # `length/1` over the same list rather than a number somebody counted.
+  @artifact_400_codes Barkpark.Sites.PrebuiltArtifact.caller_fault_codes()
+  @artifact_500_codes Barkpark.Sites.PrebuiltArtifact.internal_failure_codes()
+
+  @artifact_400_list Enum.map_join(@artifact_400_codes, " / ", &"`#{&1}`")
+  @artifact_500_list Enum.map_join(@artifact_500_codes, " / ", &"`#{&1}`")
+
   @moduledoc """
   Admin-only trigger + status for a content-bound STATIC site deploy
   (`/v1/admin/site-deploy`, backed by `Barkpark.Sites.DeployRunner`).
@@ -23,18 +35,16 @@ defmodule BarkparkWeb.SiteDeployController do
       `invalid_deploy_mode` / `invalid_env` / `invalid_artifact` /
       `invalid_artifact_digest` / `artifact_too_large` — nothing reaches argv or
       the child's env until `Barkpark.Sites.DeployRequest` has validated it.
-    * **400** `E_DIGEST_MISMATCH` / `E_NOT_GZIP` / `E_NOT_BASE64` /
-      `E_MALFORMED` / `E_PATH_TRAVERSAL` / `E_ABSOLUTE_PATH` / `E_SYMLINK` /
-      `E_HARDLINK` / `E_SPECIAL_FILE` / `E_UNKNOWN_TYPE` / `E_MODE_BITS` /
-      `E_BAD_NAME` / `E_UNSAFE_PARENT` / `E_ENTRY_TOO_LARGE` /
-      `E_TOTAL_TOO_LARGE` / `E_COMPRESSION_RATIO` / `E_TOO_MANY_ENTRIES` /
-      `E_NO_INDEX` — the 18 typed refusals a PREBUILT artifact can draw from the
+    * **400** #{@artifact_400_list} — the #{length(@artifact_400_codes)} typed
+      refusals a PREBUILT artifact can draw from the
       box (`Barkpark.Sites.PrebuiltArtifact`). These are 400s, not 500s: the
       bytes are the caller's, and the box never falls back to building the site
       itself when it refuses them. `E_MALFORMED` covers framing as well as
       corruption — a stream with no end-of-archive marker, or a gzip member that
       never terminates, is a truncated upload; `E_NO_INDEX` is the archive that
-      arrived WHOLE and still has nothing to serve.
+      arrived WHOLE and still has nothing to serve; `E_JUNK_ENTRY` is packaging
+      junk (`.DS_Store`, an AppleDouble `._*` sidecar, a real `PaxHeader`
+      directory) and its message names the repack incantation.
     * **409** `already_running` — a run for THAT SLUG is in flight. A different
       slug (or an unrelated self-update) never collides.
     * **409** `box_at_capacity` — a DIFFERENT slug is building and the box's
@@ -61,6 +71,21 @@ defmodule BarkparkWeb.SiteDeployController do
     * **500** `runner_start_failed` — the feature IS enabled but the command
       could not spawn (missing script, bad cd). Distinct from 503: telling an
       admin to set an env var they already set would be actively wrong.
+    * **500** #{@artifact_500_list} — the #{length(@artifact_500_codes)}
+      extractor codes that are NOT a verdict about the caller's bytes. The
+      artifact validated (or never got the chance to be judged); THIS BOX could
+      not put it on disk (ENOSPC, EACCES, a failed rename) or could not get the
+      memory to inflate it at all (`E_EXTRACT_EXHAUSTED`, raised when zlib
+      answers `:enomem`/`:system_limit` mid-stream — the one code here that can
+      fire BEFORE the archive has been fully validated, which is precisely why
+      it must not be reported as a verdict on the archive). They rendered as 400s until ssw11 — telling a caller
+      "your tarball is bad" while the disk was full, which is exactly the
+      answer that makes a correct client stop retrying and start repacking
+      bytes that were never the problem. WHO RETRIES: nobody automatically
+      (a TYPED 5xx is terminal for the control plane, as the 400 was) — the
+      OPERATOR who clears the disk re-fires the deploy, and the caller's bytes
+      are untouched. `Barkpark.Sites.PrebuiltArtifact.internal_failure?/1` is
+      the only classifier; a code it does not know stays a 400.
     * **500** `site_provision_failed` — the site's SOURCE could not be
       materialized, so the build never started. Carries a scrubbed `reason`
       (the failed action + path). Distinct from `runner_start_failed`, which it
@@ -78,6 +103,7 @@ defmodule BarkparkWeb.SiteDeployController do
 
   alias Barkpark.Sites.DeployRequest
   alias Barkpark.Sites.DeployRunner
+  alias BarkparkWeb.ErrorResponse
 
   @doc """
   Start a site deploy (`mode: "deploy"`, the default) or an instant rollback
@@ -114,12 +140,9 @@ defmodule BarkparkWeb.SiteDeployController do
 
       {:error, :already_running} ->
         conn
-        |> put_status(:conflict)
-        |> json(%{
-          error: %{
-            code: "already_running",
-            message: "a deploy for site '#{req.slug}' is already running"
-          }
+        |> ErrorResponse.emit_fields(:conflict, %{
+          code: "already_running",
+          message: "a deploy for site '#{req.slug}' is already running"
         })
 
       {:error, :box_at_capacity} ->
@@ -171,6 +194,17 @@ defmodule BarkparkWeb.SiteDeployController do
         # refusal as a licence to let the box build the site instead.
         bad_request(conn, code, message)
 
+      {:error, {:artifact_staging_failed, code, message}} ->
+        # THE BOX BROKE, and a 400 said otherwise. `stage/4` answers ENOSPC,
+        # EACCES and a failed rename through the same `{:error, code, message}`
+        # shape as a symlink refusal, so all three rode the `bad_request` arm
+        # above — a 400 is a statement about the CALLER'S bytes, and a client
+        # that believes it correctly stops retrying and repacks an artifact
+        # that was already valid. The code still travels verbatim (the control
+        # plane renders "<code> — <message>" and the ledger keys its class on
+        # the STATUS), so only the class moves.
+        artifact_staging_failed(conn, code, message)
+
       {:error, {:provision_failed, reason}} ->
         # The site's SOURCE could not be materialized, so the build never
         # started. This used to collapse into `runner_start_failed` after a bare
@@ -182,23 +216,17 @@ defmodule BarkparkWeb.SiteDeployController do
         # spawn". It is NOT a stage: site-spawner D34 keeps PROVISION a silent
         # pre-BUILD step, and the six stage names are untouched.
         conn
-        |> put_status(:internal_server_error)
-        |> json(%{
-          error: %{
-            code: "site_provision_failed",
-            message: "site source could not be provisioned — the deploy never started",
-            reason: reason
-          }
+        |> ErrorResponse.emit_fields(:internal_server_error, %{
+          code: "site_provision_failed",
+          message: "site source could not be provisioned — the deploy never started",
+          reason: reason
         })
 
       {:error, :start_failed} ->
         conn
-        |> put_status(:internal_server_error)
-        |> json(%{
-          error: %{
-            code: "runner_start_failed",
-            message: "site-deploy runner failed to start — check the server logs"
-          }
+        |> ErrorResponse.emit_fields(:internal_server_error, %{
+          code: "runner_start_failed",
+          message: "site-deploy runner failed to start — check the server logs"
         })
     end
   end
@@ -222,15 +250,23 @@ defmodule BarkparkWeb.SiteDeployController do
       {:ok, slug} ->
         requested_build_id = Map.get(params, "build_id")
 
-        if record_requested?(params) do
-          json(conn, render_build_record(DeployRunner.build_record(slug, requested_build_id)))
-        else
-          status = DeployRunner.status(slug)
+        cond do
+          # THE BYTES DOOR (dr-bl-recorder-http-read-path c1). Nested INSIDE
+          # `record=1` on purpose: `bytes=1` alone changes nothing, so the live
+          # poll's contract is untouched by a caller that sets only the new flag.
+          record_requested?(params) and bytes_requested?(params) ->
+            build_log_bytes(conn, slug, requested_build_id)
 
-          case resolve_status_match(status, requested_build_id) do
-            :serve -> json(conn, render_status(status))
-            :not_found -> build_id_mismatch(conn, slug, requested_build_id)
-          end
+          record_requested?(params) ->
+            json(conn, render_build_record(DeployRunner.build_record(slug, requested_build_id)))
+
+          true ->
+            status = DeployRunner.status(slug)
+
+            case resolve_status_match(status, requested_build_id) do
+              :serve -> json(conn, render_status(status))
+              :not_found -> build_id_mismatch(conn, slug, requested_build_id)
+            end
         end
 
       {:error, code, message} ->
@@ -246,6 +282,15 @@ defmodule BarkparkWeb.SiteDeployController do
   # rather than silently switching response shapes.
   defp record_requested?(params) do
     Map.get(params, "record") in ["1", "true", "yes", "on"]
+  end
+
+  # THE SECOND OPT-IN, and it only means anything alongside `record=1`. A box
+  # serving bytes is a strictly larger surface than one serving the structured
+  # record, so it gets its own flag rather than widening what `record=1` returns:
+  # a caller that has always asked for the record keeps receiving byte-identical
+  # answers, and `render_build_record/1`'s field list is untouched by this slice.
+  defp bytes_requested?(params) do
+    Map.get(params, "bytes") in ["1", "true", "yes", "on"]
   end
 
   @doc """
@@ -374,17 +419,14 @@ defmodule BarkparkWeb.SiteDeployController do
 
   defp feature_not_configured(conn) do
     conn
-    |> put_status(:service_unavailable)
-    |> json(%{
-      error: %{
-        code: "feature_not_configured",
-        message:
-          "this instance has not consented to run third-party site build code " <>
-            "— a site deploy executes the site's own npm dependency tree " <>
-            "(postinstall scripts included) on this box, so opting in is the " <>
-            "box owner's decision, not a retry; the per-box prerequisites are " <>
-            "checked by `deploy/instance-deploy.sh --site-deploy-preflight`"
-      }
+    |> ErrorResponse.emit_fields(:service_unavailable, %{
+      code: "feature_not_configured",
+      message:
+        "this instance has not consented to run third-party site build code " <>
+          "— a site deploy executes the site's own npm dependency tree " <>
+          "(postinstall scripts included) on this box, so opting in is the " <>
+          "box owner's decision, not a retry; the per-box prerequisites are " <>
+          "checked by `deploy/instance-deploy.sh --site-deploy-preflight`"
     })
   end
 
@@ -401,23 +443,33 @@ defmodule BarkparkWeb.SiteDeployController do
 
   defp runner_unavailable(conn) do
     conn
-    |> put_status(:service_unavailable)
     |> put_resp_header("retry-after", Integer.to_string(@runner_unavailable_retry_after_s))
-    |> json(%{
-      error: %{
-        code: "deploy_runner_unavailable",
-        message:
-          "the deploy runner did not answer in time — the box is busy or wedged, " <>
-            "not unconfigured; retry in #{@runner_unavailable_retry_after_s}s " <>
-            "(if the trigger did land, the retry answers already_running)"
-      }
+    |> ErrorResponse.emit_fields(:service_unavailable, %{
+      code: "deploy_runner_unavailable",
+      message:
+        "the deploy runner did not answer in time — the box is busy or wedged, " <>
+          "not unconfigured; retry in #{@runner_unavailable_retry_after_s}s " <>
+          "(if the trigger did land, the retry answers already_running)"
     })
   end
 
   defp bad_request(conn, code, message) do
     conn
-    |> put_status(:bad_request)
-    |> json(%{error: %{code: code, message: message}})
+    |> ErrorResponse.emit_fields(:bad_request, %{code: code, message: message})
+  end
+
+  # The extractor's INTERNAL failures. Same envelope, same typed code — only
+  # the class differs, and the class is the whole point: 4xx blames the caller,
+  # 5xx blames the box. `fault: "box"` rides beside it so a consumer that has
+  # only the body (a relayed envelope, a ledger row) can tell the two apart
+  # without re-deriving the status.
+  defp artifact_staging_failed(conn, code, message) do
+    conn
+    |> ErrorResponse.emit_fields(:internal_server_error, %{
+      code: code,
+      message: message,
+      fault: "box"
+    })
   end
 
   # The polled build_id is not the run this slug is currently serving — it was
@@ -425,14 +477,11 @@ defmodule BarkparkWeb.SiteDeployController do
   # so the control plane keeps waiting instead of adopting the wrong run's stages.
   defp build_id_mismatch(conn, slug, build_id) do
     conn
-    |> put_status(:not_found)
-    |> json(%{
-      error: %{
-        code: "build_id_mismatch",
-        message:
-          "no run for site '#{slug}' matches build_id '#{build_id}' — " <>
-            "it was superseded by a newer build or has not started yet"
-      }
+    |> ErrorResponse.emit_fields(:not_found, %{
+      code: "build_id_mismatch",
+      message:
+        "no run for site '#{slug}' matches build_id '#{build_id}' — " <>
+          "it was superseded by a newer build or has not started yet"
     })
   end
 
@@ -446,11 +495,23 @@ defmodule BarkparkWeb.SiteDeployController do
   # box — and nothing called `build_record/2`, so the answer to "why did build X
   # fail" was an SSH session. This is that answer over the existing admin door.
   #
-  # RAW LOG BYTES ARE DELIBERATELY NOT SERVED, AND THIS IS NOT A SIZE DECISION.
-  # The build env file carries `BARKPARK_TOKEN=` in plaintext and THE RECORDED
-  # BYTES ARE NEVER SCRUBBED AT WRITE — the log is captured verbatim, so what the
-  # build printed is on the box in the clear. `DeployRunner.build_record/2`
-  # refuses the bytes for exactly that reason.
+  # LOG BYTES ARE STILL NOT SERVED HERE — but as of 2026-09-11 the GROUND HAS
+  # MOVED, and the new ground is narrower. It used to be "the recorded bytes are
+  # never scrubbed at write": the log was captured verbatim by the deploy shell's
+  # `tee`, the build env file carries `BARKPARK_TOKEN=` in plaintext, and so what
+  # the build printed sat on the box in the clear. That hole is CLOSED
+  # (dr-bl-recorder-http-read-path c2): `DeployRunner.write_terminal_record/2`
+  # folds the log in place with `Barkpark.Sites.BuildLogScrub.raw/1` — the same
+  # `cloud/priv/secret-scrub.exs` pattern set the control plane's display
+  # boundary compiles — before it measures the file, and stamps the version it
+  # used onto the record as `log_scrub`.
+  #
+  # WHAT REMAINS is a separate criterion (c1) and a separate design: serving the
+  # bytes needs a size cap, a tail-vs-whole decision, and a rule for a record
+  # whose `log_scrub` is `nil` (never folded — a pre-2026-09-11 record whose log
+  # has since been evicted, or a fold that hit an IO error). A door that serves
+  # bytes MUST read that field and refuse a `nil`; nothing here does yet, so
+  # nothing here serves bytes.
   #
   # CORRECTED 2026-09-08 (task-04e89e88f056aa38), then CORRECTED AGAIN the same
   # day. The whole sequence is kept deliberately, so the next reader sees it:
@@ -478,10 +539,9 @@ defmodule BarkparkWeb.SiteDeployController do
   # `strip_ansi |> scrub`, test-pinned). A closed defect cannot carry a refusal,
   # which is the only reason the figure is no longer the ground here.
   #
-  # WHAT IS NOT REFUTED IS THE REFUSAL, and its ground is stated above: nothing
-  # scrubs the RECORDED LOG BYTES AT WRITE. Both landed scrubbers are
-  # DISPLAY-BOUNDARY, so a clean render says nothing about the bytes this
-  # endpoint would hand out. So this ships the STRUCTURED record — which is
+  # AND THAT REFUSAL HAS NOW BEEN PAID, not merely restated: the write-boundary
+  # scrub above is exactly the thing whose absence this comment named. What this
+  # endpoint ships is still the STRUCTURED record — which is
   # strictly more diagnostic than the one-line failure_reason and carries no
   # credential surface — and `log_path` + `log_bytes` + `journal_command` tell an
   # operator where the bytes are without moving them.
@@ -516,6 +576,15 @@ defmodule BarkparkWeb.SiteDeployController do
       log_bytes: record.log_bytes,
       exit_code: record.exit_code,
       failure_reason: cap_reason(record.failure_reason),
+      # THE ARM DECISION, on the TERMINAL door too (charter D608). It outlives
+      # the unit for the same reason the served slot does: the Caddyfile it was
+      # read out of has moved on by the time anyone asks a finished build what it
+      # did to the route. `build_record/2` already carries both keys on every
+      # shape it can answer in (`render_terminal_record/1` lifts them out of the
+      # record JSON, `absent_record/2` nils them), so the live status door and
+      # this one cannot disagree about a build.
+      route_status: Map.get(record, :route_status),
+      route_detail: Map.get(record, :route_detail),
       # The BPSTAGE fold. Retained separately from the 500-line log ring and
       # IMMUNE to it, so these survive after the log itself is evicted — which
       # is what makes this record useful at the end of a retention window
@@ -558,6 +627,109 @@ defmodule BarkparkWeb.SiteDeployController do
 
   defp cap_reason(other), do: other
 
+  # ── GET ?record=1&bytes=1 — THE BYTES DOOR (dr-bl-recorder-http-read-path c1) ──
+  #
+  # WHY THIS IS A SECOND FLAG AND NOT A WIDER RECORD. The record door above is
+  # read by the control plane's `Sites.BuildLog` and its 404/410/200 shapes are
+  # load-bearing on that end. Serving bytes needs answers the record door has no
+  # vocabulary for — chiefly a REFUSAL for a log that exists and may not be shown —
+  # so the bytes ride their own opt-in with their own statuses, and every existing
+  # caller's response is byte-identical to what it was.
+  #
+  # FOUR ANSWERS, SEPARATED BY STATUS CODE so a client that reads nothing but the
+  # status cannot conflate them:
+  #
+  #   * 200 — the bytes, as a BOUNDED TAIL (`DeployRunner.build_log_tail/2`), or a
+  #     definite "there are none": `log_state` `missing` / `never_recorded` with a
+  #     null `tail`. Those are complete answers, the same way the record door
+  #     answers `never_recorded` with a 200.
+  #   * 410 `build_log_evicted` — a tombstone says retention took the bytes.
+  #   * 422 `build_log_unscrubbed` — THE REFUSAL. The record's `log_scrub` is nil:
+  #     the bytes were NEVER FOLDED, so they may still carry a plaintext
+  #     `BARKPARK_TOKEN=`. Deliberately its OWN status, not a 404 and not a 200
+  #     with an empty tail: an operator must be able to tell "withheld" from
+  #     "gone", and a monitor must be able to count it. 422 rather than 403 —
+  #     the credential presented is fine, it is the RESOURCE's state that makes
+  #     it unservable, and 403 is already this scope's auth answer.
+  #   * 500 `build_log_unreadable` — the file is there and could not be read.
+  #
+  # THE FIELD LIST IS EXPLICIT AND IDENTICAL ON EVERY SHAPE, refusals included.
+  # One key set means a caller never has to branch on status to know what it
+  # holds, and a field the recorder grows later is invisible here until a human
+  # adds it — the same law `render_build_record/1` states, and it matters more
+  # here, because this is the door that does serve bytes.
+  defp build_log_bytes(conn, slug, build_id) do
+    case DeployRunner.build_log_tail(slug, build_id) do
+      {:ok, served} ->
+        json(conn, render_build_log_bytes(served, nil))
+
+      {:error, :unscrubbed, record} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(
+          render_build_log_bytes(
+            record,
+            {"build_log_unscrubbed",
+             "this build's recorded log was never folded through the secret scrubber " <>
+               "(log_scrub is null), so its bytes may carry a plaintext credential and " <>
+               "are withheld — the bytes exist, this is a refusal and not an absence"}
+          )
+        )
+
+      {:error, :evicted, record} ->
+        conn
+        |> put_status(:gone)
+        |> json(
+          render_build_log_bytes(
+            record,
+            {"build_log_evicted",
+             "retention reclaimed this build's log bytes; the terminal record survives " <>
+               "to say so and retrying cannot bring them back"}
+          )
+        )
+
+      {:error, :unreadable, record} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(
+          render_build_log_bytes(
+            record,
+            {"build_log_unreadable", "this build's log could not be read off the box"}
+          )
+        )
+
+      # `missing` and `never_recorded` — definite answers, so 200, exactly as the
+      # record door answers them. The null `tail` plus the honest `log_state` is
+      # the whole content.
+      {:error, _state, record} ->
+        json(conn, render_build_log_bytes(record, nil))
+    end
+  end
+
+  defp render_build_log_bytes(record, error) do
+    base = %{
+      slug: record.slug,
+      build_id: record.build_id,
+      record: Atom.to_string(record.record),
+      log_state: Atom.to_string(record.log_state),
+      # THE FIELD A BYTE DOOR MUST READ. Echoed on every shape so a caller can
+      # see WHY a refusal was a refusal, and so a 200 carries the proof that the
+      # bytes it holds were folded.
+      log_scrub: record.log_scrub,
+      log_path: record.log_path,
+      log_bytes: record.log_bytes,
+      tail_bytes: Map.get(record, :tail_bytes),
+      truncated: Map.get(record, :truncated, false),
+      tail: Map.get(record, :tail),
+      evicted_at: record_iso(record.evicted_at)
+    }
+
+    case error do
+      nil -> base
+      {code, message} -> Map.put(base, :error, %{code: code, message: message})
+    end
+  end
+
   defp render_status(status) do
     %{
       state: Atom.to_string(status.state),
@@ -580,6 +752,29 @@ defmodule BarkparkWeb.SiteDeployController do
       # crash this door.
       served_port: Map.get(status, :served_port),
       served_slot: Map.get(status, :served_slot),
+      # THE ARM DECISION (charter D608). Both engines emit
+      # `BPSTAGE name=ROUTE status=<ok|failed> detail="…"` into the durable
+      # status file after their Caddy arming attempt, and `fold_route_file/1`
+      # lifts it into the status map as a SIBLING of `stages` — deliberately not
+      # a stage, because a name inside `@stage_names` reaches `stage_exit_code/1`
+      # and would turn a report into a verdict on a run that already emitted
+      # SWITCH ok.
+      #
+      # Until this key existed the decision was durable and UNREPORTED: the run
+      # knew it, the record kept it, and nothing downstream could read it — the
+      # control plane's `deployments` table carried a ROUTE outcome on 0 of
+      # 19,327 console-bearing rows. This is the wire half of that.
+      #
+      # NIL-HONEST, never omitted — the opposite discipline from
+      # `health_exit_code` below, and the difference is the value that would be
+      # invented. An unmeasured health code would be invented as 0, which IS the
+      # success code, so absence is the only honest answer there. `route_status`
+      # is a STRING; an unmeasured one is `null` and reads as "nobody measured
+      # this" on its face, exactly like `served_slot` beside it. A box older than
+      # the ROUTE engines (or a run that died before arming) sends `null`, and
+      # the cloud consumer omits a nil rather than writing it over a column.
+      route_status: Map.get(status, :route_status),
+      route_detail: Map.get(status, :route_detail),
       started_at: iso(status.started_at),
       finished_at: iso(status.finished_at)
     }
@@ -618,6 +813,19 @@ defmodule BarkparkWeb.SiteDeployController do
 
   defp atom_or_nil(nil), do: nil
   defp atom_or_nil(atom) when is_atom(atom), do: Atom.to_string(atom)
+
+  # A BINARY IS ALREADY THE ANSWER, and this clause is not defensive padding —
+  # without it `GET ?record=1` raised `FunctionClauseError` (a 500) on EVERY
+  # record a real run ever wrote. `write_terminal_record/2` persists
+  # `"mode" => to_string(manifest.mode)` and `"runtime_target" =>
+  # to_string(manifest.runtime_target)`, `render_terminal_record/1` hands those
+  # strings straight through, and `render_build_record/1` then called
+  # `atom_or_nil/1` on `"deploy"`. The suite missed it because the one fixture
+  # exercising this door omits both keys, so the only clause it ever reached was
+  # the `nil` one — a green over a door that could not answer about a build that
+  # exists. The live-status path is unaffected (`status_from_record/1` re-atomizes
+  # both through `safe_atom/3`), which is why the two doors disagreed at all.
+  defp atom_or_nil(value) when is_binary(value), do: value
 
   defp iso(nil), do: nil
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)

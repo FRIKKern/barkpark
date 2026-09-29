@@ -21,6 +21,13 @@ defmodule BarkparkCloud.Application do
     _ = BarkparkCloud.Registry.Barkpark.base_domain()
     _ = BarkparkCloud.Templates.repo()
 
+    # Say ONCE, out loud, when this plane cannot send mail. Unlike the two reads
+    # above this one WARNS rather than raising: a relay-less plane is a real
+    # configuration (every laptop is one). See
+    # `BarkparkCloud.Mailer.warn_if_undeliverable/0` for why the Delivery rows
+    # this plane already writes cannot carry the signal on their own.
+    _ = BarkparkCloud.Mailer.warn_if_undeliverable()
+
     children =
       [
         # The control plane's only stateful dependency: its own Postgres,

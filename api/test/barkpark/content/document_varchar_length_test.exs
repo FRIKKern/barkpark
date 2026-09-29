@@ -24,7 +24,7 @@ defmodule Barkpark.Content.DocumentVarcharLengthTest do
   words. `rev` is server-generated (32 hex chars).
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo

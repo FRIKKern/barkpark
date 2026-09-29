@@ -250,3 +250,89 @@ func TestTaskGetJSONBytesUnchangedByRulingHeader(t *testing.T) {
 		})
 	}
 }
+
+// ── task-4a0eaac03a222e9a: the second line names a DECISION, so it must only
+// fire on a disposition that records one. Three states, three arms — `open`,
+// ABSENT, and decided. Two arms are not enough: a `!= "open"` fix passes the
+// open arm and shouts `disposition=` on a row that has no term at all.
+
+// rulingContextNote is a reason on a row nobody has decided: prose worth
+// surfacing, carrying no verdict.
+const rulingContextNote = "context from the lane lead, 2026-09-14: the sheets fixture is the one that reproduces it"
+
+// TestTaskClaimOpenDispositionIsNotCalledAlreadyMade — the OPEN arm. The reason
+// is still shouted (it is real context); the ALREADY MADE sentence is not.
+func TestTaskClaimOpenDispositionIsNotCalledAlreadyMade(t *testing.T) {
+	body := taskEnvelope("do the thing", "open", rulingContextNote)
+	_, stderr, code := runPageResponse(t, "table", globals{yes: true}, taskWriteCommand("task.claim", "claim"), body)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d; stderr=%q", code, exitOK, stderr)
+	}
+	if !strings.Contains(stderr, rulingBannerPrefix+rulingContextNote) {
+		t.Fatalf("the note itself stopped being shouted:\n%s", stderr)
+	}
+	if strings.Contains(stderr, rulingDecidedSuffix) {
+		t.Fatalf("disposition=open was called an ALREADY MADE decision:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, rulingUndecidedPrefix+"open"+rulingUndecidedSuffix) {
+		t.Fatalf("the open row lost its (undecided) disposition line:\n%s", stderr)
+	}
+}
+
+// TestTaskClaimAbsentDispositionPrintsNoDispositionLine — the ABSENT arm, and
+// the one a naive `disposition != "open"` fix fails in the OPPOSITE direction:
+// the envelope omits the key entirely, so there is no term to name and the
+// second line must not be printed at all — not even as `disposition= — …`.
+func TestTaskClaimAbsentDispositionPrintsNoDispositionLine(t *testing.T) {
+	body := taskEnvelope("do the thing", "", rulingContextNote)
+	_, stderr, code := runPageResponse(t, "table", globals{yes: true}, taskWriteCommand("task.claim", "claim"), body)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d; stderr=%q", code, exitOK, stderr)
+	}
+	if !strings.Contains(stderr, rulingBannerPrefix+rulingContextNote) {
+		t.Fatalf("a row with a reason and no disposition stopped shouting the reason:\n%s", stderr)
+	}
+	if strings.Contains(stderr, rulingDecidedSuffix) {
+		t.Fatalf("a row with NO disposition was called an ALREADY MADE decision:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "disposition=") {
+		t.Fatalf("a row with NO disposition rendered a disposition= line:\n%s", stderr)
+	}
+}
+
+// TestTaskClaimDecidedDispositionStillShoutsAlreadyMade — the DECIDED arm, and
+// the CONTROL for this whole slice: it is written so that DELETING the warning
+// (rather than scoping it) REDS here. `parked` and `closed` are the two decided
+// terms in the server's vocabulary; both must still shout.
+func TestTaskClaimDecidedDispositionStillShoutsAlreadyMade(t *testing.T) {
+	for _, disposition := range []string{"parked", "closed"} {
+		t.Run(disposition, func(t *testing.T) {
+			body := taskEnvelope("do the thing", disposition, rulingReason)
+			_, stderr, code := runPageResponse(t, "table", globals{yes: true}, taskWriteCommand("task.claim", "claim"), body)
+			if code != exitOK {
+				t.Fatalf("exit = %d, want %d; stderr=%q", code, exitOK, stderr)
+			}
+			want := "   disposition=" + disposition + " — this decision is ALREADY MADE; re-read the row before you build to it"
+			if !strings.Contains(stderr, want) {
+				t.Fatalf("a DECIDED row stopped warning that the decision is already made.\nwant line: %q\ngot stderr:\n%s", want, stderr)
+			}
+		})
+	}
+}
+
+// TestRulingIsDecidedFailsLoud pins the PREDICATE, not a snapshot of today's
+// vocabulary: only `open` (in any casing/padding the store might hold) counts
+// as undecided, and an unrecognised term is treated as DECIDED so a vocabulary
+// that grows fails toward shouting rather than toward silence.
+func TestRulingIsDecidedFailsLoud(t *testing.T) {
+	for _, s := range []string{"open", "OPEN", "  Open  "} {
+		if rulingIsDecided(s) {
+			t.Fatalf("rulingIsDecided(%q) = true, want false", s)
+		}
+	}
+	for _, s := range []string{"parked", "closed", "adjudicated-elsewhere"} {
+		if !rulingIsDecided(s) {
+			t.Fatalf("rulingIsDecided(%q) = false, want true", s)
+		}
+	}
+}

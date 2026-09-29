@@ -12,6 +12,28 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   import BarkparkWeb.Icons
   import BarkparkWeb.StudioComponents.Controls, only: [bp_radio: 1, bp_checkbox: 1]
 
+  # THE ONE SENTENCE ABOUT AN ENV-BASELINE SHARE, said in exactly one place.
+  #
+  # An env-sourced row (`BARKPARK_SHARES`, `Sharing.shares_env/0`) is listed in
+  # the Active shares panel with no Remove button — the Studio genuinely cannot
+  # delete it, `Sharing.remove_share/3` touches STORED rows only. Before this
+  # the panel simply rendered a share with no affordance and no reason, and the
+  # only surface that ever explained the baseline was the removal flash in
+  # `Handlers.Shares.still_shared_reason/3` — which an operator whose scope is
+  # env-ONLY can never reach, because there is no sibling stored row to click.
+  #
+  # Both surfaces now READ THIS BINARY, so the panel and the flash cannot drift
+  # into saying two different things about the same immovable share.
+  @env_baseline_immutable "the BARKPARK_SHARES environment baseline, which the Studio cannot " <>
+                            "remove. Change BARKPARK_SHARES and restart to make it private."
+
+  @doc """
+  The shared tail of every sentence about a `BARKPARK_SHARES` share: what it is
+  and the only way to change it. Read by the env row in `shares_modal/1` and by
+  `Handlers.Shares.still_shared_reason/3`.
+  """
+  def env_baseline_immutable, do: @env_baseline_immutable
+
   @doc """
   Image-picker modal, formerly a legacy inline block in StudioLive, now
   aggregated by `studio_modals/1`. Renders the overlay + media-grid card when
@@ -171,6 +193,9 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                   <%= row.surfaces %> · <%= row.access %> · <span class="share-row-source"><%= row.source %></span>
                 </div>
                 <div :if={row.url} class="share-row-url"><%= row.url %></div>
+                <p :if={row.source == "env"} class="shares-note share-row-env-note">
+                  Declared in <%= env_baseline_immutable() %>
+                </p>
               </div>
               <button
                 :if={@admin? and row.source == "stored"}
@@ -879,6 +904,9 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :show_profile, :boolean, default: false
   attr :user_name, :string, required: true
   attr :user_color, :string, required: true
+  # The scoped `…/studio/_account` page (download or erase your data). nil on a
+  # surface that cannot build a scoped path — the link is then not rendered.
+  attr :account_path, :string, default: nil
 
   def profile_modal(assigns) do
     ~H"""
@@ -925,7 +953,14 @@ defmodule BarkparkWeb.StudioComponents.Modals do
               <% end %>
             </div>
           </div>
-          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
+          <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 8px;">
+            <a
+              :if={@account_path}
+              href={@account_path}
+              class="text-sm"
+              style="margin-right: auto;"
+              data-test-id="profile-account-link"
+            >Download or erase your data</a>
             <button type="button" class="btn btn-sm" phx-click="close-profile">Cancel</button>
             <button type="submit" class="btn btn-primary btn-sm">Save</button>
           </div>
@@ -951,6 +986,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :show_profile, :boolean, default: false
   attr :user_name, :string, default: ""
   attr :user_color, :string, default: ""
+  attr :account_path, :string, default: nil
 
   attr :image_picker_field, :string, default: nil
   attr :uploads, :map, required: true
@@ -974,6 +1010,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
       show_profile={@show_profile}
       user_name={@user_name}
       user_color={@user_color}
+      account_path={@account_path}
     />
     <.image_picker_modal
       image_picker_field={@image_picker_field}

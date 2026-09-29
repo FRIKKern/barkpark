@@ -31,6 +31,21 @@ defmodule BarkparkWeb.Plugs.DeriveWorkspaceFromToken do
     * `workspace_id` matches no row → untouched. The `api_tokens.workspace_id`
       FK is `on_delete: :delete_all`, so no LIVE token points at a dead
       workspace; still fail-soft rather than 500.
+
+  ## The one halt: the token's workspace is ARCHIVED (task-55474a106554e65a)
+
+  An archived workspace is inert but not gone, and its tokens survive the
+  archive (nothing is deleted). Fail-soft here would be a TENANT SWAP: the
+  plug would leave `:current_workspace` unset and `AssignDefaultScope` would
+  stamp the Default workspace, so a token bound to the archived workspace
+  would read and write ANOTHER tenant's data. So this arm halts with 409
+  `workspace_archived` instead.
+
+  The workspace-management verbs a restore depends on opt out per ROUTE with
+  `private: %{barkpark_archived_workspace_exempt: true}` in the
+  router (`GET /api/workspaces`, archive, restore) — otherwise RESTORE, called
+  with a token bound to the archived workspace, would be refused by the very
+  guard it lifts.
   """
 
   import Plug.Conn
@@ -49,9 +64,27 @@ defmodule BarkparkWeb.Plugs.DeriveWorkspaceFromToken do
   def call(conn, _opts) do
     with %ApiToken{workspace_id: ws_id} when is_binary(ws_id) <- conn.assigns[:api_token],
          %Workspace{} = ws <- Tenancy.get_workspace_by_id(ws_id) do
-      assign(conn, :current_workspace, ws)
+      if Workspace.archived?(ws) and not archived_workspace_exempt?(conn) do
+        refuse_archived(conn, ws)
+      else
+        assign(conn, :current_workspace, ws)
+      end
     else
       _ -> conn
     end
+  end
+
+  @doc "The route-private key that exempts a workspace-management route from the archive halt."
+  def archived_ok_key, do: :barkpark_archived_workspace_exempt
+
+  defp archived_workspace_exempt?(conn), do: conn.private[archived_ok_key()] == true
+
+  defp refuse_archived(conn, ws) do
+    env = Barkpark.Content.Errors.to_envelope({:error, {:workspace_archived, ws.slug}}, conn)
+
+    conn
+    |> put_status(env.status)
+    |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
+    |> halt()
   end
 end

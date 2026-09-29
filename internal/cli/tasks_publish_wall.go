@@ -101,6 +101,24 @@ var tagNamePattern = regexp.MustCompile(`^[a-z0-9-]+$`)
 // absent.
 const tagRegistryCommand = "bp doc ls tag --all"
 
+// tagRegistryKeyNote names WHICH KEY of that listing carries the string this
+// wall accepts, and names the one that does NOT.
+//
+// Naming the command alone was not enough (task-11f69d777d9d8e87). The listing
+// emits stored documents, so a caller carrying the task surface's own
+// convention reads `.documents[].doc_id`, gets null on every row, and concludes
+// the registry is EMPTY rather than that the key is different. `doc_id` now
+// answers — doc_listing_row_id_key.go mirrors `_id` onto it — and this line is
+// the half that fires where the caller is actually stuck: on the refusal
+// itself, which is the only surface that reaches a caller who never suspected
+// the key was wrong.
+//
+// `.title` is called out by name because it is the plausible wrong answer and
+// it is wrong on a QUARTER of the vocabulary: 52 of the 208 registered tags
+// carry a title that is not a legal tag name (`macos` is titled "macOS") and 2
+// carry no title at all, measured against guerrilla 2026-09-22.
+const tagRegistryKeyNote = "the exact strings accepted here — NOT .title, which on 52 of 208 registered tags is prose, not a tag name"
+
 // publishWallRefusal is one refusal, in the shape the SERVER uses for the same
 // refusal ({field, rule, fix} for label_spine; {unknown, suggestions} for
 // unknown_tag) so the client-side and server-side messages read alike.
@@ -145,6 +163,7 @@ func (r *publishWallRefusal) lines() []string {
 		out = append(out,
 			"a tag is registered ONLY if a PUBLISHED type:tag document carries that id — you cannot invent one at create time",
 			fmt.Sprintf("%s   # the live registry (%d registered)", tagRegistryCommand, r.RegistrySize),
+			fmt.Sprintf("%s -o json | jq -r '.%s[].%s'   # %s", tagRegistryCommand, "documents", docListingRowIDKey, tagRegistryKeyNote),
 		)
 		return out
 	}
@@ -194,7 +213,8 @@ func wallRefusalMessage(ref *publishWallRefusal) string {
 func wallRefusalHint(ref *publishWallRefusal) string {
 	const nothing = "nothing was created — no draft was left behind."
 	if ref.Code == "unknown_tag" {
-		return nothing + " A tag is registered ONLY if a PUBLISHED type:tag document carries that id — list the live registry with `" + tagRegistryCommand + "`."
+		return nothing + " A tag is registered ONLY if a PUBLISHED type:tag document carries that id — list the live registry with `" +
+			tagRegistryCommand + " -o json | jq -r '.documents[]." + docListingRowIDKey + "'` (" + tagRegistryKeyNote + ")."
 	}
 	if ref.Fix != "" {
 		return nothing + " " + ref.Fix

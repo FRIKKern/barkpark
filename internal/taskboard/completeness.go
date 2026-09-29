@@ -18,8 +18,15 @@ type Completeness struct {
 // small: callers may derive it from an API envelope without retaining the full
 // content document in every compact board row.
 type CompletenessInput struct {
-	Title           string
-	Description     string
+	Title       string
+	Description string
+	// HasDescription is the PROJECTION's answer to the same question
+	// Description answers by carrying the text. `?view=board` reports
+	// `content_digest.has_description` instead of shipping multi-kilobyte prose
+	// the board never renders, so the description check is satisfied by EITHER:
+	// a non-blank Description, or this flag. It can only ever ADD a point the
+	// prose would have scored, never remove one.
+	HasDescription  bool
 	HasCriteria     bool
 	Placement       string
 	Priority        string
@@ -34,7 +41,7 @@ func ScoreCompleteness(in CompletenessInput) Completeness {
 		ok   bool
 	}{
 		{"title", strings.TrimSpace(in.Title) != ""},
-		{"description", strings.TrimSpace(in.Description) != ""},
+		{"description", strings.TrimSpace(in.Description) != "" || in.HasDescription},
 		{"criteria", in.HasCriteria},
 		{"placement", strings.TrimSpace(in.Placement) != ""},
 		{"priority", strings.TrimSpace(in.Priority) != ""},

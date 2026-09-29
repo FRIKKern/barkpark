@@ -50,17 +50,14 @@ defmodule Barkpark.EdgeProjector.TypedEndpointBindingTest do
       {:ok, _} = Content.upsert_schema(attrs, @dataset, scope)
     end
 
-    prev_plugins = Application.get_env(:barkpark, :plugins)
+    prev_plugins = Barkpark.PluginEnv.capture()
     Application.delete_env(:barkpark, :plugins)
     :ok = Registry.register(TasksPlugin, %{"plugin_name" => "tasks"})
 
     on_exit(fn ->
       Registry.reset()
 
-      case prev_plugins do
-        nil -> Application.delete_env(:barkpark, :plugins)
-        v -> Application.put_env(:barkpark, :plugins, v)
-      end
+      Barkpark.PluginEnv.restore(prev_plugins)
     end)
 
     %{scope: scope}
@@ -109,12 +106,14 @@ defmodule Barkpark.EdgeProjector.TypedEndpointBindingTest do
       publish!(
         "task",
         name,
-        Map.merge(Barkpark.LabelFixtures.with_labels(), %{
-          "kind" => "task",
-          "lifecycle_status" => "open",
-          "wave_paper" => paper_slug,
-          "acceptance_criteria" => [%{"criterion" => "cited", "met" => false}]
-        }),
+        Barkpark.TaskBriefFixtures.with_brief(
+          Map.merge(Barkpark.LabelFixtures.with_labels(), %{
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "wave_paper" => paper_slug,
+            "acceptance_criteria" => [%{"criterion" => "cited", "met" => false}]
+          })
+        ),
         scope
       )
 

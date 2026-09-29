@@ -56,7 +56,20 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # theme-threaded. This is a ratified accepted tradeoff, NOT a filed follow-on —
   # no bp task exists for nested panel theming (the email envelope renders evergreen;
   # "dark" in a mail client is the client's transform of these bytes, not a re-render).
+  # A query-carrying task block marked `unavailable` (no task resolver loaded —
+  # `TaskResolver.mark_unavailable/1`, task-9c59aa555e1e015e) renders the
+  # explicit placeholder on EVERY style, ahead of its type's own emitter, which
+  # would otherwise paint an empty board that reads as "no tasks".
+  @task_unavailable_types Barkpark.PortableDoc.TaskResolver.unavailable_types()
+
   @doc false
+  def compose_block(%{"type" => t, "unavailable" => true} = b, style, theme)
+      when style != :article and t in @task_unavailable_types,
+      do: %{
+        "kind" => "_raw",
+        "html" => Barkpark.PortableDoc.Render.FleetEmail.task_unavailable_email_html(b, theme)
+      }
+
   def compose_block(%{"type" => "field-color"} = b, style, theme) when style != :article,
     do: compose_field_color(b, theme)
 
@@ -164,7 +177,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # is theme-threaded; the CONTAINER children are still composed at evergreen via
   # `render_children/2` (charter D1/D8 — see the SCOPE note above).
   def compose_block(%{"type" => "terminal"} = b, style, theme) when style != :article do
-    body = b |> container_children() |> render_children(style)
+    body = b |> container_children() |> render_children(style, render_opts(b))
 
     %{
       "kind" => "_raw",
@@ -185,6 +198,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   def compose_block(b, style, _theme), do: compose_block(b, style)
 
   @doc false
+  def compose_block(%{"type" => t, "unavailable" => true} = b, style)
+      when t in @task_unavailable_types do
+    html =
+      if style == :article,
+        do: Barkpark.PortableDoc.Render.Components.task_unavailable_html(b),
+        else: Barkpark.PortableDoc.Render.FleetEmail.task_unavailable_email_html(b)
+
+    %{"kind" => "_raw", "html" => html}
+  end
+
   def compose_block(%{"type" => "heading"} = b, style) do
     # `text` is coerced through the tolerant `stringish/1` — a raw mutate can
     # persist a map/list where the heading string was expected, which used to
@@ -206,7 +229,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # headings were bold `<span>`s until the email-view wave (gp-w3): a mailed
     # paper deserves the same typographic skeleton the reader shows.
     _ = style
+
     %{"kind" => "PdHeading", "level" => level, "children" => children}
+    |> maybe_put("align", block_align(b))
   end
 
   def compose_block(%{"type" => "eyebrow"} = b, style) do
@@ -263,6 +288,31 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "PdParagraph", "_role" => "byline", "children" => [text]}
   end
 
+  def compose_block(%{"type" => "pre-gate-badge"} = b, style) do
+    # READER-SYNTHESISED, NEVER STORED. `Content.Papers.PreGateRegister.annotate/3`
+    # inserts this block below the masthead byline of a grandfathered Paper
+    # (the 2026-09-02 ruling: published before the block gate, still refused by
+    # it) on the way into the reader / Studio block streams. It is one quiet
+    # `<p>` — eyebrow-weight caps-mono, one line, tone from the existing
+    # `--bp-tone-*` pair — with the register's `reader_behaviour` as the title
+    # so the mark explains itself on hover and in print stays a plain line.
+    # `_tone` is whitelisted here so a stray value can never mint a class;
+    # `_tucked` tells the walker the badge sits under a byline rule (the CSS
+    # pull-up applies only then, so it never fights a heading's margin).
+    tone = if Map.get(b, "tone") == "warning", do: "warning", else: "neutral"
+
+    _ = style
+
+    %{
+      "kind" => "PdParagraph",
+      "_role" => "pre-gate",
+      "_tone" => tone,
+      "_tucked" => Map.get(b, "anchor") == "byline",
+      "_title" => stringish(Map.get(b, "title", "")),
+      "children" => [stringish(Map.get(b, "label", ""))]
+    }
+  end
+
   def compose_block(%{"type" => "ingress"} = b, style) do
     # Lead paragraph — heavier weight + larger size in article mode.
     # EVERY style emits a real `<p>` (see the eyebrow clause — the email
@@ -282,7 +332,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # both beat the bare `<span>`s email used to get, which collapsed every
     # paragraph into one unbroken run (gp-w3 email-view wave).
     _ = style
+
     %{"kind" => "PdParagraph", "children" => compose_inline_children(paragraph_inline(b))}
+    |> maybe_put("align", block_align(b))
   end
 
   # ── Authoring-drift type aliases (the choke point) ─────────────────────────
@@ -328,7 +380,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     do: compose_block(Map.put(b, "type", "blockquote"), style)
 
   # Pullquote — italic serif, larger, muted, with a 3px terracotta left-border
-  # (mirrors doc.css `.pullquote`) in article mode. The clause is style-INVARIANT:
+  # (mirrors `.bp-paper-surface .bp-role-pullquote` in
+  # api/assets/paper-surface/paper-surface.css — `border-left: 3px solid
+  # var(--paper-reading-accent)`) in article mode. The clause is style-INVARIANT:
   # it emits the same PdParagraph with `_role: "pullquote"` in every style, and
   # walk.ex paints the full role treatment (terracotta left-border + sizing) at
   # BOTH `:article` (via the `.bp-role-pullquote` class) and email/default (via
@@ -348,14 +402,19 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # Lists stay semantic in every style. Article mode leaves the resulting
   # PdList/PdListItem frame bare for the paper stylesheet; email/default mode
   # applies its Outlook-safe spacing inline in Walk.
+  # A checklist is a list with `"task" => true`; each item map may carry
+  # `"checked" => true`. Items stay inline arrays or {content|text, checked, children}
+  # maps, so every existing list reader keeps working and a checklist degrades to
+  # a plain list wherever the flag is unknown.
   def compose_block(%{"type" => "list"} = b, style) do
     ordered = Map.get(b, "ordered") == true
+    task = Map.get(b, "task") == true
 
     items =
       Map.get(b, "items", [])
       |> List.wrap()
       |> Enum.map(fn item ->
-        %{
+        base = %{
           "kind" => "PdListItem",
           "children" =>
             [
@@ -365,9 +424,17 @@ defmodule Barkpark.PortableDoc.Render.Compose do
               }
             ] ++ compose_list_children(item, style)
         }
+
+        if task do
+          checked = is_map(item) and Map.get(item, "checked") == true
+          Map.merge(base, %{"task" => true, "checked" => checked})
+        else
+          base
+        end
       end)
 
-    %{"kind" => "PdList", "ordered" => ordered, "children" => items}
+    list = %{"kind" => "PdList", "ordered" => ordered, "children" => items}
+    if task, do: Map.put(list, "task", true), else: list
   end
 
   def compose_block(%{"type" => "callout"} = b, style) do
@@ -473,9 +540,15 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  # Article mode: the doc.css `hr.section` look — a centered "§" glyph
+  # Article mode: the `.bp-section-divider` look — a centered "§" glyph
   # straddling a hairline rule (the glyph sits on the warm parchment, masking
-  # the rule behind it). Email/default mode: a plain `PdHr`, unchanged.
+  # the rule behind it). There is no `hr.section` selector anywhere in this repo:
+  # the divider's visual declarations are INLINE in
+  # `Figures.section_divider_html/0`, and the only stylesheet that restates them
+  # is the edit mirror `.bp-paper-editor-body .bp-section-divider{,__mark}`
+  # (api/assets/paper-editor/src/styles.css). paper-surface.css mentions
+  # `.bp-section-divider` only in the divider-before-h2 dedup rule, never for the
+  # glyph's own look. Email/default mode: a plain `PdHr`, unchanged.
   def compose_block(%{"type" => "divider"}, :article) do
     %{"kind" => "_raw", "html" => Figures.section_divider_html()}
   end
@@ -491,10 +564,13 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # it. The mermaid source is entity-encoded (& < >) so it round-trips through
   # the extractor and Mermaid decodes it at runtime.
   #
-  # In article mode: a bordered, parchment, inset figure card (mirrors doc.css
-  # `figure`); the figcaption carries a bold "Figure N." run-in and is styled by
-  # the ONE `.bp-figcaption` class (paper-surface.css) the diagram/asciicast
-  # emitters in figures.ex share.
+  # In article mode: a bordered, parchment, inset figure card whose frame is
+  # INLINE on the `<figure>` in `Figures.diagram_html/3` — paper-surface.css
+  # carries no `figure` selector, so the card has no stylesheet counterpart. The
+  # figcaption carries a bold "Figure N." run-in and is the part that DOES: the
+  # ONE `.bp-figcaption` class (`.bp-paper-surface .bp-figcaption`,
+  # api/assets/paper-surface/paper-surface.css) the diagram/asciicast emitters in
+  # figures.ex share.
   # In email/default mode: degrade gracefully — Mermaid never runs in email, so
   # we render the caption then the source as a plain code block.
   # CONTENTLESS DIAGRAM (the empty-chrome invariant — see `blank_field?/2`): a
@@ -587,7 +663,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     %{
       "kind" => "_raw",
-      "html" => figure_html(child, caption, style)
+      "html" => figure_html(child, caption, style, render_opts(b))
     }
   end
 
@@ -610,17 +686,29 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     if blank_code_source?(b) do
       %{"kind" => "_raw", "html" => ""}
     else
-      value = stringish(Map.get(b, "value", ""))
-      %{"kind" => "_raw", "html" => Figures.code_block_html(value)}
+      %{
+        "kind" => "_raw",
+        "html" => Figures.code_block_html(code_source(b), code_emphasis(b), Map.get(b, "lang"))
+      }
     end
   end
 
+  # LINE EMPHASIS is a WEB-ONLY channel (pe-bl-code-emphasis). The default arm
+  # below is the EMAIL arm (`compose_block/1` defaults to `:email`), and it does
+  # not read `emphasis` at all: a mail client gets the same per-line `<code>`
+  # chip stack it always got, which is the honest degradation — a background
+  # wash on one line is exactly the thing Outlook drops silently, and a span
+  # carrying a class the mail has no stylesheet for is worse than no span. The
+  # parity fixture asserts the degradation directly (an emphasis-bearing block
+  # and the same block with the field stripped compose to the IDENTICAL email
+  # tree) rather than trusting this comment.
   def compose_block(%{"type" => "code"} = b, _style) do
     if blank_code_source?(b) do
       %{"kind" => "_raw", "html" => ""}
     else
       children =
-        Map.get(b, "value", "")
+        b
+        |> code_source()
         |> String.split("\n")
         |> Enum.map(fn line ->
           %{"kind" => "PdText", "children" => [%{"kind" => "PdInlineCode", "value" => line}]}
@@ -734,7 +822,31 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "PdEmbed", "target" => stringish(Map.get(b, "target", ""))}
   end
 
-  def compose_block(%{"type" => "table"} = b, _style) do
+  # ── linked master instance (task-59f078a2fd248698) ────────────────────────
+  # `"type" => "master-ref"` carries only a master id and a pinned version
+  # (nil = latest). Composes to a `PdMasterRef` node carrying the resolution
+  # key; the walker injects the caller's prerendered master HTML from
+  # `pal.masters[key]` (see `Barkpark.PortableDoc.MasterRef`). Pure: no DB read
+  # here, and a block with no usable `master` composes to a nil key, which the
+  # walker renders as unavailable.
+  def compose_block(%{"type" => "master-ref"} = b, _style) do
+    %{"kind" => "PdMasterRef", "key" => Barkpark.PortableDoc.MasterRef.key(b)}
+  end
+
+  # TYPED COLUMNS (opt-in, CONTENT ONLY, `:article` only) — the Elixir mirror of
+  # internal/pdrender/richblocks.go tableRenderer. An optional `cols` attr, an
+  # index-aligned array of {type} maps, tags each column text | num | delta |
+  # spark. It changes only the CELL BODY (delta/spark) plus a per-column
+  # alignment CLASS for num/delta (emitted in Walk.table); it never touches the
+  # head band, the row/column shape, or any width math. `cols` ABSENT ⇒ every
+  # column is text ⇒ the render is byte-identical to a table carrying no spec.
+  # The key is `cols`, NOT `columns` (an overloaded layout attr, already read
+  # above for the implicit header). Non-`:article` styles never see the spec:
+  # the email emitters are byte-locked and a classed inline SVG paints as a
+  # black blob in a stylesheet-less mail client.
+  def compose_block(%{"type" => "table"} = b, style) do
+    col_types = table_col_types(b, style)
+
     compose_cell = fn cell ->
       cell
       |> table_cell_content()
@@ -742,7 +854,24 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> Enum.map(&to_pd_node_from_inline_child/1)
     end
 
-    compose_row = fn row -> row |> table_row_cells() |> Enum.map(compose_cell) end
+    compose_typed_cell = fn cell, index ->
+      case Enum.at(col_types, index) do
+        "delta" -> table_delta_cell(cell, compose_cell)
+        "spark" -> table_spark_cell(cell, compose_cell)
+        _ -> compose_cell.(cell)
+      end
+    end
+
+    # Head cells stay on the legacy body in EVERY column type (mirrors the Go
+    # renderer, which types only body cells); the head only inherits alignment.
+    compose_head_row = fn row -> row |> table_row_cells() |> Enum.map(compose_cell) end
+
+    compose_row = fn row ->
+      row
+      |> table_row_cells()
+      |> Enum.with_index()
+      |> Enum.map(fn {cell, index} -> compose_typed_cell.(cell, index) end)
+    end
 
     {column_head, record_keys} = table_column_head(b)
     raw_rows = Map.get(b, "rows", []) |> List.wrap()
@@ -787,7 +916,17 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       body_rows
       |> Enum.map(compose_row)
 
-    pd = %{"kind" => "PdTable", "rows" => rows}
+    pd =
+      %{"kind" => "PdTable", "rows" => rows}
+      |> table_put_col_types(col_types)
+      |> table_put_spans(
+        Map.get(b, "spans"),
+        length(rows),
+        rows |> List.first() |> List.wrap() |> length()
+      )
+      |> table_put_widths(Map.get(b, "cols"))
+      |> table_put_head_col(Map.get(b, "headCol"))
+      |> table_put_aligns(declared_head || legacy_head || column_head, body_rows)
 
     head =
       if is_list(declared_head) and declared_head != [],
@@ -797,7 +936,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     case head do
       nil -> pd
       [] -> pd
-      head_row -> Map.put(pd, "head", compose_row.(head_row))
+      head_row -> Map.put(pd, "head", compose_head_row.(head_row))
     end
   end
 
@@ -1278,7 +1417,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # threads style only — evergreen-nested, charter D1/D8).
   def compose_block(%{"type" => "terminal"} = b, :article) do
     parts = terminal_article_parts(b)
-    body = b |> container_children() |> render_blocks(:article)
+    body = b |> container_children() |> render_blocks(:article, render_opts(b))
 
     html =
       ~s|<div class="bp-term">#{parts.bar_html}<div class="bp-term__body">#{body}</div>#{parts.footer_html}</div>|
@@ -1287,7 +1426,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   def compose_block(%{"type" => "terminal"} = b, style) do
-    body = b |> container_children() |> render_children(style)
+    body = b |> container_children() |> render_children(style, render_opts(b))
 
     %{
       "kind" => "_raw",
@@ -1309,7 +1448,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       cols
       |> List.wrap()
       |> Enum.map(fn col ->
-        ~s|<div class="bp-cols__c">#{render_blocks(List.wrap(col), :article)}</div>|
+        ~s|<div class="bp-cols__c">#{render_blocks(List.wrap(col), :article, render_opts(b))}</div>|
       end)
       |> Enum.join("")
 
@@ -1423,7 +1562,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         |> Enum.with_index()
         |> Enum.map_join(fn {t, i} ->
           ~s(<div class="bp-tabs__panel" data-tab-index="#{i}">) <>
-            render_blocks(t.blocks, :article) <> ~s(</div>)
+            render_blocks(t.blocks, :article, render_opts(b)) <> ~s(</div>)
         end)
 
       %{
@@ -1444,7 +1583,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       sections =
         Enum.map_join(tabs, fn t ->
           ~s(<div class="bp-tabs__section"><p class="bp-tabs__label">#{Util.escape_html(t.label)}</p>) <>
-            render_blocks(t.blocks, style) <> ~s(</div>)
+            render_blocks(t.blocks, style, render_opts(b)) <> ~s(</div>)
         end)
 
       %{"kind" => "_raw", "html" => ~s(<div class="bp-tabs">#{sections}</div>)}
@@ -1629,7 +1768,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       if summary == "" and children == [] do
         ""
       else
-        inner = children |> Enum.map(&block_to_html(&1, style)) |> Enum.join()
+        inner = children |> Enum.map(&block_to_html(&1, style, render_opts(b))) |> Enum.join()
 
         open_attr =
           cond do
@@ -1695,7 +1834,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     html =
       if is_list(steps) and steps != [] do
-        rows = steps |> Enum.map(&steps_row_html(&1, style)) |> Enum.join()
+        rows = steps |> Enum.map(&steps_row_html(&1, style, render_opts(b))) |> Enum.join()
         if rows == "", do: "", else: ~s(<ol class="bp-steps">) <> rows <> ~s(</ol>)
       else
         ""
@@ -1976,7 +2115,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # the non-binary fail-soft already sealed in `Render.Util.escape_html/1`.
   # The ONE blank check both `code` compose arms share, so the two styles can
   # never disagree about what "sourceless" means. It reads the SAME key the
-  # emitters read (`value` — the standalone code block's source field),
+  # emitters read (`code_source/1` below — the four accepted source keys),
   # normalizes through `stringish/1` (so a missing key, an explicit nil, or a
   # non-stringish value is blank) and trims: `String.trim/1` strips the whole
   # Unicode White_Space set — NBSP U+00A0, the U+2000–200A quads, IDEOGRAPHIC
@@ -1985,10 +2124,135 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # characters (U+200B, U+FEFF) are NOT White_Space and stay content — they are
   # typed glyphs, not layout.
   #
-  # SCOPE: source-field ALIASES (`code` / `content` / `text`) are a separate
-  # contract owned elsewhere; when they normalize into `value` upstream this
-  # check sees them for free, with no second definition of "blank".
-  defp blank_code_source?(b), do: blank_field?(b, "value")
+  # SCOPE: the source-field ALIASES are read by `code_source/1` below, so this
+  # guard and the two compose arms answer to ONE key list — no shape can be
+  # blank to the guard and non-blank to the emitter (or vice versa).
+  defp blank_code_source?(b), do: code_source(b) == ""
+
+  # ── THE code-block source-field contract (task-e9af9f95d290307d) ───────────
+  #
+  # A standalone `code` block carries its source under one of FOUR keys. This is
+  # not a design; it is the corpus. Measured 2026-09-11 against
+  # https://guerrilla.barkpark.cloud, dataset `production`, over all 1050 `paper`
+  # and 8671 `task` documents (10,608 block-level `code` nodes):
+  #
+  #     value    9711   the canonical shape; every first-party producer writes it
+  #                     (from_markdown.ex, bpml/parser.ex, the Studio editor,
+  #                     paper-editor/src/canvas, the seeds)
+  #     code      327   Go's mdlite adapter (internal/taskboard/mdlite.go) and
+  #                     agent-authored JSON; ALL 219 task-side code blocks
+  #     text      460   agent-authored paper JSON
+  #     content    30   agent-authored paper JSON, an inline-node ARRAY
+  #     both        0   no live row carries two non-blank source keys
+  #
+  # Before this function, `compose_block/2` read `value` ONLY, so 817 authored
+  # blocks composed to NOTHING on every web/email surface while the Go TUI (which
+  # already read `code`||`value`) showed 327 of them — the same document full in
+  # one reader and hollow in another. internal/pdrender/code.go now reads THIS
+  # list in THIS order, and api/test/support/fixtures/code-source-aliases.json is
+  # the single file both engines' tests assert against.
+  #
+  # PRECEDENCE is FIRST NON-BLANK, not first-present: a leading key holding "" or
+  # whitespace falls through, so a Studio-seeded `"value" => ""` (the code clause
+  # of Blocks.default_block/2 mints one) cannot mask a real `code`. With `both` = 0
+  # in the corpus the order is unobservable today; `value` leads because it is the
+  # canonical field and because bpml/printer.ex has printed exactly
+  # `["value", "code", "content", "text"]` since it was written — this reuses that
+  # order rather than inventing a second one.
+  #
+  # `content` is an array of inline nodes; it flattens to its concatenated text.
+  # Anything non-stringish (a map, a number-free struct) normalizes to "" through
+  # `stringish/1` and falls through, exactly as the old single-key guard did.
+  #
+  # The winning key is returned VERBATIM (untrimmed): trimming is the selection
+  # rule, never a transform on the source — a `<pre>` shows leading indentation
+  # and trailing newlines exactly as authored, so every one of the 9711
+  # `value`-shaped rows composes byte-identically to before this change.
+  @code_source_keys ~w(value code content text)
+
+  defp code_source(b) do
+    Enum.find_value(@code_source_keys, "", fn key ->
+      source = b |> Map.get(key) |> code_source_text()
+      if String.trim(source) == "", do: nil, else: source
+    end)
+  end
+
+  # ── THE code-block LINE-EMPHASIS contract (pe-bl-code-emphasis) ────────────
+  #
+  # A `code` block MAY carry `emphasis`: an ARRAY of `{from, to, tone}` range
+  # objects marking lines of the SELECTED source (`code_source/1` above — the
+  # emphasis indexes whatever key won, so a `code`-keyed block emphasizes the
+  # same text the reader sees). `from`/`to` are 1-BASED INCLUSIVE; `to` is
+  # optional and defaults to `from`.
+  #
+  # The tone vocabulary is CLOSED — comment / offending / fixed — because the
+  # tone reaches the DOM as a class name; narrowing here is what makes the
+  # emitter's string interpolation safe. A range is DROPPED (never raises) when
+  # its tone is outside the vocabulary, when `from` is not an integer >= 1, or
+  # when `to` is present but below `from`. Dropping rather than raising is the
+  # same posture the source-key contract takes: the renderer is not the
+  # validator, and half-authored emphasis must still render the CODE.
+  #
+  # A block whose ranges ALL drop returns `[]`, which `Figures.code_block_html/2`
+  # renders through the legacy one-escape path — byte-identical to a block with
+  # no `emphasis` key. The shared fixture
+  # api/test/support/fixtures/code-block-emphasis-parity.json is the single file
+  # the Elixir, Go and JS legs all assert against.
+  @code_emphasis_tones ~w(comment offending fixed)
+
+  def code_emphasis(b) when is_map(b) do
+    case Map.get(b, "emphasis") do
+      list when is_list(list) -> Enum.flat_map(list, &code_emphasis_range/1)
+      _ -> []
+    end
+  end
+
+  def code_emphasis(_), do: []
+
+  defp code_emphasis_range(range) when is_map(range) do
+    tone = range |> Map.get("tone") |> stringish() |> String.trim()
+    from = Map.get(range, "from")
+    to = Map.get(range, "to", from)
+
+    if tone in @code_emphasis_tones and is_integer(from) and from >= 1 and
+         is_integer(to) and to >= from do
+      [{from, to, tone}]
+    else
+      []
+    end
+  end
+
+  defp code_emphasis_range(_), do: []
+
+  # The `content` shape flattens an inline-node ARRAY. Each node contributes the
+  # FIRST NON-EMPTY of its `"value"` then its `"text"` — the same dual-read every
+  # text leaf gets (`compose_inline/1`, pdrender `inline.go`), and byte-for-byte
+  # the rule the two sibling readers apply: code.go `codeSourceText` does
+  # `if s := stringishAttr(v, "value"); s != "" { … } else { stringishAttr(v, "text") }`
+  # and inline.tsx `textLeafValue` does `str(n.value) || str(n.text)` — Go and JS
+  # agree with each other exactly, including that the test is NON-EMPTY, not
+  # non-blank: a node whose `value` is `" "` keeps the space rather than falling
+  # through to `text` (only the OUTER key precedence in `code_source/1` trims).
+  # Matching on `%{"value" => v}` first — which this did — yielded "" for a
+  # `{"value" => "", "text" => "x"}` node while both siblings yielded "x": a
+  # code block full in the TUI and in the SDK, hollow on web and email. The
+  # fixture's "content node: blank value falls back to text" case is the lock.
+  defp code_source_text(nodes) when is_list(nodes) do
+    Enum.map_join(nodes, "", fn
+      s when is_binary(s) -> s
+      node when is_map(node) -> inline_leaf_source(node)
+      _ -> ""
+    end)
+  end
+
+  defp code_source_text(v), do: stringish(v)
+
+  defp inline_leaf_source(node) do
+    case stringish(Map.get(node, "value")) do
+      "" -> node |> Map.get("text") |> stringish()
+      value -> value
+    end
+  end
 
   # THE ONE blank-field reader every empty-chrome guard in this module shares, so
   # no two block types (and no two style arms of one type) can ever disagree about
@@ -2070,14 +2334,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp footnote_row_html(_), do: ""
 
   # ── steps helpers ────────────────────────────────────────────────────────
-  defp steps_row_html(%{} = step, style) do
+  defp steps_row_html(%{} = step, style, opts) do
     title = stringish(Map.get(step, "title", ""))
     blocks = container_children(step)
 
     if title == "" and blocks == [] do
       ""
     else
-      body = blocks |> Enum.map(&block_to_html(&1, style)) |> Enum.join()
+      body = blocks |> Enum.map(&block_to_html(&1, style, opts)) |> Enum.join()
 
       title_html =
         if title == "",
@@ -2089,7 +2353,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  defp steps_row_html(_, _style), do: ""
+  defp steps_row_html(_, _style, _opts), do: ""
 
   # ── toc helpers ──────────────────────────────────────────────────────────
   # `toc_items/1` normalizes the authored outline: text-less entries are
@@ -2211,6 +2475,158 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp normalize_list_item(%{} = item), do: paragraph_inline(item)
   defp normalize_list_item(item), do: item
+
+  # `cols` → an index-aligned list of type names. An unknown/missing `type`
+  # degrades to "text" (the legacy path), exactly like parseColTypes in Go.
+  # An absent spec yields [] — and [] is what keeps the node shape, and so the
+  # rendered bytes, identical to the pre-typed-columns render.
+  defp table_col_types(b, :article) do
+    case Map.get(b, "cols") do
+      cols when is_list(cols) and cols != [] ->
+        Enum.map(cols, fn
+          %{"type" => t} when t in ["num", "delta", "spark"] -> t
+          _ -> "text"
+        end)
+
+      _ ->
+        []
+    end
+  end
+
+  defp table_col_types(_b, _style), do: []
+
+  # Merged cells (Barkdown plan #24): `spans` is a list of %{"row", "col", "colspan", "rowspan"}
+  # over BODY rows; the grid stays rectangular (covered positions hold a placeholder cell) and
+  # the walker skips what a span covers. Anything malformed or outside the grid is dropped here,
+  # so the walker never sees an entry it cannot honour. Only the :article walker reads it.
+  defp table_put_spans(pd, spans, n_rows, n_cols) when is_list(spans) do
+    valid =
+      spans
+      |> Enum.filter(&is_map/1)
+      |> Enum.map(fn s ->
+        %{
+          "row" => table_span_int(Map.get(s, "row"), 0),
+          "col" => table_span_int(Map.get(s, "col"), 0),
+          "colspan" => table_span_int(Map.get(s, "colspan"), 1) || 1,
+          "rowspan" => table_span_int(Map.get(s, "rowspan"), 1) || 1
+        }
+      end)
+      |> Enum.filter(fn %{"row" => r, "col" => c, "colspan" => cs, "rowspan" => rs} ->
+        is_integer(r) and is_integer(c) and r < n_rows and c < n_cols and (cs > 1 or rs > 1)
+      end)
+      |> Enum.map(fn %{"row" => r, "col" => c, "colspan" => cs, "rowspan" => rs} = s ->
+        %{s | "colspan" => min(cs, n_cols - c), "rowspan" => min(rs, n_rows - r)}
+      end)
+      |> Enum.filter(fn %{"colspan" => cs, "rowspan" => rs} -> cs > 1 or rs > 1 end)
+
+    if valid == [], do: pd, else: Map.put(pd, "spans", valid)
+  end
+
+  defp table_put_spans(pd, _spans, _n_rows, _n_cols), do: pd
+
+  defp table_span_int(v, min) when is_integer(v) and v >= min, do: v
+
+  defp table_span_int(v, min) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, ""} when n >= min -> n
+      _ -> nil
+    end
+  end
+
+  defp table_span_int(_v, _min), do: nil
+
+  # Column widths (Barkdown plan #25): `cols[i].width`, an integer of CSS pixels, rides PdTable as
+  # `widths` (nil where a column has none) — only when at least one column has one. Only the
+  # :article walker reads it (a <colgroup>); email keeps the plain grid.
+  # Header column (Barkdown plan #26): `headCol: true` → the walker renders each body row's first
+  # cell as <th scope="row">.
+  defp table_put_head_col(pd, true), do: Map.put(pd, "headCol", true)
+  defp table_put_head_col(pd, _), do: pd
+
+  # Per-cell alignment (plan #26): a content-map cell may carry `align: "center" | "right"`;
+  # PdTable gets `aligns` — %{"head" => [...], "rows" => [[...]]} with nil where a cell has none —
+  # only when at least one cell has one.
+  defp table_put_aligns(pd, head, rows) do
+    head_aligns =
+      if is_list(head), do: Enum.map(table_row_cells_safe(head), &table_cell_align/1), else: []
+
+    row_aligns =
+      Enum.map(rows, fn row -> Enum.map(table_row_cells_safe(row), &table_cell_align/1) end)
+
+    if Enum.any?(head_aligns ++ List.flatten(row_aligns), &(&1 != nil)),
+      do: Map.put(pd, "aligns", %{"head" => head_aligns, "rows" => row_aligns}),
+      else: pd
+  end
+
+  defp table_row_cells_safe(row) when is_list(row), do: row
+  defp table_row_cells_safe(%{"cells" => cells}) when is_list(cells), do: cells
+  defp table_row_cells_safe(_row), do: []
+
+  defp table_cell_align(%{"align" => a}) when a in ["center", "right"], do: a
+  defp table_cell_align(_cell), do: nil
+
+  defp table_put_widths(pd, cols) when is_list(cols) and cols != [] do
+    widths =
+      Enum.map(cols, fn
+        %{"width" => w} -> table_span_int(w, 1)
+        _ -> nil
+      end)
+
+    if Enum.any?(widths, &is_integer/1), do: Map.put(pd, "widths", widths), else: pd
+  end
+
+  defp table_put_widths(pd, _cols), do: pd
+
+  defp table_put_col_types(pd, []), do: pd
+  defp table_put_col_types(pd, types), do: Map.put(pd, "cols", types)
+
+  # delta: the direction glyph FIRST (▲ up / ▼ down / - flat), then the
+  # magnitude — so the sign survives with zero colour (colour would be
+  # reinforcement only, and mail/monochrome sinks have none). A cell that does
+  # not coerce to a number falls back to the legacy text body, no glyph.
+  defp table_delta_cell(cell, compose_cell) do
+    case table_cell_number(cell) do
+      nil ->
+        compose_cell.(cell)
+
+      n ->
+        text = table_delta_glyph(n) <> " " <> format_field_number(abs(n))
+        [%{"kind" => "PdText", "children" => [text]}]
+    end
+  end
+
+  defp table_delta_glyph(n) when n > 0, do: "▲"
+  defp table_delta_glyph(n) when n < 0, do: "▼"
+  defp table_delta_glyph(_n), do: "-"
+
+  # spark: a numeric series cell becomes the canonical stat sparkline
+  # (DataViz.spark_svg/2 — the ONE primitive), carried as a `_raw` node so the
+  # SVG reaches the walk unescaped. The TUI mirror renders the same series as
+  # the block-glyph sparkline; the SVG is the web projection of that value, not
+  # a second ladder. A non-series cell, or one with no coercible numbers, falls
+  # back to the legacy text body.
+  defp table_spark_cell(cell, compose_cell) when is_list(cell) do
+    values = cell |> Enum.map(&table_cell_number/1) |> Enum.reject(&is_nil/1)
+
+    if values == [] do
+      compose_cell.(cell)
+    else
+      %{
+        "kind" => "_raw",
+        "html" => Barkpark.PortableDoc.Render.DataViz.spark_svg(values, "bp-table__spark")
+      }
+      |> List.wrap()
+    end
+  end
+
+  defp table_spark_cell(cell, compose_cell), do: compose_cell.(cell)
+
+  # Only a scalar cell coerces to a number (mirrors Go's toFloat, which sees the
+  # raw cell); a {content:…} / node-array cell is prose and stays prose.
+  defp table_cell_number(cell) when is_number(cell) or is_binary(cell),
+    do: field_number_value(cell)
+
+  defp table_cell_number(_cell), do: nil
 
   defp table_row_cells(%{"cells" => cells}) when is_list(cells), do: cells
   defp table_row_cells(row), do: List.wrap(row)
@@ -2474,13 +2890,34 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # child block then renders it to a body fragment via `Render.Walk.render_body`
   # (the `doctype: false` body twin of `render_html`).
   # Render a list of child blocks to a concatenated HTML fragment — the same
-  # compose→walk bridge `figure_html/3` uses, for container blocks (terminal /
-  # columns) that hold arbitrary other blocks.
-  defp render_blocks(blocks, style) when is_list(blocks) do
-    blocks |> Enum.map(&block_to_html(&1, style)) |> Enum.join("")
+  # compose→walk bridge `figure_html/4` uses, for container blocks (terminal /
+  # columns / tabs / grid section / card / expandable / steps) that hold
+  # arbitrary other blocks.
+  #
+  # `opts` is the container's carried render options (`render_opts/1`): nil for
+  # a caller that composed the container directly (pure unit tests, Studio's
+  # edit-mode emitters), else the map `Render.render_block/2` was called with.
+  defp render_blocks(blocks, style, opts) when is_list(blocks) do
+    blocks |> Enum.map(&block_to_html(&1, style, opts)) |> Enum.join("")
   end
 
-  defp render_blocks(_, _), do: ""
+  defp render_blocks(_, _, _), do: ""
+
+  @doc """
+  The render options a container block carries for its children — stamped under
+  the transient `"_render_opts"` key by `Render.prepare_block/2` (so only a block
+  that went through `Render.render_block/2` has them). nil when absent.
+  """
+  def render_opts(b) when is_map(b), do: Map.get(b, "_render_opts")
+  def render_opts(_), do: nil
+
+  # A child of a container renders under the container's opts with three keys
+  # held back: `:theme` (nested children render at evergreen by design — the
+  # SCOPE note at the top of this module, charter D8), `:container_width` (a
+  # child takes its palette width, as it always has) and `:doctype` (a child is
+  # always a fragment). `style` is the style the container passes down.
+  defp child_render_opts(opts, style),
+    do: opts |> Map.drop([:theme, :container_width, :doctype]) |> Map.put(:style, style)
 
   @doc """
   Public compose→walk bridge for a slot's child blocks — the SAME
@@ -2491,9 +2928,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   a body fragment; an `image` child fast-paths to a `PdImage` `<img>`, an
   `action` child to a `PdButton` link — no card-specific media/action code.
   """
-  def render_children(blocks, style \\ :email)
-  def render_children(blocks, style) when is_list(blocks), do: render_blocks(blocks, style)
-  def render_children(_, _), do: ""
+  def render_children(blocks, style \\ :email, opts \\ nil)
+
+  def render_children(blocks, style, opts) when is_list(blocks),
+    do: render_blocks(blocks, style, opts)
+
+  def render_children(_, _, _), do: ""
 
   # columns email variant — composes each column's children at the call site
   # (evergreen-nested, style-only) then hands the list of ready column fragments
@@ -2504,7 +2944,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       b
       |> Map.get("columns")
       |> List.wrap()
-      |> Enum.map(fn col -> render_children(List.wrap(col), style) end)
+      |> Enum.map(fn col -> render_children(List.wrap(col), style, render_opts(b)) end)
 
     Barkpark.PortableDoc.Render.PanelsEmail.columns_email_html(cols_html, theme)
   end
@@ -2525,7 +2965,21 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         t -> [%{"kind" => "PdText", "weight" => "bold", "children" => [t]}]
       end
 
-    inner = Enum.map(blocks, &compose_block(&1, style))
+    # A stack child composes into THIS Pd-tree, so the outer walk's palette
+    # (wikilinks / embeds / values) already reaches it; the per-block pre-pass
+    # (paper-link metadata, reference titles, codelist labels, redaction) does
+    # not, so run it here with the section's carried opts.
+    inner =
+      case render_opts(b) do
+        nil ->
+          Enum.map(blocks, &compose_block(&1, style))
+
+        opts ->
+          Enum.map(
+            blocks,
+            &compose_block(Barkpark.PortableDoc.Render.prepare_block(&1, opts), style)
+          )
+      end
 
     # A section that OPENS with a heading (and carries no title of its own) draws
     # no rule pair in article mode: the heading IS the boundary, and the
@@ -2615,7 +3069,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> List.wrap()
       |> Enum.map(fn child ->
         ~s(<div class="bp-section__cell"#{cell_layout_attr(child)}>) <>
-          render_blocks([child], style) <> "</div>"
+          render_blocks([child], style, render_opts(b)) <> "</div>"
       end)
       |> Enum.join("")
 
@@ -2661,13 +3115,19 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  defp block_to_html(child, style) when is_map(child) do
+  defp block_to_html(child, style, nil) when is_map(child) do
     composed = compose_block(child, style)
     pal = Barkpark.PortableDoc.Render.Palettes.palette_for(style)
     Walk.render_body(composed, Map.fetch!(pal, :width), pal)
   end
 
-  defp block_to_html(_, _), do: ""
+  # Carried opts: the child renders through the SAME entry a top-level block
+  # does, so it gets the pre-pass AND the resolution palette — and, if it is a
+  # container itself, carries the opts one level further down.
+  defp block_to_html(child, style, opts) when is_map(child),
+    do: Barkpark.PortableDoc.Render.render_block(child, child_render_opts(opts, style))
+
+  defp block_to_html(_, _, _), do: ""
 
   @doc false
   def paper_links_presentation(block, style) do
@@ -3011,17 +3471,11 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # author's prose is never deleted to tidy a border), and a real child with no
   # caption is byte-UNCHANGED — the pre-existing `cap == ""` branches already
   # handle a caption-less figure and are untouched.
-  defp figure_html(child, caption, style) do
+  defp figure_html(child, caption, style, opts) do
     child_html =
       case child do
-        c when is_map(c) ->
-          composed = compose_block(c, style)
-          pal = Barkpark.PortableDoc.Render.Palettes.palette_for(style)
-          width = Map.fetch!(pal, :width)
-          Walk.render_body(composed, width, pal)
-
-        _ ->
-          ""
+        c when is_map(c) -> block_to_html(c, style, opts)
+        _ -> ""
       end
 
     if String.trim(stringish(child_html)) == "" and String.trim(caption) == "" do
@@ -3055,5 +3509,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       end
 
     open <> child_html <> cap <> "</figure>"
+  end
+
+  # The author's text alignment on a paragraph or heading: "center" | "right" ride to the
+  # walker as `align`; "left" and anything else are the default and add nothing.
+  defp block_align(b) do
+    case Map.get(b, "align") do
+      a when a in ["center", "right"] -> a
+      _ -> nil
+    end
   end
 end

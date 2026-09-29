@@ -1,4 +1,43 @@
 // Cross-tab pin race driver — runs origin/main's app.js verbatim in a vm sandbox.
+//
+// ── 2026-09-10 · THE RACE IS NOW PROVED IN TWO REAL CHROME TABS ──────────────
+// cch-w42-bl-pin-race-needs-a-two-tab-browser-reproduction. This sandbox driver
+// proved the MECHANISM; the end-to-end RENDERED symptom is now proved too, in a
+// real browser, by cloud/priv/static/__preview__/pin-race.mjs. Verdict:
+// REPRODUCED. Two tabs of one headless Chrome share one localStorage; tab B
+// switches team and reloads ITSELF; tab A, same page life, clicks Refresh on
+// Activity and paints the OTHER team's audit rows under its own team's label:
+//
+//   tab A after refresh — renderedTeamLabel "Northwind Ops"
+//                         renderedRows ["y-side@contoso.example minted an API token"]
+//                         livePin team-2222…  meTeamPinMoved true  role "admin"
+//
+// The verbatim capture, both tabs, both legs, is beside this file:
+//   tooling/grip/ledger/cch-w42-pinrace.capture-2026-09-10.json
+//
+// ── THREE THINGS THE FILING GOT WRONG (dated correction, 2026-09-10) ─────────
+// The charter file is outside this row's fence, so the amendments the lead
+// should make to the D469 entry are named here by line:
+//
+//  1. "the switcher reloads only its own tab (:5269-5270)" — WRONG LINES on
+//     today's origin/main. The switcher's setItem + location.reload() pair is
+//     app.js:6588-6589. :5269 is inside tokenAbilitiesUnknownHtml's comment.
+//     (app.js:116, the per-request pin re-read, IS correct.)
+//  2. "loadMe has three call sites" — there are FIVE on today's main
+//     (app.js:1631, :11867, :17818, :20138, :26367). The CONCLUSION survives —
+//     none of them is a route change — but the count does not.
+//  3. The filing reads as though the console cannot tell the pin moved. It CAN:
+//     `meTeamPinMoved()` (app.js:19964) already exists and already guards THREE
+//     bands (app.js:18993, :19996, :20078 — teamAuthorityState and siblings).
+//     The Activity band is simply not one of them: loadActivity (app.js:20753)
+//     issues GET /v1/audit and paints the answer with no pin question asked.
+//     That narrows the defect from "no mechanism" to "one band skipped the
+//     mechanism", and it narrows the fix accordingly.
+//
+// ── THIS DRIVER WAS UNRUNNABLE AS COMMITTED ─────────────────────────────────
+// It read `./main-app.js` — a file that has never existed in this directory, so
+// `node tooling/grip/ledger/cch-w42-pinrace.driver.mjs` died ENOENT for anyone
+// who tried to re-run D469's proof. It now reads the repo's real app.js.
 import vm from "node:vm";
 import fs from "node:fs";
 
@@ -53,7 +92,7 @@ const sandbox = {
 };
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(new URL("./main-app.js", import.meta.url), "utf8"), sandbox);
+vm.runInContext(fs.readFileSync(new URL("../../../cloud/priv/static/app.js", import.meta.url), "utf8"), sandbox);
 
 // A session token must exist or api() sends no auth header (and no team pin).
 store["bpcloud.session"] = JSON.stringify({ token: "tok-1", user: { id: "u1" } });

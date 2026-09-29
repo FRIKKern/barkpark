@@ -17,6 +17,9 @@ package taskboard
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -72,6 +75,36 @@ import (
 // honest budget is snapshot-shaped. Rationale in full at snapshotFetchTimeout
 // (fetch.go).
 func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
+	// A bare, per-call corpus cache: no base, so the corpus GET is the same
+	// exhaustive walk it has always been. Every one-shot CLI verb (`bp task
+	// frontier` / `lint` / `next`, `bp cmux dispatch`) reaches the fetch through
+	// here and is therefore byte-identical to before. The board takes the
+	// incremental path via newSnapshotFetcher, which keeps its cache across the
+	// re-lists of one long-lived process.
+	return fetchSnapshotWith(c, &corpusCache{})
+}
+
+// newSnapshotFetcher returns a fetch seam that CARRIES a corpus cache, so
+// successive re-lists from one board can walk only the changed prefix
+// (corpus.go). One cache per fetcher — never a package global — so two boards,
+// or two tests, can never seed each other's corpus.
+//
+// cacheDir/cacheKey address the PERSISTED base (corpus_persist.go): the same bp
+// config dir and scope key the first-paint snapshot cache uses. They are passed
+// in rather than resolved here so a test can point the whole seam at a
+// t.TempDir(), and an empty cacheDir disables persistence entirely — which is
+// what a board with no resolvable config dir gets, and it is byte-identical to
+// the pre-persistence behaviour.
+func newSnapshotFetcher(cacheDir, cacheKey string) func(*apiclient.Client) (Snapshot, DetailIndex, error) {
+	// live:true — this cache outlives one fetch, which is what licenses the brief
+	// prime projection and the rolling event tail (corpus.go primeView).
+	cc := &corpusCache{live: true, persistDir: cacheDir, persistKey: cacheKey}
+	return func(c *apiclient.Client) (Snapshot, DetailIndex, error) {
+		return fetchSnapshotWith(c, cc)
+	}
+}
+
+func fetchSnapshotWith(c *apiclient.Client, cc *corpusCache) (Snapshot, DetailIndex, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), snapshotFetchTimeout)
 	defer cancel()
 	var (
@@ -83,21 +116,25 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 		inflightTasks   []Task
 		inflightDetails DetailIndex
 		inflightErr     error
+		listExhaustive  bool
 		wg              sync.WaitGroup
 	)
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		body, err := getJSONCtx(ctx, c, "/v1/tasks?limit=1000")
-		if err != nil {
-			listErr = err
-			return
-		}
-		tasks, details, listErr = decodeTaskListFull(body)
+		// task-6c59bff7cb6b36ee: the corpus GET is a CURSOR WALK, not one
+		// window. listExhaustive records whether the walk actually reached the
+		// end — the fact mergeForward needs to tell "this row closed" from
+		// "this row rotated out of the window".
+		// The corpus GET walks the CHANGED PREFIX when it safely can and the
+		// whole cursor when it cannot (corpus.go); either way listExhaustive
+		// keeps its meaning — true only when the returned corpus is the whole
+		// world — so mergeForward's absence heuristic is unaffected.
+		tasks, details, listExhaustive, listErr = fetchTaskCorpus(ctx, c, cc, time.Now())
 	}()
 	go func() {
 		defer wg.Done()
-		extras, primeErr = fetchPrime(ctx, c)
+		extras, primeErr = fetchPrime(ctx, c, cc.primeView())
 	}()
 	go func() {
 		defer wg.Done()
@@ -105,12 +142,7 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 		// decodeTaskListFull — the filtered response is the same {ok,docs}
 		// envelope, and {"docs":[]} legitimately decodes to zero rows with a
 		// nil error (an empty in-flight population is a fact, not a failure).
-		body, err := getJSONCtx(ctx, c, inflightFetchPath)
-		if err != nil {
-			inflightErr = err
-			return
-		}
-		inflightTasks, inflightDetails, inflightErr = decodeTaskListFull(body)
+		inflightTasks, inflightDetails, _, inflightErr = fetchTaskPages(ctx, c, inflightFetchPath+cc.listView())
 	}()
 	wg.Wait()
 	if listErr != nil {
@@ -119,6 +151,11 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 	if primeErr != nil {
 		return Snapshot{}, nil, primeErr
 	}
+	// Rebuild the event tail the brief projection trims. On a one-shot cache
+	// primeView() returned "", the body already carried the full tail, and this
+	// is an identity (nothing stored, nothing to merge with) — so those verbs
+	// stay byte-identical in BOTH directions, request and Snapshot.
+	extras.events = cc.mergeEventTail(extras.events)
 	if inflightErr != nil {
 		return Snapshot{}, nil, inflightErr
 	}
@@ -136,6 +173,7 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 	}
 	extras.counts[lifeInProgress] = countInProgress(tasks)
 	snap := composeSnapshot(tasks, extras, time.Now().UTC())
+	snap.Exhaustive = listExhaustive
 	syncDetails(details, snap.Tasks)
 	return snap, details, nil
 }
@@ -163,6 +201,21 @@ func bareID(id string) string { return strings.TrimPrefix(id, draftsPrefix) }
 // BareID is the exported form of bareID for callers outside the package (the
 // CLI's `bp task frontier` renderer) that need the drafts.-stripped id.
 func BareID(id string) string { return bareID(id) }
+
+// isDraftID is the package's ONE prefix test — the Go half of THE DRAFT LABEL
+// CONTRACT (Barkpark.Tasks.Board's moduledoc, shipped in #18961). What marks a
+// row a draft is the `drafts.` spelling of its OWN stored doc_id and nothing
+// else: not status, not lifecycle_status, not content. A `drafts.`-spelled row
+// stored status:"published" is STILL a draft, which is exactly why this may
+// never become a status check. Elixir consolidated the same test into
+// Barkpark.Content.DraftId.draft?/1 (@canonical capability:draft-published-id)
+// after the scattered String.starts_with? calls drifted; this is the mirror of
+// that consolidation, so every caller in this package tests the prefix HERE —
+// `grep -rn 'strings.HasPrefix(.*drafts' internal/taskboard` must stay a single
+// site. It is deliberately the NEIGHBOUR of bareID: the test reads the RAW id,
+// bareID destroys the evidence, so the two live together and the ordering
+// (test, THEN strip) is visible in one screen.
+func isDraftID(id string) bool { return strings.HasPrefix(id, draftsPrefix) }
 
 // ChildrenOf returns the direct children of docID — every task whose
 // parent_id names it, drafts.-prefix-agnostic on both sides — oldest-inserted
@@ -247,4 +300,53 @@ func (d TaskDetail) PaperRefs() []string {
 		add(p)
 	}
 	return refs
+}
+
+// ─── per-row hydration off the always-full row route ───────────────────────
+
+// taskDetailPath is the single-row GET. The route is ALWAYS the full card —
+// `?view=` is a LIST param and this route does not read it — so one request
+// restores every content field `?view=board` deleted for the one row a reader
+// actually opened.
+const taskDetailPath = "/v1/tasks/"
+
+// FetchTaskDetailByID hydrates ONE task's full TaskDetail from GET
+// /v1/tasks/:doc_id.
+//
+// WHY IT EXISTS. The live board's list/poll path asks for `?view=board`
+// (corpusCache.listView), which deletes `content` — so the DetailIndex the list
+// body hydrates carries the board ROW (identity, lifecycle, claim, the digest-
+// derived ladder and badge) and none of the prose the detail pane draws:
+// description, brief, evidence, code_refs, purpose, the blocked/closed/
+// disposition strips. This is the fetch that pays for exactly the rows a reader
+// opens, which is the trade the projection was cut for: the corpus walk goes
+// from 105,755,961 B to 13,035,765 B and a single opened row costs a few KB.
+//
+// It decodes through the SAME taskWire/toTask/toDetail the list path uses, so
+// there is one decode contract and one tolerance contract, not two. The doc's
+// own board row is rebuilt from the full card here; applying it is the caller's
+// job (Model.applyTaskDetail re-embeds the LIVE snapshot row over it, so a
+// hydration in flight across a re-list can never resurrect a stale lifecycle).
+func FetchTaskDetailByID(c *apiclient.Client, docID string) (TaskDetail, error) {
+	if strings.TrimSpace(docID) == "" {
+		return TaskDetail{}, fmt.Errorf("fetch task detail: empty doc_id")
+	}
+	body, err := getJSON(c, taskDetailPath+url.PathEscape(docID))
+	if err != nil {
+		return TaskDetail{}, err
+	}
+	var env struct {
+		Doc *taskWire `json:"doc"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return TaskDetail{}, fmt.Errorf("decode task detail: %w", err)
+	}
+	// Nil STRICTLY before deref, and an absent `doc` is a refusal rather than a
+	// zero TaskDetail: a blank pane that claims to be the row is the silent lie
+	// this whole seam exists to avoid.
+	if env.Doc == nil {
+		return TaskDetail{}, fmt.Errorf("decode task detail: response carried no %q key%s", "doc", bodyHint(body))
+	}
+	w := *env.Doc
+	return w.toDetail(w.toTask()), nil
 }

@@ -276,4 +276,69 @@ defmodule Barkpark.DeploymentLiteralsTest do
       assert {:error, _reason} = Supervisor.start_link([boot_child()], strategy: :one_for_one)
     end
   end
+
+  describe "the judge endpoint check rides the TASKS plugin's boot path" do
+    # task-6325dacb0e233d75: `application.ex` no longer names
+    # `Barkpark.Tasks.Judge`. The Tasks plugin contributes the check as its own
+    # `register_workers/1` child, the same shape as the ONIX host check above.
+    @judge_check_id :tasks_judge_endpoint_boot_check
+
+    defp judge_boot_child do
+      Enum.find(
+        Barkpark.Plugins.Tasks.register_workers(%{phase: :boot}),
+        &match?(%{id: @judge_check_id}, &1)
+      )
+    end
+
+    defp with_plugins(value, fun), do: Barkpark.PluginEnv.run_with(value, fun)
+
+    test "register_workers/1 contributes the check as a start-only child" do
+      assert %{
+               id: @judge_check_id,
+               start: {Barkpark.Plugins.Tasks, :start_judge_endpoint_check, []},
+               restart: :temporary
+             } = judge_boot_child()
+    end
+
+    test "a valid URL starts and leaves NO process behind" do
+      put_api_url("https://gateway.internal/v1/messages")
+
+      assert Barkpark.Plugins.Tasks.start_judge_endpoint_check() == :ignore
+
+      assert {:ok, sup} = Supervisor.start_link([judge_boot_child()], strategy: :one_for_one)
+      assert Supervisor.which_children(sup) == []
+      Supervisor.stop(sup)
+    end
+
+    test "FAILS CLOSED: a malformed URL refuses the supervisor, i.e. the boot" do
+      put_api_url("gateway.internal/v1/messages")
+
+      assert_raise ArgumentError, ~r/invalid Anthropic API URL/, fn ->
+        Barkpark.Plugins.Tasks.start_judge_endpoint_check()
+      end
+
+      Process.flag(:trap_exit, true)
+
+      assert {:error, _reason} =
+               Supervisor.start_link([judge_boot_child()], strategy: :one_for_one)
+    end
+
+    test "the boot collector folds the check in with Tasks enabled, and NOT under the kill switch" do
+      ids = fn ->
+        Enum.map(Barkpark.Plugins.Registry.collect_workers(%{phase: :boot}), &child_id/1)
+      end
+
+      with_plugins([Barkpark.Plugins.Tasks], fn ->
+        assert @judge_check_id in ids.()
+      end)
+
+      with_plugins([], fn ->
+        refute @judge_check_id in ids.()
+      end)
+    end
+
+    defp child_id(%{id: id}), do: id
+    defp child_id({module, _arg}), do: module
+    defp child_id(module) when is_atom(module), do: module
+  end
 end

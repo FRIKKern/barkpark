@@ -87,17 +87,24 @@ def load_yaml(path):
         return yaml.safe_load(fh)
 
 
-def topology(wf_dir=WF_DIR, req=None):
-    """Per workflow: triggers, path filters, jobs, required + feeds-required.
+def workflow_graphs(wf_dir=WF_DIR, req=None):
+    """EVERY workflow file, parsed once: triggers, jobs, and the required +
+    feeds-required job ids. The ONE needs walker in this repo's gate tooling:
+    `topology` below and scripts/blocking-name-census.py both read it, so the
+    closure the inventory calls feeds-required and the closure the census
+    guards cannot drift apart.
+
+    The walk runs from each REQUIRED job INWARD along its own `needs:` -- the
+    aggregator declares `needs: [leaf, ...]`, the leaf never names the
+    aggregator -- so a leaf's authority is found from the aggregator's side.
 
     YAML 1.1 parses a bare `on:` key as the boolean True; both spellings are
     accepted here so a workflow written either way is not silently dropped.
     """
     req = req if req is not None else required_contexts()[0]
-    rows = {}
+    out = []
     for path in sorted(glob.glob(os.path.join(wf_dir, "*.yml")) +
                        glob.glob(os.path.join(wf_dir, "*.yaml"))):
-        name = os.path.basename(path)
         y = load_yaml(path) or {}
         on = y.get("on", y.get(True))
         if isinstance(on, dict):
@@ -106,15 +113,12 @@ def topology(wf_dir=WF_DIR, req=None):
             keys, pr = set(str(k) for k in on), None
         else:
             keys, pr = {str(on)}, None
-        if "pull_request" not in keys:
-            continue
         jobs = {k: v for k, v in (y.get("jobs") or {}).items() if isinstance(v, dict)}
         jnames = {jid: (j.get("name") or jid) for jid, j in jobs.items()}
         needs = {}
         for jid, j in jobs.items():
             n = j.get("needs", [])
             needs[jid] = [n] if isinstance(n, str) else list(n or [])
-        reuse = [jid for jid, j in jobs.items() if j.get("uses")]
         req_jobs = [jid for jid, n in jnames.items() if n in req]
         feeds, frontier = set(), list(req_jobs)
         while frontier:
@@ -122,6 +126,22 @@ def topology(wf_dir=WF_DIR, req=None):
                 if n not in feeds:
                     feeds.add(n)
                     frontier.append(n)
+        out.append({"path": path, "workflow": os.path.basename(path),
+                    "keys": keys, "pr": pr, "jobs": jobs, "jnames": jnames,
+                    "needs": needs, "req_jobs": req_jobs, "feeds": feeds})
+    return out
+
+
+def topology(wf_dir=WF_DIR, req=None):
+    """Per PR-triggered workflow: triggers, path filters, jobs, required +
+    feeds-required (derived by workflow_graphs above)."""
+    rows = {}
+    for g in workflow_graphs(wf_dir, req):
+        name, keys, pr, jobs = g["workflow"], g["keys"], g["pr"], g["jobs"]
+        if "pull_request" not in keys:
+            continue
+        jnames, req_jobs, feeds = g["jnames"], g["req_jobs"], g["feeds"]
+        reuse = [jid for jid, j in jobs.items() if j.get("uses")]
         # A job-level `paths` cannot exist in GitHub Actions; only the
         # workflow-level `on: pull_request: paths[-ignore]` filters a run.
         wf_paths = bool(isinstance(pr, dict) and

@@ -22,10 +22,16 @@ export const SLASH_ITEMS = [
   { group: "Text", type: "list", label: "List", hint: "•", desc: "bulleted or ordered" },
   { group: "Text", type: "callout", label: "Callout", hint: "!", desc: "warn or info card" },
   { group: "Text", type: "note", label: "Note", hint: "❡", desc: "labelled annotation" },
+  { group: "Text", type: "blockquote", label: "Quote", hint: "❝", desc: "a quoted passage" },
   { group: "Text", type: "code", label: "Code", hint: "</>", desc: "monospace block" },
   { group: "Text", type: "divider", label: "Divider", hint: "—", desc: "horizontal rule" },
   { group: "Text", type: "section", label: "Section", hint: "§", desc: "ruled group" },
   { group: "Text", type: "columns", label: "Columns", hint: "▥", desc: "multi-column layout" },
+  { group: "Text", type: "expandable", label: "Toggle", hint: "▸", desc: "collapsible details" },
+  { group: "Text", type: "steps", label: "Steps", hint: "①", desc: "numbered steps with bodies" },
+  { group: "Text", type: "tabs", label: "Tabs", hint: "⌸", desc: "labelled panels" },
+  { group: "Text", type: "footnote", label: "Footnotes", hint: "¹", desc: "numbered notes" },
+  { group: "Text", type: "toc", label: "Contents", hint: "☰", desc: "outline of entries" },
 
   { group: "Article chrome", type: "eyebrow", label: "Eyebrow", hint: "▔", desc: "kicker over the title" },
   { group: "Article chrome", type: "byline", label: "Byline", hint: "✎", desc: "author / credit line" },
@@ -33,6 +39,9 @@ export const SLASH_ITEMS = [
   { group: "Article chrome", type: "pullquote", label: "Pullquote", hint: "❝", desc: "highlighted quote" },
 
   { group: "Visual", type: "diagram", label: "Diagram", hint: "⬡", desc: "Mermaid diagram" },
+  { group: "Visual", type: "image", label: "Image", hint: "▣", desc: "picture from a url" },
+  { group: "Visual", type: "video", label: "Video", hint: "▶", desc: "video from a url" },
+  { group: "Visual", type: "equation", label: "Equation", hint: "∑", desc: "TeX math" },
   { group: "Visual", type: "figure", label: "Figure", hint: "▤", desc: "captioned block" },
   { group: "Visual", type: "table", label: "Table", hint: "▦", desc: "rows and columns" },
   { group: "Visual", type: "terminal", label: "Terminal", hint: "⌘", desc: "console frame" },
@@ -48,7 +57,7 @@ export const SLASH_ITEMS = [
   { group: "Basic fields", type: "field-datetime", label: "Date & time", hint: "◷", desc: "timestamp value" },
   { group: "Basic fields", type: "field-color", label: "Color", hint: "●", desc: "hex swatch value" },
 
-  { group: "Media & reference", type: "field-image", label: "Image", hint: "▣", desc: "upload or url" },
+  { group: "Media & reference", type: "field-image", label: "Image field", hint: "▣", desc: "upload or url" },
   { group: "Media & reference", type: "field-reference", label: "Reference", hint: "↗", desc: "link another document" },
 
   { group: "Structured", type: "composite", label: "Composite", hint: "{}", desc: "object of subfields" },
@@ -119,6 +128,60 @@ export function readExpectedItems(doc = document) {
       hint: "✦",
       desc: "expected",
     }));
+}
+
+// Paper MASTERS group (task-3b6e562e916c8ce4). The Studio paper editor renders
+// the open paper's in-scope masters as JSON on `[data-paper-masters]` (a
+// LiveView-driven carrier, re-rendered after every save — the EXPECTED-group
+// precedent above). Each entry becomes TWO "Masters" rows carrying a `master`
+// id: a detached copy, and a LINKED instance (`linked: true`);
+// the canvas picks it by asking the SERVER to insert a detached copy (it never
+// builds the node client-side: fresh ids, provenance and reference rewriting
+// are server work). Returns [] when the carrier is absent (the public reader,
+// a field canvas, a pane that may not write) — the group then never renders.
+// `root` scopes the lookup to one editor (default: the whole document).
+export const MASTERS_GROUP = "Masters";
+
+export function readMasterItems(root = document) {
+  const el = root && root.querySelector ? root.querySelector("[data-paper-masters]") : null;
+  if (!el) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(el.getAttribute("data-paper-masters") || "[]");
+  } catch (_e) {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((m) => m && typeof m.id === "string" && m.id !== "")
+    .flatMap((m) => {
+      const label = typeof m.title === "string" && m.title !== "" ? m.title : m.block_type || "Master";
+      const tier = typeof m.tier === "string" && m.tier !== "" ? ` ${m.tier}` : "";
+      return [
+        {
+          group: MASTERS_GROUP,
+          // `type` feeds only the row's dataset/filter haystack; the pick branches on
+          // `master`, never on type (it is not a default_block/2 type).
+          type: "master",
+          master: m.id,
+          label,
+          hint: "★",
+          desc: `master${tier}`,
+        },
+        // LINKED (task-59be65118320fa0e): the same master as a live instance — the
+        // server inserts a `master-ref` block (`mode: "linked"`) that renders the
+        // master's latest content at read time instead of a copy.
+        {
+          group: MASTERS_GROUP,
+          type: "master-linked",
+          master: m.id,
+          linked: true,
+          label: `${label} (linked)`,
+          hint: "⛓",
+          desc: `linked master${tier}`,
+        },
+      ];
+    });
 }
 
 export class SlashMenu {

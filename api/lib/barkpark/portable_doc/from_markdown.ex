@@ -56,7 +56,19 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
       |> Enum.filter(&match?({"li", _, _, _}, &1))
       |> Enum.map(fn {"li", _, li_children, _} -> list_item_inline(li_children) end)
 
-    [%{"type" => "list", "ordered" => tag == "ol", "items" => items}]
+    # GitHub task syntax (`- [ ] ` / `- [x] `) makes the whole list a checklist.
+    tasks = if tag == "ul", do: Enum.map(items, &task_item/1), else: []
+
+    if Enum.any?(tasks, &(&1 != nil)) do
+      checklist_items =
+        Enum.zip_with(items, tasks, fn item, task ->
+          task || %{"content" => item, "checked" => false}
+        end)
+
+      [%{"type" => "list", "ordered" => false, "task" => true, "items" => checklist_items}]
+    else
+      [%{"type" => "list", "ordered" => tag == "ol", "items" => items}]
+    end
   end
 
   defp block({"pre", _attrs, [{"code", code_attrs, code_children, _} | _], _meta}) do
@@ -116,6 +128,26 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
   end
 
   defp block(_other), do: []
+
+  # `[ ] rest` / `[x] rest` at the head of an item's inline → {content, checked}; else nil.
+  defp task_item([%{"type" => "text", "value" => value} = first | rest]) when is_binary(value) do
+    case Regex.run(~r/^\[( |x|X)\]\s+(.*)$/s, value) do
+      [_, mark, tail] ->
+        content =
+          if tail == "" and rest == [] do
+            []
+          else
+            [Map.put(first, "value", tail) | rest]
+          end
+
+        %{"content" => content, "checked" => mark in ["x", "X"]}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp task_item(_), do: nil
 
   # ── the portabledoc fence (native block escape hatch) ──────────────────
 

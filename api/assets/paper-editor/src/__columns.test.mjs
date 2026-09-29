@@ -34,6 +34,58 @@ function check(name, fn) {
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
+const columnStyles = [
+  ["../../paper-surface/paper-surface.css", ".bp-paper-surface"],
+  ["./styles.css", ".bp-paper-editor-body"],
+  ["../../../priv/static/assets/bp-paper-editor-shell.css", ".bp-paper-editor-body"],
+].map(([path, scope]) => {
+  const css = readFileSync(new URL(path, import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .flatMap(([, selectors, body]) => selectors.split(",").map((selector) => ({
+      selector: selector.trim(), body,
+    })));
+  return { path, scope, rules };
+});
+
+function assertEvidenceReset(sheet, selector) {
+  const rule = sheet.rules.find((rule) => rule.selector === selector);
+  assert.ok(rule, `${sheet.path}: missing ${selector}`);
+  assert.match(rule.body, /--bp-evidence-width:\s*100%;/);
+  assert.match(rule.body, /--bp-evidence-pull:\s*0px;/);
+}
+
+check("section-cell columns reset the page evidence band in reader and editor mirrors", () => {
+  for (const sheet of columnStyles) {
+    assertEvidenceReset(sheet, `${sheet.scope} .bp-section__cell .bp-cols`);
+  }
+});
+
+check("wrapperless canvas grid columns reset evidence at the direct-child boundary", () => {
+  for (const sheet of columnStyles.slice(1)) {
+    assertEvidenceReset(sheet, ".bp-canvas-section > .bp-section__grid > .bp-cols");
+  }
+});
+
+check("top-level columns still inherit the evidence width and pull", () => {
+  for (const sheet of columnStyles) {
+    const base = sheet.rules.find((rule) => rule.selector === `${sheet.scope} .bp-cols`);
+    assert.ok(base, `${sheet.path}: missing top-level columns rule`);
+    assert.match(base.body, /width:\s*var\(--bp-evidence-width, 100%\);/);
+    assert.match(base.body, /margin-inline:\s*var\(--bp-evidence-pull, 0px\);/);
+    const allowedResets = new Set([
+      `${sheet.scope} .bp-section__cell .bp-cols`,
+      ".bp-canvas-section > .bp-section__grid > .bp-cols",
+    ]);
+    for (const rule of sheet.rules.filter((rule) => /\.bp-cols$/.test(rule.selector))) {
+      if (!allowedResets.has(rule.selector)) {
+        assert.doesNotMatch(rule.body, /--bp-evidence-(?:width|pull)\s*:/,
+          `${sheet.path}: ${rule.selector} must not reset inherited evidence`);
+      }
+    }
+  }
+});
+
 check("nested tables use their column width, not the page evidence band", () => {
   for (const path of ["../../paper-surface/paper-surface.css", "./styles.css"]) {
     const css = readFileSync(new URL(path, import.meta.url), "utf8");

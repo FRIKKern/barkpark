@@ -13,10 +13,13 @@
 #   PLAN   build_id is passed in by the caller; if the process on the ACTIVE
 #          Caddy-upstream slot already serves this build_id, exit 0 no-op (the
 #          on-box mirror of the sites(site_id,build_id) unique index).
-#   BUILD  npm ci && npm run build in the site source dir under
-#          `systemd-run --scope -p MemoryMax -p CPUQuota` + a SCRUBBED env (only
-#          the injected BARKPARK_* build vars — D7). Next's `output:'standalone'`
-#          emits .next/standalone (a traced node_modules + server.js), NOT a
+#   BUILD  npm ci && npm run build in the site source dir + a SCRUBBED env (only
+#          the injected BARKPARK_* build vars — D7).  The cap is carried by the
+#          OUTER transient unit DeployRunner mints (`bp-site-build-*.service`,
+#          MemoryMax=1500M CPUQuota=150%), not by an inner `systemd-run --scope`:
+#          that one was retired (stw6-deployrunner-reattach), and the transient
+#          unit is the only place charter D118 permits a bound (D611).
+#          Next's `output:'standalone'` emits .next/standalone (a traced node_modules + server.js), NOT a
 #          static dist/.
 #   STAGE  (D64) three-piece copy into an IMMUTABLE releases/<build_id>/: the
 #          standalone dir IS the release root (server.js at its top), then
@@ -75,6 +78,7 @@
 #   10 missing site dir       13 STAGE failed (no standalone/)
 #   14 HEALTH failed          15 gave up waiting for lock
 #   16 SWITCH failed          21 rollback: no_previous
+#   17 prebuilt node ABI mismatch (refused BEFORE STAGE; nothing was staged)
 #   22 rollback: not_supported  23 rollback: lock held (deploy running)
 #   24 rollback failed         25 teardown: route still live (disarm rejected)
 #
@@ -101,6 +105,59 @@
 #   CONTENT_REV        dataset revision read at build (baked as bp-content-rev).
 #   BARKPARK_CADDYFILE Caddyfile to arm/flip. Default /etc/caddy/Caddyfile
 #   BARKPARK_NODE_LINK stable node symlink. Default /usr/local/bin/barkpark-node
+#   PREBUILT_DIR       optional. A tree of ALREADY-BUILT node bytes (a Next
+#                      `output:'standalone'` release root: server.js at its top,
+#                      .next/static and public/ already folded in) that the box's
+#                      Elixir side extracted from an uploaded artifact and
+#                      validated (path/symlink/size/junk refusals live there —
+#                      this script never unpacks a tarball).  Set => PLAN_MODE=prebuilt:
+#                      NO npm runs on this box, and STAGE copies THIS tree
+#                      verbatim instead of $SITE_SRC/.next/standalone.
+#   PREBUILT_SHA256    required WITH PREBUILT_DIR.  The 64-hex digest the CP
+#                      verified for the uploaded artifact.  An IDENTITY record,
+#                      not a re-hash of the tree: recorded in
+#                      releases/<build_id>/.bp-prebuilt-sha256 and compared on a
+#                      retry, so "which bytes are staged" is answerable without
+#                      trusting dir-existence.
+#
+#   THE NODE ABI DECLARATION — WIRE SHAPE, STATED ONCE, HERE.
+#   A node release is not a directory of files: it is a PROCESS, and a traced
+#   node_modules can carry compiled native addons (.node) bound to a specific
+#   NODE_MODULE_VERSION and a specific libc.  Bytes built on node 22/glibc that
+#   boot on node 20/musl do not 404 — they abort at require() time.  The static
+#   engine has no such failure mode, which is why this half is NOT in the static
+#   sibling.  Caught only at HEALTH, it costs a full boot + gate AND leaves the
+#   release marked health-failed with no source on this box to rebuild from
+#   (purge_failed_release_node keeps a live/previous target's bytes), so the
+#   only way out is another upload.  So the UPLOADER declares the ABI it built
+#   against and this engine refuses a mismatch BEFORE STAGE.
+#
+#   The declaration is a file at the ROOT of the uploaded tree:
+#
+#       <PREBUILT_DIR>/.bp-node-abi
+#
+#   It is a KEY=VALUE text file, LF-separated, at most 16 lines.  Exactly two
+#   keys are read; any other line is ignored (forward compatibility — a packer
+#   that adds a key must not brick an older box):
+#
+#       node_major=<integer>        the node MAJOR the addons were built against
+#       libc=glibc|musl|unknown     the C library they were linked against
+#
+#   Both keys are REQUIRED.  A PREBUILT_DIR with no .bp-node-abi, or one whose
+#   node_major is not an integer, is REFUSED (exit 17) — an undeclared ABI is
+#   not a passing ABI, or every packer that forgets the file silently reopens
+#   the hole this exists to close.
+#
+#   MATCHING is deliberately asymmetric:
+#     * node_major MUST equal this box's node major.  A mismatch is exit 17.
+#     * libc mismatch is exit 17 ONLY when BOTH sides name a real libc.  Either
+#       side saying `unknown` is UNDECIDED, and an undecided libc does not
+#       refuse — the box's own probe is a heuristic (ldd), and a heuristic that
+#       cannot tell must not manufacture a refusal out of its own ignorance.
+#       The node_major half still binds, so the arm is never vacuous.
+#   BARKPARK_NODE_LIBC  override for the box's libc when the ldd probe cannot
+#                      tell (and the selftest's specimen driver).  glibc|musl|
+#                      unknown.  Default: probed.
 #   BARKPARK_SITE_BASEPATH  set to 1 for a site whose framework BAKES a basePath
 #                      of `/sites/<slug>` at build (multi-route Next apps — the
 #                      search-starter — whose links/RSC fetches are root-absolute
@@ -122,6 +179,12 @@
 set -uo pipefail
 
 SELF="${BASH_SOURCE[0]}"   # --self-test re-executes THIS script as the subject
+# Absolute path to the docs neighbour, resolved HERE while the cwd is still the
+# invocation's, so the --self-test README count guard at the foot of the selftest
+# block can find it after blocks below have cd'd into tmpdirs. Resolves to a
+# non-existent path when this engine was extracted without its directory, and the
+# guard then skips cleanly - which is the point.
+SELFTEST_README="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd || true)/README.md"
 # Read by log() in deploy/lib/site-deploy-common.sh (sourced below). Exported so
 # the linter sees a use (SC2034) and any child shell carries the same tag.
 export BP_LOG_TAG="site-deploy-node"
@@ -141,6 +204,31 @@ HEALTH_HOST="${BARKPARK_HEALTH_HOST:-guerrilla.barkpark.cloud}"
 NODE_LINK="${BARKPARK_NODE_LINK:-/usr/local/bin/barkpark-node}"
 RETAIN="${BARKPARK_SITE_RETAIN:-5}"
 HEALTH_FAIL_MARK=".bp-health-failed"
+# Dropped inside a release dir STAGED FROM UPLOADED BYTES (PLAN_MODE=prebuilt),
+# carrying the digest the CP verified for that artifact.  SAME FILENAME AND SAME
+# MEANING as the static engine's (deploy/site-deploy.sh) — one name, one meaning,
+# across both runtime targets.  It is the only on-box record that these bytes did
+# not come from this box's source tree, and two decisions read its PRESENCE:
+# PLAN refuses to rebuild such a release from the provisioned template (that
+# rebuild passes HEALTH on genuine markers and boots the WRONG bytes), and
+# purge_failed_release_node refuses to delete it into one.
+PREBUILT_MARK=".bp-prebuilt-sha256"
+# The uploader's node ABI declaration, at the root of the uploaded tree AND (via
+# `cp -a`) inside the staged release, where it is the receipt of what the bytes
+# were built for.  Wire shape: the header block, stated once.
+NODE_ABI_MARK=".bp-node-abi"
+PREBUILT_DIR="${PREBUILT_DIR:-}"
+PREBUILT_SHA256="${PREBUILT_SHA256:-}"
+# Tri-state PLAN (mirrors the static engine's D88/D89 shape).  ALWAYS assigned
+# before it is read — this file runs under `set -u` and an unset PLAN_MODE would
+# abort the deploy with `unbound variable` on a path no test drives.
+PLAN_MODE=build
+# Narration + comparison values the prebuilt arm fills in.  Declared HERE, empty,
+# for the same reason PLAN_MODE is: `set -u` turns a read on an arm that did not
+# assign them into an aborted deploy, and the arms that read them are not the
+# arms that write them.
+PREBUILT_SHORT=""; PREBUILT_SIZE=""; PB_ABI_MAJOR=""; PB_ABI_LIBC=""
+STAGE_SRC=""; STAGE_WHAT=""
 # basePath mode (charter D6): a framework that bakes basePath=/sites/<slug> serves
 # EVERY route under that prefix, including on the raw node port — so Caddy must
 # NOT strip the prefix (arm a `handle`, not `handle_path`) and the health probe
@@ -177,6 +265,23 @@ slot_inst()  { printf '%s__%s' "$SITE_SLUG" "$1"; }              # <slot> -> ins
 slot_port()  { [ "$1" = a ] && printf '%s' "$PORT_A" || printf '%s' "$PORT_B"; }
 other_slot() { [ "$1" = a ] && printf b || printf a; }
 slot_env()   { printf '%s/%s.env' "$SLOT_ENV_DIR" "$(slot_inst "$1")"; }
+
+# The port a RUNNING slot actually holds. Read from the slot's EnvironmentFile —
+# that PORT= line is what systemd handed the node process, so it is the truth
+# about the listener; $PORT_A/$PORT_B are only this INVOCATION's inputs and a
+# teardown that was not handed SITE_PORT_A/B falls back to the derived pair,
+# which need not be the pair the site was deployed on. Falls back to slot_port
+# when the env file is already gone.
+held_port() { # <slot> -> the port the unit was started with
+  local f p; f="$(slot_env "$1")"
+  p=""
+  # No `… | head -1`: a reader that exits early SIGPIPEs its producer, and this
+  # file runs under `set -o pipefail` (scripts/pipefail-sigpipe-scan.sh). Take
+  # the first line in the shell instead.
+  [ -f "$f" ] && p="$(sed -n 's/^PORT=//p' "$f")"
+  p="${p%%$'\n'*}"
+  printf '%s' "${p:-$(slot_port "$1")}"
+}
 
 # The build_id a slot is configured for = basename of RELEASE_DIR in its env file.
 read_slot_build() { # <slot> -> build_id or ""
@@ -468,6 +573,16 @@ HEALTH_SECONDS=""    # curl %{time_total} of the attempt that answered
 clean_200() { # <http_code> <curl_rc> -> 0 when the body was read to the end
   [ "$1" = 200 ] && [ "$2" = 0 ]
 }
+# THE DEEP-PATH ASSERTION, in ONE predicate for the same reason clean_200 is one:
+# one place to get it wrong, one place to mutate. A linked route is certified
+# only when there was no link to take (n/a — a genuinely single-page render) or
+# the route this page LINKS TO answered 200. Reduce the second half to `true` and
+# every deep-path row in --self-test goes red while the engine keeps deploying —
+# which is exactly the pre-fix engine, and exactly what the self-test's mutation
+# block reproduces.
+deep_ok() { # <deep-path> <http_code> -> 0 when the linked route is certified
+  [ -z "$1" ] || [ "$2" = 200 ]
+}
 health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   HEALTH_DETAIL=""
   local slot="$1" bid="$2" port inst path
@@ -585,6 +700,96 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   # node(s)…"). Read it BEFORE the body is deleted — it is what turns the empty
   # bp-doc-id refusal below from a symptom into a diagnosis.
   got_corpus="$(meta_value "$body" bp-corpus-status)"
+  # DEEP PATH — pick ONE non-root route out of the SERVED html's own links, while
+  # the body is still on disk and the slot is still booted. The fetch itself
+  # happens below, AFTER the marker assertions, so a lying build is still refused
+  # in the marker branch's words rather than in this one's.
+  #
+  # WHY THE TARGET COMES FROM THE HTML AND NEVER FROM THE DISK. This gate curls
+  # exactly one path ("/", the basePath sub-path, or BARKPARK_SITE_HEALTH_PATH)
+  # and asserts three markers on it, so an SSR release whose /d/<slug>/ route
+  # throws at render time — a corpus row the finder page dereferences and the
+  # home page does not, a dynamic segment whose params went empty, a route
+  # handler that 500s — served that 500 to every visitor and STILL switched live.
+  # The static engine closed the same hole (site-deploy.sh's deep-path probe);
+  # the SSR engine kept it. This is that fix, ported.
+  # A disk-derived target could not close it anyway: an SSR route need not
+  # correspond to any file, and enumerating .next/ would ask the app for paths no
+  # visitor's browser ever requests. The page's own href IS the request a browser
+  # will make.
+  #
+  # The extractor hands back a PERCENT-ENCODED, pure-ASCII path, so nothing this
+  # shell or curl touches depends on filename encoding and nothing word-splits.
+  # Root-relative hrefs carry the site base (`/sites/<slug>/`, the bp-site-base
+  # marker the template bakes): strip it — or, failing that, the probe root this
+  # gate already speaks to — and SKIP an href that matches neither rather than
+  # manufacture a refusal out of an off-site link.
+  #
+  # HEALTH_PY is the interpreter the extractor runs on, kept nameable so the
+  # self-test can drive the COULD-NOT-CHECK arm. A probe that could not run has
+  # made no claim, and a gate that made no claim has not gated: refuse, never
+  # "n/a".
+  local HEALTH_PY="${BARKPARK_HEALTH_PY:-python3}"
+  local deep="" deep_code=000 deep_probe_rc=0 site_base="" deep_slow=0 deep_secs=""
+  site_base="$(meta_value "$body" bp-site-base)"
+  if ! command -v "$HEALTH_PY" >/dev/null 2>&1; then
+    deep_probe_rc=127
+  else
+    deep="$("$HEALTH_PY" - "$body" "$site_base" "$path" <<'DEEPPY' 2>/dev/null
+import re, sys, urllib.parse
+html = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+
+
+def norm(b):
+    b = (b or "").strip()
+    if not b:
+        return ""
+    if not b.startswith("/"):
+        b = "/" + b
+    if not b.endswith("/"):
+        b += "/"
+    return b
+
+
+base = norm(sys.argv[2])          # bp-site-base: the prefix the TEMPLATE baked
+root = norm(sys.argv[3]) or "/"   # the path this gate already probes on the raw port
+ATTR = r"(?:href|src)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'>]+))"
+SCHEME = r"^[A-Za-z][A-Za-z0-9+.\-]*:"
+cands = []
+for m in re.finditer(ATTR, html, re.I):
+    raw = (m.group(1) or m.group(2) or m.group(3) or "").strip()
+    if not raw or raw.startswith("//"):
+        continue
+    if re.match(SCHEME, raw):
+        continue
+    p = urllib.parse.unquote(urllib.parse.urlsplit(raw).path)
+    if p.startswith("./"):
+        p = p[2:]
+    if p.startswith("/"):
+        # Strip the prefix this href is expressed in. When the template baked a
+        # site base, that base IS the vocabulary of its own links: an href that
+        # does not start with it points outside this site, and is SKIPPED, never
+        # manufactured into a refusal. With no base marker at all the probe root
+        # is the only prefix there is -- and a root of "/" then matches every
+        # root-relative href, which is correct only BECAUSE there is no base to
+        # contradict it.
+        pre = base or root
+        if not p.startswith(pre):
+            continue
+        p = p[len(pre):]
+    if not p or p in ("index.html", "/"):
+        continue
+    if ".." in p.split("/"):
+        continue
+    cands.append(p)
+if cands:
+    # Non-ASCII first (the encoding cases are the ones that break), then a
+    # page-shaped target, then the shortest — deterministic across runs.
+    cands.sort(key=lambda p: (p.isascii(), not (p.endswith("/") or p.endswith(".html")), len(p), p))
+    print(urllib.parse.quote(cands[0], safe="/"))
+DEEPPY
+)" || deep_probe_rc=$?
+  fi
   rm -f "$body"
   if [ "$got_build" != "$bid" ]; then
     stop_slot "$slot"
@@ -615,6 +820,52 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
     fi
     log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
   fi
+  # ---- THE DEEP-PATH VERDICT --------------------------------------------
+  # Fetched HERE, after the markers, while the slot is still booted: the target
+  # was chosen from the body above. Same two-phase budget as the root probe (D27)
+  # — a deep SSR route renders per request too, so ONE fast attempt at the
+  # ${HEALTH_FAST_MAX}s ceiling and, only if that did not land a clean 200, ONE
+  # patient attempt at the patient ceiling. Slow is a fact about the route, not a
+  # verdict about the release: a deep path that answers 200 late still PASSES and
+  # says SLOW, exactly as the root probe does.
+  if [ "$deep_probe_rc" = 0 ] && [ -n "$deep" ]; then
+    local d_out d_rc=0
+    d_out="$(curl -sL --max-redirs 2 -o /dev/null -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time "$HEALTH_FAST_MAX" "http://127.0.0.1:$port$path$deep" 2>/dev/null)"; d_rc=$?
+    deep_code="${d_out%% *}"; deep_secs="${d_out##* }"; [ -n "$deep_code" ] || deep_code=000
+    if ! clean_200 "$deep_code" "$d_rc"; then
+      log "HEALTH: deep path $path$deep did not clean-200 inside the ${HEALTH_FAST_MAX}s ceiling (got $deep_code, curl exit $d_rc) — one patient probe at ${HEALTH_PATIENT_MAX}s to tell a SLOW route from a BROKEN one"
+      d_out="$(curl -sL --max-redirs 2 -o /dev/null -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time "$HEALTH_PATIENT_MAX" "http://127.0.0.1:$port$path$deep" 2>/dev/null)"; d_rc=$?
+      deep_code="${d_out%% *}"; deep_secs="${d_out##* }"; [ -n "$deep_code" ] || deep_code=000
+      clean_200 "$deep_code" "$d_rc" && deep_slow=1
+    fi
+  fi
+  # THREE-VALUED, never two. An empty $deep means BOTH "no internal link" (n/a,
+  # fine) and "the extractor never ran" (nothing was checked) — and a gate that
+  # prints the n/a prose for the second PASSES every broken release while reading
+  # as a single-page build. Refuse, and name the assertion that was not made.
+  if [ "$deep_probe_rc" != 0 ]; then
+    stop_slot "$slot"
+    HEALTH_DETAIL="deep-path probe COULD-NOT-CHECK: the link extractor ($HEALTH_PY) did not run (exit $deep_probe_rc) — the deep-path assertion was NOT made, so this release is unverified, not healthy; live slot untouched"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
+  # A REFUSAL, not a warning: a linked route that 404s or 500s is a 404/500 for
+  # visitors, and switching to it ships the hole (charter D116). ACTION FIRST
+  # after the path — emit() clips detail= at 240 chars, so on a pathologically
+  # long path it is the cause hint that degrades, never the "do not retry this
+  # artifact" move. The log line below is unclipped.
+  if ! deep_ok "$deep" "$deep_code"; then
+    stop_slot "$slot"
+    HEALTH_DETAIL="the served page links to $path$deep — the SSR answered HTTP $deep_code there, want 200 (${deep_secs}s). Rebuild; do not retry this artifact. Cause: that route throws at render, or its content row is unreachable while the home page's is; live slot untouched"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
+  if [ -n "$deep" ] && [ "$deep_slow" = 1 ]; then
+    log "HEALTH: deep path $path$deep serves 200 — SLOW: only on the patient ${HEALTH_PATIENT_MAX}s probe, after ${deep_secs}s (past the ${HEALTH_FAST_MAX}s per-attempt ceiling). Gating it as healthy: it renders."
+  elif [ -n "$deep" ]; then
+    log "HEALTH: deep path $path$deep serves 200 in ${deep_secs}s from the booted slot (site base '${site_base:-/}')"
+  else
+    log "HEALTH: no non-root internal link in the served page — deep-path probe n/a (single-page build)"
+  fi
+  # ------------------------------------------------------------------------
   # The observed latency ALWAYS rides the detail — a stdout-only caller cannot
   # ask the box afterwards, and "how long did it take to render" is the one
   # number that separates a site that is degrading from one that is fine.
@@ -641,6 +892,16 @@ purge_failed_release_node() { # <build_id>
   if [ -d "$RELEASES/$bid" ] && { [ "$bid" = "$act_build" ] || [ "$bid" = "$p_build" ]; }; then
     : > "$RELEASES/$bid/$HEALTH_FAIL_MARK" 2>/dev/null || true
     log "HEALTH: release $bid is a live/rollback target — keeping its bytes, marking it health-failed (a redeploy REBUILDS it)"
+    return 0
+  fi
+  # A PREBUILT release has NO source on this box.  Purging it drops the box into
+  # a state where a redeploy of the same build_id REBUILDS from the provisioned
+  # template: genuine markers, HEALTH green, WRONG bytes booted.  Keep the bytes
+  # and mark them instead — PLAN's prebuilt health-failed arm then fails closed
+  # and says the only real fix out loud: re-upload.
+  if [ -f "$RELEASES/$bid/$PREBUILT_MARK" ]; then
+    : > "$RELEASES/$bid/$HEALTH_FAIL_MARK" 2>/dev/null || true
+    log "HEALTH: release $bid was staged from UPLOADED prebuilt bytes — this box has no source to rebuild it from, so its bytes are KEPT and marked health-failed: re-upload required (a template rebuild would pass HEALTH on genuine markers and boot the WRONG bytes)"
     return 0
   fi
   rm -rf "${RELEASES:?}/$bid"
@@ -696,6 +957,43 @@ place_node() { # <src node binary>
     mv -f "$NODE_LINK.tmp.$$" "$NODE_LINK" 2>/dev/null || { rm -f "$NODE_LINK.tmp.$$"; return 1; }
   fi
   return 0
+}
+
+# ---- NODE ABI (prebuilt) ---------------------------------------------------
+# The BOX half of the ABI comparison.  Both probes answer on stdout and NEVER
+# fail the script: an unreadable box is `unknown`, and the matcher decides what
+# an unknown means (node_major unknown REFUSES — we cannot certify bytes against
+# a box we cannot name; libc unknown is undecided, see the header).
+box_node_major() {
+  local nb="" v=""
+  if [ -x "$NODE_LINK" ]; then nb="$NODE_LINK"; else nb="$(command -v node 2>/dev/null || true)"; fi
+  [ -n "$nb" ] || { printf 'unknown'; return 0; }
+  v="$("$nb" -v 2>/dev/null || true)"            # v22.11.0
+  case "$v" in
+    v[0-9]*) printf '%s' "${v#v}" | cut -d. -f1 ;;
+    *)       printf 'unknown' ;;
+  esac
+}
+# ldd is a heuristic, deliberately: there is no portable "what libc am I" call.
+# BARKPARK_NODE_LIBC overrides it for a box whose probe cannot tell.
+box_node_libc() {
+  local out=""
+  if [ -n "${BARKPARK_NODE_LIBC:-}" ]; then printf '%s' "$BARKPARK_NODE_LIBC"; return 0; fi
+  out="$(ldd --version 2>&1 || true)"
+  case "$out" in
+    *musl*)                printf 'musl'  ;;
+    *"GNU libc"*|*GLIBC*|*"GNU C Library"*) printf 'glibc' ;;
+    *)                     printf 'unknown' ;;
+  esac
+}
+# Read ONE key out of a .bp-node-abi declaration.  Last assignment wins, unknown
+# keys are ignored (forward compatibility), and the file is read at most 16 lines
+# deep so a hostile artifact cannot make this a memory event.  Deliberately NOT
+# `grep … | head -1`: a pipeline whose head exits early returns 141 under
+# pipefail and this engine sets pipefail at the top.
+abi_decl_value() { # <abi-file> <key> -> value or ""
+  [ -f "$1" ] || return 0
+  awk -v k="$2" 'NR<=16 { i=index($0,"="); if (i>0 && substr($0,1,i-1)==k) v=substr($0,i+1) } END { if (v!="") print v }' "$1" 2>/dev/null | tr -d '\r'
 }
 
 ensure_node_link() {
@@ -784,23 +1082,276 @@ if [ "$MODE" = selftest ]; then
   # processes), and a successful disarm followed by a stop that does not take
   # RESTORES the route byte-identically (no dead route over live processes). All
   # 21 sit outside both optional blocks, so BOTH floors move by the same 21.
-  SELFTEST_FLOOR_MIN=396
-  SELFTEST_FLOOR_FULL=413
+  # 2026-09-10: +38 (396->434, 413->451) for the DEEP-PATH probe — the SSR gate
+  # asserted ONE url, so a release whose LINKED route 404s/500s passed HEALTH and
+  # switched live (ssw11-bl-node-engine-health-one-path). All 38 sit outside both
+  # optional blocks, so BOTH floors move by the same 38.
+  # 2026-09-11: +2 (434->436, 451->453) for the still-HELD PORT in the no-stop
+  # teardown's typed failure (task-d1fc3ff3a8892663) — the slot letter alone did
+  # not name the resource that collides with the next deploy. Both sit outside
+  # both optional blocks, so BOTH floors move by the same 2.
+  # 2026-09-11 (same row, review): +2 more (436->438, 453->455) — the fixture
+  # separation of the env-file port from the handed pair, and the CONTROL that
+  # the handed pair is NOT what the message names. The first two checks above
+  # were VACUOUS until these landed: the fixture handed the teardown the same
+  # ports the env files carried, so held_port's env read was unmeasured.
+  # 2026-09-12: +42 (438->480, 455->497) for the FIXTURE/ARRIVED pair —
+  # check_run_arrived states, on its own three lines, that the harness kept both
+  # RESERVED ports and that the run staged and reached HEALTH, for each of the 14
+  # sl_deploy-driven e2e blocks (task-a1a209424c7127e8). Until these landed, a
+  # block's only negative assertion passed VACUOUSLY on a run that never arrived.
+  # All 42 sit outside both optional blocks, so BOTH floors move by the same 42.
+  SELFTEST_FLOOR_MIN=530
+  SELFTEST_FLOOR_FULL=547
   TESTS=0; FAILS=0
-  check() { local label="$1"; shift; TESTS=$((TESTS + 1)); if "$@"; then echo "  ok   - $label"; else echo "  FAIL - $label"; FAILS=$((FAILS + 1)); fi; }
+  # A bare "FAIL - <label>" is not evidence. It cannot tell a SUBJECT that
+  # misbehaved from a FIXTURE that never reached the state under test, and the
+  # value the predicate actually saw is gone the instant the line is printed —
+  # which is exactly how one red in six runs of the truncation MUTATION PROOF
+  # became unrecoverable (task-a1a209424c7127e8). So every failure now names
+  # what it OBSERVED: the predicate with its arguments ALREADY EXPANDED by the
+  # shell (`[ 0 = 14 ]` names the exit code that was really seen), a
+  # predicate-specific probe where one exists, and the stage trail of the run
+  # the log holds. The cure lives HERE, in the one helper every check passes
+  # through, so no block in this engine can produce a bare FAIL again.
+  check() {
+    local label="$1"; shift
+    TESTS=$((TESTS + 1))
+    if "$@"; then
+      echo "  ok   - $label"
+    else
+      echo "  FAIL - $label"
+      check_observed "$@" 2>&1 | sed 's/^/         observed: /'
+      FAILS=$((FAILS + 1))
+    fi
+  }
+  check_observed() {
+    printf 'predicate as it ran: '; printf '%s ' "$@"; printf '\n'
+    if declare -F "observe_$1" >/dev/null 2>&1; then "observe_$1" "${@:2}"; fi
+    run_trail
+  }
+  # The stage trail is the "did the run ARRIVE" half, printed beside every red so
+  # the two failure modes are distinguishable in the log without a re-run.
+  run_trail() {
+    [ -n "${TD:-}" ] || return 0
+    if [ -s "$TD/out.log" ]; then
+      printf 'the run trail was: %s\n' \
+        "$(grep '^BPSTAGE ' "$TD/out.log" 2>/dev/null | sed 's/ detail=.*//' | tr '\n' '|' | cut -c1-420)"
+    else
+      printf 'the run left NO log at all (%s empty or absent) — the fixture never got there\n' "$TD/out.log"
+    fi
+  }
+  observe_saw()   { printf 'BPSTAGE lines seen for name=%s: %s\n' "$1" \
+                      "$(grep "^BPSTAGE name=$1 " "$TD/out.log" 2>/dev/null | sed 's/ detail=.*//' | tr '\n' '|')"; }
+  observe_nosaw() { observe_saw "$@"; }
+  observe_no_log_match() { printf 'lines matching %s: %s\n' "$1" \
+                      "$(grep -n "$1" "$TD/out.log" 2>/dev/null | head -3 | tr '\n' '|' | cut -c1-300)"; }
+  observe_grep()  { local f="${!#}"; printf 'searched %s (%s lines); nothing matched\n' "$f" \
+                      "$(wc -l < "$f" 2>/dev/null | tr -d ' ')"; }
+  observe_log_has_a_run() { printf 'the negative assertion was REFUSED as vacuous: this log records no run\n'; }
+  observe_fixture_clean() { cat "$TD/fixture.verdict" 2>/dev/null; }
+  observe_res_held() { printf 'reservation record %s: %s\n' "$RESDIR/$1.holder" \
+                      "$(cat "$RESDIR/$1.holder" 2>/dev/null || echo GONE)"; }
 
   TD="$(mktemp -d "${TMPDIR:-/tmp}/site-deploy-node-selftest.XXXXXX")"
   # Kill any slot http servers the fake systemctl left running.
   # shellcheck disable=SC2154  # pf is the for-loop var inside the (deferred) trap body
-  trap 'for pf in "$TD"/slotpids/*; do [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null; done; rm -rf "$TD"' EXIT
+  trap 'for pf in "$TD"/slotpids/* "$TD"/portres/*.holder; do [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null; done; rm -rf "$TD"' EXIT
 
-  # Two free loopback ports for the two slots.
-  free_port() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()'; }
-  T_PORT_A="$(free_port)"; T_PORT_B="$(free_port)"; T_PORT_C="$(free_port)"; T_PORT_D="$(free_port)"
-  T_PORT_E="$(free_port)"; T_PORT_F="$(free_port)"   # basePath site's two slots
-  T_PORT_G="$(free_port)"; T_PORT_H="$(free_port)"   # prefix-collision: the LONGER sibling
-  T_PORT_I="$(free_port)"; T_PORT_J="$(free_port)"   # prefix-collision: the PREFIX slug
-  T_PORT_K="$(free_port)"; T_PORT_L="$(free_port)"   # the pre-#3382 block's two slots
+  # -------------------------------------------------------------------------
+  # THE PORT IS RESERVED, NOT GUESSED (task-a1a209424c7127e8).
+  #
+  # The helper this replaces was:
+  #     free_port() { python3 -c 'import socket;s=socket.socket();
+  #                   s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()'; }
+  # bind -> read the number -> CLOSE -> hand the bare number to a deploy that
+  # binds it seconds later. Textbook TOCTOU, and NOT local to one block: every
+  # e2e block in this engine took its ports from that one helper, so on a loaded
+  # box ANY of them could lose its port between pick and bind, fail to boot its
+  # fake slot, and red as if the SUBJECT had misbehaved.
+  #
+  # Here the socket is never let go. `reserve_port` starts a HOLDER process that
+  # binds, LISTENS, and keeps the socket open; the number only becomes knowable
+  # after the socket is listening. The slot server does not re-bind it — it
+  # BORROWS the holder's socket over a unix channel (SCM_RIGHTS), and the holder
+  # keeps its own copy, so the port is never unbound for an instant. There is no
+  # window between pick and bind because nothing binds twice. A slot that
+  # is stopped simply gives the socket back to the holder that never let go, so
+  # the port stays ours for the whole life of the fixture and `res_held` is an
+  # ASSERTABLE fact rather than a hope.
+  # -------------------------------------------------------------------------
+  RESDIR="$TD/portres"; mkdir -p "$RESDIR"
+  cat > "$TD/portres.py" <<'PORTRES'
+"""Hold a loopback port by keeping its LISTENING socket open for the whole life
+of the fixture, and lend that very socket to each slot server over a unix socket
+(SCM_RIGHTS). The holder NEVER closes its own copy, so there is no instant at
+which the port is unbound and stealable — and because the server is still
+spawned by the fake systemctl (not exec'd out of this process), the slot keeps
+the file-descriptor lineage the build-gate leak proof depends on.
+
+While no server holds the port, the holder drains-and-closes arriving
+connections, so a stopped slot fails fast instead of hanging on a backlog
+nobody accepts.
+"""
+import array
+import os
+import select
+import socket
+import sys
+import time
+
+
+def hold(want):
+    deadline = time.time() + 20.0
+    while True:
+        s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", want))
+            s.listen(64)
+            return s
+        except OSError as exc:
+            s.close()
+            if want == 0 or time.time() > deadline:
+                sys.stderr.write("portres: cannot hold port %d: %s\n" % (want, exc))
+                sys.exit(3)
+            time.sleep(0.05)
+
+
+def alive(pid):
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def main():
+    resdir = sys.argv[1]
+    want = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+    sock = hold(want)
+    port = sock.getsockname()[1]
+
+    ctlpath = os.path.join(resdir, "%d.sock" % port)
+    armed = os.path.join(resdir, "%d.armed" % port)
+    for stale in (ctlpath, armed):
+        try:
+            os.unlink(stale)
+        except OSError:
+            pass
+    ctl = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    ctl.bind(ctlpath)
+    ctl.listen(8)
+
+    tmp = os.path.join(resdir, "%d.holder.tmp" % port)
+    with open(tmp, "w") as fh:
+        fh.write("%d\n" % os.getpid())
+    os.rename(tmp, os.path.join(resdir, "%d.holder" % port))
+    # The number becomes knowable only HERE — with the socket already LISTENING.
+    sys.stdout.write("%d\n" % port)
+    sys.stdout.flush()
+    os.close(1)
+
+    borrower = 0
+    while True:
+        watch = [ctl] if alive(borrower) else [ctl, sock]
+        try:
+            ready = select.select(watch, [], [], 0.2)[0]
+        except OSError:
+            continue
+        if ctl in ready:
+            conn, _ = ctl.accept()
+            try:
+                who = conn.recv(64).decode().strip()
+                conn.sendmsg(
+                    [b"1"],
+                    [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [sock.fileno()]))],
+                )
+                borrower = int(who or 0)
+                with open(armed + ".tmp", "w") as fh:
+                    fh.write("%d\n" % borrower)
+                os.rename(armed + ".tmp", armed)
+            except (OSError, ValueError):
+                pass
+            finally:
+                conn.close()
+        if sock in ready:
+            # No server is holding this port: refuse fast rather than leave the
+            # caller hanging on a backlog nobody will accept.
+            try:
+                sock.accept()[0].close()
+            except OSError:
+                pass
+
+
+main()
+PORTRES
+  # The fd-lending client, shared by both slot servers.
+  cat > "$TD/resock.py" <<'RESOCK'
+"""Borrow the RESERVED listening socket from its holder. The holder keeps its own
+copy open, so the port is never unbound between the pick and this serve."""
+import array
+import os
+import socket
+
+
+def acquire():
+    path = os.environ.get("BP_RESERVED_SOCK")
+    if not path:
+        return None
+    c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    c.connect(path)
+    c.sendall(("%d\n" % os.getpid()).encode())
+    fds = array.array("i")
+    _, anc, _, _ = c.recvmsg(1, socket.CMSG_SPACE(4))
+    for level, typ, data in anc:
+        if level == socket.SOL_SOCKET and typ == socket.SCM_RIGHTS:
+            fds.frombytes(data[: len(data) - (len(data) % fds.itemsize)])
+    c.close()
+    if not fds:
+        raise SystemExit("portres: no reserved fd arrived from %s" % path)
+    return socket.socket(fileno=fds[0])
+RESOCK
+
+  # reserve_port -> a port whose listening socket is HELD by a live holder.
+  # Retries WITH VERIFICATION: a pick is only returned once the holder's own
+  # reservation record is on disk and its pid is alive. It never returns a number
+  # nobody is holding.
+  reserve_port() {
+    local attempt=0 out port hp n
+    while [ "$attempt" -lt 5 ]; do
+      attempt=$((attempt + 1))
+      out="$RESDIR/pick.$$.$attempt"
+      : > "$out"
+      python3 "$TD/portres.py" "$RESDIR" 0 > "$out" 2>"$out.err" &
+      hp=$!
+      n=0; port=""
+      while [ "$n" -lt 500 ]; do
+        port="$(head -n1 "$out" 2>/dev/null)"
+        [ -n "$port" ] && break
+        kill -0 "$hp" 2>/dev/null || break
+        sleep 0.02; n=$((n + 1))
+      done
+      if [ -n "$port" ] && res_held "$port"; then
+        printf '%s\n' "$port"
+        return 0
+      fi
+      kill "$hp" 2>/dev/null
+    done
+    echo "FIXTURE: reserve_port could not hold a loopback port in 5 attempts: $(cat "$out.err" 2>/dev/null)" >&2
+    return 1
+  }
+  # The reservation as an ASSERTABLE fact: the port is held by a process of ours
+  # that is still alive (the idle holder before hand-off, the slot server after).
+  res_held() { local hp; hp="$(cat "$RESDIR/$1.holder" 2>/dev/null)"; [ -n "$hp" ] && kill -0 "$hp" 2>/dev/null; }
+
+  T_PORT_A="$(reserve_port)"; T_PORT_B="$(reserve_port)"; T_PORT_C="$(reserve_port)"; T_PORT_D="$(reserve_port)"
+  T_PORT_E="$(reserve_port)"; T_PORT_F="$(reserve_port)"   # basePath site's two slots
+  T_PORT_G="$(reserve_port)"; T_PORT_H="$(reserve_port)"   # prefix-collision: the LONGER sibling
+  T_PORT_I="$(reserve_port)"; T_PORT_J="$(reserve_port)"   # prefix-collision: the PREFIX slug
+  T_PORT_K="$(reserve_port)"; T_PORT_L="$(reserve_port)"   # the pre-#3382 block's two slots
 
   FAKEBIN="$TD/bin"; SLOTPIDS="$TD/slotpids"; SENV="$TD/slots"; SRC="$TD/src"
   mkdir -p "$FAKEBIN" "$SLOTPIDS" "$SENV" "$SRC"
@@ -814,7 +1365,33 @@ if [ "$MODE" = selftest ]; then
   # so the REAL health_gate_node code gates a REAL http endpoint offline.
   cat > "$FAKEBIN/systemctl" <<SYSCTL
 #!/usr/bin/env bash
-SENVDIR="$SENV"; PIDDIR="$SLOTPIDS"
+SENVDIR="$SENV"; PIDDIR="$SLOTPIDS"; RESDIR="$RESDIR"
+# A slot NEVER binds a port itself. Its port has been held, listening, by its
+# reservation holder since the moment it was picked; res_handoff makes the slot
+# server BORROW that socket over the holder's unix channel and waits until the
+# holder confirms the hand-off, so `start` is done only once the port is being
+# served. The server is still spawned HERE, as a child of the deploy, which is
+# what keeps the build-gate fd-leak proof meaningful.
+res_handoff() {
+  local p="\$1"; shift
+  local hp n=0
+  hp="\$(cat "\$RESDIR/\$p.holder" 2>/dev/null)"
+  if [ -z "\$hp" ] || ! kill -0 "\$hp" 2>/dev/null; then
+    echo "FIXTURE: port \$p has no live reservation holder — the harness lost its port" >&2
+    return 1
+  fi
+  rm -f "\$RESDIR/\$p.armed"
+  BP_RESERVED_SOCK="\$RESDIR/\$p.sock" python3 "\$@" >/dev/null 2>&1 &
+  local srv=\$!
+  while [ "\$n" -lt 500 ]; do
+    [ -f "\$RESDIR/\$p.armed" ] && { echo "\$srv"; return 0; }
+    kill -0 "\$srv" 2>/dev/null || break
+    sleep 0.02; n=\$((n + 1))
+  done
+  echo "FIXTURE: slot server never borrowed reserved port \$p" >&2
+  kill "\$srv" 2>/dev/null
+  return 1
+}
 verb="\${1:-}"
 case "\$verb" in
   is-active) shift; [ "\${1:-}" = --quiet ] && shift; unit="\${1:-}";;
@@ -843,18 +1420,24 @@ case "\$verb" in
     # flush, then the stream hangs before bp-doc-id. That is the shape a probe
     # ceiling turns into http_code=200 + curl exit 28 + a partial document.
     if [ -f "\$rel/.truncate-serve" ]; then
-      python3 "$TD/trunc-server.py" "\$port" "\$rel" "\$(cat "\$rel/.truncate-serve")" >/dev/null 2>&1 &
-    elif [ -f "\$rel/.slow-serve" ] || [ -f "\$rel/.broken-serve" ]; then
+      srvpid="\$(res_handoff "\$port" "$TD/trunc-server.py" "\$port" "\$rel" "\$(cat "\$rel/.truncate-serve")")" || exit 1
+    else
+      # The plain file server is the probe server with no delay and status 200 —
+      # one code path, so the fd hand-off is written once.
       delay=0; status=200
       [ -f "\$rel/.slow-serve" ]   && delay="\$(cat "\$rel/.slow-serve")"
       [ -f "\$rel/.broken-serve" ] && status="\$(cat "\$rel/.broken-serve")"
-      python3 "$TD/probe-server.py" "\$port" "\$rel" "\$delay" "\$status" >/dev/null 2>&1 &
-    else
-      python3 -m http.server "\$port" --bind 127.0.0.1 --directory "\$rel" >/dev/null 2>&1 &
+      srvpid="\$(res_handoff "\$port" "$TD/probe-server.py" "\$port" "\$rel" "\$delay" "\$status")" || exit 1
     fi
-    echo \$! > "\$pidf"; exit 0;;
+    echo "\$srvpid" > "\$pidf"; exit 0;;
   stop)
-    [ -f "\$pidf" ] && { kill "\$(cat "\$pidf")" 2>/dev/null; rm -f "\$pidf"; }; exit 0;;
+    # Only the BORROWER dies. The reservation holder still has the listening
+    # socket, so a stopped slot's port is never released back to the box.
+    [ -f "\$pidf" ] && { kill "\$(cat "\$pidf")" 2>/dev/null; rm -f "\$pidf"; }
+    envf="\$SENVDIR/\$inst.env"
+    p="\$(grep -E '^PORT=' "\$envf" 2>/dev/null | cut -d= -f2)"
+    [ -n "\$p" ] && rm -f "\$RESDIR/\$p.armed"
+    exit 0;;
   is-active)
     [ -f "\$pidf" ] && kill -0 "\$(cat "\$pidf")" 2>/dev/null && exit 0; exit 1;;
 esac
@@ -864,7 +1447,7 @@ SYSCTL
   # takes 48s to render and a slot that never answers 200 are INDISTINGUISHABLE to
   # a probe with one ceiling — this is how both are driven offline, in seconds.
   cat > "$TD/probe-server.py" <<'PROBESRV'
-import http.server, sys, time
+import http.server, os, sys, time
 port, root, delay, status = int(sys.argv[1]), sys.argv[2], float(sys.argv[3]), int(sys.argv[4])
 class H(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
@@ -880,7 +1463,18 @@ class H(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             return
         super().do_GET()
-http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+# The listening socket is BORROWED from the reservation holder — this process
+# never binds, so the port cannot be lost between the pick and the serve.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import resock
+_ls = resock.acquire()
+if _ls is not None:
+    srv = http.server.HTTPServer(("127.0.0.1", port), H, bind_and_activate=False)
+    srv.socket = _ls
+    srv.server_address = _ls.getsockname()
+else:
+    srv = http.server.HTTPServer(("127.0.0.1", port), H)
+srv.serve_forever()
 PROBESRV
   # THE TRUNCATING SLOT SERVER — a render that STREAMS. It answers 200
   # immediately, flushes everything up to (but not including) the bp-doc-id
@@ -892,7 +1486,7 @@ PROBESRV
   # markers. Threaded on purpose: each probe attempt must be answered on its own
   # timeline, not queued behind the previous attempt's stall.
   cat > "$TD/trunc-server.py" <<'TRUNCSRV'
-import http.server, socketserver, sys, time
+import http.server, os, socketserver, sys, time
 port, root, stall = int(sys.argv[1]), sys.argv[2], float(sys.argv[3])
 with open(root + "/index.html", "rb") as f:
     DOC = f.read()
@@ -915,7 +1509,16 @@ class H(http.server.BaseHTTPRequestHandler):
             pass
 class S(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
-S(("127.0.0.1", port), H).serve_forever()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import resock
+_ls = resock.acquire()
+if _ls is not None:
+    srv = S(("127.0.0.1", port), H, bind_and_activate=False)
+    srv.socket = _ls
+    srv.server_address = _ls.getsockname()
+else:
+    srv = S(("127.0.0.1", port), H)
+srv.serve_forever()
 TRUNCSRV
   # Fake npm: `ci` no-ops; `run build` emits a Next standalone layout carrying the
   # markers the health gate asserts. Lie/fail switches ride in FILES in the source
@@ -952,6 +1555,21 @@ bid="${BARKPARK_BUILD_ID:-}"; rev="${BARKPARK_CONTENT_REV:-}"; doc="doc-42"; cor
 # The legacy shape: empty bp-doc-id and NO status marker (a template built before
 # the corpus-status contract) — the gate must refuse AND say the cause is unknown.
 [ -f ./.no-corpus-legacy ] && { doc=""; corpus=""; }
+# DEEP-PATH fixtures. `.deep-link` holds the href the rendered page carries (the
+# ONLY thing the HEALTH deep probe may derive a target from); `.deep-page` holds
+# a release-relative directory the "SSR" actually answers at. Ship the link
+# WITHOUT the page and the release is exactly the shape this probe exists for: a
+# home page that 200s and a linked route that does not.
+link=""; deeppage=""; sitebase=""
+[ -f ./.deep-link ] && link="$(cat ./.deep-link)"
+[ -f ./.deep-page ] && deeppage="$(cat ./.deep-page)"
+[ -f ./.site-base ] && sitebase="$(cat ./.site-base)"
+# The src tree is REUSED across every e2e case in this file, and `mkdir -p` does
+# not un-make anything: a deep page written for one fixture survived into the
+# next, so a "the linked route is GONE" case still served it and the gate
+# correctly passed a release the test believed was broken. Clear the deep-page
+# roots every build. (Caught by exactly that: two refusal rows went green.)
+rm -rf .next/standalone/d .next/standalone/sites
 mkdir -p .next/standalone .next/static public
 printf '// fake next standalone server\n' > .next/standalone/server.js
 {
@@ -962,8 +1580,15 @@ printf '// fake next standalone server\n' > .next/standalone/server.js
   # Emitted ONLY when there is something to record — same conditional the
   # template uses (a healthy render carries no bp-corpus-status at all).
   [ -n "$corpus" ] && printf '<meta name="bp-corpus-status" content="%s">\n' "$corpus"
-  printf '</head><body><h1>SSR</h1></body></html>\n'
+  [ -n "$sitebase" ] && printf '<meta name="bp-site-base" content="%s">\n' "$sitebase"
+  printf '</head><body><h1>SSR</h1>'
+  [ -n "$link" ] && printf '<a href="%s">deep</a>' "$link"
+  printf '</body></html>\n'
 } > .next/standalone/index.html
+if [ -n "$deeppage" ]; then
+  mkdir -p ".next/standalone/$deeppage"
+  printf '<!doctype html><html><body>deep route</body></html>\n' > ".next/standalone/$deeppage/index.html"
+fi
 printf 'chunk\n' > .next/static/chunk.js
 printf 'robots\n' > public/robots.txt
 # Carry the slot-behaviour sentinels INTO the release (STAGE's `cp -a src/.`
@@ -1026,7 +1651,34 @@ FAKENPM
   nosaw() { ! grep -q "^BPSTAGE name=$1 " "$TD/out.log"; }
   # "this run's log says nothing of the kind" — the negative half of a reason
   # assertion (a diagnosis must not be invented when nothing was recorded).
-  no_log_match() { ! grep -q "$1" "$TD/out.log"; }
+  # A NEGATIVE ASSERTION IS ONLY EVIDENCE IF THE RUN ARRIVED. The old form
+  # `! grep -q …` passes on an EMPTY log — a run that never started satisfies
+  # every "it did not say X" in this file at once, which is precisely the shape
+  # that made one red unreadable (task-a1a209424c7127e8). It now refuses a log
+  # that records no run at all, and every block that uses it also states arrival
+  # positively via check_run_arrived.
+  log_has_a_run() { [ -s "$TD/out.log" ] && grep -q '^BPSTAGE name=' "$TD/out.log"; }
+  no_log_match() { log_has_a_run && ! grep -q "$1" "$TD/out.log"; }
+
+  # THE FIXTURE'S OWN VERDICT. sl_deploy records, either side of the run, whether
+  # the two RESERVED ports were still held by this harness; an empty verdict file
+  # means the fixture was intact. Without it a lost port reads as a subject that
+  # misbehaved.
+  fixture_clean() { [ ! -s "$TD/fixture.verdict" ]; }
+
+  # THE PAIR (c2). "the subject behaved differently" and "the fixture never got
+  # there" used to be indistinguishable in this log, because a block asserted
+  # only what the run CONCLUDED. Arrival is now stated POSITIVELY, SEPARATELY,
+  # and BEFORE any claim about the conclusion — three own-line checks, so a red
+  # names which half broke.
+  check_run_arrived() { # <build_id>
+    check "FIXTURE ($1): both reserved ports were still held by the harness across the run" \
+      fixture_clean
+    check "ARRIVED ($1): the run staged a release (STAGE ok) — the subject really was exercised" \
+      grep -qE "^BPSTAGE name=STAGE status=ok build_id=$1" "$TD/out.log"
+    check "ARRIVED ($1): the run reached the HEALTH gate — asserted apart from what HEALTH concluded" \
+      grep -qE "^BPSTAGE name=HEALTH status=(started|ok|failed) build_id=$1" "$TD/out.log"
+  }
   cf_port() { awk -v m="BARKPARK_SITE_ROUTE:selftest" 'index($0,m){i=1} i&&match($0,/localhost:[0-9]+/){p=substr($0,RSTART+10,RLENGTH-10);print p;exit}' "$CF"; }
 
   # -------------------------------------------------------------------------
@@ -1511,7 +2163,17 @@ FAKENPM
   # seconds, not minutes. What must differ is the OUTCOME, not the wording alone:
   # one deploys, one refuses.
   # -------------------------------------------------------------------------
+  # The harness HELPER, not each calling block, records whether the fixture was
+  # sound: the two reserved ports are checked for a live holder BEFORE the run
+  # and again AFTER it, and anything wrong is written, with the observed holder,
+  # to $TD/fixture.verdict for check_run_arrived to assert and print.
   sl_deploy() { # <slug> <build_id> <lock> <port-a> <port-b> [patient-max] -> exit code
+    local p rc
+    : > "$TD/fixture.verdict"
+    for p in "$4" "$5"; do
+      res_held "$p" || printf 'reserved port %s had NO live holder BEFORE the run (record: %s)\n' \
+        "$p" "$(cat "$RESDIR/$p.holder" 2>/dev/null || echo GONE)" >> "$TD/fixture.verdict"
+    done
     env PATH="$FAKEBIN:$PATH" SITE_SLUG="$1" BUILD_ID="$2" CONTENT_REV=sl-rev \
       SITE_SRC="$SRC" SITE_PORT_A="$4" SITE_PORT_B="$5" \
       BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
@@ -1519,13 +2181,19 @@ FAKENPM
       BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
       BARKPARK_SITE_HEALTH_ATTEMPTS=2 BARKPARK_SITE_HEALTH_FAST_MAX=1 \
       BARKPARK_SITE_HEALTH_PATIENT_MAX="${6:-20}" \
-      bash "${SL_ENGINE:-$SELF}" > "$TD/out.log" 2> "$TD/err.log"; echo $?
+      bash "${SL_ENGINE:-$SELF}" > "$TD/out.log" 2> "$TD/err.log"; rc=$?
+    for p in "$4" "$5"; do
+      res_held "$p" || printf 'reserved port %s LOST its holder DURING the run (record: %s)\n' \
+        "$p" "$(cat "$RESDIR/$p.holder" 2>/dev/null || echo GONE)" >> "$TD/fixture.verdict"
+    done
+    echo "$rc"
   }
 
   echo "[selftest] e2e: a SLOW site (serves 200, past the per-attempt ceiling) is gated HEALTHY and SAYS it is slow"
   printf '2\n' > "$SRC/.slow-serve"
-  rc="$(sl_deploy slowsite sl1 slowsite "$(free_port)" "$(free_port)")"
+  rc="$(sl_deploy slowsite sl1 slowsite "$(reserve_port)" "$(reserve_port)")"
   rm -f "$SRC/.slow-serve"
+  check_run_arrived sl1
   check "slow deploy exit 0 (it renders — refusing it would be a false 'boot failed')" [ "$rc" = 0 ]
   check "HEALTH ok"                            saw HEALTH ok sl1
   check "SWITCH ok (a slow site still goes live)" saw SWITCH ok sl1
@@ -1540,8 +2208,9 @@ FAKENPM
 
   echo "[selftest] e2e: a BROKEN site (never 200, even unthrottled) is refused — a DIFFERENT outcome, in different words"
   printf '503\n' > "$SRC/.broken-serve"
-  rc="$(sl_deploy brokesite br1 brokesite "$(free_port)" "$(free_port)")"
+  rc="$(sl_deploy brokesite br1 brokesite "$(reserve_port)" "$(reserve_port)")"
   rm -f "$SRC/.broken-serve"
+  check_run_arrived br1
   check "broken deploy exit 14 (HEALTH refused)"  [ "$rc" = 14 ]
   check "HEALTH failed"                           saw HEALTH failed br1
   check "the detail says NEVER served 200"        grep -q 'NEVER served 200' "$TD/out.log"
@@ -1559,8 +2228,9 @@ FAKENPM
   # green is refused, and refused with the BROKEN wording. The distinction is
   # therefore load-bearing, not decorative.
   printf '2\n' > "$SRC/.slow-serve"
-  rc="$(sl_deploy slowsite2 sl2 slowsite2 "$(free_port)" "$(free_port)" 1)"
+  rc="$(sl_deploy slowsite2 sl2 slowsite2 "$(reserve_port)" "$(reserve_port)" 1)"
   rm -f "$SRC/.slow-serve"
+  check_run_arrived sl2
   check "MUTANT: no headroom -> the identical slow site exits 14"  [ "$rc" = 14 ]
   check "MUTANT: and it is called BROKEN, which is the false diagnosis being fixed" \
     grep -q 'BROKEN, not slow' "$TD/out.log"
@@ -1599,8 +2269,9 @@ FAKENPM
   # -------------------------------------------------------------------------
   echo "[selftest] e2e: a TRUNCATED fast read is NOT accepted as a 200 — the patient probe reads the document whole and the site deploys"
   printf '2\n' > "$SRC/.truncate-serve"
-  rc="$(sl_deploy truncsite tr1 truncsite "$(free_port)" "$(free_port)" 20)"
+  rc="$(sl_deploy truncsite tr1 truncsite "$(reserve_port)" "$(reserve_port)" 20)"
   rm -f "$SRC/.truncate-serve"
+  check_run_arrived tr1
   check "truncating-then-complete deploy exit 0"   [ "$rc" = 0 ]
   check "HEALTH ok"                                saw HEALTH ok tr1
   check "SWITCH ok (the document WAS readable — just not inside the fast ceiling)" \
@@ -1620,8 +2291,9 @@ FAKENPM
 
   echo "[selftest] e2e: a read TRUNCATED even at the patient ceiling refuses by naming the TRUNCATION — never as a fact about the content"
   printf '8\n' > "$SRC/.truncate-serve"
-  rc="$(sl_deploy truncsite2 tr2 truncsite2 "$(free_port)" "$(free_port)" 3)"
+  rc="$(sl_deploy truncsite2 tr2 truncsite2 "$(reserve_port)" "$(reserve_port)" 3)"
   rm -f "$SRC/.truncate-serve"
+  check_run_arrived tr2
   check "unreadable-within-the-ceiling deploy exit 14" [ "$rc" = 14 ]
   check "HEALTH failed"                            saw HEALTH failed tr2
   check "the detail says the body was TRUNCATED, with the seconds and the curl exit" \
@@ -1666,8 +2338,9 @@ FAKENPM
   check "the mutant differs by exactly ONE line (the mutation APPLIED)" \
     [ "$(diff "$SELF" "$TRMUT" | grep -c '^[<>]')" = 2 ]
   printf '2\n' > "$SRC/.truncate-serve"
-  mrc="$(SL_ENGINE="$TRMUT" sl_deploy truncsite3 tr3 truncsite3 "$(free_port)" "$(free_port)" 20)"
+  mrc="$(SL_ENGINE="$TRMUT" sl_deploy truncsite3 tr3 truncsite3 "$(reserve_port)" "$(reserve_port)" 20)"
   rm -f "$SRC/.truncate-serve"
+  check_run_arrived tr3
   check "MUTANT: the identical readable site is REFUSED (exit 14)"  [ "$mrc" = 14 ]
   check "MUTANT: and the reason is the FABRICATED content diagnosis" \
     grep -q 'the SSR rendered no content document (no bp-corpus-status marker: this build predates the corpus-status contract' "$TD/out.log"
@@ -1676,6 +2349,165 @@ FAKENPM
   check "MUTANT: and the truncation was never named at all" \
     no_log_match 'the body was TRUNCATED'
   echo "  mutation proof: with clean_200 reduced to '[ \"\$1\" = 200 ]', a site whose document IS readable at the patient ceiling exits 14 and reports 'the SSR rendered no content document … predates the corpus-status contract' — the three checks above (fast loop refused the truncated 200 / fell through to the patient probe / never claims no content document) all red"
+
+  # -------------------------------------------------------------------------
+  # ONE PATH IS NOT THE SITE (ssw11-bl-node-engine-health-one-path).
+  #
+  # THE SHAPE. Until this block, every assertion this engine made was about ONE
+  # url: "/" (or the basePath sub-path, or BARKPARK_SITE_HEALTH_PATH). A release
+  # whose home page renders and whose LINKED route 404s or 500s therefore passed
+  # HEALTH and SWITCHed live, and the first report was a visitor's. The static
+  # engine closed the identical hole (site-deploy.sh, "HEALTH certifies a page the
+  # served HTML links to"); the SSR engine — where a route can fail for reasons a
+  # file tree cannot show at all — kept it.
+  #
+  # THE TARGET IS THE PAGE'S OWN href, NEVER THE DISK. On SSR that is not a
+  # preference, it is the only option that means anything: routes need not
+  # correspond to files, so an enumeration would ask the app for paths no browser
+  # ever requests, while the rendered href IS the next request a visitor makes.
+  #
+  # FIXTURES. `.deep-link` puts an href in the rendered page; `.deep-page` makes
+  # the "SSR" actually answer there; `.site-base` emits the bp-site-base marker
+  # the base-stripping reads. Ship the link WITHOUT the page and you have the
+  # exact release this gate exists for.
+  # -------------------------------------------------------------------------
+  echo "[selftest] e2e: FAIL-BEFORE — a release whose LINKED route 404s is REFUSED (14), never switched"
+  printf '/sites/deep1/d/hello/\n' > "$SRC/.deep-link"
+  printf '/sites/deep1/\n'         > "$SRC/.site-base"
+  rc="$(sl_deploy deep1 dp1 deep1 "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp1
+  check "the home page itself was fine: HEALTH read all three markers" \
+    no_log_match 'bp-doc-id marker is empty'
+  check "deploy exits 14 (HEALTH failed)"          [ "$rc" = 14 ]
+  check "no SWITCH stage line at all"              nosaw SWITCH
+  check "the reason NAMES the link it followed"    grep -q 'links to /d/hello/' "$TD/out.log"
+  check "…and the code it got there"               grep -q 'answered HTTP 404 there, want 200' "$TD/out.log"
+  check "…and the next move, before any cause hint (emit() clips detail= at 240)" \
+    grep -q 'Rebuild; do not retry this artifact' "$TD/out.log"
+  check "the refusal ALSO rides the plain human log (dual-channel)" \
+    grep -q '\[site-deploy-node .*HEALTH: the served page links to /d/hello/' "$TD/out.log"
+  check "it did NOT blame the content markers (they were all present)" \
+    no_log_match 'the SSR rendered no content document'
+  check "the broken release is purged"             [ ! -d "$TD/sites/deep1/releases/dp1" ]
+
+  echo "[selftest] e2e: the SAME release with the linked route PRESENT deploys, and the gate names the path it certified"
+  printf 'd/hello\n' > "$SRC/.deep-page"
+  rc="$(sl_deploy deep2 dp2 deep2 "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp2
+  check "deploy exit 0"                            [ "$rc" = 0 ]
+  check "HEALTH ok"                                saw HEALTH ok dp2
+  check "SWITCH ok"                                saw SWITCH ok dp2
+  check "the gate names the deep path it certified" \
+    grep -q 'deep path /d/hello/ serves 200' "$TD/out.log"
+  check "it was fetched at the BASE-STRIPPED path (the raw port has no /sites/<slug>/ prefix)" \
+    no_log_match 'deep path /sites/deep1/d/hello/'
+  check "it did not degrade to n/a"                no_log_match 'deep-path probe n/a'
+  rm -f "$SRC/.deep-link" "$SRC/.deep-page" "$SRC/.site-base"
+
+  echo "[selftest] e2e: a single-page render (no internal link) passes — the probe is n/a, never a refusal"
+  rc="$(sl_deploy deep3 dp3 deep3 "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp3
+  check "deploy exit 0"                            [ "$rc" = 0 ]
+  check "and it SAYS the probe was n/a"            grep -q 'deep-path probe n/a (single-page build)' "$TD/out.log"
+
+  echo "[selftest] e2e: an href pointing OUTSIDE this site's base is SKIPPED, not manufactured into a refusal"
+  printf '/some/other/site/page/\n' > "$SRC/.deep-link"
+  printf '/sites/deep4/\n'          > "$SRC/.site-base"
+  rc="$(sl_deploy deep4 dp4 deep4 "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp4
+  rm -f "$SRC/.deep-link" "$SRC/.site-base"
+  check "deploy exit 0 (an off-site link is not this release's problem)" [ "$rc" = 0 ]
+  check "and the probe reports n/a"                grep -q 'deep-path probe n/a' "$TD/out.log"
+  check "it never fetched the off-site path"       no_log_match '/some/other/site/page/'
+
+  echo "[selftest] e2e: a probe that COULD NOT RUN is a refusal, never an 'n/a' — an unchecked release is not a healthy one"
+  # THREE-VALUED, not two. An empty $deep means both "no internal link" and "the
+  # extractor never ran". Print the n/a prose for the second and a missing
+  # interpreter silently passes every broken release while reading as a
+  # single-page build — the static engine's own regression, ported here as a row.
+  printf '/sites/deep5/d/hello/\n' > "$SRC/.deep-link"
+  printf '/sites/deep5/\n'         > "$SRC/.site-base"
+  printf 'd/hello\n'               > "$SRC/.deep-page"
+  cnc_rc="$(env PATH="$FAKEBIN:$PATH" SITE_SLUG=deep5 BUILD_ID=dp5 CONTENT_REV=sl-rev \
+      SITE_SRC="$SRC" SITE_PORT_A="$(reserve_port)" SITE_PORT_B="$(reserve_port)" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/deep5.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      BARKPARK_SITE_HEALTH_ATTEMPTS=2 BARKPARK_SITE_HEALTH_FAST_MAX=1 \
+      BARKPARK_HEALTH_PY="$TD/no-such-interpreter" \
+      bash "$SELF" > "$TD/out.log" 2> "$TD/err.log"; echo $?)"
+  check "a release that would otherwise deploy is REFUSED (14) when the extractor is missing" \
+    [ "$cnc_rc" = 14 ]
+  check "and it says COULD-NOT-CHECK"              grep -q 'deep-path probe COULD-NOT-CHECK' "$TD/out.log"
+  check "…naming the interpreter that did not run" grep -q "did not run (exit 127)" "$TD/out.log"
+  check "and it does NOT read as a single-page build" no_log_match 'deep-path probe n/a'
+  rc="$(sl_deploy deep5b dp5b deep5b "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp5b
+  check "CONTROL: exit 0 and the deep path is CERTIFIED" \
+    sh -c "[ '$rc' = 0 ] && grep -q 'deep path /d/hello/ serves 200' '$TD/out.log'"
+  rm -f "$SRC/.deep-link" "$SRC/.site-base" "$SRC/.deep-page"
+
+  echo "[selftest] e2e: a basePath site probes the linked route UNDER its base (base-aware in the other dialect too)"
+  : > "$SRC/.basepath"
+  printf '/sites/deep6/d/x/\n'  > "$SRC/.deep-link"
+  printf '/sites/deep6/\n'      > "$SRC/.site-base"
+  printf 'sites/deep6/d/x\n'    > "$SRC/.deep-page"
+  bp6_deploy() { # <build_id> <port-a> <port-b>
+    env PATH="$FAKEBIN:$PATH" SITE_SLUG=deep6 BUILD_ID="$1" CONTENT_REV=sl-rev \
+      SITE_SRC="$SRC" SITE_PORT_A="$2" SITE_PORT_B="$3" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/deep6.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_SITE_BASEPATH=1 BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      BARKPARK_SITE_HEALTH_ATTEMPTS=2 BARKPARK_SITE_HEALTH_FAST_MAX=1 \
+      bash "$SELF" > "$TD/out.log" 2> "$TD/err.log"; echo $?
+  }
+  rc="$(bp6_deploy dp6 "$(reserve_port)" "$(reserve_port)")"
+  check "basePath deploy exit 0"                   [ "$rc" = 0 ]
+  check "the deep path was fetched UNDER the base, not at root" \
+    grep -q 'deep path /sites/deep6/d/x/ serves 200' "$TD/out.log"
+  rm -f "$SRC/.deep-page"
+  rc="$(bp6_deploy dp6b "$(reserve_port)" "$(reserve_port)")"
+  check "basePath: the same link with the route GONE is refused (14)"  [ "$rc" = 14 ]
+  check "…naming the base-qualified path"          grep -q 'links to /sites/deep6/d/x/' "$TD/out.log"
+  rm -f "$SRC/.basepath" "$SRC/.deep-link" "$SRC/.site-base"
+
+  echo "[selftest] e2e: a PERCENT-ENCODED accented href is fetched as the browser would ask for it"
+  # No accented byte is ever typed here: the on-disk name comes from a numeric
+  # \xNN escape naming the exact UTF-8 encoding, and the href is the ASCII
+  # percent-encoding of the same codepoint. What crosses the shell is ASCII.
+  printf '/sites/deep7/d/caf%%C3%%A9/\n' > "$SRC/.deep-link"
+  printf '/sites/deep7/\n'               > "$SRC/.site-base"
+  printf 'd/caf\xc3\xa9\n'               > "$SRC/.deep-page"
+  rc="$(sl_deploy deep7 dp7 deep7 "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp7
+  check "accented deep route present: deploy exit 0"  [ "$rc" = 0 ]
+  check "and the gate reports the PERCENT-ENCODED path (pure ASCII on the wire)" \
+    grep -q 'deep path /d/caf%C3%A9/ serves 200' "$TD/out.log"
+  rm -f "$SRC/.deep-page"
+  rc="$(sl_deploy deep7b dp7b deep7b "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp7b
+  check "accented deep route MANGLED away: refused (14)"  [ "$rc" = 14 ]
+  check "…and the refusal names the encoded path"    grep -q 'links to /d/caf%C3%A9/' "$TD/out.log"
+
+  echo "[selftest] e2e: MUTATION PROOF — disable the deep probe's verdict and the 404-linked release deploys green again"
+  # ONE LINE, and it is the whole gate: `deep_ok` stops consulting the code it was
+  # handed. With it, the release whose linked route 404s walks through HEALTH,
+  # SWITCHes, and goes live — which IS the pre-fix engine, reproduced on demand.
+  DPMUT="$TD/mutant-deep-probe-off.sh"; DPMUTLIB="$TD/lib"
+  mkdir -p "$DPMUTLIB"
+  cp "$(cd "$(dirname "$SELF")" && pwd)/lib/site-deploy-common.sh" "$DPMUTLIB/"  # a mutant sources by its OWN dirname
+  awk '{ if ($0 == "  [ -z \"$1\" ] || [ \"$2\" = 200 ]") print "  [ -z \"$1\" ] || true"; else print }' \
+    "$SELF" > "$DPMUT"
+  check "the mutant differs by exactly ONE line (the mutation APPLIED)" \
+    [ "$(diff "$SELF" "$DPMUT" | grep -c '^[<>]')" = 2 ]
+  mrc="$(SL_ENGINE="$DPMUT" sl_deploy deep8 dp8 deep8 "$(reserve_port)" "$(reserve_port)")"
+  check_run_arrived dp8
+  check "MUTANT: the identical 404-linked release exits 0"      [ "$mrc" = 0 ]
+  check "MUTANT: and it SWITCHES live"                          saw SWITCH ok dp8
+  check "MUTANT: the refusal sentence is never emitted"         no_log_match 'answered HTTP 404 there'
+  check "MUTANT: nothing at all names the linked route as bad"  no_log_match 'Rebuild; do not retry this artifact'
+  rm -f "$SRC/.deep-link" "$SRC/.site-base"
+  echo "  mutation proof: with deep_ok reduced to '[ -z \"\$1\" ] || true', a release whose LINKED route 404s exits 0 and goes live — every FAIL-BEFORE row above (exit 14 / no SWITCH / names the link / names the code / purged) reds"
 
   echo "[selftest] build_failure_reason resolves from the SHARED lib in THIS engine too"
   # The lift's whole point: one copy, both engines. If it ever gets re-forked into
@@ -1945,8 +2777,24 @@ NOSTOP
     [ -n "$WARM_UP_PRE3" ]
   check "no-stop-case PRECONDITION: warm's route was ARMED before the teardown" \
     grep -q 'BARKPARK_SITE_ROUTE:warm' "$CF"
+  # THE FIXTURE MUST SEPARATE THE TWO PORTS, or the assertion below is VACUOUS.
+  # held_port reads the slot's EnvironmentFile and falls back to slot_port (i.e.
+  # $SITE_PORT_A/B, THIS invocation's inputs). Hand the teardown the pair warm was
+  # deployed on and the two are the same number, so the check passes even when
+  # held_port never opens the env file — proven: gutting held_port to `slot_port
+  # "$1"` left the whole suite green. So this teardown is handed a DIFFERENT pair
+  # (exactly the real case the function exists for: a --teardown invoked without
+  # SITE_PORT_A/B, or with a re-derived pair, while the units still hold the ports
+  # they were STARTED with). The env file is the truth; the handed pair is the lie.
+  nsp_env_a="$(awk -F= '$1=="PORT"{print $2; exit}' "$SENV/warm__a.env")"
+  nsp_env_b="$(awk -F= '$1=="PORT"{print $2; exit}' "$SENV/warm__b.env")"
+  nsp_wrong_a=18301; nsp_wrong_b=18302   # a pair warm was NEVER deployed on
+  check "no-stop-case FIXTURE: the slot env files really carry warm's DEPLOYED ports, and the pair this teardown is handed really DIFFERS from them (without that, the held-port check below passes on the fallback)" \
+    sh -c "[ '$nsp_env_a' = '$T_PORT_C' ] && [ '$nsp_env_b' = '$T_PORT_D' ] \
+        && [ '$nsp_env_a' != '$nsp_wrong_a' ] && [ '$nsp_env_a' != '$nsp_wrong_b' ] \
+        && [ '$nsp_env_b' != '$nsp_wrong_a' ] && [ '$nsp_env_b' != '$nsp_wrong_b' ]"
   env PATH="$STOPBIN:$FAKEBIN:$PATH" \
-    SITE_SLUG=warm SITE_PORT_A="$T_PORT_C" SITE_PORT_B="$T_PORT_D" \
+    SITE_SLUG=warm SITE_PORT_A="$nsp_wrong_a" SITE_PORT_B="$nsp_wrong_b" \
     BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
     BARKPARK_CADDYFILE="$CF" BARKPARK_SITE_DEPLOY_LOCK="$TD/warm.lock" \
     BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" BARKPARK_SITE_LOG_FILE="$TD/td-nostop.log" \
@@ -1961,6 +2809,25 @@ NOSTOP
     grep -q '^TEARDOWN_FAILED=warm detail="' "$TD/td-nostop.out"
   check "node no-stop teardown names the slot that would not stop" \
     grep -q 'would NOT stop' "$TD/td-nostop.out"
+  # A SLOT LETTER IS NOT THE LEAKED RESOURCE (task-d1fc3ff3a8892663). The stranded
+  # node process keeps its LISTENER, and that port is what the next deploy of this
+  # site collides on. A PREDICATE over every slot the precondition proved running,
+  # not a hard-coded pair: it stays true if the fixture's running set changes.
+  nostop_ports_named=1
+  for nsp_slot in a b; do
+    case "$WARM_UP_PRE3" in *"$nsp_slot"*) ;; *) continue ;; esac
+    nsp_port="$nsp_env_a"; [ "$nsp_slot" = b ] && nsp_port="$nsp_env_b"
+    grep -q "port $nsp_port still held" "$TD/td-nostop.out" || nostop_ports_named=0
+  done
+  check "node no-stop teardown names the still-HELD PORT (the one in the slot's EnvironmentFile) of every slot that would not stop" \
+    [ "$nostop_ports_named" = 1 ]
+  # THE CONTROL for the check above: the port it names must be the one the UNIT
+  # HOLDS, never the pair this invocation happened to be handed. Without this arm
+  # a held_port that never reads the env file still reads green.
+  check "node no-stop teardown does NOT name the port pair this invocation was handed (the stranded listener holds the port it was STARTED with, not the caller's guess)" \
+    sh -c "! grep -q 'port $nsp_wrong_a still held' '$TD/td-nostop.out' && ! grep -q 'port $nsp_wrong_b still held' '$TD/td-nostop.out'"
+  check "node no-stop teardown says the held port collides with the next deploy" \
+    grep -q 'collides on them' "$TD/td-nostop.out"
   check "node no-stop teardown RESTORED the route (no dead route over a live slot)" \
     grep -q 'BARKPARK_SITE_ROUTE:warm' "$CF"
   check "node no-stop teardown left the Caddyfile BYTE-IDENTICAL to the pre-teardown snapshot" \
@@ -2019,7 +2886,7 @@ NOSTOP
     # inherits nothing), but it is a 20-minute hang if you reuse a slug here.
     ng_deploy() { # <slug> <build_id> [VAR=value…] -> exit code; log at $NG/out.log
       local slug="$1" bid="$2" pa pb; shift 2
-      pa="$(free_port)"; pb="$(free_port)"
+      pa="$(reserve_port)"; pb="$(reserve_port)"
       env PATH="$GBIN:$PATH" "$@" \
         SITE_SLUG="$slug" BUILD_ID="$bid" CONTENT_REV=rev-1 \
         SITE_SRC="$GSRC" SITE_PORT_A="$pa" SITE_PORT_B="$pb" \
@@ -2173,7 +3040,7 @@ FAKEMV
   # ONE fixture, run twice — the arms differ ONLY by which engine binary runs.
   rb_arm() { # <engine> <slug> -> populates $TD/rb-<slug>/, echoes the STAGE-failure exit code
     local eng="$1" slug="$2" base="$TD/rb-$2" pa pb
-    pa="$(free_port)"; pb="$(free_port)"
+    pa="$(reserve_port)"; pb="$(reserve_port)"
     mkdir -p "$base/sites"
     rb_deploy() { # <build_id>
       env PATH="$RBBIN:$FAKEBIN:$PATH" \
@@ -2234,7 +3101,7 @@ FAKEMV
   mv "$RBF/sites/rbfix/releases/rb1" "$RBF/sites/rbfix/releases/rb1.aside"
   rb_recover_rc="$(env PATH="$RBBIN:$FAKEBIN:$PATH" \
     SITE_SLUG=rbfix BUILD_ID=rb1 CONTENT_REV=rb-rev SITE_SRC="$RBSRC" \
-    SITE_PORT_A="$(free_port)" SITE_PORT_B="$(free_port)" \
+    SITE_PORT_A="$(reserve_port)" SITE_PORT_B="$(reserve_port)" \
     BARKPARK_SITES_DIR="$RBF/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
     BARKPARK_CADDYFILE="$CF" \
     BARKPARK_SITE_DEPLOY_LOCK="$RBF/deploy.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
@@ -2257,7 +3124,7 @@ FAKEMV
   : > "$RBF/mv.log"
   rb_norecover_rc="$(env PATH="$RBBIN:$FAKEBIN:$PATH" \
     SITE_SLUG=rbfix BUILD_ID=rb1 CONTENT_REV=rb-rev SITE_SRC="$RBSRC" \
-    SITE_PORT_A="$(free_port)" SITE_PORT_B="$(free_port)" \
+    SITE_PORT_A="$(reserve_port)" SITE_PORT_B="$(reserve_port)" \
     BARKPARK_SITES_DIR="$RBF/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
     BARKPARK_CADDYFILE="$CF" \
     BARKPARK_SITE_DEPLOY_LOCK="$RBF/deploy.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
@@ -2304,7 +3171,7 @@ FAKEMV
   SFCF="$TD/Caddyfile.switchfail"
   printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$SFCF"
   cp "$SFCF" "$SFCF.orig"
-  SF_PORT_A="$(free_port)"; SF_PORT_B="$(free_port)"
+  SF_PORT_A="$(reserve_port)"; SF_PORT_B="$(reserve_port)"
   sf_rc="$(env PATH="$SFB:$FAKEBIN:$PATH" \
     SITE_SLUG=switchfail BUILD_ID=sf1 CONTENT_REV=sf-rev SITE_SRC="$SRC" \
     SITE_PORT_A="$SF_PORT_A" SITE_PORT_B="$SF_PORT_B" \
@@ -2358,7 +3225,7 @@ FAKEMV
   echo "[selftest] e2e: a REJECTED RE-DEPLOY flip fails CLOSED with exit 16 and leaves the LIVE slot routed"
   FLCF="$TD/Caddyfile.flipfail"
   printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$FLCF"
-  FL_PORT_A="$(free_port)"; FL_PORT_B="$(free_port)"
+  FL_PORT_A="$(reserve_port)"; FL_PORT_B="$(reserve_port)"
   fl_deploy() { # <build_id> <extra-PATH-prefix> -> exit code, logs $TD/fl.<id>.out
     env PATH="${2}$FAKEBIN:$PATH" \
       SITE_SLUG=flipfail BUILD_ID="$1" CONTENT_REV="fl-$1" SITE_SRC="$SRC" \
@@ -2554,8 +3421,8 @@ SWPMV
     cp -a "$SWP/$1-snap/Caddyfile" "$SWP/$1.Caddyfile"
   }
 
-  SWP_PA="$(free_port)"; SWP_PB="$(free_port)"   # the FIXED arm's two slots
-  SWP_PC="$(free_port)"; SWP_PD="$(free_port)"   # the MUTANT arm's two slots
+  SWP_PA="$(reserve_port)"; SWP_PB="$(reserve_port)"   # the FIXED arm's two slots
+  SWP_PC="$(reserve_port)"; SWP_PD="$(reserve_port)"   # the MUTANT arm's two slots
   swp_fixture fixed  swpfix "$SELF"   "$SWP_PA" "$SWP_PB"
   swp_fixture mutant swpmut "$RBMUT"  "$SWP_PC" "$SWP_PD"
   check "fixture (fixed):  .previous names n1 (n1 IS the rollback target)" \
@@ -2626,6 +3493,235 @@ SWPMV
   swp_variant static     '^cp .*/\.next/static/\. -> .*/releases/n1\.partial/\.next/static/$'
   swp_variant public     '^cp .*/public/\. -> .*/releases/n1\.partial/public/$'
   swp_variant mv         '^mv .*/releases/n1\.partial -> .*/releases/n1$'
+  # =========================================================================
+  # PREBUILT (PLAN_MODE=prebuilt) — THE BUILD LEAVES THE SERVING BOX, and the
+  # node ABI is refused BEFORE STAGE.
+  #
+  # Its own slug, its own slot ports, its own src tree, so nothing above can
+  # leak into it. The whole block is written so that DELETING the prebuilt arm
+  # from the engine reds a NAMED row: the two mutation proofs at the foot drive
+  # the SAME fixtures through an engine with one line removed.
+  # =========================================================================
+  echo "[selftest] e2e: a PREBUILT node deploy STAGEs uploaded bytes with NO npm on this box"
+  PB="$TD/pb"; PBBIN="$PB/bin"; PBSRC="$PB/src"; PB_SITE="$TD/sites/pbnode"
+  mkdir -p "$PBBIN" "$PBSRC"
+  PB_PORT_A="$(reserve_port)"; PB_PORT_B="$(reserve_port)"
+  printf '{"name":"selftest-pb-node","private":true}\n' > "$PBSRC/package.json"
+  # The BOX half of the ABI comparison must be deterministic, so the fixture
+  # owns it: a fake `node` on PATH, ahead of everything. box_node_major shells
+  # `node -v`, so this is the real probe reading a real (fake) binary — not an
+  # env override standing in for the measurement.
+  PB_BOX_MAJOR=22
+  printf '#!/bin/sh\n[ "$1" = -v ] && { echo v%s.11.0; exit 0; }\nexit 0\n' "$PB_BOX_MAJOR" > "$PBBIN/node"
+  chmod +x "$PBBIN/node"
+  PB_CF="$TD/pb.Caddyfile"
+  printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$PB_CF"
+  pb_deploy() { # <engine> <build_id> [PREBUILT_DIR] [SHA] -> exit code; log $TD/pb.out
+    env PATH="$PBBIN:$FAKEBIN:$PATH" \
+      SITE_SLUG=pbnode BUILD_ID="$2" CONTENT_REV=rev-1 SITE_SRC="$PBSRC" \
+      PREBUILT_DIR="${3:-}" PREBUILT_SHA256="${4:-}" \
+      SITE_PORT_A="$PB_PORT_A" SITE_PORT_B="$PB_PORT_B" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+      BARKPARK_CADDYFILE="$PB_CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$PB/deploy.lock" \
+      BARKPARK_CADDYFILE_LOCK="$PB/caddyfile.lock" \
+      BARKPARK_NODE_LINK="$PB/absent-node-link" \
+      BARKPARK_NODE_LIBC=glibc \
+      BARKPARK_SITE_NO_CAP=1 \
+      bash "$1" > "$TD/pb.out" 2>"$TD/pb.err"
+    echo $?
+  }
+  pb_saw() { grep -q "^BPSTAGE name=$1 status=$2 build_id=$3" "$TD/pb.out"; }
+  # <dir> <build_id> <body-marker> [node_major] [libc] — an UPLOADED node release
+  # root: server.js at the top, .next/static + public ALREADY folded in (the
+  # packer's job; there is no $SITE_SRC to take them from), plus the declaration.
+  mk_pb() {
+    local d="$1" bid="$2" body="$3" maj="${4:-$PB_BOX_MAJOR}" libc="${5:-glibc}"
+    rm -rf "$d"; mkdir -p "$d/.next/static" "$d/public"
+    printf '// UPLOADED standalone server\n' > "$d/server.js"
+    { printf '<!doctype html><html><head>\n'
+      printf '<meta name="bp-build-id" content="%s">\n' "$bid"
+      printf '<meta name="bp-content-rev" content="rev-1">\n'
+      printf '<meta name="bp-doc-id" content="doc-1">\n'
+      printf '</head><body><h1>%s</h1></body></html>\n' "$body"; } > "$d/index.html"
+    printf 'uploaded-chunk\n' > "$d/.next/static/chunk.js"
+    printf 'uploaded-robots\n' > "$d/public/robots.txt"
+    if [ "$maj" != NONE ]; then
+      { printf 'node_major=%s\n' "$maj"
+        [ "$libc" != NONE ] && printf 'libc=%s\n' "$libc"
+        printf 'packer=selftest\n'; } > "$d/.bp-node-abi"
+    fi
+  }
+  PB_SHA_A="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  PB_SHA_B="fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+
+  # POSITIVE CONTROL FIRST. Without it, "ran NO npm" below is satisfied by a
+  # fixture whose npm was never reachable in the first place — an absence that
+  # proves the PATH, not the engine.
+  : > "$PBSRC/.npm-calls"
+  rc="$(pb_deploy "$SELF" pb0)"
+  check "positive control: a BOX build on this same slug DOES run npm" \
+    grep -q 'npm run build' "$PBSRC/.npm-calls"
+  check "positive control: that box build went live (the fixture is a working one)" \
+    [ "$rc" = 0 ]
+
+  : > "$PBSRC/.npm-calls"
+  mk_pb "$PB/up1" pb1 "UPLOADED-BYTES-pb1"
+  rc="$(pb_deploy "$SELF" pb1 "$PB/up1" "$PB_SHA_A")"
+  check "prebuilt deploy exit 0"                    [ "$rc" = 0 ]
+  check "ran NO npm on this box"                    [ ! -s "$PBSRC/.npm-calls" ]
+  check "BUILD is SKIPPED and SAYS prebuilt, naming the digest" \
+    grep -qE '^BPSTAGE name=BUILD status=skipped build_id=pb1 detail="prebuilt bytes \(.*sha256 0123456789ab\) - no build ran on this box"' "$TD/pb.out"
+  check "STAGE ok names the prebuilt digest AND the ABI it certified" \
+    grep -qE '^BPSTAGE name=STAGE status=ok build_id=pb1 detail="prebuilt bytes -> releases/pb1 \(.*sha256 0123456789ab, node abi 22/glibc\)"' "$TD/pb.out"
+  check "the release root carries the UPLOADED server.js" \
+    grep -q 'UPLOADED standalone server' "$PB_SITE/releases/pb1/server.js"
+  check "…and the uploader's .next/static came through (the packer folds it in)" \
+    grep -q 'uploaded-chunk' "$PB_SITE/releases/pb1/.next/static/chunk.js"
+  check "…and the uploader's public/ too" \
+    grep -q 'uploaded-robots' "$PB_SITE/releases/pb1/public/robots.txt"
+  check "the release RECORDS which bytes it carries (.bp-prebuilt-sha256)" \
+    [ "$(cat "$PB_SITE/releases/pb1/$PREBUILT_MARK" 2>/dev/null)" = "$PB_SHA_A" ]
+  check "…and the ABI declaration rides into the release as its receipt" \
+    grep -q 'node_major=22' "$PB_SITE/releases/pb1/.bp-node-abi"
+  check "HEALTH ok"                                 pb_saw HEALTH ok pb1
+  check "SWITCH ok — uploaded bytes went LIVE"      pb_saw SWITCH ok pb1
+  # READ BACK the routed upstream rather than assuming TARGET_PORT: pb0 (the
+  # control box build) took slot a, so the prebuilt deploy is on b. An assertion
+  # against the port we INTENDED would be an assertion about this test's
+  # arithmetic, not about what Caddy is serving.
+  PB_LIVE_PORT="$(awk '/BARKPARK_SITE_ROUTE:pbnode/{f=1} f && /reverse_proxy localhost:/{sub(/.*localhost:/,""); sub(/[^0-9].*/,""); print; exit}' "$PB_CF")"
+  check "Caddy's pbnode block names a real port (the read-back is not empty)" \
+    sh -c "printf '%s' '$PB_LIVE_PORT' | grep -qE '^[0-9]+$'"
+  check "the ROUTED slot serves the UPLOADED body, not a rebuilt one" \
+    sh -c "curl -fsS --max-time 5 'http://127.0.0.1:$PB_LIVE_PORT/' 2>/dev/null | grep -q 'UPLOADED-BYTES-pb1'"
+
+  echo "[selftest] e2e: prebuilt bytes this box cannot NAME are refused before anything is staged"
+  mk_pb "$PB/up2" pb2 "UPLOADED-BYTES-pb2"
+  rc="$(pb_deploy "$SELF" pb2 "$PB/up2" "not-a-digest")"
+  check "a malformed PREBUILT_SHA256 exits 11"      [ "$rc" = 11 ]
+  check "…and nothing was staged"                   [ ! -d "$PB_SITE/releases/pb2" ]
+  rc="$(pb_deploy "$SELF" pb3 "$PB/absent-tree" "$PB_SHA_B")"
+  check "a PREBUILT_DIR that is not there exits 11" [ "$rc" = 11 ]
+  check "…and the detail names server.js (a node release root, not a dist/)" \
+    grep -q 'server.js at its top' "$TD/pb.out"
+
+  echo "[selftest] e2e: a NODE ABI MISMATCH is refused BEFORE STAGE — nothing staged, HEALTH never reached"
+  mk_pb "$PB/abi1" pb4 "UPLOADED-BYTES-pb4" 20 glibc
+  rc="$(pb_deploy "$SELF" pb4 "$PB/abi1" "$PB_SHA_B")"
+  check "a declared node_major the box does not run exits 17" [ "$rc" = 17 ]
+  check "…it spoke PLAN failed on the machine channel (never a silent exit)" \
+    pb_saw PLAN failed pb4
+  check "…the detail names BOTH majors (a diagnosis, not a symptom)" \
+    grep -qE 'declares node_major=20, this box runs node major 22' "$TD/pb.out"
+  check "…ZERO release dir was staged"              [ ! -d "$PB_SITE/releases/pb4" ]
+  check "…and no .partial/.aside was left behind either" \
+    sh -c "[ ! -e '$PB_SITE/releases/pb4.partial' ] && [ ! -e '$PB_SITE/releases/pb4.aside' ]"
+  check "…STAGE was never reached"                  sh -c "! grep -q '^BPSTAGE name=STAGE ' '$TD/pb.out'"
+  check "…HEALTH was never reached (the whole point: no wasted boot)" \
+    sh -c "! grep -q '^BPSTAGE name=HEALTH ' '$TD/pb.out'"
+  check "…and the live release pb1 is untouched" \
+    grep -q 'UPLOADED-BYTES-pb1' "$PB_SITE/releases/pb1/index.html"
+  mk_pb "$PB/abi2" pb5 "UPLOADED-BYTES-pb5" NONE
+  rc="$(pb_deploy "$SELF" pb5 "$PB/abi2" "$PB_SHA_B")"
+  check "an UNDECLARED ABI exits 17 (absence is not a pass)" [ "$rc" = 17 ]
+  check "…and says so by name"                      grep -q 'carries no .bp-node-abi' "$TD/pb.out"
+  check "…staging nothing"                          [ ! -d "$PB_SITE/releases/pb5" ]
+  mk_pb "$PB/abi3" pb6 "UPLOADED-BYTES-pb6" "$PB_BOX_MAJOR" musl
+  rc="$(pb_deploy "$SELF" pb6 "$PB/abi3" "$PB_SHA_B")"
+  check "a libc mismatch (musl bytes, glibc box) exits 17"   [ "$rc" = 17 ]
+  check "…and names both libcs"                     grep -q 'declares libc=musl, this box is glibc' "$TD/pb.out"
+  # THE QUIET CONTROL for the libc arm: an UNDECIDED libc must not be turned
+  # into a refusal. A probe that cannot tell has measured nothing, and the
+  # node_major half above still binds — so this arm is narrow, not vacuous.
+  mk_pb "$PB/abi4" pb7 "UPLOADED-BYTES-pb7" "$PB_BOX_MAJOR" unknown
+  rc="$(pb_deploy "$SELF" pb7 "$PB/abi4" "$PB_SHA_B")"
+  check "control: libc=unknown is UNDECIDED, not a refusal — the deploy lands" [ "$rc" = 0 ]
+  check "control: …and it really staged (the control is not a silent skip)" \
+    [ -f "$PB_SITE/releases/pb7/server.js" ]
+
+  echo "[selftest] e2e: MUTATION PROOF — delete the ABI refusal and the SAME mismatched bytes stage and boot"
+  # A mutant sources the common lib by its OWN dirname, so it needs a lib/ too.
+  PBMUTD="$PB/mut"; PBMUT="$PBMUTD/site-deploy-node.sh"
+  mkdir -p "$PBMUTD/lib"
+  cp "$(cd "$(dirname "$SELF")" && pwd)/lib/site-deploy-common.sh" "$PBMUTD/lib/"
+  # Delete the FOURTH `exit 17` refusal line — the node_major mismatch. The three
+  # above it (no declaration, unreadable declaration, unreadable box) and the two
+  # below (libc) stay, so this mutation is as narrow as a mutation gets.
+  awk '$0 == "    log \"PLAN: $DETAIL\"; emit PLAN failed \"$DETAIL\"; exit 17" { n++; if (n == 4) next } { print }' "$SELF" > "$PBMUT"
+  check "the ABI mutant differs by exactly ONE deleted line" \
+    [ "$(diff "$SELF" "$PBMUT" | grep -c '^[<>]')" = 1 ]
+  mk_pb "$PB/mut1" pb8 "UPLOADED-BYTES-pb8" 20 glibc
+  rc="$(pb_deploy "$PBMUT" pb8 "$PB/mut1" "$PB_SHA_B")"
+  check "MUTANT: the node_major mismatch is no longer refused (exit 0, not 17)" [ "$rc" = 0 ]
+  check "MUTANT: bytes built for node 20 are STAGED onto a node 22 box" \
+    [ -f "$PB_SITE/releases/pb8/server.js" ]
+  check "MUTANT: and a slot was BOOTED for them — the wasted deploy this arm exists to prevent" \
+    grep -q '^BPSTAGE name=HEALTH ' "$TD/pb.out"
+  echo "  mutation proof: with the node_major refusal deleted, the pb4 specimen above (exit 17, zero release dir, no HEALTH line) instead exits 0, stages releases/<id>/server.js and reaches HEALTH — the four pb4 rows named above all red"
+  # QUIET CONTROL for the mutation: the ABI arm is PREBUILT-ONLY. Removing it
+  # must not disturb a box build, or the mutation proves the engine's health in
+  # general rather than this arm in particular.
+  : > "$PBSRC/.npm-calls"
+  rc="$(pb_deploy "$PBMUT" pb9)"
+  check "control: the SAME mutant still deploys a BOX build unchanged (the arm is prebuilt-only)" \
+    [ "$rc" = 0 ]
+  check "control: …and that box build really ran npm" \
+    grep -q 'npm run build' "$PBSRC/.npm-calls"
+
+  echo "[selftest] e2e: MUTATION PROOF — lose the prebuilt MARK and a health-failed release is rebuilt from the template"
+  PBMUT2D="$PB/mut2"; PBMUT2="$PBMUT2D/site-deploy-node.sh"
+  mkdir -p "$PBMUT2D/lib"
+  cp "$(cd "$(dirname "$SELF")" && pwd)/lib/site-deploy-common.sh" "$PBMUT2D/lib/"
+  # SUBSTITUTED, not deleted: that write is the only statement in its `if`, and
+  # an emptied `if` body is a bash SYNTAX ERROR — a mutant that cannot parse
+  # exits 2 on every fixture and would "prove" the arm from a broken file.
+  # Matched by its redirection target, which occurs exactly once in this engine
+  # (the row below counts the diff, so a match of nothing cannot pass quietly).
+  awk 'index($0, "> \"$RELDIR/$PREBUILT_MARK\"") > 0 { print "    : # MUTANT: the prebuilt mark is never written"; next } { print }' "$SELF" > "$PBMUT2"
+  check "the MARK mutant differs by exactly ONE substituted line" \
+    [ "$(diff "$SELF" "$PBMUT2" | grep -c '^[<>]')" = 2 ]
+  check "the MARK mutant still PARSES (a syntax-error mutant proves nothing)" \
+    bash -n "$PBMUT2"
+  mk_pb "$PB/up-markmut" pbA "UPLOADED-BYTES-pbA"
+  rc="$(pb_deploy "$PBMUT2" pbA "$PB/up-markmut" "$PB_SHA_A")"
+  check "MUTANT: the deploy still succeeds (the loss is SILENT)" [ "$rc" = 0 ]
+  check "MUTANT: the release carries NO record that its bytes were uploaded" \
+    [ ! -f "$PB_SITE/releases/pbA/$PREBUILT_MARK" ]
+  # THE DOWNSTREAM CONSEQUENCE, MEASURED on a matched pair that differs in ONE
+  # file. A release that is staged, health-failed and NOT live is exactly the
+  # state PLAN's fail-closed arm exists for: with the mark it must refuse and
+  # say re-upload; without it, it is indistinguishable from a box build and the
+  # box rebuilds from the provisioned template — genuine markers, HEALTH green,
+  # the WRONG bytes booted. Built by hand rather than by a deploy, because a
+  # release this engine JUST deployed is LIVE and the no-op arm would claim the
+  # run before either arm under test is reached.
+  mk_failed_release() { # <build_id> <with-mark: 1|0>
+    local bid="$1" rd="$PB_SITE/releases/$1"
+    rm -rf "$rd"; mkdir -p "$rd"
+    printf '// UPLOADED standalone server\n' > "$rd/server.js"
+    printf '<!doctype html><html><body>UPLOADED-BYTES-%s</body></html>\n' "$bid" > "$rd/index.html"
+    [ "$2" = 1 ] && printf '%s\n' "$PB_SHA_A" > "$rd/$PREBUILT_MARK"
+    : > "$rd/$HEALTH_FAIL_MARK"
+  }
+  mk_failed_release pbF 1
+  check "precondition: the fixture release is staged, health-failed and NOT live" \
+    sh -c "[ -f '$PB_SITE/releases/pbF/$HEALTH_FAIL_MARK' ] && [ \"\$(cat '$SENV/pbnode__a.env' '$SENV/pbnode__b.env' 2>/dev/null | grep -c 'pbF')\" = 0 ]"
+  rc="$(pb_deploy "$SELF" pbF)"
+  check "FIXED: a MARKED health-failed release FAILS CLOSED (11), never a template rebuild" \
+    [ "$rc" = 11 ]
+  check "FIXED: …and says the only real fix out loud" \
+    grep -q 'RE-UPLOAD the artifact for this build_id' "$TD/pb.out"
+  check "FIXED: …leaving the uploaded bytes on disk" \
+    grep -q 'UPLOADED-BYTES-pbF' "$PB_SITE/releases/pbF/index.html"
+  mk_failed_release pbG 0
+  rc="$(pb_deploy "$SELF" pbG)"
+  check "control: the SAME shape WITHOUT the mark is an ordinary rebuild (the arm keys on the mark, not on health-failed)" \
+    [ "$rc" = 0 ]
+  check "control: …and the box's own bytes replaced it" \
+    sh -c "! grep -q 'UPLOADED-BYTES-pbG' '$PB_SITE/releases/pbG/index.html'"
+  echo "  mutation proof: with the .bp-prebuilt-sha256 write substituted away, the pbF pair collapses onto the pbG control — the mark-less mutant stages a release that no later reader can tell from a box build, so PLAN's fail-closed arm (exit 11, 're-upload') and purge_failed_release_node's keep-the-bytes arm both go silent and a template rebuild boots the WRONG bytes green"
+
   echo "[selftest] the shipped unit template treats a SIGTERM exit (143) as a clean stop"
   UNIT_TMPL="$(cd "$(dirname "$SELF")" && pwd)/systemd/barkpark-site@.service"
   unit_ses_section() { awk '/^\[/{s=$0} /^SuccessExitStatus=/{print s; exit}' "$UNIT_TMPL"; }
@@ -2637,6 +3733,41 @@ SWPMV
 
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
+  # --- deploy/README.md count guard (ssw8-selftest-count-guard) -------------
+  # deploy/README.md publishes this engine's check count in prose, and until now
+  # NOTHING read it back, so it drifted freely (110 -> 128 -> the number this
+  # guard landed with). Direction matters: the README number is the ASSERTED
+  # value and $TESTS, which this run just measured, is the MEASUREMENT, so the
+  # guard only ever READS the README. A guard that learned its expected value
+  # from the thing it guards would have agreed with every drifted number.
+  # Skips cleanly when the README is absent, so a box that ships only the
+  # engines without the docs tree is unaffected.
+  if [ ! -f "$SELFTEST_README" ]; then
+    echo "[selftest] README count guard: SKIPPED - no $SELFTEST_README (engine shipped without the docs tree)"
+  elif [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" != 1 ]; then
+    # Asserted only on the COMPLETE run - the same condition SELFTEST_FLOOR_FULL
+    # uses. A bare run may honestly skip the optional blocks, so its $TESTS is a
+    # lower bound, and equality there would red on the runner's toolchain rather
+    # than on the drift this guard is looking for.
+    echo "[selftest] README count guard: NOT ASSERTED - bare run (the optional blocks may skip honestly, so $TESTS is a lower bound); it is asserted under BARKPARK_SELFTEST_REQUIRE_E2E=1, which is how CI runs this engine"
+  else
+    # The anchor is this engine's own invocation followed by its count, which
+    # occurs exactly once in the README. Zero matches, or more than one, is a
+    # FAILURE and not a pass: a reworded sentence must red here rather than
+    # quietly disarm the guard by matching nothing.
+    SELFTEST_README_RE='deploy/site-deploy-node\.sh --self-test[^0-9]{1,12}[0-9]+ checks'
+    SELFTEST_README_HITS="$(grep -oE "$SELFTEST_README_RE" "$SELFTEST_README" | wc -l | tr -d ' ')"
+    if [ "$SELFTEST_README_HITS" != 1 ]; then
+      echo "[selftest] FAILED (1) - README count guard, deploy/site-deploy-node.sh: expected exactly ONE 'deploy/site-deploy-node.sh --self-test ... <N> checks' anchor in $SELFTEST_README, found $SELFTEST_README_HITS. The guard reads that sentence to learn the published count; if you reworded it, restore the anchor (the invocation, then the number, then the word 'checks', all on one line) in the SAME commit."
+      exit 1
+    fi
+    SELFTEST_README_COUNT="$(grep -oE "$SELFTEST_README_RE" "$SELFTEST_README" | sed -E 's/.*[^0-9]([0-9]+) checks$/\1/')"
+    if [ "$SELFTEST_README_COUNT" != "$TESTS" ]; then
+      echo "[selftest] FAILED (1) - README count drift in deploy/site-deploy-node.sh: deploy/README.md publishes $SELFTEST_README_COUNT checks, this run measured $TESTS. The run is the truth - update the number in deploy/README.md to $TESTS in the SAME commit that changed the check count, or the two drift apart again."
+      exit 1
+    fi
+    echo "[selftest] README count guard: deploy/README.md publishes $SELFTEST_README_COUNT checks for deploy/site-deploy-node.sh, this run measured $TESTS - agreed"
+  fi
   # The floor (see SELFTEST_FLOOR_* above). `FAILED (1)` is the shape
   # internal/cli/cloud_site_preflight.go recognises as terminal.
   if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
@@ -2780,7 +3911,12 @@ if [ "$MODE" = rollback ]; then
   read -r p_slot p_port p_build < "$ROOT/.previous"
   if [ -z "$p_build" ] || [ ! -d "$RELEASES/$p_build" ]; then log "previous release '$p_build' is gone (no_previous)"; rb_mark "rollback refused: (no_previous)"; exit 21; fi
   if [ -f "$RELEASES/$p_build/$HEALTH_FAIL_MARK" ]; then
-    log "previous release '$p_build' is marked health-failed — refusing to serve it (no_previous)"; rb_mark "rollback refused: (no_previous)"; exit 21
+    if [ -f "$RELEASES/$p_build/$PREBUILT_MARK" ]; then
+      log "previous release '$p_build' FAILED its health gate and is marked broken — refusing to serve it (no_previous). It was staged from UPLOADED prebuilt bytes and this box has no source for it: RE-UPLOAD the artifact for build '$p_build' and redeploy."
+    else
+      log "previous release '$p_build' is marked health-failed — refusing to serve it (no_previous)"
+    fi
+    rb_mark "rollback refused: (no_previous)"; exit 21
   fi
   if [ "$p_slot" = "$cur_slot" ]; then log "rollback: previous slot == current ($cur_slot) — nothing to do"; rb_mark "ROLLED BACK: $SITE_SLUG now on slot $cur_slot ($(read_slot_build "$cur_slot"))"; rb_mark "TARGET_BUILD=$(read_slot_build "$cur_slot")"; exit 0; fi
 
@@ -2927,15 +4063,19 @@ if [ "$MODE" = teardown ]; then
   stop_slot a; stop_slot b
   # THE INVERSE HAZARD, measured rather than assumed: systemctl can report success
   # and leave a unit up (a stuck ExecStop, a unit that restarts itself). Ask.
+  # Name the PORT each surviving slot still HOLDS, not just the slot letter: the
+  # operator's next collision is a port collision (the next deploy of this site
+  # allocates the same pair and the stranded listener already owns it), and the
+  # letter alone does not tell them which listener to hunt.
   still_up=""
-  slot_running a && still_up="a"
-  slot_running b && still_up="${still_up:+$still_up and }b"
+  slot_running a && still_up="a (port $(held_port a) still held)"
+  slot_running b && still_up="${still_up:+$still_up and }b (port $(held_port b) still held)"
   if [ -n "$still_up" ]; then
     # teardown_failed_node removes $CF_SNAPSHOT on its way out, on every arm.
     if with_caddy_lock restore_caddyfile_snapshot "$CF_SNAPSHOT"; then
-      teardown_failed_node "slot(s) $still_up would NOT stop — the caddy /sites/$SITE_SLUG route came down first, so this run RESTORED the pre-teardown Caddyfile: the route is armed again over the slot(s) that are still running, which serves real bytes instead of stranding a dead route over a live process. Nothing was deleted (the release tree at $ROOT and both slot env files are kept); fix the slot unit and re-run --teardown"
+      teardown_failed_node "slot(s) $still_up would NOT stop — the caddy /sites/$SITE_SLUG route came down first, so this run RESTORED the pre-teardown Caddyfile: the route is armed again over the slot(s) that are still running, which serves real bytes instead of stranding a dead route over a live process. Nothing was deleted (the release tree at $ROOT and both slot env files are kept). Until that unit stops, the port(s) named above stay BOUND by the stranded node process and the next deploy of this site collides on them; fix the slot unit and re-run --teardown"
     fi
-    teardown_failed_node "slot(s) $still_up would NOT stop AND the caddy /sites/$SITE_SLUG route could not be put back — the disarm succeeded, the restore was rejected, so this site is now UNROUTED with slot(s) $still_up still running. Nothing was deleted (the release tree at $ROOT and both slot env files are kept); stop the slot unit(s) by hand (\`systemctl stop barkpark-site@${SITE_SLUG}__<slot>\`) and re-run --teardown"
+    teardown_failed_node "slot(s) $still_up would NOT stop AND the caddy /sites/$SITE_SLUG route could not be put back — the disarm succeeded, the restore was rejected, so this site is now UNROUTED with slot(s) $still_up still running. Nothing was deleted (the release tree at $ROOT and both slot env files are kept); the port(s) named above stay BOUND by the stranded node process and will collide with the next deploy of this site; stop the slot unit(s) by hand (\`systemctl stop barkpark-site@${SITE_SLUG}__<slot>\`) and re-run --teardown"
   fi
   [ -n "$CF_SNAPSHOT" ] && rm -f "$CF_SNAPSHOT"
   rm -f "$(slot_env a)" "$(slot_env b)" 2>/dev/null || true
@@ -2965,35 +4105,126 @@ TARGET_PORT="$(slot_port "$TARGET_SLOT")"
 # ---- PLAN ------------------------------------------------------------------
 # Live = the process on the ACTIVE Caddy-upstream slot serves this build_id.
 emit PLAN started
+RELDIR="$RELEASES/$BUILD_ID"
 if [ -n "$CUR_SLOT" ] && [ "$(read_slot_build "$CUR_SLOT")" = "$BUILD_ID" ] && slot_running "$CUR_SLOT"; then
+  # THE NO-OP IS DIGEST-AWARE FOR UPLOADED BYTES (the static engine's shape).
+  # build_id does NOT determine prebuilt bytes: the same id can be re-uploaded
+  # carrying a DIFFERENT artifact, and a blind no-op would report success over
+  # bytes nobody just uploaded while the box keeps serving the old ones.
+  if [ -n "$PREBUILT_DIR" ] && [ "$(cat "$RELDIR/$PREBUILT_MARK" 2>/dev/null || true)" != "$PREBUILT_SHA256" ]; then
+    DETAIL="build $BUILD_ID is already LIVE on slot $CUR_SLOT carrying prebuilt '$(cat "$RELDIR/$PREBUILT_MARK" 2>/dev/null || echo '<none>')', but this upload declares ${PREBUILT_SHA256:0:12} — refusing to report a no-op over bytes that are not the ones uploaded; mint a NEW deployment for this artifact and redeploy"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
+  fi
   log "PLAN: build_id $BUILD_ID already live on slot $CUR_SLOT for '$SITE_SLUG' — nothing to do"
   emit PLAN noop "build $BUILD_ID is already live on slot $CUR_SLOT"
   for s in BUILD STAGE HEALTH SWITCH RETIRE; do emit "$s" skipped "build $BUILD_ID is already live"; done
   exit 0
 fi
-RELDIR="$RELEASES/$BUILD_ID"
-if [ -f "$RELDIR/$HEALTH_FAIL_MARK" ]; then
+# PLAN is tri-state.  ORDER IS LOAD-BEARING (charter D88/D89, the static engine's
+# reasoning verbatim): the PREBUILT arm is tested FIRST, above the already-staged
+# arm and above the health-failed arm.  Below the already-staged gate, a
+# RE-UPLOAD of a build_id whose release dir happens to exist would exit 0 having
+# re-gated and flipped to the STALE tree — the box would boot bytes nobody
+# uploaded and report success.  "Rebuild from source" is not a move a prebuilt
+# site has, so neither arm below may claim this run.
+if [ -n "$PREBUILT_DIR" ]; then
+  PLAN_MODE=prebuilt
+  # `case`, not `printf … | grep -q`: a pipeline's status under `set -o pipefail`
+  # can be the PRODUCER's 141 when the early-exiting reader SIGPIPEs it, which
+  # inverts exactly this kind of refusal. No pipeline, no reading to get wrong.
+  if [ "${#PREBUILT_SHA256}" != 64 ] || case "$PREBUILT_SHA256" in *[!0-9a-f]*) true ;; *) false ;; esac; then
+    DETAIL="PREBUILT_DIR is set but PREBUILT_SHA256 is '${PREBUILT_SHA256:-<missing>}' (want 64 lowercase hex) — refusing to stage bytes this box cannot name; the caller must pass the digest it verified for the artifact"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
+  fi
+  if [ ! -d "$PREBUILT_DIR" ] || [ ! -f "$PREBUILT_DIR/server.js" ]; then
+    DETAIL="PREBUILT_DIR '$PREBUILT_DIR' is not a directory with a server.js at its top — a node release root IS the Next standalone tree (server.js, traced node_modules, .next/static, public); check the ingest step ran, named this dir, and that the artifact was packed from .next/standalone and not from the repo root"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
+  fi
+  # ---- THE NODE ABI REFUSAL — BEFORE STAGE, NEVER AT HEALTH ----------------
+  # Wire shape: the header block.  This is the whole point of the node half of
+  # the prebuilt arm: a native-addon ABI mismatch does not 404, it aborts the
+  # process at require() time, and the price of finding that out at HEALTH is a
+  # wasted boot AND a release marked health-failed that this box has no source
+  # to rebuild from.  So: refuse here, with NOTHING staged and NO slot booted.
+  PB_ABI_FILE="$PREBUILT_DIR/$NODE_ABI_MARK"
+  if [ ! -f "$PB_ABI_FILE" ]; then
+    DETAIL="uploaded tree carries no $NODE_ABI_MARK — a node artifact must DECLARE the ABI its native addons were built against (node_major=<int> and libc=glibc|musl|unknown, one per line, at the root of the packed tree). An undeclared ABI is not a passing ABI: a mismatched .node addon aborts at require() and would be caught only after a wasted boot, on a release this box has no source to rebuild. Re-pack the artifact with the declaration"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
+  fi
+  PB_ABI_MAJOR="$(abi_decl_value "$PB_ABI_FILE" node_major)"
+  PB_ABI_LIBC="$(abi_decl_value "$PB_ABI_FILE" libc)"
+  BOX_ABI_MAJOR="$(box_node_major)"
+  BOX_ABI_LIBC="$(box_node_libc)"
+  if [ -z "$PB_ABI_MAJOR" ] || [ "${#PB_ABI_MAJOR}" -gt 3 ] || case "$PB_ABI_MAJOR" in *[!0-9]*) true ;; *) false ;; esac; then
+    DETAIL="$NODE_ABI_MARK declares node_major='${PB_ABI_MAJOR:-<missing>}' (want a bare integer, e.g. node_major=22) — refusing bytes whose target runtime this box cannot read; fix the packer's declaration"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
+  fi
+  if [ -z "$BOX_ABI_MAJOR" ] || [ "${#BOX_ABI_MAJOR}" -gt 3 ] || case "$BOX_ABI_MAJOR" in *[!0-9]*) true ;; *) false ;; esac; then
+    DETAIL="this box cannot name its own node major (probed '$BOX_ABI_MAJOR' via ${NODE_LINK} / PATH node) while the artifact declares node_major=$PB_ABI_MAJOR — refusing to certify uploaded native addons against a runtime nobody can name; install node (or fix BARKPARK_NODE_LINK) and redeploy"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
+  fi
+  if [ "$PB_ABI_MAJOR" != "$BOX_ABI_MAJOR" ]; then
+    DETAIL="node ABI mismatch: the artifact declares node_major=$PB_ABI_MAJOR, this box runs node major $BOX_ABI_MAJOR — a traced node_modules carrying a native addon built for one NODE_MODULE_VERSION aborts at require() on the other, so NOTHING was staged and no slot was booted (refused BEFORE STAGE, deliberately: at HEALTH this would cost a boot and leave a health-failed release with no source on this box). Rebuild the artifact on node $BOX_ABI_MAJOR and re-upload"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
+  fi
+  # libc: a refusal only when BOTH sides name a real libc.  An `unknown` on
+  # either side is UNDECIDED, and an undecided probe must not manufacture a
+  # refusal — the node_major half above already binds, so this is never vacuous.
+  if [ -n "$PB_ABI_LIBC" ] && [ "$PB_ABI_LIBC" != unknown ] && [ "$BOX_ABI_LIBC" != unknown ] && [ "$PB_ABI_LIBC" != "$BOX_ABI_LIBC" ]; then
+    DETAIL="node ABI mismatch: the artifact declares libc=$PB_ABI_LIBC, this box is $BOX_ABI_LIBC — a native addon linked against one C library does not load against the other, so NOTHING was staged and no slot was booted. Rebuild the artifact on a $BOX_ABI_LIBC host and re-upload"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
+  fi
+  if [ -z "$PB_ABI_LIBC" ]; then
+    DETAIL="$NODE_ABI_MARK declares no libc= line — both keys are required (node_major and libc); a packer that omits one silently reopens the hole this refusal exists to close. Use libc=unknown only when the packer genuinely cannot tell"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
+  fi
+  PREBUILT_SHORT="${PREBUILT_SHA256:0:12}"
+  PREBUILT_SIZE="$(du -sh "$PREBUILT_DIR" 2>/dev/null | cut -f1 || echo '?')"
+  # RE-VERIFY on a retry instead of leaning on dir-existence: a dir that is there
+  # says NOTHING about WHICH bytes are in it.  Either way the tree is RE-STAGED.
+  if [ -f "$RELDIR/$PREBUILT_MARK" ]; then
+    staged_sha="$(cat "$RELDIR/$PREBUILT_MARK" 2>/dev/null || true)"
+    if [ "$staged_sha" = "$PREBUILT_SHA256" ]; then
+      log "PLAN: releases/$BUILD_ID already carries prebuilt $PREBUILT_SHORT — re-staging the uploaded bytes anyway (dir-existence is not a proof of which bytes are staged)"
+    else
+      log "PLAN: releases/$BUILD_ID carries prebuilt '${staged_sha:-<none>}' but this upload is $PREBUILT_SHORT — REPLACING the staged tree (never re-gating the stale one)"
+    fi
+  fi
+  log "PLAN: release $BUILD_ID ships UPLOADED prebuilt bytes ($PREBUILT_SIZE, sha256 $PREBUILT_SHORT, node $PB_ABI_MAJOR/$PB_ABI_LIBC == box $BOX_ABI_MAJOR/$BOX_ABI_LIBC) — no build will run on this box"
+elif [ -f "$RELDIR/$PREBUILT_MARK" ] && [ -f "$RELDIR/$HEALTH_FAIL_MARK" ]; then
+  # Prebuilt bytes that failed HEALTH, and no artifact on THIS run.  The arms
+  # below would rebuild from the provisioned template: genuine markers, HEALTH
+  # green, WRONG bytes booted.  Fail closed — the only real fix is another upload.
+  DETAIL="release $BUILD_ID was staged from UPLOADED prebuilt bytes and FAILED health — this box has no source for it, and a rebuild from the provisioned template would pass HEALTH on genuine markers and boot the WRONG bytes; RE-UPLOAD the artifact for this build_id and redeploy"
+  log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
+elif [ -f "$RELDIR/$HEALTH_FAIL_MARK" ]; then
   log "PLAN: release $BUILD_ID is marked health-failed — rebuilding from source"
-  SKIP_BUILD=0
+  PLAN_MODE=build
 elif [ -d "$RELDIR" ] && [ -f "$RELDIR/server.js" ]; then
   log "PLAN: release $BUILD_ID already staged — re-gating on slot $TARGET_SLOT, skipping BUILD/STAGE"
-  SKIP_BUILD=1
+  PLAN_MODE=staged
 else
-  SKIP_BUILD=0
+  PLAN_MODE=build
 fi
 log "PLAN: deploy '$SITE_SLUG' build $BUILD_ID onto slot $TARGET_SLOT :$TARGET_PORT (live now: ${CUR_SLOT:-none})"
-if [ "$SKIP_BUILD" = 1 ]; then
-  emit PLAN ok "release $BUILD_ID is already staged — BUILD and STAGE will be skipped"
-else
-  emit PLAN ok "building '$SITE_SLUG' build $BUILD_ID for slot $TARGET_SLOT"
-fi
+case "$PLAN_MODE" in
+  staged)   emit PLAN ok "release $BUILD_ID is already staged — BUILD and STAGE will be skipped" ;;
+  prebuilt) emit PLAN ok "staging uploaded prebuilt bytes for build $BUILD_ID (sha256 $PREBUILT_SHORT) — BUILD will be skipped, STAGE will run" ;;
+  *)        emit PLAN ok "building '$SITE_SLUG' build $BUILD_ID for slot $TARGET_SLOT" ;;
+esac
 
 # ---- BUILD -----------------------------------------------------------------
 # build_failure_reason() (the `BUILD failed` detail's producer) lives in
 # lib/site-deploy-common.sh, sourced above — ONE copy, shared with the static
 # engine, which is the only way a repair to it reaches BOTH runtime targets.
 
-if [ "$SKIP_BUILD" = 0 ]; then
+if [ "$PLAN_MODE" != staged ]; then
+ if [ "$PLAN_MODE" = prebuilt ]; then
+  # NO npm ON THIS BOX.  BUILD is `skipped`, not `ok`: nothing was built here,
+  # and a stage-watching orchestrator must be able to tell the two apart.
+  log "BUILD: skipped — release $BUILD_ID ships UPLOADED prebuilt bytes (sha256 $PREBUILT_SHORT); no build ran on this box"
+  emit BUILD skipped "prebuilt bytes ($PREBUILT_SIZE, sha256 $PREBUILT_SHORT) - no build ran on this box"
+ else
   emit BUILD started
   if [ ! -d "$SITE_SRC" ]; then
     DETAIL="no site source dir $SITE_SRC — expected a checked-out app there; check the deploy payload's repo+ref and that the clone/checkout step actually populated it"
@@ -3008,8 +4239,9 @@ if [ "$SKIP_BUILD" = 0 ]; then
   # Identical contract to the static engine's (deploy/site-deploy.sh): the lock
   # taken above is PER-SLUG, so without this second, fleet-wide lock N sites
   # compile at once on 2 cores — and a `next build` is the heaviest of them.
-  # Keyed on SKIP_BUILD (this engine has NO PLAN_MODE; naming one would be an
-  # unbound expansion under the `set -u` at the top of this file). Taken after
+  # Reached only on the `build` arm of PLAN_MODE (a prebuilt deploy runs no npm
+  # at all and must never queue behind the fleet's compilers). PLAN_MODE is
+  # ALWAYS assigned at the Config block, so `set -u` cannot abort here. Taken after
   # BUILD started and after the two cheap validations; released right after
   # BUILD ok, BEFORE HEALTH boots the slot process — see below.
   if ! build_gate_acquire; then
@@ -3085,16 +4317,31 @@ if [ "$SKIP_BUILD" = 0 ]; then
   # this contract must not rest on it. The self-test pins it against a harness
   # whose fake systemctl DOES spawn the slot as a direct child.
   build_gate_release
+ fi
 
   # ---- STAGE (D64) — three-piece standalone copy into an immutable release ----
+  # ONE staging path, TWO sources (charter D88/D89's shape on this runtime): a
+  # box build copies $SITE_SRC/.next/standalone plus the two pieces Next leaves
+  # out; a PREBUILT deploy copies the uploaded tree VERBATIM, because the packer
+  # already folded .next/static and public/ into it (there is no $SITE_SRC to
+  # take them from — that is the whole point of an off-box build).  The swap,
+  # the aside-recovery and every exit-13 arm below are SHARED, so a repair to
+  # the rollback-safety of STAGE reaches both arms or neither.
   emit STAGE started
-  if [ ! -d "$SITE_SRC/.next/standalone" ]; then
-    DETAIL="build produced no .next/standalone — expected a Next standalone bundle; check next.config has output:'standalone' and the build reached 'next build' (not just lint/typecheck)"
-    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
-  fi
-  if [ ! -f "$SITE_SRC/.next/standalone/server.js" ]; then
-    DETAIL=".next/standalone has no server.js — expected the standalone entrypoint; check the Next build completed (a partial .next survives a failed build) and the app has at least one server route"
-    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+  if [ "$PLAN_MODE" = prebuilt ]; then
+    STAGE_SRC="$PREBUILT_DIR"
+    STAGE_WHAT="uploaded prebuilt bytes (sha256 $PREBUILT_SHORT)"
+  else
+    STAGE_SRC="$SITE_SRC/.next/standalone"
+    STAGE_WHAT="standalone + .next/static + public"
+    if [ ! -d "$SITE_SRC/.next/standalone" ]; then
+      DETAIL="build produced no .next/standalone — expected a Next standalone bundle; check next.config has output:'standalone' and the build reached 'next build' (not just lint/typecheck)"
+      log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+    fi
+    if [ ! -f "$SITE_SRC/.next/standalone/server.js" ]; then
+      DETAIL=".next/standalone has no server.js — expected the standalone entrypoint; check the Next build completed (a partial .next survives a failed build) and the app has at least one server route"
+      log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+    fi
   fi
   # NEVER delete releases/<build_id> before the new bytes exist.  That dir can be
   # the LIVE release or the build .previous names as the warm-rollback target —
@@ -3139,15 +4386,16 @@ if [ "$SKIP_BUILD" = 0 ]; then
   # cp/mv carry no forensic of their own — capture the exit code + a disk read (a
   # copy that fails on a real box almost always fails on a full mount) so each
   # detail names the next move instead of a bare "copy failed".
-  # 1) standalone dir IS the release root (server.js + traced node_modules).
-  cp -a "$SITE_SRC/.next/standalone/." "$RELDIR.partial/"; cp_rc=$?
+  # 1) the standalone dir (or the uploaded tree) IS the release root.
+  cp -a "$STAGE_SRC/." "$RELDIR.partial/"; cp_rc=$?
   if [ "$cp_rc" -ne 0 ]; then
     disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
-    DETAIL="copy of .next/standalone into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership. The previously staged releases/$BUILD_ID (if any) is UNTOUCHED, so any rollback target it held is still there"
+    DETAIL="copy of $STAGE_SRC into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership. The previously staged releases/$BUILD_ID (if any) is UNTOUCHED, so any rollback target it held is still there"
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
   # 2) .next/static -> <release>/.next/static (standalone omits it by design).
-  if [ -d "$SITE_SRC/.next/static" ]; then
+  #    Prebuilt: already inside the uploaded tree; $SITE_SRC may not even exist.
+  if [ "$PLAN_MODE" != prebuilt ] && [ -d "$SITE_SRC/.next/static" ]; then
     mkdir -p "$RELDIR.partial/.next/static"
     cp -a "$SITE_SRC/.next/static/." "$RELDIR.partial/.next/static/"; cp_rc=$?
     if [ "$cp_rc" -ne 0 ]; then
@@ -3157,7 +4405,7 @@ if [ "$SKIP_BUILD" = 0 ]; then
     fi
   fi
   # 3) public/ -> <release>/public (static assets; optional).
-  if [ -d "$SITE_SRC/public" ]; then
+  if [ "$PLAN_MODE" != prebuilt ] && [ -d "$SITE_SRC/public" ]; then
     mkdir -p "$RELDIR.partial/public"
     cp -a "$SITE_SRC/public/." "$RELDIR.partial/public/"; cp_rc=$?
     if [ "$cp_rc" -ne 0 ]; then
@@ -3188,9 +4436,22 @@ if [ "$SKIP_BUILD" = 0 ]; then
   # the BUILDER last wrote .next/standalone (cp -a preserves source timestamps)
   # and RETIRE must not sort on the builder's clock.
   stamp_release_staged "$RELEASES" "$BUILD_ID"
+  # THE ONLY ON-BOX RECORD THAT THESE BYTES CAME FROM AN UPLOAD.  Written AFTER
+  # the swap landed, into the real release dir: a mark inside a .partial that was
+  # later discarded would name a release that does not exist, and a mark written
+  # before the swap would survive into the .aside as a claim about the OLD tree.
+  # No release dir can exist without it on this arm, so no reader can mistake
+  # uploaded bytes for locally built ones.
+  if [ "$PLAN_MODE" = prebuilt ]; then
+    printf '%s\n' "$PREBUILT_SHA256" > "$RELDIR/$PREBUILT_MARK"
+  fi
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
-  log "STAGE: standalone + .next/static + public -> releases/$BUILD_ID/ ($staged_size)"
-  emit STAGE ok "standalone(+static+public) -> releases/$BUILD_ID ($staged_size)"
+  log "STAGE: $STAGE_WHAT -> releases/$BUILD_ID/ ($staged_size)"
+  if [ "$PLAN_MODE" = prebuilt ]; then
+    emit STAGE ok "prebuilt bytes -> releases/$BUILD_ID ($staged_size, sha256 $PREBUILT_SHORT, node abi $PB_ABI_MAJOR/$PB_ABI_LIBC)"
+  else
+    emit STAGE ok "standalone(+static+public) -> releases/$BUILD_ID ($staged_size)"
+  fi
 else
   emit BUILD skipped "release $BUILD_ID is already staged"
   emit STAGE skipped "release $BUILD_ID is already staged"

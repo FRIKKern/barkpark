@@ -11,7 +11,7 @@ defmodule BarkparkWeb.PluginRoutesTest do
        (s2), the `plugin_routes/1` macro inside `BarkparkWeb.Router` (s3),
        and the `PingLive` mount (s4) all wire together correctly.
 
-    2. With `Application.put_env(:barkpark, :plugins, [])`,
+    2. With `Barkpark.PluginEnv.put!([])`,
        `Plugins.Registry.collect_routes/1` returns `[]` — proving the
        macro INPUT collapses to an empty list under the fresh-install
        invariant. The macro emits routes at compile time, so we cannot
@@ -113,14 +113,11 @@ defmodule BarkparkWeb.PluginRoutesTest do
 
   describe "fresh-install invariant — plugins=[] (G1's contract)" do
     setup do
-      prev_plugins = Application.get_env(:barkpark, :plugins, :unset)
-      Application.put_env(:barkpark, :plugins, [])
+      prev_plugins = Barkpark.PluginEnv.capture()
+      Barkpark.PluginEnv.put!([])
 
       on_exit(fn ->
-        case prev_plugins do
-          :unset -> Application.delete_env(:barkpark, :plugins)
-          v -> Application.put_env(:barkpark, :plugins, v)
-        end
+        Barkpark.PluginEnv.restore(prev_plugins)
       end)
 
       :ok
@@ -147,13 +144,20 @@ defmodule BarkparkWeb.PluginRoutesTest do
       Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, {:shared, self()})
 
       # create_token/4 (no explicit workspace_id) binds to the seeded Default
-      # workspace AND creates a membership — so this token is a Default member
-      # with admin perms (the LV admin on_mount gate), but NOT a member of
+      # workspace AND creates a membership there — the workspace is named at
+      # the mint below — so this token is a Default member with admin perms
+      # (the LV admin on_mount gate), but NOT a member of
       # "scoped-plugin-other-ws".
       raw = "scoped-plugin-admin-token-#{System.unique_integer([:positive])}"
 
       {:ok, _api_token} =
-        Auth.create_token(raw, "scoped plugin admin", "production", ["read", "write", "admin"])
+        Auth.create_token(
+          raw,
+          "scoped plugin admin",
+          "production",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, other_ws} =
         Barkpark.Tenancy.create_workspace(%{slug: "scoped-plugin-other-ws", name: "Other"})
@@ -330,14 +334,11 @@ defmodule BarkparkWeb.PluginRoutesTest do
     end
 
     setup do
-      prev = Application.get_env(:barkpark, :plugins, :unset)
-      Application.put_env(:barkpark, :plugins, [BucketProbePlugin])
+      prev = Barkpark.PluginEnv.capture()
+      Barkpark.PluginEnv.put!([BucketProbePlugin])
 
       on_exit(fn ->
-        case prev do
-          :unset -> Application.delete_env(:barkpark, :plugins)
-          v -> Application.put_env(:barkpark, :plugins, v)
-        end
+        Barkpark.PluginEnv.restore(prev)
       end)
 
       :ok

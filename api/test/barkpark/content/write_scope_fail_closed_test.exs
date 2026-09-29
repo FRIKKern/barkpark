@@ -23,7 +23,7 @@ defmodule Barkpark.Content.WriteScopeFailClosedTest do
   Mutation-proven: reverting the resolver's error arms to `_ -> nil` reds the
   tests in this file (the fail-before run in the task ledger quotes it).
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query
   import Barkpark.TenancyFixtures
@@ -34,7 +34,14 @@ defmodule Barkpark.Content.WriteScopeFailClosedTest do
   @invalid_dataset "Not-Valid"
 
   setup do
-    Barkpark.Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
+    Barkpark.Auth.create_token(
+      "barkpark-dev-token",
+      "dev",
+      "test",
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
+
     :ok
   end
 

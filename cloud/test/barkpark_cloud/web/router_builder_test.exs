@@ -1158,7 +1158,16 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
       d = json_body(step)["deployment"]
       assert d["status"] == "pushing"
       assert String.starts_with?(d["image_tag"], "site-#{site.slug}-")
-      assert String.starts_with?(d["build_log_url"], "file://")
+      # cch-w33-bl: the builder's `file://` stamp is ACCEPTED on the write (the
+      # column is the worker's raw report and an operator with SSH to the builder
+      # host can still use the path) and SUPPRESSED on the wire, because no
+      # reader of this response can open a path on the builder's own disk. This
+      # assertion used to read `String.starts_with?(d["build_log_url"], "file://")`
+      # — it pinned the lie.
+      assert d["build_log_url"] == nil
+
+      assert Repo.get!(BarkparkCloud.Registry.Deployment, did).build_log_url ==
+               "file:///var/lib/barkpark-builder/logs/#{did}.log"
     end
   end
 end

@@ -127,7 +127,7 @@ defmodule Barkpark.Connectors.CloudPolicyTest do
       assert CloudPolicy.connector_tool_providers(ws) == []
     end
 
-    test "a garbage/nil workspace inherits the fail-safe [] (never a CastError 500)" do
+    test "a garbage/nil workspace inherits the fail-safe [] (never an Ecto.Query.CastError)" do
       assert CloudPolicy.connector_tool_providers("not-a-uuid") == []
       assert CloudPolicy.connector_tool_providers(nil) == []
     end
@@ -219,7 +219,7 @@ defmodule Barkpark.Connectors.CloudPolicyTest do
                %{"github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"}}
     end
 
-    test "a garbage/nil workspace yields %{} (fail-safe, never a CastError 500)" do
+    test "a garbage/nil workspace yields %{} (fail-safe, never an Ecto.Query.CastError)" do
       assert CloudPolicy.cloud_mcp_servers("not-a-uuid", [gh_descriptor()]) == %{}
       assert CloudPolicy.cloud_mcp_servers(nil, [gh_descriptor()]) == %{}
     end
@@ -338,7 +338,7 @@ defmodule Barkpark.Connectors.CloudPolicyTest do
       assert CloudPolicy.cloud_egress_hosts(ws, descriptors) == []
     end
 
-    test "a garbage/nil workspace yields [] (fail-safe, never a CastError 500)" do
+    test "a garbage/nil workspace yields [] (fail-safe, never an Ecto.Query.CastError)" do
       assert CloudPolicy.cloud_egress_hosts("not-a-uuid", [gh_descriptor()]) == []
       assert CloudPolicy.cloud_egress_hosts(nil, [gh_descriptor()]) == []
     end

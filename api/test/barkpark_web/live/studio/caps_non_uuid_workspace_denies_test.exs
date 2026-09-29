@@ -88,7 +88,15 @@ defmodule BarkparkWeb.Studio.CapsNonUuidWorkspaceDeniesTest do
 
   defp real_token(ws) do
     raw = "caps-nonuuid-token-#{System.unique_integer([:positive])}"
-    {:ok, token} = Auth.create_token(raw, "caps non-uuid", @dataset, ["read", "write", "admin"])
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        "caps non-uuid",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     # `Auth.create_token/4` ALREADY mints the workspace membership, so a second
     # `Tenancy.Auth.create_membership/4` here trips

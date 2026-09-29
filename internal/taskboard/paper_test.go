@@ -39,7 +39,7 @@ const fixtureBlocks = `[
     {"type":"wikilink","target":"task-alpha","docId":"drafts.task-alpha","children":[]},
     {"type":"text","value":" — read it inline."}
   ]},
-  {"type":"code","code":"go test ./internal/taskboard/...","language":"bash"}
+  {"type":"code","code":"go test ./internal/taskboard/...","lang":"bash"}
 ]`
 
 // paperServer answers the scoped canonical-source GET with the given payload.

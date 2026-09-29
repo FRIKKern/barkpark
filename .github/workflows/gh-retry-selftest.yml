@@ -1,0 +1,46 @@
+name: gh-retry selftest
+
+# VENUE. scripts/gh-retry.sh guards the release-artifact publish step against
+# transient GitHub upload-API faults (task-86883bb93fe61df7). "Present in the
+# file" is not "fires when it should", so the classifier has an executable
+# selftest with a non-retryable arm and a transient arm — and it runs where it
+# can actually fail a PR that breaks it.
+#
+# PATH-FILTERED, therefore ADVISORY BY CONSTRUCTION. A workflow-level `paths:`
+# filter emits no check run on a non-matching PR, so a required context pointing
+# here would report "expected" forever and deadlock every unrelated PR
+# (docs/ops/merge-gates.md, the S4 PATHS-FILTERED exclusion). This must never be
+# added to .github/required-checks.json. It costs ~5 seconds and only on the
+# handful of PRs that touch the helper itself.
+on:
+  pull_request:
+    paths:
+      - "scripts/gh-retry.sh"
+      - "scripts/gh-retry-selftest.sh"
+      - ".github/workflows/gh-retry-selftest.yml"
+      - ".github/workflows/release-artifact.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/gh-retry.sh"
+      - "scripts/gh-retry-selftest.sh"
+      - ".github/workflows/gh-retry-selftest.yml"
+      - ".github/workflows/release-artifact.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Classifier arms (non-retryable fails fast, transient retries)
+        run: bash scripts/gh-retry-selftest.sh
+      - name: release-artifact.yml actually calls the helper
+        run: |
+          set -euo pipefail
+          # A green selftest on a helper nothing invokes measures nothing.
+          n=$(grep -c 'scripts/gh-retry.sh release ' .github/workflows/release-artifact.yml)
+          echo "release-artifact.yml gh-retry.sh call sites: $n"
+          [ "$n" -eq 2 ] || { echo "expected 2 (create + upload), got $n" >&2; exit 1; }

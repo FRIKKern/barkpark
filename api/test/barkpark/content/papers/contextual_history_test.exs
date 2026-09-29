@@ -928,6 +928,218 @@ defmodule Barkpark.Content.Papers.ContextualHistoryTest do
              ContextualHistory.capture(before, over_limit, [slots_patch(over_limit)])
   end
 
+  test "card title text history preserves exact text and content states" do
+    content_states = [
+      %{"present" => false},
+      %{"present" => true, "value" => nil},
+      %{"present" => true, "value" => []}
+    ]
+
+    text_changes = [
+      {"Before", ""},
+      {"", "   "},
+      {"   ", "After"}
+    ]
+
+    for content_state <- content_states,
+        level <- [:absent, nil, 1, 2, 3, "1", "2", "3"],
+        {before_text, after_text} <- text_changes do
+      before_title = card_title(before_text, content_state, level)
+      after_title = Map.put(before_title, "text", after_text)
+      before = [card_with_title(before_title)]
+      after_blocks = [card_with_title(after_title)]
+
+      assert {:ok, continuation} =
+               ContextualHistory.capture(before, after_blocks, [slots_patch(after_blocks)])
+
+      assert continuation == %{
+               "version" => 5,
+               "action" => "undo",
+               "target" => %{"id" => "card", "type" => "card"},
+               "field" => "title.text",
+               "identity" => %{
+                 "type" => %{"present" => true, "value" => "heading"},
+                 "content" => content_state
+               },
+               "expect" => %{"present" => true, "value" => after_text},
+               "replace" => %{"present" => true, "value" => before_text}
+             }
+
+      assert :ok = ContextualHistory.validate(continuation)
+      assert {:ok, ^before, redo} = ContextualHistory.apply(after_blocks, continuation)
+      assert redo["action"] == "redo"
+      assert {:ok, ^after_blocks, ^continuation} = ContextualHistory.apply(before, redo)
+    end
+  end
+
+  test "card title text history preserves concurrent admissible title and Card metadata" do
+    before_title =
+      card_title("Before", %{"present" => true, "value" => []}, 2)
+      |> Map.put("id", "title-owner")
+      |> Map.put("opaque", %{"keep" => [true, nil, 1, 1.0]})
+
+    saved_title = Map.put(before_title, "text", "After")
+    before = [card_with_title(before_title)]
+    after_blocks = [card_with_title(saved_title)]
+
+    assert {:ok, continuation} =
+             ContextualHistory.capture(before, after_blocks, [slots_patch(after_blocks)])
+
+    concurrent_title =
+      saved_title
+      |> Map.put("level", "3")
+      |> Map.put("id", "concurrent-title-owner")
+      |> Map.put("opaque", %{"later" => [false, %{}]})
+
+    current =
+      card_with_title(concurrent_title)
+      |> put_in(["slots", "media", Access.at(0), "src"], "/concurrent.png")
+      |> put_in(["slots", "action", Access.at(0), "href"], "/concurrent")
+      |> Map.put("tone", "warn")
+      |> Map.put("outside", %{"keep" => true})
+      |> then(&[&1])
+
+    assert {:ok, [undone], redo} = ContextualHistory.apply(current, continuation)
+
+    assert get_in(undone, ["slots", "title"]) == [
+             Map.put(concurrent_title, "text", "Before")
+           ]
+
+    assert get_in(undone, ["slots", "media", Access.at(0), "src"]) == "/concurrent.png"
+    assert get_in(undone, ["slots", "action", Access.at(0), "href"]) == "/concurrent"
+    assert undone["tone"] == "warn"
+    assert undone["outside"] == %{"keep" => true}
+
+    assert {:ok, [redone], _undo} = ContextualHistory.apply([undone], redo)
+    assert get_in(redone, ["slots", "title"]) == [concurrent_title]
+  end
+
+  test "card title capture rejects broad, structural, and malformed changes" do
+    before_title = card_title("Before")
+    after_title = Map.put(before_title, "text", "After")
+    before = [card_with_title(before_title)]
+    valid_after = [card_with_title(after_title)]
+
+    unsupported = [
+      [card_with_title(Map.put(after_title, "level", 3))],
+      [card_with_title(Map.put(after_title, "content", [%{"type" => "text"}]))],
+      [card_with_title(Map.delete(after_title, "type"))],
+      [card_with_title(Map.put(after_title, "type", nil))],
+      [card_with_title(Map.put(after_title, "type", "paragraph"))],
+      [card_with_title(Map.delete(after_title, "text"))],
+      [card_with_title(Map.put(after_title, "text", nil))],
+      [card_with_title(Map.put(after_title, "text", 42))],
+      [card_with_title(Map.put(after_title, "level", 4))],
+      [card_with_title(Map.put(after_title, "level", "4"))],
+      [card_with_title([after_title, after_title])],
+      [card_with_title(nil)],
+      [card_with_title([])]
+    ]
+
+    for after_blocks <- unsupported do
+      assert {:ok, nil} =
+               ContextualHistory.capture(before, after_blocks, [slots_patch(valid_after)])
+    end
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(before, before, [slots_patch(before)])
+
+    without_title = [card_with_title(:absent)]
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(without_title, valid_after, [slots_patch(valid_after)])
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(before, without_title, [slots_patch(without_title)])
+
+    duplicate_before = before ++ [card_with_title(before_title)]
+    duplicate_after = valid_after ++ [card_with_title(before_title)]
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(duplicate_before, duplicate_after, [
+               slots_patch(valid_after)
+             ])
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(before, valid_after, [
+               put_in(slots_patch(valid_after), ["patch", "extra"], true)
+             ])
+  end
+
+  test "card title apply and validation fail closed" do
+    before_title = card_title("Before")
+    after_title = Map.put(before_title, "text", "After")
+    before = [card_with_title(before_title)]
+    after_blocks = [card_with_title(after_title)]
+
+    assert {:ok, continuation} =
+             ContextualHistory.capture(before, after_blocks, [slots_patch(after_blocks)])
+
+    for current <- [
+          [card_with_title(Map.put(after_title, "text", "Newer"))],
+          [card_with_title(Map.put(after_title, "content", nil))],
+          [card_with_title(Map.put(after_title, "content", []))],
+          [card_with_title(Map.delete(after_title, "type"))],
+          [card_with_title(Map.put(after_title, "type", nil))],
+          [card_with_title(Map.put(after_title, "type", "paragraph"))],
+          [card_with_title(Map.delete(after_title, "text"))],
+          [card_with_title(Map.put(after_title, "text", nil))],
+          [card_with_title(Map.put(after_title, "level", 4))],
+          [card_with_title([after_title, after_title])],
+          [card_with_title(nil)],
+          [card_with_title([])]
+        ] do
+      assert {:error, :history_conflict} = ContextualHistory.apply(current, continuation)
+    end
+
+    duplicate = after_blocks ++ after_blocks
+    assert {:error, :duplicate_id} = ContextualHistory.apply(duplicate, continuation)
+
+    for invalid <- [
+          Map.put(continuation, "version", 5.0),
+          Map.put(continuation, "extra", true),
+          Map.put(continuation, "field", "title.level"),
+          Map.delete(continuation, "identity"),
+          put_in(continuation, ["identity", "extra"], true),
+          put_in(continuation, ["identity", "type"], %{"present" => false}),
+          put_in(continuation, ["identity", "content"], %{"present" => true, "value" => %{}}),
+          put_in(continuation, ["target", "type"], "heading"),
+          Map.put(continuation, "expect", %{"present" => false}),
+          Map.put(continuation, "expect", %{"present" => true, "value" => nil}),
+          Map.put(continuation, "replace", continuation["expect"])
+        ] do
+      assert {:error, :invalid_history} = ContextualHistory.validate(invalid)
+      assert {:error, :invalid_history} = ContextualHistory.apply(after_blocks, invalid)
+    end
+
+    oversized = put_in(continuation, ["replace", "value"], String.duplicate("x", @max_bytes))
+    assert {:error, :invalid_history} = ContextualHistory.validate(oversized)
+  end
+
+  test "card title continuation uses the inclusive encoded-size cap" do
+    before_title = card_title("Before")
+    before = [card_with_title(before_title)]
+    seed_after = [card_with_title(Map.put(before_title, "text", "x"))]
+
+    assert {:ok, seed} =
+             ContextualHistory.capture(before, seed_after, [slots_patch(seed_after)])
+
+    fixed_bytes = byte_size(Jason.encode!(seed)) - 1
+    at_limit = String.duplicate("x", @max_bytes - fixed_bytes)
+    limited_after = [card_with_title(Map.put(before_title, "text", at_limit))]
+
+    assert {:ok, continuation} =
+             ContextualHistory.capture(before, limited_after, [slots_patch(limited_after)])
+
+    assert byte_size(Jason.encode!(continuation)) == @max_bytes
+    assert :ok = ContextualHistory.validate(continuation)
+
+    over_limit = [card_with_title(Map.put(before_title, "text", at_limit <> "x"))]
+
+    assert {:ok, nil} =
+             ContextualHistory.capture(before, over_limit, [slots_patch(over_limit)])
+  end
+
   defp capture_caption(before, caption) do
     after_blocks = [Map.put(hd(before), "caption", caption)]
     ContextualHistory.capture(before, after_blocks, [patch("figure", "caption", caption)])
@@ -1003,6 +1215,26 @@ defmodule Barkpark.Content.Papers.ContextualHistoryTest do
         :absent -> Map.delete(block["slots"], "media")
         value when is_list(value) -> Map.put(block["slots"], "media", value)
         value -> Map.put(block["slots"], "media", [value])
+      end
+
+    Map.put(block, "slots", slots)
+  end
+
+  defp card_title(text, content_state \\ %{"present" => false}, level \\ :absent) do
+    %{"type" => "heading", "text" => text, "unknown" => %{"keep" => true}}
+    |> put_state("content", content_state)
+    |> then(fn title -> if level === :absent, do: title, else: Map.put(title, "level", level) end)
+  end
+
+  defp card_with_title(title, id \\ "card") do
+    action = card_action() |> Map.put("label", "Read")
+    block = card(action, id)
+
+    slots =
+      case title do
+        :absent -> Map.delete(block["slots"], "title")
+        value when is_list(value) -> Map.put(block["slots"], "title", value)
+        value -> Map.put(block["slots"], "title", [value])
       end
 
     Map.put(block, "slots", slots)

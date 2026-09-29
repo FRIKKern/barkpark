@@ -3,14 +3,21 @@ defmodule BarkparkWeb.Studio.DatasetSwitcher do
   Function component: renders a <select> of known datasets that navigates
   to `/studio/:new_dataset[/:subpath]` on change, preserving the current
   section (structure / media / api-tester).
+
+  The section is DERIVED from `current_path` by `BarkparkWeb.Studio.Section`
+  — the raw suffix is carried in the `data-section-suffix` attribute and read
+  by the (now static, CSP-hashable) onchange handler as
+  `this.dataset.sectionSuffix`, with no JS quoting (the browser stores and
+  returns the literal string).
   """
 
   use Phoenix.Component
 
   alias Barkpark.Content
+  alias BarkparkWeb.Studio.Section
 
   attr :current, :string, required: true
-  attr :current_section, :atom, default: :structure
+  attr :current_path, :string, default: nil
 
   def switcher(assigns) do
     datasets = Content.list_datasets()
@@ -25,7 +32,7 @@ defmodule BarkparkWeb.Studio.DatasetSwitcher do
             the compact top-bar sizing on top (sup-w1 PART C). --%>
       <select
         class="dataset-switcher-select form-input"
-        data-section-suffix={section_suffix(@current_section)}
+        data-section-suffix={Section.suffix(@current_path, @current)}
         onchange={BarkparkWeb.CSP.dataset_switch_onchange()}
       >
         <%= for ds <- @datasets do %>
@@ -35,12 +42,4 @@ defmodule BarkparkWeb.Studio.DatasetSwitcher do
     </label>
     """
   end
-
-  # Raw path suffix carried in the `data-section-suffix` attribute and read by
-  # the (now static, CSP-hashable) onchange handler as `this.dataset.sectionSuffix`
-  # — no JS quoting (the browser stores/returns the literal string).
-  defp section_suffix(:structure), do: ""
-  defp section_suffix(:media), do: "/media"
-  defp section_suffix(:api_tester), do: "/api-tester"
-  defp section_suffix(_), do: ""
 end

@@ -59,6 +59,17 @@
         "glyph_role": "done",
         "label": "Done",
         "role": "done"
+      },
+      {
+        "cards": [
+          {
+            "title": "Abandoned spike"
+          }
+        ],
+        "count": 1,
+        "glyph_role": "cancel",
+        "label": "Cancelled",
+        "role": "cancel"
       }
     ],
     "container_role": "board"
@@ -94,6 +105,10 @@
       {
         "status": "ready",
         "title": "Second ready row"
+      },
+      {
+        "status": "cancelled",
+        "title": "Abandoned spike"
       }
     ],
     "type": "task-board"

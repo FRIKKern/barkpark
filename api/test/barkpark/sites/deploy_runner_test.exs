@@ -20,6 +20,7 @@ defmodule Barkpark.Sites.DeployRunnerTest do
 
   import ExUnit.CaptureLog
 
+  alias Barkpark.Sites.BuildLogScrub
   alias Barkpark.Sites.DeployRequest
   alias Barkpark.Sites.DeployRunner
   alias Barkpark.Sites.Provisioner
@@ -1014,7 +1015,19 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       # never exit 23). The old pin here drove {23, "rollback: …"} under a
       # deploy request, a state the shell cannot produce; the honest 23 pins
       # live below, driven under the modes that CAN exit 23.
+      #
+      # dr-w15: the table is now TOTAL over `exit_label/1`'s deploy-voiced
+      # clauses. Wave 15 measured eleven of them at zero PRODUCTION rows and
+      # proposed a prune; every one has a live producer in the engine (the
+      # traced list sits above the clause group), so each is retained as a
+      # tripwire — and a retained tripwire with no assertion is exactly the
+      # thing that rots. 2/10/11 and the generic fallback are pinned here; 12
+      # above; 23/25 by mode below; -2 by the deadline test; -1 by the
+      # abnormal-rollback test.
       for {code, fragment, slug} <- [
+            {2, "usage error (exit 2)", "exit-2"},
+            {10, "missing site source dir (exit 10)", "exit-10"},
+            {11, "missing or invalid required input (exit 11)", "exit-11"},
             {13, "STAGE failed", "exit-13"},
             {14, "HEALTH gate failed", "exit-14"},
             # Exit 15 has TWO producers — the box's fleet build gate and the
@@ -1023,7 +1036,11 @@ defmodule Barkpark.Sites.DeployRunnerTest do
             {16, "SWITCH failed", "exit-16"},
             {21, "rollback: no previous release", "exit-21"},
             {22, "rollback: not supported", "exit-22"},
-            {24, "rollback failed", "exit-24"}
+            {24, "rollback failed", "exit-24"},
+            # The generic fallback. NOT a dead template: site-deploy.sh exits a
+            # bare 1 in eight places (:1274, :1458, :1489, :2034, :2401, :2454,
+            # :2695, :2903), none of which is a typed code.
+            {1, "deploy failed (exit 1)", "exit-fallback-1"}
           ] do
         put_cfg(enabled: true, command: stub("echo 'the real reason #{code}'; exit #{code}"))
 
@@ -1600,6 +1617,20 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       "started_at" => DateTime.utc_now() |> DateTime.to_iso8601()
     }
 
+    # A run that carried an uploaded artifact also names its staged tree, so a
+    # re-attach after a BEAM restart can recognise it from disk alone.
+    manifest =
+      case Keyword.get(opts, :prebuilt_dir) do
+        nil ->
+          manifest
+
+        prebuilt_dir ->
+          Map.merge(manifest, %{
+            "prebuilt_dir" => prebuilt_dir,
+            "prebuilt_sha256" => Keyword.get(opts, :prebuilt_sha256, String.duplicate("ab", 32))
+          })
+      end
+
     File.write!(Path.join(dir, "#{slug}.manifest.json"), Jason.encode!(manifest))
     %{unit: unit, status_file: status_file, env_file: env_file}
   end
@@ -1653,6 +1684,7 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       argv = File.read!(argv_dump)
       assert argv =~ ~r/^--unit=bp-site-build-unitspawn-b9-\d+\.service$/m
       assert argv =~ "--property=MemoryMax=1500M"
+      assert argv =~ "--property=MemorySwapMax=0"
       assert argv =~ "--property=CPUQuota=150%"
       assert argv =~ "--property=EnvironmentFile=#{env_file}"
       assert argv =~ "--collect"
@@ -1766,6 +1798,44 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert status.state == :done
       assert status.exit_code == 21
       assert status.failure_reason =~ "no previous release (exit 21)"
+    end
+
+    test "a rollback whose log names no typed marker is an abnormal end (-1), deploy-voiced" do
+      dir = run_dir()
+
+      # dr-w15: the positive pin for `exit_label(-1)`. Its bytes are BYTE-FROZEN
+      # — cloud/lib/barkpark_cloud/deploy_ledger.ex's `classify/2`
+      # starts_with-matches them to classify PROCESS_DIED — and until now every
+      # api-side assertion on this clause was a `refute` under a teardown. This
+      # is the state that produces it: a FLIP FAILURE (the engine's exit 24)
+      # logs no distinct marker, so
+      # `rollback_outcome/1` finds neither a typed code nor a success line and
+      # falls through to a fail-closed -1, in the deploy/rollback voice.
+      engine =
+        stub("""
+        echo 'rollback flip failed — Caddy untouched, still on b7 (fail closed)' >> "$BARKPARK_SITE_LOG_FILE"
+        exit 24
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        rollback_command: engine
+      )
+
+      assert DeployRunner.trigger(req("unitrb-1", mode: "rollback")) == {:ok, :started}
+
+      status = DeployRunner.status("unitrb-1")
+      assert status.state == :done
+      assert status.exit_code == -1
+
+      # The frozen bytes, asserted as a PREFIX — which is how the cloud ledger
+      # reads them.
+      assert String.starts_with?(status.failure_reason, "deploy process died abnormally")
+      assert status.failure_reason =~ "fail closed"
     end
 
     test "a successful teardown finalizes exit 0, not an abnormal death" do
@@ -1898,6 +1968,53 @@ defmodule Barkpark.Sites.DeployRunnerTest do
     end
   end
 
+  describe "the swap bound lives on the BUILD unit and NOWHERE ELSE (D118/D611)" do
+    # ARM. This REDS the moment `--property=MemorySwapMax=0` is dropped from
+    # `systemd_run/3` in deploy_runner.ex — it reads the argv the launcher was
+    # ACTUALLY invoked with, not the source file, so present-in-file cannot
+    # satisfy it. Under cgroup v2 `memory.swap.max` defaults to `max`: MemoryMax
+    # alone bounds RSS and leaves the build free to displace the serving BEAM's
+    # pages into the swapfile. Blast radius, not reclaim — see D611(c).
+    test "the rendered systemd-run argv carries -p MemorySwapMax=0 beside MemoryMax" do
+      dir = run_dir()
+      argv_dump = Path.join(dir, "argv.dump")
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(argv_dump), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        command: stub("exit 0")
+      )
+
+      assert DeployRunner.trigger(req("swapbound", build_id: "sb1")) == {:ok, :started}
+
+      argv = argv_dump |> File.read!() |> String.split("\n", trim: true)
+
+      assert "--property=MemorySwapMax=0" in argv,
+             "the build unit's swap bound is missing from the argv: #{inspect(argv)}"
+
+      # It rides the SAME unit as the RSS/CPU bounds — the per-build transient
+      # unit named on this very argv, which is the home D118 permits.
+      assert "--property=MemoryMax=1500M" in argv
+      assert "--property=CPUQuota=150%" in argv
+      assert Enum.any?(argv, &String.starts_with?(&1, "--unit=bp-site-build-swapbound-sb1-"))
+    end
+
+    # The CONTROL for this rule — "the SERVING slot unit file still carries ZERO
+    # Memory*= directives", so the bound cannot be "satisfied" by putting it
+    # where D118 forbids — deliberately does NOT live here. It lives in the
+    # deploy fence, as ARM 18/19 of `bash deploy/slot-memory-peaks.sh
+    # --self-test` ("the SHIPPED barkpark-slot@.service carries ZERO memory
+    # directives (D118, in the tree)"), gated by offline-deploy-harnesses.
+    # Reading deploy/systemd/barkpark-slot@.service from an ExUnit test escapes
+    # elixir.yml's dispatcher — `scripts/elixir-path-escape-check.sh` reds it as
+    # an UNCOVERED repo-root read, because a PR editing ONLY that unit file
+    # would skip the Elixir suite and report green, i.e. the control would be
+    # silent in exactly the case it exists for.
+  end
+
   describe "systemd unit path — re-attach on init (D32)" do
     test "re-attaches to a live unit: :running, fold repopulated, same-slug re-trigger 409s" do
       dir = run_dir()
@@ -1961,6 +2078,118 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert status.failure_reason =~ "BUILD failed (exit 12)"
       assert status.failure_reason =~ "disk full during npm ci"
       assert Enum.map(status.stages, & &1.name) == ~w(PLAN BUILD)
+    end
+  end
+
+  # ── THE ROUTE ARMING CHANNEL (charter D608, task dr-w21-bl-route-decision) ──
+  #
+  # Both engines emit `BPSTAGE name=ROUTE status=<ok|failed> … detail="…"` after
+  # their Caddy arming attempt, into the DURABLE STATUS FILE. Wave 21 measured
+  # that the decision reached nothing: `read_log_tail/1` structurally cannot
+  # carry it (emit() writes to stdout + the status file, never to the log file),
+  # and `fold_status_file/2` discarded it through `parse_stage_line/2`'s
+  # `name in @stage_names` guard.
+  #
+  # These tests drive the PRODUCTION path — systemd-run + `reconstruct/2` +
+  # `fold_status_file/2` — from a fixture status file, and NEVER the in-process
+  # Port fallback (`runner_mode: :port`, deploy_runner.ex's `render_run/1`),
+  # where a ROUTE line lands in the in-memory log and an assertion on it would
+  # be vacuous against prod. `runner_mode: :systemd` in both, deliberately.
+  describe "ROUTE arming channel (systemd reconstruct path)" do
+    test "a ROUTE line in the status file reaches the forwarded status as route_status/route_detail, and is NOT a stage" do
+      dir = run_dir()
+
+      seed_manifest(dir, "route-armed",
+        build_id: "r1",
+        status:
+          "BPSTAGE name=PLAN status=ok build_id=r1\n" <>
+            "BPSTAGE name=SWITCH status=ok build_id=r1\n" <>
+            "BPSTAGE name=ROUTE status=ok build_id=r1 detail=\"armed: wrote the BARKPARK_SITE_ROUTE:route-armed handle\"\n",
+        log: "done\n"
+      )
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        is_active_cmd: {echo_script("inactive"), []},
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        command: stub("exit 0")
+      )
+
+      pid = start_fresh_runner()
+      status = GenServer.call(pid, {:status, "route-armed"})
+
+      # THE CRITERION: the arm decision is in what the runner forwards.
+      assert status.route_status == "ok"
+      assert status.route_detail =~ "armed: wrote the BARKPARK_SITE_ROUTE:route-armed handle"
+
+      # …and it is a MEASUREMENT, not a verdict: it never entered `stages`, so it
+      # cannot reach `deploy_outcome/2` or `stage_exit_code/1`.
+      assert Enum.map(status.stages, & &1.name) == ~w(PLAN SWITCH)
+      assert status.exit_code == 0
+    end
+
+    test "a FAILED ROUTE is reported without becoming the run's verdict" do
+      dir = run_dir()
+
+      seed_manifest(dir, "route-failed",
+        build_id: "r2",
+        status:
+          "BPSTAGE name=PLAN status=ok build_id=r2\n" <>
+            "BPSTAGE name=SWITCH status=ok build_id=r2\n" <>
+            "BPSTAGE name=ROUTE status=failed build_id=r2 detail=\"caddy validate rejected the block\"\n",
+        log: "done\n"
+      )
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        is_active_cmd: {echo_script("inactive"), []},
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        command: stub("exit 0")
+      )
+
+      pid = start_fresh_runner()
+      status = GenServer.call(pid, {:status, "route-failed"})
+
+      assert status.route_status == "failed"
+      assert status.route_detail =~ "caddy validate rejected the block"
+
+      # The guard this test exists for: were ROUTE admitted to `@stage_names`,
+      # `deploy_outcome/2` would find a `failed` stage, hand `stage_exit_code/1`
+      # a name it has no clause for, and report exit_code -1 with a failure
+      # reason on a run that SWITCHed cleanly.
+      assert Enum.map(status.stages, & &1.name) == ~w(PLAN SWITCH)
+      assert status.exit_code == 0
+      assert status.failure_reason == nil
+    end
+
+    test "no ROUTE line at all reports nil — an honest 'nobody measured this', not a passing zero" do
+      dir = run_dir()
+
+      seed_manifest(dir, "route-silent",
+        build_id: "r3",
+        status:
+          "BPSTAGE name=PLAN status=ok build_id=r3\nBPSTAGE name=SWITCH status=ok build_id=r3\n",
+        log: "done\n"
+      )
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        is_active_cmd: {echo_script("inactive"), []},
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        command: stub("exit 0")
+      )
+
+      pid = start_fresh_runner()
+      status = GenServer.call(pid, {:status, "route-silent"})
+
+      assert status.route_status == nil
+      assert status.route_detail == nil
     end
   end
 
@@ -2052,12 +2281,28 @@ defmodule Barkpark.Sites.DeployRunnerTest do
         is_active_cmd: {echo_script("active"), []},
         systemctl_stop_cmd: {slow_ctl_script(2, "stopped"), []},
         systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
-        command: stub("exit 0"),
-        ctl_cmd_timeout_ms: 400
+        command: stub("exit 0")
       )
 
       pid = start_fresh_runner()
       assert %{state: :running} = GenServer.call(pid, {:status, "slow-stop"})
+
+      # The 400ms budget belongs to the STOP, and is armed only once the run is
+      # re-attached as :running — never over the re-attach probe itself.
+      # `ctl_cmd_timeout_ms` is ONE budget shared by every control-plane call,
+      # so setting it in the seed put_cfg also bounded the `systemctl is-active`
+      # that init/1's re-attach runs, at 400ms. That probe's script is a plain
+      # `echo active`, but it is EXECUTED FOR THE FIRST TIME here: on macOS the
+      # first exec of a newly written file pays a one-shot Gatekeeper /
+      # code-signing check — measured 490ms on this tree's tmpdir against ~0ms
+      # for every later exec, and ~2ms on the ubuntu runner, which is why CI
+      # never saw it. Over 400ms the probe times out, `is_active` degrades to
+      # the terminal "unknown" by design, and the run finalized :done/-1
+      # ("deploy process died abnormally") before this test could fire the
+      # watchdog at all. Arming the budget after the :running precondition keeps
+      # the deadline under test — the stop — bounded, and leaves the re-attach
+      # probe on the 15s default it was always meant to have.
+      put_cfg(ctl_cmd_timeout_ms: 400)
 
       # Fire the watchdog; its `systemctl stop` HANGS. A call queued behind the
       # handle_info measures its wall-clock (GenServer messages are serial).
@@ -2181,6 +2426,156 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       # An EXACT -u query (measured 0.16s), never a glob (measured 121s).
       assert record.journal_command == "journalctl --no-pager -u #{record.unit_name}"
       refute record.journal_command =~ "*"
+    end
+  end
+
+  describe "the recorded log is SCRUBBED AT WRITE (dr-bl-recorder-http-read-path c2)" do
+    # A real-shape Barkpark PAT — `bppat_` + a 43-char url-safe base64 body with
+    # the `-`/`_` that the bare high-entropy clause structurally cannot see.
+    @pat "bppat_7Kd-Qm2xTf9Zb_LpV4nA1sJhR0yWuEcG3iOtXvB"
+
+    # A build that prints what a real one prints: the env fold of this box's own
+    # token, colourised by the PTY, plus a colourised key=value.
+    defp leaky_engine do
+      stub("""
+      printf '\\033[31m\\033[1m04:34:24\\033[22m [build] BARKPARK_TOKEN=#{@pat} exported\\n' >> "$BARKPARK_SITE_LOG_FILE"
+      printf 'run\\033[0mapi_key=s3cretValueGoesHere1\\n' >> "$BARKPARK_SITE_LOG_FILE"
+      echo "npm ERR! build failed (exit 12)" >> "$BARKPARK_SITE_LOG_FILE"
+      # THE CONTROL COPY: byte-identical output, written to a path the recorder
+      # does not fold. Without it, `refute bytes =~ "\\e["` would pass just as
+      # happily on a stub that never emitted an escape byte at all.
+      cp "$BARKPARK_SITE_LOG_FILE" "$BARKPARK_SITE_LOG_FILE.unfolded"
+      echo "BPSTAGE name=SWITCH status=ok build_id=$BUILD_ID" >> "$BARKPARK_SITE_STATUS_FILE"
+      exit 0
+      """)
+    end
+
+    test "THE STORED BYTES carry no token and no colour once the record is durable" do
+      dir = run_dir()
+      recorder_cfg(dir, command: leaky_engine())
+
+      deploy_and_finalize("scrubbed", "s1")
+
+      log = Path.join(dir, "scrubbed-s1.log")
+
+      # THE PRECONDITION, measured rather than assumed: the build really did
+      # print a live token and real 0x1B bytes. This is the same output, copied
+      # by the stub to a path nothing folds.
+      unfolded = File.read!(log <> ".unfolded")
+      assert unfolded =~ @pat
+      assert unfolded =~ "\e["
+      assert unfolded =~ "s3cretValueGoesHere1"
+
+      # READ THE ARTIFACT, never a rendered response — that is the criterion's
+      # own proof method, and it is what stops a display-boundary scrub from
+      # satisfying it.
+      bytes = File.read!(log)
+
+      # POSITIVE FACTS FIRST: the redaction landed exactly where the secret was,
+      # which a build that printed nothing could not produce.
+      assert bytes =~ "BARKPARK_TOKEN=[redacted]"
+      assert bytes =~ "run api_key=[redacted]"
+      # …and the copy a person needs survived untouched.
+      assert bytes =~ "npm ERR! build failed (exit 12)"
+
+      refute bytes =~ @pat
+      refute bytes =~ "bppat_"
+      refute bytes =~ "s3cretValueGoesHere1"
+      refute bytes =~ "\e["
+    end
+
+    test "log_bytes describes the SCRUBBED file, not the raw one it replaced" do
+      dir = run_dir()
+      recorder_cfg(dir, command: leaky_engine())
+
+      deploy_and_finalize("measured", "m1")
+
+      log = Path.join(dir, "measured-m1.log")
+      record = DeployRunner.build_record("measured", "m1")
+
+      assert record.log_bytes == File.stat!(log).size
+      assert record.log_bytes == byte_size(File.read!(log))
+      # …and the file it describes is the FOLDED one. Without this the equality
+      # above is equally true of a raw file measured raw — it would pin the
+      # arithmetic and say nothing about the bytes.
+      refute File.read!(log) =~ @pat
+      assert File.read!(log) =~ "BARKPARK_TOKEN=[redacted]"
+      # The stamp says WHICH pattern set folded these bytes. Without it nothing
+      # downstream may treat the log as safe.
+      assert record.log_scrub == BuildLogScrub.version()
+    end
+
+    test "the fold leaves no `.scrub-*` temp file in the run-state dir" do
+      dir = run_dir()
+      recorder_cfg(dir, command: leaky_engine())
+
+      deploy_and_finalize("notmp", "n1")
+
+      leftovers = dir |> File.ls!() |> Enum.filter(&(&1 =~ ".scrub-"))
+      assert leftovers == []
+    end
+
+    test "an UNSTAMPED record whose log is still on disk heals on the next read" do
+      dir = run_dir()
+      recorder_cfg(dir, command: leaky_engine())
+
+      deploy_and_finalize("healme", "h1")
+      log = Path.join(dir, "healme-h1.log")
+      record_path = Path.join(dir, "healme-h1.terminal.json")
+
+      # Put the box back in its PRE-SCRUB state by hand: raw bytes on disk and a
+      # record with no stamp — exactly what a build recorded before this fold
+      # existed, or one whose box died mid-fold, leaves behind.
+      raw = "[build] BARKPARK_TOKEN=#{@pat}\n"
+      File.write!(log, raw)
+
+      record =
+        record_path
+        |> File.read!()
+        |> Jason.decode!()
+        |> Map.delete("log_scrub")
+        |> Map.put("log_bytes", byte_size(raw))
+
+      File.write!(record_path, Jason.encode!(record))
+
+      # THE PRECONDITION, asserted rather than assumed: the bytes really are raw
+      # and the record really is unstamped at this point.
+      assert File.read!(log) =~ @pat
+      refute Map.has_key?(record, "log_scrub")
+
+      healed = DeployRunner.build_record("healme", "h1")
+
+      refute File.read!(log) =~ @pat
+      assert File.read!(log) =~ "BARKPARK_TOKEN=[redacted]"
+      assert healed.log_scrub == BuildLogScrub.version()
+      assert healed.log_bytes == File.stat!(log).size
+
+      # The heal is DURABLE — it rewrote the record, so the next read does no
+      # work and answers the same.
+      persisted = record_path |> File.read!() |> Jason.decode!()
+      assert persisted["log_scrub"] == BuildLogScrub.version()
+      assert persisted["log_bytes"] == File.stat!(log).size
+    end
+
+    test "an unstamped record whose log is GONE stays unstamped — no phantom claim" do
+      dir = run_dir()
+      recorder_cfg(dir, command: leaky_engine())
+
+      deploy_and_finalize("gonelog", "g1")
+      record_path = Path.join(dir, "gonelog-g1.terminal.json")
+
+      record =
+        record_path |> File.read!() |> Jason.decode!() |> Map.delete("log_scrub")
+
+      File.write!(record_path, Jason.encode!(record))
+      File.rm!(Path.join(dir, "gonelog-g1.log"))
+
+      read = DeployRunner.build_record("gonelog", "g1")
+
+      # There is nothing to fold, so there is nothing to claim: `nil` is the
+      # honest answer, and `missing` is still the honest log_state.
+      assert read.log_scrub == nil
+      assert read.log_state == :missing
     end
   end
 
@@ -2668,6 +3063,471 @@ defmodule Barkpark.Sites.DeployRunnerTest do
 
       for f <- [decoy_status, decoy_log, decoy_env], do: assert(File.exists?(f))
       assert File.exists?(Path.join(decoy_tree, "keep"))
+    end
+  end
+
+  # An engine stub that writes ONLY to the status file — faithful to the real
+  # prebuilt path, where `log()` goes to stdout, `emit()` goes to the status
+  # fold, and BUILD's `tee "$BUILD_LOG"` (the sole writer of the log file) never
+  # runs because BUILD is skipped.
+  defp status_only_engine(build_id) do
+    stub("""
+    echo 'BPSTAGE name=BUILD status=skipped build_id=#{build_id}' >> "$BARKPARK_SITE_STATUS_FILE"
+    echo 'BPSTAGE name=SWITCH status=ok build_id=#{build_id}' >> "$BARKPARK_SITE_STATUS_FILE"
+    exit 0
+    """)
+  end
+
+  # ── the staged prebuilt tree + the log the manifest names ─────────────────
+  #
+  # (ssw9-prebuilt-tree-finalize-sweep / ssw10-bl-prebuilt-tree-and-log-hygiene)
+  # Two properties of the prebuilt lane that only a run-to-finalize test can see:
+  #
+  #   * `<slug>.prebuilt/` used to be removed ONLY by `prune_run_state_dir/1`'s
+  #     LRU eviction, gated on `length(manifests) > @max_tracked_runs` (32).
+  #     Manifests are one-per-SLUG, so on a 12-site box that gate never fires and
+  #     the extracted tree survived a successful deploy, an ordinary deploy, and
+  #     a second prebuilt deploy. Worst case: 32 x the 64 MiB extraction cap =
+  #     2 GiB on a 3.8 GB box.
+  #   * the run's `log_file` is truncated at launch and, on the prebuilt path,
+  #     nothing ever writes it (BUILD's `tee` is the only writer, and BUILD is
+  #     skipped), so the manifest pointed at a 0-byte file.
+  describe "the staged prebuilt tree (ssw9 / ssw10-bl)" do
+    test "is DROPPED at run finalize on the SUCCESS path — no LRU eviction involved, and the release still serves" do
+      dir = run_dir()
+      release = Path.join(dir, "fake-release")
+      {b64, sha} = prebuilt_artifact()
+
+      engine =
+        stub("""
+        # PRECONDITION asserted BY THE ENGINE, mid-run: the staged tree is on
+        # disk and carries the uploaded bytes at the moment STAGE would copy
+        # them. Without this the "it is gone" assertion below could pass on a
+        # tree that was never there.
+        test -f "$PREBUILT_DIR/index.html" || exit 3
+        mkdir -p #{release}
+        cp "$PREBUILT_DIR/index.html" #{release}/index.html
+        echo 'BPSTAGE name=BUILD status=skipped build_id=pbfin' >> "$BARKPARK_SITE_STATUS_FILE"
+        echo 'BPSTAGE name=STAGE status=ok build_id=pbfin' >> "$BARKPARK_SITE_STATUS_FILE"
+        echo 'BPSTAGE name=SWITCH status=ok build_id=pbfin' >> "$BARKPARK_SITE_STATUS_FILE"
+        exit 0
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        command: engine
+      )
+
+      staged = Path.join(dir, "pbfin.prebuilt")
+
+      assert DeployRunner.trigger(
+               req("pbfin", build_id: "pbfin", artifact_b64: b64, artifact_sha256: sha)
+             ) == {:ok, :started}
+
+      # PRECONDITION, from the test's side: the tree reached disk and SURVIVED
+      # the run. This is exactly the state the old code left on the box forever.
+      assert File.exists?(Path.join(staged, "index.html"))
+      # …and the engine really read it — the copy exists only if it did.
+      assert File.read!(Path.join(release, "index.html")) =~ "prebuilt"
+
+      # The LRU sweep CANNOT be the thing that cleans up below: it fires only
+      # above @max_tracked_runs = 32 manifests, and this dir holds exactly one.
+      assert length(Path.wildcard(Path.join(dir, "*.manifest.json"))) == 1
+
+      status = DeployRunner.status("pbfin")
+      assert status.state == :done
+      assert status.exit_code == 0
+
+      # THE PROPERTY: gone at finalize, one manifest in the dir.
+      refute File.exists?(staged)
+      assert length(Path.wildcard(Path.join(dir, "*.manifest.json"))) == 1
+
+      # …while the release dir still serves the bytes that were copied out of it.
+      assert File.read!(Path.join(release, "index.html")) =~ "prebuilt"
+    end
+
+    test "is dropped on the FAILURE path too — the caller holds the artifact, and RE-UPLOAD is the only recovery" do
+      dir = run_dir()
+      {b64, sha} = prebuilt_artifact()
+
+      engine =
+        stub("""
+        test -f "$PREBUILT_DIR/index.html" || exit 3
+        echo 'BPSTAGE name=BUILD status=skipped build_id=pbfail' >> "$BARKPARK_SITE_STATUS_FILE"
+        echo 'BPSTAGE name=HEALTH status=failed build_id=pbfail detail="bp-build-id marker mismatch"' >> "$BARKPARK_SITE_STATUS_FILE"
+        exit 13
+        """)
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        command: engine
+      )
+
+      staged = Path.join(dir, "pbfail.prebuilt")
+
+      assert DeployRunner.trigger(
+               req("pbfail", build_id: "pbfail", artifact_b64: b64, artifact_sha256: sha)
+             ) == {:ok, :started}
+
+      assert File.exists?(Path.join(staged, "index.html"))
+
+      status = DeployRunner.status("pbfail")
+      # PRECONDITION: this run really FAILED — a green here would make the
+      # "dropped on failure" claim vacuous.
+      assert status.state == :done
+      assert status.exit_code == 14
+      assert status.failure_reason =~ "bp-build-id marker mismatch"
+
+      refute File.exists?(staged)
+    end
+
+    test "a re-attach after a BEAM restart mid-run does NOT delete a tree the engine has not yet copied" do
+      dir = run_dir()
+      staged = Path.join(dir, "reattach-pb.prebuilt")
+      File.mkdir_p!(staged)
+      File.write!(Path.join(staged, "index.html"), "<h1>not copied yet</h1>")
+
+      seed_manifest(dir, "reattach-pb",
+        build_id: "b7",
+        status: "BPSTAGE name=PLAN status=ok build_id=b7\n",
+        prebuilt_dir: staged
+      )
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        is_active_cmd: {active_only_for("reattach-pb"), []},
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        command: stub("exit 0")
+      )
+
+      pid = start_fresh_runner()
+
+      # PRECONDITION: the run is LIVE across the "restart". A re-attach that saw
+      # it as terminal would say nothing about a MID-RUN tree.
+      status = GenServer.call(pid, {:status, "reattach-pb"})
+      assert status.state == :running
+
+      # THE PROPERTY: the tree the engine has not copied yet is untouched.
+      assert File.read!(Path.join(staged, "index.html")) =~ "not copied yet"
+
+      # CONTROL, same tree, same manifest: once the unit is gone the finalize
+      # drops it — so the survival above is the live state, not an inert path.
+      put_cfg(is_active_cmd: {echo_script("inactive"), []})
+      assert %{state: :done} = GenServer.call(pid, {:status, "reattach-pb"})
+      refute File.exists?(staged)
+    end
+
+    test "the 2 GiB worst case is gone, and the bound that replaced it is NAMED with its derivation" do
+      cap = Barkpark.Sites.PrebuiltArtifact.caps().max_total_bytes
+
+      # Named, derived, and not re-declared: capacity x the extractor's own cap.
+      assert DeployRunner.staged_prebuilt_bound_bytes() ==
+               DeployRunner.build_slot_capacity() * cap
+
+      assert DeployRunner.staged_prebuilt_bound_bytes() == 64 * 1024 * 1024
+
+      # The bound the finalize drop REPLACED: @max_tracked_runs (32) x the same
+      # cap = 2 GiB on a 3.8 GB box.
+      assert 32 * cap == 2 * 1024 * 1024 * 1024
+      assert DeployRunner.staged_prebuilt_bound_bytes() < 32 * cap
+    end
+  end
+
+  describe "the log the manifest names, on a prebuilt deploy (ssw10-bl)" do
+    test "NEGATIVE CONTROL: a box build whose engine writes no log leaves the manifest pointing at an EMPTY file" do
+      dir = run_dir()
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        command: status_only_engine("nolog")
+      )
+
+      assert DeployRunner.trigger(req("pb-nolog", build_id: "nolog")) == {:ok, :started}
+
+      manifest = dir |> Path.join("pb-nolog.manifest.json") |> File.read!() |> Jason.decode!()
+      # This is the shape the bug reported — and on a BOX build it is honest:
+      # the engine simply produced no build output in this stub.
+      assert File.read!(manifest["log_file"]) == ""
+      refute manifest["prebuilt_dir"]
+    end
+
+    test "a prebuilt deploy leaves the file the manifest names NON-EMPTY, naming the digest and the unreproducible property" do
+      dir = run_dir()
+      {b64, sha} = prebuilt_artifact()
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        command: status_only_engine("pblog")
+      )
+
+      assert DeployRunner.trigger(
+               req("pb-log", build_id: "pblog", artifact_b64: b64, artifact_sha256: sha)
+             ) == {:ok, :started}
+
+      # THE ASSERTION IS ON THE FILE THE MANIFEST NAMES — not on a path the test
+      # rebuilt for itself, which is the whole point of the finding.
+      manifest = dir |> Path.join("pb-log.manifest.json") |> File.read!() |> Jason.decode!()
+      assert manifest["prebuilt_dir"] == Path.join(dir, "pb-log.prebuilt")
+
+      contents = File.read!(manifest["log_file"])
+      refute contents == ""
+      assert contents =~ "PREBUILT DEPLOY"
+      assert contents =~ sha
+      assert contents =~ "UNREPRODUCIBLE"
+      assert contents =~ "RE-UPLOAD"
+      assert contents =~ "pblog"
+
+      # …and it reaches the operator through `status/1`'s log, which is what the
+      # control plane renders.
+      status = DeployRunner.status("pb-log")
+      assert status.state == :done
+      assert status.exit_code == 0
+      assert Enum.any?(status.log, &String.contains?(&1, "no build ran on this box"))
+
+      # It must not look like a marker a finalizer reads out of a log.
+      for marker <- [
+            "TORN_DOWN=",
+            "TEARDOWN_FAILED=",
+            "TARGET_BUILD=",
+            "(no_previous)",
+            "(not_supported)",
+            "ROLLED BACK"
+          ] do
+        refute contents =~ marker
+      end
+    end
+  end
+
+  # ── the prune DROP path at the CAP BOUNDARY, and at the REAL 10,000 ───────
+  #
+  # HOW THIS BLOCK WAS SCOPED, because the drop path was NOT uncovered before
+  # it. Two filesystem arms already drive it ("terminal RECORDS that tie on
+  # mtime are pruned deterministically too", "the terminal-record cap prunes to
+  # the cap, keeps the NEWEST, and spares other names") and three permutation
+  # arms pin `terminal_records_to_evict/2`'s ordering. What none of them touched
+  # is the BOUNDARY — one under the cap, exactly at it, one over — which is
+  # where an off-by-one in the drop lives and where nothing above would notice
+  # it: every existing arm sits far over its cap (3 against 1, 12 against 5), so
+  # an `Enum.drop(max - 1)` or `Enum.drop(max + 1)` still condemns a non-empty,
+  # merely wrong-sized set and every one of those assertions still passes.
+  #
+  # And none of them ran at 10,000. The census arm's own comment argues the real
+  # cap out of scope — "5, not 10_000: seeding the real cap means 10,001 real
+  # files" — which is true of FILES and quietly also skipped the pure function,
+  # where 10,001 maps cost nothing. Both are covered here: the boundary table
+  # below includes the real cap, and one arm seeds 10,001 REAL records and
+  # sweeps at the production default, so the cap's first binding in production
+  # is no longer its first execution anywhere.
+
+  @boundary_caps [1, 4, 10_000]
+
+  # Distinct, ascending mtimes, so "newest" is unambiguous and the condemned set
+  # is fully determined WITHOUT leaning on the path tie-break (which has its own
+  # arms above). Here the tie-break must never be consulted at all.
+  defp boundary_entry(i),
+    do: %{
+      path: "/run/state/bnd-#{String.pad_leading("#{i}", 6, "0")}.terminal.json",
+      size: 100,
+      mtime: DateTime.from_unix!(1_770_000_000 + i)
+    }
+
+  defp boundary_entries(n), do: Enum.map(1..n//1, &boundary_entry/1)
+
+  describe "the terminal-record cap at its BOUNDARY (dr-w22 c1)" do
+    test "one UNDER the cap, and exactly AT it, condemn nothing" do
+      for cap <- @boundary_caps, n <- [cap - 1, cap], n > 0 do
+        entries = boundary_entries(n)
+
+        # NON-VACUITY: the fixture really reached the size this arm is about. A
+        # setup that silently built the wrong number would let a no-op drop path
+        # pass the assertion below for the wrong reason.
+        assert length(entries) == n
+
+        assert DeployRunner.terminal_records_to_evict(entries, cap) == [],
+               "cap #{cap} with #{n} record(s) condemned something at or below the cap"
+      end
+    end
+
+    test "one OVER the cap condemns exactly one record, and it is the OLDEST" do
+      for cap <- @boundary_caps do
+        n = cap + 1
+        entries = boundary_entries(n)
+        assert length(entries) == n
+
+        condemned = DeployRunner.terminal_records_to_evict(entries, cap)
+
+        assert length(condemned) == 1,
+               "cap #{cap} with #{n} records condemned #{length(condemned)}, not 1 — " <>
+                 "an off-by-one at the boundary"
+
+        assert hd(condemned).path == boundary_entry(1).path,
+               "cap #{cap} dropped the wrong END of the ordering — the newest record " <>
+                 "lost its tombstone and the oldest kept one"
+      end
+    end
+
+    test "the survivors are the NEWEST `cap` records, and the condemned are the rest" do
+      cap = 4
+      entries = boundary_entries(cap + 3)
+      assert length(entries) == cap + 3
+
+      condemned = DeployRunner.terminal_records_to_evict(entries, cap)
+      condemned_paths = MapSet.new(condemned, & &1.path)
+      survivors = Enum.reject(entries, &MapSet.member?(condemned_paths, &1.path))
+
+      assert Enum.map(condemned, & &1.path) == Enum.map([3, 2, 1], &boundary_entry(&1).path)
+      assert Enum.map(survivors, & &1.path) == Enum.map(4..7//1, &boundary_entry(&1).path)
+    end
+  end
+
+  describe "the 10,000-record cap BINDS, exercised at the production default (dr-w22 c1)" do
+    @tag timeout: 600_000
+    test "10,001 records sweep down to exactly 10,000 and the dropped one is the OLDEST" do
+      dir = run_dir()
+      # NO cap override, deliberately: a lowered cap proves a different number,
+      # and the criterion is about THIS one.
+      recorder_cfg(dir)
+      assert DeployRunner.retention_caps().max_terminal_records == 10_000
+
+      base = System.os_time(:second) - 20_000
+      n = 10_001
+
+      for i <- 1..n//1 do
+        path = Path.join(dir, "bigcap-#{String.pad_leading("#{i}", 6, "0")}.terminal.json")
+        File.write!(path, Jason.encode!(%{"slug" => "bigcap", "run_tag" => "r#{i}"}))
+        File.touch!(path, base + i)
+      end
+
+      # NON-VACUITY, stated against the cap actually in force rather than a
+      # literal: a seed that silently landed 9,999 files would make a drop path
+      # that does nothing at all look correct below.
+      seeded = terminal_names(dir)
+      assert length(seeded) == n
+      assert length(seeded) > DeployRunner.retention_caps().max_terminal_records
+
+      DeployRunner.retention_sweep()
+
+      kept = terminal_names(dir)
+
+      assert length(kept) == 10_000,
+             "the sweep left #{length(kept)} records against a 10,000 cap"
+
+      refute "bigcap-000001.terminal.json" in kept
+      assert "bigcap-000002.terminal.json" in kept
+      assert "bigcap-010001.terminal.json" in kept
+    end
+  end
+
+  # ── the orphan tombstone reads as an explicit UNKNOWN in every corpus reader
+  #
+  # HOW THE READER SET WAS DERIVED, by following the code rather than by
+  # inheriting a list. The corpus is the `*.terminal.json` files under
+  # `run_state_dir()`. Exactly one function opens them — `read_terminal_record/1`
+  # in DeployRunner — and it has four call sites: `disk_log_state/1`,
+  # `list_terminal_records/1`, `find_terminal_record/2`, and `tombstone/2`, which
+  # is the WRITER and not a reader. Following the first three upward gives the
+  # whole reader set: `build_record/2` (the single-record door),
+  # `build_records/1` (the LIST door), and `status/1` by way of
+  # `load_latest_terminal_record/1`. Above those sits one HTTP door —
+  # `BarkparkWeb.SiteDeployController`'s `render_build_record/1` — covered by an
+  # arm in that controller's own test file. BarkparkCloud's `BoxRelay` and
+  # `BuildLog` consume that door's JSON over HTTP; they never touch the corpus,
+  # so they inherit what it emits rather than reading it.
+  #
+  # One of those arms already existed: "a log evicted before its run finalized
+  # is still not 'never recorded'" covers `build_record/2`. The LIST door and
+  # `status/1` were unpinned — and the LIST door is precisely where the failure
+  # the criterion names lives, because omitting a row there is invisible.
+
+  describe "an orphan tombstone is an explicit unknown, never an omission (dr-w22 c2)" do
+    setup do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      # A REAL orphan, not a planted fixture: bytes on disk from a run that
+      # never reached finalize, so there is no record to merge onto and
+      # `orphan_tombstone/2` has to fabricate one.
+      File.write!(Path.join(dir, "orphan2-o1.log"), "partial output\n")
+
+      # A fully finalized neighbour in the SAME corpus, so every assertion below
+      # can tell "the orphan reads as unknown" apart from "this reader answers
+      # nil for everything".
+      deploy_and_finalize("orphan2ok", "k1")
+
+      put_cfg(max_build_logs: 0)
+      assert %{evicted: 2} = DeployRunner.retention_sweep()
+
+      # PRECONDITION, asserted rather than assumed: without the fabricated
+      # tombstone nothing below is measuring the case at all.
+      assert File.exists?(Path.join(dir, "orphan2-o1.terminal.json")),
+             "the sweep did not fabricate the orphan tombstone"
+
+      {:ok, dir: dir}
+    end
+
+    test "the LIST door keeps the orphan's row rather than dropping it" do
+      records = DeployRunner.build_records()
+      slugs = Enum.map(records, & &1.slug)
+
+      assert "orphan2" in slugs,
+             "the orphan row was OMITTED from build_records/0 — the exact failure the " <>
+               "criterion forbids: a deployment with no exit code stops existing"
+
+      orphan = Enum.find(records, &(&1.slug == "orphan2"))
+      neighbour = Enum.find(records, &(&1.slug == "orphan2ok"))
+
+      # EXPLICIT unknown means the key is PRESENT and its value is nil — not the
+      # key being absent, which reads downstream as a field nobody asked about.
+      for key <- [:build_id, :exit_code, :unit_name, :started_at, :finished_at] do
+        assert Map.has_key?(orphan, key), "#{key} is absent from the orphan's rendering"
+        assert Map.fetch!(orphan, key) == nil, "#{key} was invented for a record that has none"
+      end
+
+      # THE CONTROL for those nils: the same reader fills the same keys for a
+      # record that HAS them, so the nils above belong to the orphan and not to
+      # a reader that renders everything empty.
+      assert neighbour.exit_code == 0
+      assert neighbour.unit_name =~ "bp-site-build-orphan2ok-k1-"
+
+      # And it says WHY, instead of leaving a reader to guess at the nils.
+      assert orphan.log_state == :evicted
+      assert orphan.failure_reason =~ "no exit code was ever recorded"
+    end
+
+    test "status/1 answers ABOUT the orphan instead of calling the slug idle" do
+      orphan = DeployRunner.status("orphan2")
+      never = DeployRunner.status("orphan2-never-deployed")
+
+      assert orphan.state == :done
+      assert orphan.log_state == :evicted
+      assert orphan.exit_code == nil
+      assert orphan.failure_reason =~ "no exit code was ever recorded"
+
+      assert Map.has_key?(orphan, :content_rev)
+      assert orphan.content_rev == nil
+
+      # THE CONTROL: a slug nobody ever deployed is a DIFFERENT answer. Without
+      # this, "everything is nil and idle" would satisfy the assertions above.
+      assert never.state == :idle
+      assert never.log_state == :never_recorded
     end
   end
 end

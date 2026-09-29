@@ -57,7 +57,13 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesRemoveReceiptTest do
 
   setup %{conn: conn} do
     {:ok, admin_tok} =
-      Auth.create_token(@admin, "shares receipt admin", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        @admin,
+        "shares receipt admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     prior_shares = Application.get_env(:barkpark, :shares)
     prior_env = Application.get_env(:barkpark, :shares_env)

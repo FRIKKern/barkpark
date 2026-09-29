@@ -34,6 +34,7 @@ defmodule Barkpark.Content.PublishKeepsTaskClaimTest do
   defp task_content(extra) do
     %{
       "kind" => "task",
+      "brief" => Barkpark.TaskBriefFixtures.brief(),
       "lifecycle_status" => "open",
       "acceptance_criteria" => [
         %{"criterion" => "the original criterion", "met" => false, "evidence" => ""}

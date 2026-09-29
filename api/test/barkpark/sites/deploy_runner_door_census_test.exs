@@ -152,6 +152,50 @@ defmodule Barkpark.Sites.DeployRunnerDoorCensusTest do
     end
   end
 
+  # ── the staleness BOUND: census_interval_ms rides beside measured_at ──────
+  #
+  # `measured_at` states how old a reading is; nothing said how old it is
+  # ALLOWED to be. In systemd mode a transient unit can end without a message,
+  # so `observed_in_flight: 1` may outlive its build by up to one backstop tick
+  # (dr-w22-s2-followup-census-staleness-systemd). The payload now carries that
+  # tick's period. Each test here is shaped to lose to a hard-coded value.
+  describe "door_census/0 census_interval_ms" do
+    test "renders the CONFIGURED interval, and moves when the config moves" do
+      put_cfg(census_interval_ms: 4_321)
+      assert DeployRunner.door_census().census_interval_ms == 4_321
+
+      # A literal `10_000` (or any constant) passes neither line of this pair —
+      # the second read differs from the first only because the config did.
+      put_cfg(census_interval_ms: 1_234)
+      assert DeployRunner.door_census().census_interval_ms == 1_234
+    end
+
+    # Proves the renderer reads through the TICKER'S OWN accessor, not a second
+    # `Keyword.get`: an unusable value falls back to the default the ticker
+    # would arm with, so the payload can never state a period the ticker cannot
+    # run at. A hand-rolled `Keyword.get(config(), :census_interval_ms, 10_000)`
+    # renders 0 here and fails.
+    test "a non-positive config renders the default the ticker falls back to" do
+      put_cfg(census_interval_ms: 0)
+      assert DeployRunner.door_census().census_interval_ms == 10_000
+
+      put_cfg(census_interval_ms: "fast")
+      assert DeployRunner.door_census().census_interval_ms == 10_000
+    end
+
+    # Configuration, like `capacity`, not a reading — so it survives the
+    # no-table arm where every MEASUREMENT is nil.
+    test "renders even when nothing was read" do
+      put_cfg(census_interval_ms: 777)
+      absent = :"bp_census_never_created_#{System.unique_integer([:positive])}"
+      assert :ets.whereis(absent) == :undefined
+
+      census = DeployRunner.door_census(absent)
+      assert census.measured_at == nil
+      assert census.census_interval_ms == 777
+    end
+  end
+
   # ── the refusal counter: it must be able to NOT rise ─────────────────────
 
   describe "door_census/0 refusals" do
@@ -320,6 +364,57 @@ defmodule Barkpark.Sites.DeployRunnerDoorCensusTest do
                dir |> Path.join("serving-memory.json") |> File.read!() |> Jason.decode!()
 
       assert first_seen_at === recorded.serving_since
+    end
+  end
+
+  # ── the no-census-table arm: a null is not a zero (dr-w22) ────────────────
+  #
+  # The branch dr-w22-s2 wrote and NOTHING reached: no Runner has ever run in
+  # this BEAM, so `@census_table` does not exist and every measurement must
+  # render as an explicit `nil`. ExUnit always starts the supervised Runner, and
+  # the table is owned by that Runner, so a test cannot delete it without killing
+  # a supervised singleton — a flake generator across this `async: false` module.
+  # `door_census/1` takes the table NAME instead: a name that was never created
+  # reaches the identical `:ets.lookup` ArgumentError rescue with nothing killed.
+  describe "door_census/1 with no census table" do
+    test "every measurement is nil while capacity still renders" do
+      absent = :"bp_census_never_created_#{System.unique_integer([:positive])}"
+
+      # PRECONDITION, asserted rather than assumed: the table really is absent.
+      assert :ets.whereis(absent) == :undefined
+
+      census = DeployRunner.door_census(absent)
+
+      # Capacity is a compile-time constant, not a reading — it still renders.
+      assert census.capacity == DeployRunner.build_slot_capacity()
+      assert is_integer(census.capacity) and census.capacity > 0
+
+      # Every MEASUREMENT is an explicit nil. Not 0, not %{}, not [], not now().
+      for key <- [
+            :observed_in_flight,
+            :in_flight_slugs,
+            :refusals_total,
+            :refusals_since,
+            :door_open_admissions_total,
+            :door_open_admissions,
+            :measured_at
+          ] do
+        assert Map.fetch!(census, key) == nil,
+               "#{key} rendered #{inspect(Map.fetch!(census, key))} with NO census table — " <>
+                 "a null means UNREAD; anything else is a fabricated reading"
+      end
+    end
+
+    # ANTI-VACUITY CONTROL. Without this, "everything is nil" would also pass on
+    # a door_census that had been gutted to return a map of nils unconditionally.
+    # The SAME function, one argument different, reads real values.
+    test "the same call against the LIVE table reads values — so the nils above mean something" do
+      live = DeployRunner.door_census()
+
+      assert is_integer(live.refusals_total)
+      assert %DateTime{} = live.refusals_since
+      assert is_integer(live.door_open_admissions_total)
+      assert live.capacity == DeployRunner.build_slot_capacity()
     end
   end
 

@@ -47,9 +47,15 @@ func TestTaskLsDefaultPageTruncationIsAnnounced(t *testing.T) {
 		}
 	}
 
-	// A full page: exactly `limit` rows came back, which is precisely the
-	// condition page.has_more encodes server-side.
-	fullPage := func(n int) []byte {
+	// THIS HELPER USED TO HARDCODE has_more:true FOR EVERY n, including the
+	// pages it was used to build as "provably the last one". That made the
+	// continuation flag a constant rather than a variable, so the two subtests
+	// that asserted SILENCE were asserting it over a payload in which the
+	// server explicitly said more rows remained — the very defect
+	// task-3e9b429a93abab79 names, sitting inside the test meant to pin the
+	// announcement. has_more is now a parameter, because it is the fact the
+	// guard's backstop reads and a fixture cannot both state it and ignore it.
+	page := func(n int, hasMore bool) []byte {
 		rows := make([]json.RawMessage, n)
 		for i := range rows {
 			rows[i] = json.RawMessage(fmt.Sprintf(`{"doc_id":"task-%d"}`, i))
@@ -57,10 +63,13 @@ func TestTaskLsDefaultPageTruncationIsAnnounced(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"ok":   true,
 			"docs": rows,
-			"page": map[string]any{"limit": n, "offset": 0, "returned": n, "has_more": true},
+			"page": map[string]any{"limit": n, "offset": 0, "returned": n, "has_more": hasMore},
 		})
 		return body
 	}
+	// A full page: exactly `limit` rows came back, which is precisely the
+	// condition page.has_more encodes server-side.
+	fullPage := func(n int) []byte { return page(n, true) }
 
 	t.Run("declared default 100 announces a full 100-row page", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
@@ -80,32 +89,66 @@ func TestTaskLsDefaultPageTruncationIsAnnounced(t *testing.T) {
 		}
 	})
 
-	// RED WITHOUT the manifest change. Same server response, same truncated
-	// page — the only difference is the stale declared default, and the CLI
-	// goes completely quiet.
-	t.Run("stale declared default 1000 silences the hint", func(t *testing.T) {
+	// A STALE DECLARED DEFAULT STILL DEFEATS THE ROW-COUNT HINT — that half of
+	// the original finding stands, and the manifest field is still
+	// load-bearing for the "default limit of N" wording. What CHANGED is that
+	// it is no longer the last line of defence: the CLI compares 100 rows to a
+	// believed limit of 1000, concludes the page is complete, and then reads
+	// the server's own page.has_more, which says otherwise. So the specific
+	// hint is lost and the TRUNCATION is still announced.
+	//
+	// This subtest used to assert TOTAL silence here, which pinned the bug in
+	// place: it would have gone red on any fix that made a stale manifest
+	// default survivable. The assertion now distinguishes the two claims
+	// instead of collapsing them.
+	t.Run("stale declared default 1000 loses the hint but not the truncation", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		out := newWriter(&stdout, &stderr)
 		out.output = "table"
 
 		warnIfDefaultPageMayBeTruncated(out, globals{}, taskLs(1000), fullPage(100))
 
-		if stderr.Len() != 0 {
-			t.Fatalf("expected the stale default to say nothing (that is the bug this documents); got %q", stderr.String())
+		got := stderr.String()
+		if strings.Contains(got, "default limit of") {
+			t.Errorf("the row-count hint cannot fire under a stale default — it believes the limit is 1000 and only 100 rows came back; got %q", got)
+		}
+		if !strings.Contains(got, "has_more") {
+			t.Fatalf("SILENT under a stale manifest default: 100 of 8,525 rows, server says has_more — the stale number must cost the wording, not the warning; got %q", got)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("hint must ride stderr only; stdout=%q", stdout.String())
 		}
 	})
 
-	// An under-full page is provably the last one — no hint, at either
-	// declared default.
-	t.Run("a short page stays silent", func(t *testing.T) {
+	// An under-full page is the last one ONLY WHEN THE SERVER SAYS SO. The
+	// fixture must therefore carry has_more:false — built with fullPage (which
+	// hardcoded true) this subtest asserted silence over a payload that
+	// promised more rows, and so tested the opposite of its own name.
+	t.Run("a genuinely last short page stays silent", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		out := newWriter(&stdout, &stderr)
 		out.output = "table"
 
-		warnIfDefaultPageMayBeTruncated(out, globals{}, taskLs(100), fullPage(37))
+		warnIfDefaultPageMayBeTruncated(out, globals{}, taskLs(100), page(37, false))
 
 		if stderr.Len() != 0 {
-			t.Errorf("short page must not warn; got %q", stderr.String())
+			t.Errorf("a complete short page must not warn; got %q", stderr.String())
+		}
+	})
+
+	// THE COMPANION CONTROL the pair above needs: the same short page, with the
+	// server promising more. Without this arm, "a short page stays silent"
+	// passes just as well on a CLI that can no longer detect any truncation at
+	// all — a green with no subject.
+	t.Run("a short page the server says continues is announced", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		out := newWriter(&stdout, &stderr)
+		out.output = "table"
+
+		warnIfDefaultPageMayBeTruncated(out, globals{}, taskLs(100), page(37, true))
+
+		if !strings.Contains(stderr.String(), "has_more") {
+			t.Fatalf("SILENT: 37 rows with has_more true reads as a 37-row board; got %q", stderr.String())
 		}
 	})
 

@@ -706,7 +706,7 @@
        .bp-paper-surface block above (view_edit_parity_test §2 enforces the match).
        Top-only so the flat ProseMirror (collapse) and div-wrapped reader (additive)
        land identical. */
-    .bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; overflow-wrap: break-word; }
+    .bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 0.8em 0 0; overflow-wrap: break-word; }
     /* h2 takes the DISPLAY VOICE (device 3): the per-step `--bp-h2-weight`, not the
        shared `--bp-heading-weight`, plus `text-wrap: balance` — byte-identical with
        paper-surface.css `.bp-paper-surface h2` (which carries the reasoning) and
@@ -725,11 +725,25 @@
       margin-top: var(--bp-section-beat);
       border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
       padding-top: var(--bp-section-gap);
+      margin-inline: var(--bp-evidence-pull, 0px);
+      width: var(--bp-evidence-width, 100%);
+      box-sizing: border-box;
+      padding-inline: calc(0px - var(--bp-evidence-pull, 0px));
     }
 .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
+/* PROSE LONG-TOKEN BREAK — the EDIT half of the View rule in
+   paper-surface.css (`.bp-paper-surface p, li`). It is not optional and not a
+   copy for tidiness: view_edit_parity_test.exs §2 reds the moment View
+   declares a property Edit does not, because a paper whose prose wraps at a
+   different word in Edit than in View is the exact drift that suite exists to
+   catch. `h1` beside it already carries the identical guard for the identical
+   reason. The View-side comment carries the measurements. */
+.bp-paper-editor-body p,
+.bp-paper-editor-body li { overflow-wrap: break-word; }
 /* A nested disclosure heading is not a document section boundary. */
 .bp-expandable__body .bp-paper-editor-body > .ProseMirror > h2 {
   margin-top: 1.9em; border-top: 0; padding-top: 0;
+  margin-inline: 0; width: auto; padding-inline: 0;
 }
 /* Reader-suppressed scaffolds remain keyboard-reachable without reserving
  * document space until selected. These are transient editor decorations. */
@@ -779,8 +793,8 @@
        class, so it stays out of these rules on both surfaces. Keep byte-aligned with
        paper-surface.css + assets/paper-editor/src/styles.css. */
     .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em; overflow-wrap: break-word; }
-    .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em; }
-    .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em; }
+    .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0.75rem 0 2rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em; }
+    .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em; margin-top: 20px; }
     .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
     /* editable-table: the three reader table class rules, mirrored byte-for-byte from
        paper-surface.css `.bp-paper-surface .bp-table*` (view_edit_parity_test.exs §2
@@ -794,6 +808,19 @@
     .bp-paper-editor-body .bp-table__td { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 10px 14px; vertical-align: top; line-height: 1.45; }
     .bp-paper-editor-body .bp-table tr:last-child .bp-table__td { border-bottom: 0; }
     .bp-paper-editor-body .bp-table :is(.bp-table__th, .bp-table__td):empty::before { content: "\200b"; visibility: hidden; }
+    /* TYPED COLUMNS (the `cols` spec — text | num | delta | spark), mirrored
+       byte-for-byte from paper-surface.css `.bp-paper-surface .bp-table__*--num /
+       --spark / __spark`. walk.ex table_col_class/3 emits these modifiers on the
+       canvas cells too (the canvas mounts the reader producer), so without the
+       mirror a typed num column right-aligns in the reader and not in the editor.
+       view_edit_parity_test.exs §2/§5 guard the drift. Keep byte-aligned with the
+       other two copies. */
+    .bp-paper-editor-body .bp-table__th--num,
+    .bp-paper-editor-body .bp-table__td--num { text-align: right; font-variant-numeric: tabular-nums; }
+    .bp-paper-editor-body .bp-table__th--spark,
+    .bp-paper-editor-body .bp-table__td--spark { width: 1%; white-space: nowrap; }
+    .bp-paper-editor-body .bp-table__spark { display: block; width: 96px; height: 20px; }
+    .bp-paper-editor-body .bp-table__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
     /* evidence-band breakout mirrors: .bp-stats / .bp-chart step out of the prose
        column exactly like .bp-table (the reader's three breakout classes). Values
        byte-copied from paper-surface.css `.bp-paper-surface .bp-stats` / `.bp-chart`
@@ -827,6 +854,8 @@
        prose surrounding the component remains on the measured column. */
     .bp-paper-editor-body .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; align-items: start; }
     @media (max-width: 720px) { .bp-paper-editor-body .bp-cols { grid-template-columns: 1fr; } }
+    /* Nested columns use their section cell, not the page-wide evidence band. */
+    .bp-paper-editor-body .bp-section__cell .bp-cols { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
     /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF
        the .bp-table* selectors so it never leaks into the parity comparison). The
        control rails reveal on hover so an idle table reads byte-identically to /papers. */
@@ -897,11 +926,14 @@
        The bundled ProseMirror base CSS kills ligatures + onum with
        `font-variant-ligatures: none` / `font-feature-settings: "liga" 0`;
        this higher-specificity rule (`.bp-paper-surface .ProseMirror`) wins it
-       back so `1234567890` renders as old-style numerals, matching surface. */
+       back so `1234567890` renders as old-style numerals, matching surface.
+       The feature list is the surface's own, and there is deliberately NO
+       `font-variant-numeric`: the reader has none, and `oldstyle-nums` here gave
+       every editable element a computed style the reader lacks for the same
+       glyphs (editor_control_island_parity_test). */
     .bp-paper-surface .ProseMirror {
       font-variant-ligatures: normal;
       -webkit-font-variant-ligatures: normal;
-      font-variant-numeric: oldstyle-nums;
       font-feature-settings: "kern", "liga", "onum";
     }
     .bp-paper-editor-body code {
@@ -929,11 +961,23 @@
        --bp-codeblock- and --paper- tokens as the reader <pre> so the editable code
        renders byte-identically (0.9rem/1.5, mono, ink). Keep BYTE-IDENTICAL with
        assets/paper-editor/src/styles.css. */
+    /* The highlight layer under the textarea (code-node.js + code-highlight.js, plan #27): the SAME
+       text painted with hljs-* tokens, metrics identical to the island above it, which shows only its
+       caret and selection. Keep BYTE-IDENTICAL with the styles.css copy (the code-interior test checks). */
+    .bp-canvas-code-hl {
+      position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 0; pointer-events: none;
+      margin: 0; padding: var(--bp-codeblock-pad); box-sizing: border-box; overflow: hidden;
+      display: block; font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+      color: var(--paper-ink); white-space: pre; overflow-wrap: normal; background: transparent;
+    }
     .bp-canvas-code-area {
-  display: block;
+      position: relative; z-index: 1; color: transparent; caret-color: var(--paper-ink);
+      display: block;
       font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
-      color: var(--paper-ink); white-space: pre; overflow-wrap: normal;
+      white-space: pre; overflow-wrap: normal;
       background: transparent; border: 0; padding: 0; width: 100%; box-sizing: border-box; resize: vertical;
+      letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+      font-feature-settings: inherit; font-variant-ligatures: inherit;
     }
     /* loop-epic/parity-callout: `bp-canvas-callout` is a thin edit-only layout
        hook; the tone card (padding/border-left/background/color) rides the
@@ -955,6 +999,8 @@
        inert so View == Edit. Keep byte-aligned with styles.css. */
     .bp-canvas-section > .bp-section__body { display: flex; flex-direction: column; }
     .bp-canvas-section > .bp-section__title { font-weight: 700; }
+    /* Canvas grid children have no section-cell wrapper. */
+    .bp-canvas-section > .bp-section__grid > .bp-cols { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
     /* S2 layout-engine: section-grid mirror. In grid mode the node-view swaps the
          body class from `bp-section__body` (flex column) to `bp-section__grid` (CSS
          grid) + sets `--bp-tracks`. Studio inlines the reader `.bp-paper-surface
@@ -996,18 +1042,18 @@
     .bp-canvas-card:hover .bp-canvas-card__controls, .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; pointer-events: auto; }
     .bp-canvas-card:has([data-test-id="paper-card-action-label"]:focus) .bp-canvas-card__controls { opacity: 0; pointer-events: none; }
     .bp-canvas-card__input { flex: 1 1 120px; min-width: 0; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
-    /* notes-grid split: the `note` WIDGET edit chrome. UNLIKE card, note does NOT
-         class-share with the reader (parity §3 forbids bp-notes / bp-note__ in the
-         editor JS), so these rules MIMIC the inlined `.bp-paper-surface .bp-note*`
-         visuals — reader parity is proven by the compose byte-identity test, not this
-         mirror. Keep BYTE-IDENTICAL with styles.css. */
-    .bp-canvas-note { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.9rem; align-items: baseline; margin: 1.4rem 0; }
-    .bp-canvas-note__k { font-family: var(--paper-font-mono); font-size: 0.68rem; font-weight: 700; text-transform: lowercase; letter-spacing: 0.02em; color: var(--paper-accent); background: color-mix(in srgb, var(--paper-accent) 12%, transparent); border: 0; border-radius: 5px; padding: 2px 7px; text-align: center; min-width: 0; }
-    .bp-canvas-note__k::placeholder { color: var(--paper-accent); opacity: 0.5; }
-    .bp-canvas-note__d { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.92rem; color: var(--paper-ink-soft); line-height: 1.55; min-width: 0; }
-    .bp-canvas-note__lead { font-family: inherit; font-size: inherit; font-weight: 600; color: var(--paper-ink); background: transparent; border: 0; padding: 0; min-width: 0; }
-    .bp-canvas-note__lead::placeholder { color: var(--paper-ink-soft); opacity: 0.5; }
-    .bp-canvas-note__body { min-width: 0; }
+    /* Note-only mirror of styles.css. This is the root-linked shell source;
+       native browser measurement, not stylesheet text, proves geometry. */
+    .bp-canvas-note { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.9rem; align-items: baseline; margin: 0; white-space: normal; }
+    .bp-canvas-note__label-host { display: contents; }
+    .bp-canvas-note__k { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 700; text-transform: lowercase; letter-spacing: 0.02em; color: var(--paper-accent); background: color-mix(in srgb, var(--paper-accent) 12%, transparent); border-radius: 5px; padding: 2px 7px; text-align: center; min-width: 0; }
+    .bp-canvas-note__d { font-size: 0.92rem; color: var(--paper-ink-soft); line-height: 1.55; min-width: 0; }
+    .bp-canvas-note__lead { color: var(--paper-ink); font-weight: 600; }
+    .bp-canvas-note__body { display: inline; }
+    /* Canonical Note paint keeps its surface styling, not the enclosing page geometry. */
+    .bp-paper-surface .bp-canvas-note-preview > .bp-paper-surface { max-width: none; max-inline-size: none; min-inline-size: 0; min-height: 0; margin: 0; padding: 0; }
+    .bp-canvas-note__k[contenteditable="plaintext-only"], .bp-canvas-note__lead[contenteditable="plaintext-only"] { cursor: text; }
+    .bp-canvas-note__k:empty:focus::before, .bp-canvas-note__lead:empty:focus::before { content: attr(data-placeholder); color: var(--paper-ink-soft); opacity: 0.5; }
     .bp-canvas-note__k:focus, .bp-canvas-note__lead:focus { outline: 1px solid var(--paper-accent); outline-offset: 1px; border-radius: 4px; }
     @media (max-width: 520px) { .bp-canvas-note { grid-template-columns: 1fr; gap: 0.3rem; } .bp-canvas-note__k { justify-self: start; } }
     /* stage WIDGET canvas node-view (DESIGN 1 — the editable pipeline-node twin).
@@ -1069,6 +1115,32 @@
       font-weight: 500;
       line-height: 1.2;
     }
+    /* pd-ee-sheet-embed-retarget: a read-only atom's ONE control — the existing
+       <bp-reference-picker>, scoped by ref-type to the documents that atom's reference
+       names (sheet → sheets, embed → papers; embed-node.js mountAtomRetarget). It sits
+       BESIDE the summary chip, not inside it: the chip still says what this block
+       resolves to, the picker says which document that is. Three overrides the
+       read-only atom's own rules make necessary: user-select (the atom sets `none`;
+       a typeahead input IS text to select, so the island opts back in), overflow (the
+       atom clips horizontally — pdd-t17, cards under the sidebar — but the picker's
+       dropdown hangs BELOW the input, so an atom carrying one must not clip, or the
+       affordance is dead the moment you type in it), and cursor/caret (the atom is a
+       selectable read-only unit; the input is not).
+       MUST stay BYTE-IDENTICAL with assets/paper-editor/src/styles.css (mirror-check). */
+    .bp-canvas-readonly:has(.bp-canvas-readonly-retarget) {
+      overflow: visible;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+    .bp-canvas-readonly-retarget {
+      display: inline-block;
+      flex: 1 1 220px;
+      min-width: 0;
+      user-select: text;
+      cursor: auto;
+    }
     /* editable-figure: the bpFigure atom wears "bp-canvas-readonly bp-canvas-figure",
        inheriting the atom margin/overflow guard, focus ring, selectednode wash, and
        loading chip. Restore the reader figure margin (figure_html article
@@ -1089,6 +1161,8 @@
       color: var(--paper-ink-soft, #6a6a6a);
       font-size: 0.9rem; line-height: 1.45;
       font-family: var(--paper-font-serif, 'Iowan Old Style', Palatino, Georgia, serif);
+      letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+      font-feature-settings: inherit; font-variant-ligatures: inherit;
     }
     .bp-canvas-figure-caption-input:focus { outline: none; }
     /* live-data task-list: the bpTaskList widget wears "bp-canvas-readonly
@@ -1140,13 +1214,13 @@
        to the --paper- and --st- token vocabulary. Keep BYTE-IDENTICAL with
        assets/paper-editor/src/styles.css (mirror-check). */
     .bp-canvas-term { position: relative; }
-    .bp-canvas-term__title-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; min-width: 6ch; font: inherit; color: inherit; }
+    .bp-canvas-term__title-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; min-width: 6ch; font: inherit; color: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; }
     .bp-canvas-term__title-input::placeholder { color: var(--paper-ink-faint); }
     .bp-canvas-term__live-toggle, .bp-canvas-term__add-foot { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 1px 7px; cursor: pointer; opacity: 0; transition: opacity 0.12s ease; }
     .bp-canvas-term__live-toggle { margin-left: auto; }
     .bp-canvas-term__live-toggle.is-on { color: var(--st-ok); border-color: var(--st-ok); }
     .bp-canvas-term:hover .bp-canvas-term__live-toggle, .bp-canvas-term:focus-within .bp-canvas-term__live-toggle, .bp-canvas-term:hover .bp-canvas-term__add-foot, .bp-canvas-term:focus-within .bp-canvas-term__add-foot { opacity: 1; }
-    .bp-canvas-term__foot-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; width: 100%; font: inherit; color: inherit; }
+    .bp-canvas-term__foot-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; width: 100%; font: inherit; color: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; }
     .bp-canvas-term__foot-input::placeholder { color: var(--paper-ink-faint); }
     .bp-canvas-term__atom { display: block; font-size: 0.85em; color: var(--paper-ink-soft); padding: 0.3em 0.5em; border: 1px solid var(--paper-rule); border-radius: 4px; font-family: var(--paper-font-serif); }
     /* Featured-image placeholder (t13) — the calm evergreen ghost frame an
@@ -1618,6 +1692,32 @@
       color: var(--paper-accent); border-color: var(--paper-accent);
     }
 
+    /* The link hover card (canvas/link-preview.js): the bubble's chrome, laid out as a small card
+       under the hovered link — title (or host), address, an excerpt for a wikilink, Open / Edit. */
+    .bp-link-preview {
+      position: fixed; z-index: 200;
+      width: 320px; max-width: calc(100vw - 16px);
+      padding: 8px 10px 8px;
+      background: var(--paper-chrome-bg);
+      border: 1px solid var(--paper-chrome-border);
+      border-radius: 5px;
+      box-shadow: 0 4px 14px hsl(var(--bp-shadow-hsl) / 0.10);
+      font-family: var(--paper-font-sans, var(--font)); color: var(--paper-ink);
+      animation: bp-paper-format-fade var(--dur-1) ease-out;
+    }
+    .bp-link-preview__title { font-size: var(--text-sm); font-weight: 600; line-height: var(--text-sm-lh); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-link-preview__addr { font-family: var(--paper-font-mono); font-size: var(--text-2xs); color: var(--paper-ink-soft); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-link-preview__excerpt { font-size: var(--text-xs); line-height: var(--text-xs-lh); color: var(--paper-ink-soft); margin-top: 6px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .bp-link-preview__actions { display: flex; gap: 6px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--paper-rule); }
+    .bp-link-preview__btn {
+      height: 22px; border: 1px solid var(--paper-chrome-border); background: transparent;
+      border-radius: 3px; padding: 0 8px;
+      font-family: var(--paper-font-sans); font-size: var(--text-xs);
+      color: var(--paper-ink-soft); cursor: pointer;
+    }
+    .bp-link-preview__btn:hover { color: var(--paper-accent); border-color: var(--paper-accent); }
+    .bp-link-preview__btn:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+
 /* Native collection controls belong outside the authored card/stat content.
    Closed controls leave reader geometry intact; the fallback opens in flow. */
 .bp-paper-contextual-controls.bp-paper-cards-config,
@@ -1663,16 +1763,24 @@
 .bp-canvas-fleet { margin: 0; overflow: visible; white-space: normal; }
 
 /* Diagram configuration stays outside the reader figure's layout. */
-.bp-canvas-diagram { position: relative; }
-.bp-canvas-diagram-editor { position: absolute; top: 0; right: 0; z-index: 3; max-width: 100%; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; opacity: 0; pointer-events: none; }
+/* scaffy-backlog-blocks-editable-studio: .bp-canvas-technical* is the diff/filetree
+   edit chrome. It SHARES these rules with the diagram editor rather than restating
+   them — one declaration block, so the two attr-atom families can never drift and no
+   new hand-stamped type literal enters the design ratchet. */
+.bp-canvas-diagram, .bp-canvas-technical { position: relative; }
+.bp-canvas-diagram-editor, .bp-canvas-technical-editor { position: absolute; top: 0; right: 0; z-index: 3; max-width: 100%; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; opacity: 0; pointer-events: none; }
 .bp-canvas-diagram:hover .bp-canvas-diagram-editor,
 .bp-canvas-diagram:focus-within .bp-canvas-diagram-editor,
-.bp-canvas-diagram-editor[open] { opacity: 1; pointer-events: auto; }
-.bp-canvas-diagram-editor-toggle { cursor: pointer; width: max-content; margin-left: auto; background: var(--paper-bg); padding: 2px 6px; border-radius: 4px; }
-.bp-canvas-diagram-fields { display: grid; gap: 0.65rem; width: min(32rem, 75vw); max-width: 100%; box-sizing: border-box; margin-top: 0.55rem; padding: 0.75rem; background: var(--paper-bg); border: 1px solid var(--paper-rule); border-radius: 4px; }
-.bp-canvas-diagram-field { display: grid; gap: 0.3rem; min-width: 0; }
-.bp-canvas-diagram-area, .bp-canvas-diagram-caption { width: 100%; box-sizing: border-box; color: var(--paper-ink); background: transparent; border: 1px solid var(--paper-rule); border-radius: 3px; padding: 0.5rem; }
-.bp-canvas-diagram-editor :is(summary, input, textarea):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+.bp-canvas-diagram-editor[open],
+.bp-canvas-technical:hover .bp-canvas-technical-editor,
+.bp-canvas-technical:focus-within .bp-canvas-technical-editor,
+.bp-canvas-technical-editor[open] { opacity: 1; pointer-events: auto; }
+.bp-canvas-diagram-editor-toggle, .bp-canvas-technical-editor-toggle { cursor: pointer; width: max-content; margin-left: auto; background: var(--paper-bg); padding: 2px 6px; border-radius: 4px; }
+.bp-canvas-diagram-fields, .bp-canvas-technical-fields { display: grid; gap: 0.65rem; width: min(32rem, 75vw); max-width: 100%; box-sizing: border-box; margin-top: 0.55rem; padding: 0.75rem; background: var(--paper-bg); border: 1px solid var(--paper-rule); border-radius: 4px; }
+.bp-canvas-diagram-field, .bp-canvas-technical-field { display: grid; gap: 0.3rem; min-width: 0; }
+.bp-canvas-diagram-area, .bp-canvas-diagram-caption, .bp-canvas-technical-area, .bp-canvas-technical-meta { width: 100%; box-sizing: border-box; color: var(--paper-ink); background: transparent; border: 1px solid var(--paper-rule); border-radius: 3px; padding: 0.5rem; }
+.bp-canvas-diagram-editor :is(summary, input, textarea):focus-visible,
+.bp-canvas-technical-editor :is(summary, input, textarea):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
 
 /* Reference-family configuration floats over the canonical reader render.
    Closed controls therefore add no document rhythm, while the native details /
@@ -1764,7 +1872,7 @@
 .bp-paper-figure-caption-paint {
   display: block; width: 100%; padding: 0; margin: 0; border: 0;
   background: transparent; color: inherit; font: inherit; text-align: inherit;
-  letter-spacing: inherit; word-spacing: inherit;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
   white-space: normal; cursor: text;
 }
 .bp-paper-figure-caption-paint:focus-visible {
@@ -1783,6 +1891,7 @@ textarea.bp-paper-figure-caption-input {
   display: block; width: 100%; min-width: 0; box-sizing: border-box;
   margin: 0; padding: 0; border: 0; border-radius: 0;
   background: transparent; color: inherit; font: inherit;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
   resize: none; overflow: hidden; outline-offset: 3px;
 }
 textarea.bp-paper-figure-caption-input:focus-visible {
@@ -1790,6 +1899,34 @@ textarea.bp-paper-figure-caption-input:focus-visible {
 }
 .bp-paper-section-title-editor {
   position: relative; min-width: 0;
+}
+.bp-paper-edit-form.bp-paper-card-title-form {
+  display: block; margin: 0; padding: 0;
+}
+.bp-paper-card-title-owner {
+  position: relative;
+}
+[data-paper-card-title-paint] {
+  display: block; width: 100%; max-width: 100%; margin: 0; padding: 0;
+  border: 0; border-radius: 0; background: transparent; color: inherit;
+  font: inherit; text-align: inherit; letter-spacing: inherit; word-spacing: inherit;
+  white-space: normal; text-wrap: inherit; overflow-wrap: anywhere; cursor: text;
+}
+textarea.bp-paper-inline-text.bp-paper-card-title-input {
+  display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box;
+  margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent;
+  color: inherit; font: inherit; letter-spacing: inherit; word-spacing: inherit;
+  text-align: inherit; resize: none; overflow: hidden; overflow-wrap: anywhere;
+}
+.bp-paper-card-title-input:not(:focus) {
+  position: absolute; inset: 0; opacity: 0; pointer-events: none;
+  clip-path: inset(50%); contain: size;
+}
+.bp-paper-card-title-owner:has(.bp-paper-card-title-input:focus)
+  > [data-paper-card-title-paint] { display: none; }
+[data-paper-card-title-paint]:focus-visible,
+.bp-paper-card-title-input:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
 }
 .bp-paper-card-action-label-owner {
   display: inline-grid; position: relative; max-width: 100%; vertical-align: baseline;
@@ -1839,6 +1976,7 @@ textarea.bp-paper-inline-text.bp-paper-card-action-label-input {
   margin: 0; padding: 0; border: 0; border-radius: 0;
   background: transparent; color: inherit; font: inherit; font-weight: inherit;
   text-align: inherit; letter-spacing: inherit; word-spacing: inherit;
+  text-rendering: inherit;
   white-space: normal; overflow-wrap: anywhere; cursor: text;
 }
 .bp-paper-section-title-paint:focus-visible,
@@ -1854,7 +1992,8 @@ textarea.bp-paper-inline-text.bp-paper-section-title-input {
   box-sizing: border-box; margin: 0; padding: 0;
   border: 0; border-radius: 0; background: transparent;
   color: inherit; font: inherit; font-weight: inherit; text-align: inherit;
-  letter-spacing: inherit; resize: none; overflow: hidden;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+  resize: none; overflow: hidden;
   overflow-wrap: anywhere;
 }
 [data-paper-section-title-empty="true"]:not(:focus-within) {
@@ -2017,6 +2156,9 @@ textarea.bp-paper-inline-text.bp-paper-link-ref-description-input {
 .bp-section__cell > .bp-paper-edit-wc:first-child .bp-paper-editor-body .ProseMirror > :first-child {
   margin-top: 0;
 }
+.bp-cols__c > :is(.bp-paper-edit-canvas, .bp-paper-edit-wc):first-child .bp-paper-editor-body .ProseMirror > :first-child {
+  margin-top: 0;
+}
 :is(.bp-section__cell, .bp-cols__c) > .bp-paper-contextual-editor:first-child > [data-paper-columns-editor-frame] {
   margin-top: 0;
 }
@@ -2109,6 +2251,8 @@ textarea.bp-paper-inline-text.bp-paper-link-ref-description-input {
   font: inherit;
   color: inherit;
   letter-spacing: inherit;
+  word-spacing: inherit;
+  text-rendering: inherit;
   resize: none;
   overflow: hidden;
   outline-offset: 3px;
@@ -2222,3 +2366,57 @@ textarea.bp-paper-inline-text.bp-paper-link-ref-description-input {
   color: var(--paper-ink); background: var(--paper-bg-deep); font-size: 12px; line-height: 1.5;
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
+
+/* Canvas block controls: keep in lockstep with the standalone editor. */
+/* The expandable container in the canvas: the reader's <details class="bp-expandable"> shape, always open,
+   with the summary as an editable island. */
+/* The canvas wrapper is a div, not <details>, so the reader's `> summary` rules are restated on the island. */
+.bp-canvas-expandable { position: relative; }
+.bp-canvas-expandable::before { content: "▾"; position: absolute; left: 15px; top: 10px; color: var(--paper-ink-soft); pointer-events: none; }
+.bp-canvas-expandable > .bp-expandable__summary { display: block; width: 100%; box-sizing: border-box; padding: 10px 15px 10px 34px; margin: 0; border: 0; background: transparent; font: inherit; font-weight: 700; color: var(--paper-ink); cursor: text; outline: none; }
+.bp-canvas-expandable > .bp-expandable__summary::placeholder { color: var(--paper-ink-faint); font-weight: 400; }
+.ProseMirror-selectednode.bp-canvas-expandable { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
+/* steps / tabs in the canvas: the reader's markup with a title input per row, a remove button and an add
+   button as edit-only chrome. */
+.bp-canvas-row__head { display: flex; align-items: center; gap: 6px; }
+.bp-canvas-row__head > input.bp-canvas-row__title { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; font: inherit; color: var(--paper-ink); outline: none; padding: 0; }
+.bp-canvas-row__head > input.bp-canvas-row__title::placeholder { color: var(--paper-ink-faint); font-weight: 400; }
+.bp-canvas-row__remove, .bp-canvas-rows__add { appearance: none; border: 1px solid var(--paper-chrome-border); background: var(--paper-chrome-bg); color: var(--paper-ink-soft); border-radius: 4px; font: 12px/1 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 7px; cursor: pointer; }
+.bp-canvas-row__remove { opacity: 0; }
+.bp-canvas-row:hover > .bp-canvas-row__head > .bp-canvas-row__remove, .bp-canvas-row:focus-within > .bp-canvas-row__head > .bp-canvas-row__remove { opacity: 1; }
+.bp-canvas-rows__foot { margin: 0.3rem 0 1rem; }
+.bp-canvas-steps > .bp-canvas-row > .bp-canvas-row__head > input.bp-steps__title { font-weight: 700; }
+.bp-canvas-tabs > .bp-canvas-row { padding: 0; }
+.bp-canvas-tabs > .bp-canvas-row > .bp-canvas-row__head { padding: 6px 8px 0; background: var(--paper-bg-deep); border-bottom: 1px solid var(--paper-chrome-border); }
+.bp-canvas-tabs > .bp-canvas-row > .bp-canvas-row__head > input.bp-tabs__tab { font-weight: 700; color: var(--paper-ink); border-bottom: var(--bp-rule-hairline) solid var(--paper-accent); padding: 6px 12px; }
+.bp-canvas-tabs > .bp-canvas-row + .bp-canvas-row { border-top: 1px solid var(--paper-chrome-border); }
+/* find matches (canvas/find-replace.js): the host's bar drives them. */
+.bp-find-match { background: hsl(var(--warn-hsl) / 0.28); border-radius: 2px; box-decoration-break: clone; }
+.bp-find-match--active { background: hsl(var(--warn-hsl) / 0.55); outline: 1px solid var(--paper-accent); }
+/* island atoms (equation / footnotes / contents / video): a preview in the reader's classes over a fields
+   row that hides at rest once the block has data. */
+.bp-canvas-island { position: relative; margin: 1rem 0 0; }
+.bp-canvas-island__empty { padding: 1rem; border: 1px dashed var(--paper-rule); border-radius: 6px; color: var(--paper-ink-soft); font: 0.9rem/1.45 var(--paper-font-sans, system-ui, sans-serif); text-align: center; }
+.bp-canvas-island__fields { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 0.5rem 0 0; }
+.bp-canvas-island__field { display: flex; flex-direction: column; gap: 3px; flex: 1 1 220px; min-width: 0; font: 0.8rem/1.4 var(--paper-font-sans, system-ui, sans-serif); color: var(--paper-ink-soft); }
+.bp-canvas-island__field--bool { flex: 0 0 auto; flex-direction: row; align-items: center; gap: 6px; align-self: flex-end; }
+.bp-canvas-island__input { border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 8px; min-width: 0; }
+.bp-canvas-island__input:focus { outline: none; border-color: var(--paper-accent); }
+textarea.bp-canvas-island__input { resize: vertical; }
+.bp-canvas-island__mono, .bp-canvas-equation__tex { font-family: var(--paper-font-mono, ui-monospace, monospace); }
+.bp-canvas-video video { max-width: 100%; border-radius: 6px; }
+.ProseMirror-selectednode.bp-canvas-island { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
+/* editable-image: the bpImage atom — the picture, or an empty frame, over an alt + url row. */
+.bp-canvas-image { margin: var(--bp-air-figure, 1.6rem) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); max-width: none; box-sizing: border-box; position: relative; }
+.bp-canvas-image-frame { position: relative; }
+.bp-canvas-image-img { display: block; max-width: 100%; height: auto; border-radius: 4px; }
+.bp-canvas-image-empty { display: none; padding: 1.4rem 1rem; border: 1px dashed var(--paper-rule); border-radius: 6px; color: var(--paper-ink-soft); font: 0.9rem/1.45 var(--paper-font-sans, system-ui, sans-serif); text-align: center; }
+.bp-canvas-image--empty .bp-canvas-image-empty { display: block; }
+.bp-canvas-image-chrome { display: flex; gap: 8px; margin: 0.5rem 0 0; }
+.bp-canvas-image-chrome input { flex: 1 1 0; min-width: 0; border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink-soft); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 8px; }
+.bp-canvas-image-chrome input:focus { outline: none; border-color: var(--paper-accent); color: var(--paper-ink); }
+.bp-canvas-image-chrome .bp-canvas-image-src { flex: 2 1 0; }
+.bp-canvas-image-chrome .bp-canvas-image-width { flex: 0 0 90px; }
+.bp-canvas-image-badge { position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: 4px; background: var(--paper-chrome-bg); border: 1px solid var(--paper-chrome-border); color: var(--paper-ink-soft); font: 0.75rem/1.4 var(--paper-font-sans, system-ui, sans-serif); }
+.bp-canvas-image-badge--error { color: var(--bp-tone-danger-fg); border-color: var(--bp-tone-danger-fg); }
+.ProseMirror-selectednode.bp-canvas-image { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }

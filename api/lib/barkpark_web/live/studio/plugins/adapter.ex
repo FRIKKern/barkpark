@@ -77,9 +77,14 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           field: parsed,
           value: ensure_map(value),
           errors: errors_for(assigns, name),
+          warnings: warnings_for(assigns, name),
           on_change: "autosave",
           plugin_name: plugin,
-          path: path
+          path: path,
+          # Picker context for reference / image subfields (Gyldendal E1.6).
+          dataset: Map.get(assigns, :dataset, "production"),
+          scope_prefix: Map.get(assigns, :scope_prefix, ""),
+          api_token_raw: Map.get(assigns, :api_token_raw, "")
         })
 
       "arrayOf" ->
@@ -87,6 +92,7 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           field: parsed,
           value: ensure_list(value),
           errors: errors_for(assigns, name),
+          warnings: warnings_for(assigns, name),
           on_change: "autosave",
           on_reorder: "array_op",
           plugin_name: plugin,
@@ -207,8 +213,22 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
   defp ensure_string(v) when is_binary(v), do: v
   defp ensure_string(_), do: nil
 
-  defp errors_for(%{validation_errors: errs}, name) when is_map(errs), do: errs[name] || %{}
+  # The field's subtree out of `Validation.check_tree/3` (Gyldendal parity
+  # E1.11): a map keyed by subfield name / row index, with the field's own
+  # findings under `:__self__` — a bare list (own findings only, or a flat
+  # legacy verdict) is lifted into that shape so the components never index a
+  # list.
+  defp errors_for(%{validation_errors: errs}, name) when is_map(errs), do: subtree(errs[name])
   defp errors_for(_, _), do: %{}
+
+  defp warnings_for(%{validation_warnings: warns}, name) when is_map(warns),
+    do: subtree(warns[name])
+
+  defp warnings_for(_, _), do: %{}
+
+  defp subtree(map) when is_map(map), do: map
+  defp subtree(list) when is_list(list), do: %{__self__: list}
+  defp subtree(_), do: %{}
 
   # ─── raw map → %Field{} conversion (mirrors SchemaDefinition.parse_field/2,
   # which is private; we deliberately avoid `Code.eval_*` per D7). ─────────

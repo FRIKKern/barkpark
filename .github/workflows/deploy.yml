@@ -41,11 +41,58 @@ on:
         description: "Why this manual deploy is needed (recorded in the run log)"
         required: true
         type: string
+      # ── THE DELIBERATE LOCK BREAK (task-e0e4fa0b709c093e) ─────────────────
+      #
+      # OFF BY DEFAULT, and it is the documented path for a human who knows the
+      # holder is gone. On 2026-09-22 fifteen `instance` jobs exited 15 after
+      # ~30 min each behind one holder (run 35698504994, 07:14:06Z-12:33:49Z),
+      # and the only repair anyone had was to wait. HOW THAT LOCK ACTUALLY
+      # CLEARED WAS NEVER ESTABLISHED — whether the owner cleared it or the
+      # holder exited on its own is unknown, and this input is not a remedy for
+      # a diagnosed cause. It is a repair for having had no repair.
+      #
+      # It does NOT consult the age or liveness tests that instance-deploy.sh's
+      # automatic stale-holder policy uses; a human asserting "the holder is
+      # gone" is the whole input. The two paths log DIFFERENT wording
+      # ("MANUAL" vs "AUTOMATIC") precisely so an operator reading the run
+      # afterwards can tell which one fired.
+      break_deploy_lock:
+        description: "Break a stuck deploy lock on the content instance before deploying. Only when you KNOW the holder is gone."
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
       - "cloud/**"
       - "api/**"
+      # DEPLOY-EXCLUSION (task-75f45c6baba2e633). A merge confined to api/test/**
+      # cannot change the deployed artifact: api/mix.exs elixirc_paths(:test) is
+      # ["lib", "test/support"] and elixirc_paths(_) is ["lib"], so a prod build
+      # compiles NOTHING under api/test/ — support modules included. MEASURED
+      # 2026-09-07 on origin/main --first-parent --since="7 days ago": of the 890
+      # merges that matched this path filter at all, 86 (9.7%, ~12/day) matched
+      # ONLY because of files under api/test/, and each one took a full
+      # rebuild-and-swap of guerrilla plus a health check for a byte-identical
+      # release. Re-measured after this change; see the PR for the window and sha.
+      #
+      # GitHub applies the LAST matching pattern per changed file, so this line
+      # must stay AFTER "api/**". A merge touching api/lib AND api/test still runs:
+      # the api/lib file's last match is the positive "api/**".
+      #
+      # THE ONE RESIDUAL, read rather than assumed: api/lib/barkpark/search/
+      # golden_eval.ex:187 DOES read api/test/search_golden/<surface>/test.jsonl at
+      # runtime (File.read!). Its only caller is `mix search.eval`
+      # (api/lib/mix/tasks/search.eval.ex:39), a Mix task; a release has no Mix, no
+      # api/test/ tree, and nothing in deploy/, scripts/ or .github/ invokes
+      # search.eval (grep: zero hits). The six api/lib/mix/tasks/barkpark.*.gen_*
+      # generators that name test/support are File.write!/mkdir_p! only — they
+      # WRITE fixtures, they never read them. The other six api/lib mentions of
+      # test/support are comments and @moduledoc prose.
+      #
+      # Kept in step by scripts/check-deployyml-filters.sh: its exclusion arm pins
+      # this entry's presence, proves the `changes` classifier below drops the same
+      # subtree BEHAVIOURALLY, and proves the parent tree still deploys.
+      - "!api/test/**"
       - "internal/**"
       - "cmd/**"
       - "deploy/**"
@@ -64,10 +111,13 @@ on:
       # a co-triggering merge — without this line a runner/.mjs-only change lands
       # on main but never reaches guerrilla (charter D275, W35).
       - "scripts/connectors/**"
-      # deploy-filter-exempt: editing THIS workflow deploys nothing by itself —
-      # the next real code merge carries it. Marked explicitly so
+      # deploy-filter-exempt[cp,instance]: editing THIS workflow deploys nothing
+      # by itself — the next real code merge carries it. Marked explicitly, and
+      # BOUNDED to the two jobs it deliberately does not target, so
       # scripts/check-deployyml-filters.sh can tell "deliberately targetless"
-      # from "silently dropped".
+      # from "silently dropped": an exempt entry must be a single file (a tree
+      # that starts this workflow must deploy something) and every named job's
+      # regex must indeed NOT match it.
       - ".github/workflows/deploy.yml"
 
 # ── ONE GROUP PER PUSH SHA (task-8e5eae5c71635a5e) ──────────────────────────
@@ -131,26 +181,177 @@ jobs:
           DISPATCH_TARGETS: ${{ inputs.targets }}
           DISPATCH_REASON: ${{ inputs.reason }}
         run: |
-          # Diff since the last SUCCESSFUL deploy of THIS workflow, not just the
-          # previous push. Every push now gets its own concurrency group (see the
-          # stanza above), so a run is no longer evicted before it starts — but it
-          # can still be OVERTAKEN: the box resets to origin/main's tip, so the
-          # run ahead of us routinely ships commits from later pushes than its
-          # own. Basing the path filter on `github.event.before` (this run's own
+          # ── SUPERSEDED AT START — exit before ANY remote box mutation ───────
+          #
+          # (task-01f48337d83a0d15) A merge storm queues N per-sha deploy runs
+          # (MEASURED 2026-09-11T19:44Z: 8 in_progress + 4 queued,
+          # 30d7c357c..3a9faf139) and only the NEWEST main-ancestry sha matters.
+          # The "already covered" exit below fires only once a newer sha has
+          # COMPLETED, so it cannot drain a pile that is still IN FLIGHT. This
+          # fires while a newer sha is still in_progress/queued: the run sets
+          # cp=false + instance=false and exits 0, so the deploy jobs SKIP and no
+          # scp/ssh — no remote box mutation — ever happens for this sha.
+          #
+          # ANCESTRY, NEVER WALL CLOCK. "Newer" is descendancy on main via
+          # `git merge-base --is-ancestor` (scripts/deploy-supersede-exit.sh,
+          # which borrows scripts/deploy-convergence-check.sh's is_ancestor
+          # discipline). A run created later can carry an OLDER commit; trusting
+          # creation time is task-0c3069135d1b4bfd's exact defect.
+          #
+          # NEVER A CANCEL (honest-gates D12). This run decides only about
+          # ITSELF and exits at START. It never runs `gh run cancel`, never
+          # touches another run, and the newest run is never superseded (no
+          # in-flight candidate is its strict descendant). `concurrency` keeps
+          # `cancel-in-progress: false`; scripts/never-cancel-main-check.sh stays
+          # green because nothing here adds a bare `cancel-in-progress: true`.
+          #
+          # PUSH ONLY, same reason as the already-covered exit: a
+          # workflow_dispatch is the DELIBERATE repair named in
+          # report-convergence-failure's issue body, and must never talk itself
+          # out of deploying.
+          #
+          # FAIL-OPEN. Only exit code 3 (a clean, ancestry-proven "a newer run
+          # is in flight") skips. rc 0 (we are newest) and rc 2 (could not look)
+          # both fall through to a normal deploy — a redundant deploy coalesces
+          # on the box's lock, a wrongly-skipped one strands a commit.
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            # in_progress + queued deploy.yml runs on main, one per line as
+            # "<run_id> <sha> <status> <created_at>". created_at is carried only
+            # to prove the decision ignores it; --limit is generous so a wide
+            # merge storm is fully enumerated. A gh failure yields an empty list
+            # and the decider then PROCEEDS (fail-open).
+            super_rc=0
+            gh run list --workflow=deploy.yml --branch=main --limit 80 \
+                --json databaseId,headSha,status,createdAt \
+                --jq '.[] | select(.status=="in_progress" or .status=="queued") | "\(.databaseId) \(.headSha) \(.status) \(.createdAt)"' \
+              2>/dev/null \
+              | bash scripts/deploy-supersede-exit.sh decide \
+                  --our-run-id "$GITHUB_RUN_ID" --our-sha "$GITHUB_SHA" || super_rc=$?
+            if [ "$super_rc" -eq 3 ]; then
+              echo "::notice title=deploy superseded at start::a newer main-ancestry sha is already in_progress/queued; skipping the deploy jobs. This is NOT a failure — the deploy legs are SKIPPED and no box is touched."
+              echo "cp=false" >> "$GITHUB_OUTPUT"
+              echo "instance=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [ "$super_rc" -ne 0 ]; then
+              echo "::warning::deploy-supersede-exit could not decide (rc=${super_rc}) — proceeding to deploy (fail-open)."
+            fi
+          fi
+          # ── THE ANCHOR IS THE LAST RUN THAT DEPLOYED, NOT THE LAST THAT
+          #    SUCCEEDED (task-220b847a8072f82e) ────────────────────────────────
+          #
+          # Diff since the last deploy of THIS workflow, not just the previous
+          # push. Every push now gets its own concurrency group (see the stanza
+          # above), so a run is no longer evicted before it starts — but it can
+          # still be OVERTAKEN: the box resets to origin/main's tip, so the run
+          # ahead of us routinely ships commits from later pushes than its own.
+          # Basing the path filter on `github.event.before` (this run's own
           # range) would then re-deploy a range someone else already carried, and
           # under the OLD single-group scheme would silently DROP the paths of an
-          # evicted run. Anchoring to the last success means a run always deploys
+          # evicted run. Anchoring to the last DEPLOY means a run always deploys
           # the UNION of every push not yet shipped — no range is ever skipped —
           # while still letting a docs-only stretch resolve to "nothing changed".
-          base="$(gh run list --workflow=deploy.yml --branch=main --status=success \
-                    --limit=1 --json headSha --jq '.[0].headSha' 2>/dev/null || true)"
+          #
+          # WHY NOT RUN-LEVEL `--status=success`, WHICH THIS USED TO BE. Two arms
+          # of THIS VERY STEP finish a run in seconds having deployed nothing —
+          # "superseded at start" (deploy-supersede-exit.sh rc 3, above) and
+          # "already covered" (below). Both write cp=false + instance=false and
+          # `exit 0`, and a run whose only job succeeded is a `success` run. So
+          # the last SUCCESSFUL run was routinely a run that touched no box, the
+          # next run anchored its diff on that sha, the range collapsed, and
+          # every deployable file merged BEFORE it dropped out of the
+          # classification under a green run. MEASURED 2026-09-18: run
+          # 35334681747 (bfbdd50ff) exited superseded -> success; run 35335602083
+          # (ffb3b90c9) then printed `diff base: bfbdd50ff…` and classified
+          # instance=false while api/lib changes from #19327 sat undeployed.
+          # Run-success stopped implying box-deployed when those exits were added
+          # (#18010 and the already-covered arm) and nobody moved the anchor.
+          #
+          # SO THE ANCHOR NOW KEYS ON A LEG, NOT ON THE RUN: the newest run on
+          # main whose `control-plane` or `instance` JOB concluded success. Those
+          # jobs are `if: needs.changes.outputs.cp/instance == 'true'`, so an
+          # early-exit run has them SKIPPED, never success — a leg conclusion is
+          # the one thing a run that touched no box cannot fake.
+          #
+          # WHY THE JOBS API AND NOT THE ALTERNATIVES. (a) A marker artifact
+          # written only by a leg needs `actions: write` plus artifact upload and
+          # cross-run download, adds retention as a new failure mode, and is
+          # blind to every run in history that predates it — the first run after
+          # this merge would find no marker at all. (b) The box's own served sha
+          # (barkpark.cloud/health, guerrilla status.json) is TWO shas for two
+          # hosts where the diff needs ONE anchor, can be a hand deploy that is
+          # no run head, and makes an unreachable box strand the anchor. (c) The
+          # jobs API needs only `actions: read`, which this job already holds,
+          # and answers for runs that happened before this change shipped.
+          #
+          # FAIL-OPEN, like everything around it. A gh failure, an unparseable
+          # answer, or an unknown conclusion all count as "did not deploy", which
+          # walks us to an OLDER anchor — a WIDER diff. A redundant deploy
+          # coalesces on the box's lock; a narrowed one strands a commit. If no
+          # run in the scanned window proves a leg, `base` becomes the OLDEST
+          # scanned success (widest available range) and `last_deployed` stays
+          # EMPTY, which disarms the already-covered exit rather than letting it
+          # read an unproven sha as "on the box".
+          base=""
           # Kept SEPARATELY from $base, because the two fallbacks below replace
           # $base with a plain diff anchor. A parent commit says where to start a
           # diff; it is NOT evidence that anything was ever deployed, and the
-          # already-covered test below must never read one as if it were.
+          # already-covered test below must never read one as if it were. Only a
+          # run with a leg-proven deploy is ever written here.
           last_deployed=""
-          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
-            last_deployed="$base"
+          anchor_widest=""
+          # ── A SHORT SCAN IS NEVER A NARROWED BASE (task-5c4cd03a726b0a0c) ──
+          #
+          # The loop below reads its candidates from fd 0. Any child in the body
+          # that also reads fd 0 — an `ssh` without -n, a `-` operand, a
+          # `docker exec -i` — swallows the rest of the heredoc; the loop then
+          # ends after ONE iteration and NOTHING says so, because "read returned
+          # non-zero" looks identical whether stdin was exhausted or STOLEN.
+          # The list is NEWEST FIRST, so $anchor_widest is left holding the
+          # NEWEST candidate instead of the oldest scanned: the diff NARROWS,
+          # and :171 above says what that costs — a narrowed base strands a
+          # commit (the 2026-09-18 incident, task-220b847a8072f82e).
+          #
+          # So COUNT, do not merely guard. The `</dev/null` redirections added
+          # to today's children are fd discipline the next edit can undo; the
+          # identity below notices a short scan whoever caused it, including a
+          # cause nobody has thought of. $anchor_broke records the ONE
+          # legitimate early exit — a leg-proven anchor was found — where
+          # examined < listed is CORRECT and the unscanned tail cannot matter
+          # because $base is already set.
+          anchor_candidates="$(gh run list --workflow=deploy.yml --branch=main --status=success \
+              --limit=30 --json databaseId,headSha \
+              --jq '.[] | "\(.databaseId) \(.headSha)"' 2>/dev/null || true)"
+          anchor_listed="$(printf '%s\n' "$anchor_candidates" | awk 'NF' | wc -l | tr -d ' ')"
+          anchor_examined=0
+          anchor_broke=0
+          while read -r cand_id cand_sha; do
+            [ -n "$cand_id" ] && [ -n "$cand_sha" ] || continue
+            anchor_examined=$((anchor_examined + 1))
+            git cat-file -e "$cand_sha^{commit}" </dev/null 2>/dev/null || continue
+            anchor_widest="$cand_sha"
+            cand_legs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${cand_id}/jobs?per_page=100" \
+                           --jq '[.jobs[] | select(.name == "control-plane" or .name == "instance") | select(.conclusion == "success")] | length' \
+                         </dev/null 2>/dev/null || echo 0)"
+            if [ "${cand_legs:-0}" -gt 0 ] 2>/dev/null; then
+              base="$cand_sha"
+              last_deployed="$cand_sha"
+              anchor_broke=1
+              echo "anchor: run $cand_id ($cand_sha) is the newest run whose control-plane/instance job concluded success"
+              break
+            fi
+            echo "anchor: run $cand_id ($cand_sha) succeeded but no deploy leg ran (superseded-at-start / already-covered) — not an anchor"
+          done <<ANCHOR_RUNS
+          $anchor_candidates
+          ANCHOR_RUNS
+          echo "anchor: candidates examined ${anchor_examined} of ${anchor_listed} listed"
+          if [ "$anchor_broke" -eq 0 ] && [ "$anchor_examined" -ne "$anchor_listed" ]; then
+            echo "::warning title=anchor scan short read::examined ${anchor_examined} of ${anchor_listed} listed candidates and proved no deploy leg — the scan ended BEFORE its input was exhausted, so \$anchor_widest holds the NEWEST candidate, not the oldest scanned. Widening to it would NARROW the diff and strand a commit; falling back to the safe base instead."
+            anchor_widest=""
+          fi
+          if [ -z "$base" ] && [ -n "$anchor_widest" ]; then
+            base="$anchor_widest"
+            echo "anchor: no run in the scanned window proved a deploy leg — widening to the OLDEST scanned success $base (already-covered stays disarmed)"
           fi
           if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
             base="${{ github.event.before }}"
@@ -208,12 +409,36 @@ jobs:
           # against both shapes and reds if this line regresses.
           changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "$base" "${{ github.sha }}" | tr '\0' '\n')"
           echo "changed files:"; echo "$changed"
+          # ── THE DEPLOY-EXCLUSION ARM (task-75f45c6baba2e633) ───────────────
+          #
+          # The SECOND half of the api/test/** exclusion. on.push.paths above
+          # stops this workflow STARTING for an api/test-only merge; this stops
+          # the classifier from dispatching one when an api/test file rides in on
+          # some other run's diff range. Fixing only one arm is inert: the
+          # `changes` job's diff is anchored to the LAST SUCCESSFUL DEPLOY, not to
+          # this push, so it routinely sees files from pushes that never started a
+          # run of their own — an api/test-only merge that lands between two
+          # deploys reaches this line even though its own push was filtered out.
+          #
+          # `grep -vE`, deliberately NOT the -qE spelling: the dispatch-filter
+          # extractors in scripts/check-deployyml-filters.sh and
+          # scripts/deploy-convergence-check.sh harvest single-quoted -qE patterns
+          # inside this job as DISPATCH filters (and fail closed on a shape they
+          # cannot decompose), and a SUBTRACTIVE filter is not a dispatch. Writing
+          # the exclusion with -vE keeps it out of that harvest. `|| true`
+          # because grep -v exits 1 when it drops every line, which is exactly the
+          # api/test-only case this exists for.
+          #
+          # The prefix is EXACT — `api/test/`, not `api/test` — so a sibling named
+          # api/testing/ is not silently excluded too.
+          deployable="$(printf '%s\n' "$changed" | grep -vE '^api/test/' || true)"
+          echo "deployable files (api/test/** excluded — a prod build compiles only api/lib):"; echo "$deployable"
           # internal/ + cmd/ ride the control plane too: bp-provisioner is
           # cross-built from ./cmd/barkpark-provisioner (code under
           # internal/cli/cloud), so an internal-only worker fix must roll the
           # CP or the stale binary keeps provisioning (bit us 2026-07-24: the
           # secrets-chain fix deployed guerrilla but left the CP worker broken).
-          if echo "$changed" | grep -qE '^(cloud|deploy|internal|cmd)/'; then cp=true; else cp=false; fi
+          if echo "$deployable" | grep -qE '^(cloud|deploy|internal|cmd)/'; then cp=true; else cp=false; fi
           # connectors/ rides the content instance: instance-deploy.sh npm-installs
           # it and restarts barkpark-connectors behind the /connectors route.
           # templates/ rides it too (stw9, charter D57a): the box builds sites FROM
@@ -235,7 +460,7 @@ jobs:
           # The TARGET arm of check-deployyml-filters.sh pins BOTH halves of this
           # prefix by name (cmd -> instance, cmd -> cp): the forward arm cannot see
           # it, because a path matched by the WRONG job is still a path matched.
-          if echo "$changed" | grep -qE '^(api|internal|cmd|deploy|connectors|templates|scripts/connectors)/'; then instance=true; else instance=false; fi
+          if echo "$deployable" | grep -qE '^(api|internal|cmd|deploy|connectors|templates|scripts/connectors)/'; then instance=true; else instance=false; fi
           # THE OVERRIDE, AND ONLY ON A DISPATCH. A push can never reach this —
           # `github.event_name` is the trigger, not an input — so the automatic
           # path is byte-for-byte what it was. `auto` deliberately falls through
@@ -266,8 +491,17 @@ jobs:
         # only the bare form, so the run that is ABOUT TO DEPLOY took the gate's
         # green on trust while never asking whether the gate could still lose.
         run: |
-          bash scripts/check-deploy-smoke.sh --selftest
-          bash scripts/check-deploy-smoke.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/check-deploy-smoke.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/check-deploy-smoke.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
   control-plane:
     needs: changes
@@ -291,8 +525,10 @@ jobs:
         # empty, which the recorder records as `transition: unknown` rather than
         # inventing a range.
         run: |
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
           sha=""
-          if body="$(curl -s --max-time 15 https://barkpark.cloud/health)"; then
+          if body="$(bp_curl_body -s --max-time 15 https://barkpark.cloud/health)"; then
             sha="$(printf '%s' "$body" | jq -r '.git_sha // empty')"
           fi
           echo "control plane was serving: ${sha:-<unknown>}"
@@ -301,7 +537,14 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Cross-build provisioner (linux/amd64)
-        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bp-provisioner ./cmd/barkpark-provisioner
+        # -ldflags -X stamps the binary with the commit it was built from, so the
+        # box can state which PROVISIONER it runs and not only which APP. The two
+        # legitimately diverge: this build is actions/checkout@v4 at $GITHUB_SHA,
+        # while cp-deploy.sh `git pull --ff-only origin main` ON THE BOX can land
+        # the app AHEAD of it under back-to-back merges. Pattern copied from the
+        # Makefile's LDFLAGS (`cli-build`, Makefile:173) — a plain `go build`
+        # leaves the var EMPTY and `--version` then prints nothing on stdout.
+        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-X main.buildSHA=$GITHUB_SHA" -o bp-provisioner ./cmd/barkpark-provisioner
       - name: Deploy control plane over SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -345,13 +588,15 @@ jobs:
         # scripts/check-deploy-smoke.sh is the tripwire that stops either
         # invariant regressing.
         run: |
-          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://barkpark.cloud/")"
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
+          code="$(bp_curl_code -s -o /dev/null --max-time 15 "https://barkpark.cloud/")"
           echo "https://barkpark.cloud/ = $code"
           echo "$code" | grep -qE '^(200|301|302)$'
-          dbcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+          dbcode="$(bp_curl_code -s -o /dev/null --max-time 15 \
             -X POST -H 'content-type: application/json' \
             -d '{"email":"deploy-smoke-probe@invalid.example","password":"x"}' \
-            "https://barkpark.cloud/v1/auth/login" || true)"
+            "https://barkpark.cloud/v1/auth/login" || echo 000)"
           echo "https://barkpark.cloud/v1/auth/login (bad creds) = $dbcode"
           test "$dbcode" = "401"
       - name: Assert the control plane serves this commit or a descendant
@@ -384,6 +629,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
           # The settle window exists ONLY for transport. It EXPIRES INTO A FAILURE,
           # and it is never spent on a clean verdict: a `behind` or `diverged`
           # answer is retried ZERO times, because retrying a real regression only
@@ -397,8 +644,11 @@ jobs:
             attempt=$((attempt + 1))
             served=""
             body=""
-            if ! body="$(curl -sS --max-time 15 https://barkpark.cloud/health 2>&1)"; then
-              reason="/health was unreachable: $(printf '%s' "$body" | head -c 200)"
+            # stderr to a FILE, not 2>&1: bp_curl_body narrates a 429 backoff on
+            # stderr, and a merged stream would put that prose in front of the JSON
+            # and make jq read a box that answered as a box with no git_sha.
+            if ! body="$(bp_curl_body -sS --max-time 15 https://barkpark.cloud/health 2>"${RUNNER_TEMP:-/tmp}/cp-health.err")"; then
+              reason="/health was unreachable: $(head -c 200 "${RUNNER_TEMP:-/tmp}/cp-health.err" 2>/dev/null)"
             else
               # `-e` plus `// empty` is the NULL ARM: `jq -r '.git_sha'` prints the
               # four-character string `null` for a null value, and that string would
@@ -501,6 +751,10 @@ jobs:
           # bucket. Secret unset ⇒ empty ⇒ the script writes a commented
           # placeholder and logs the gap; the deploy is never blocked on it.
           CP_HOST: ${{ secrets.CP_HOST }}
+          # Read as a SHELL VARIABLE, same law as DISPATCH_TARGETS above: a
+          # `${{ }}` expansion lands as raw text in the generated shell. Empty on
+          # a push event, which the normalisation below reads as off.
+          DISPATCH_BREAK_LOCK: ${{ inputs.break_deploy_lock }}
         run: |
           install -m 600 /dev/null /tmp/deploy_key
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
@@ -508,11 +762,22 @@ jobs:
           SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
           # PER-RUN path — same clobber class as the control-plane leg above.
           R="${GITHUB_RUN_ID}"
+          # NORMALISED TO A LITERAL 0 OR 1 BEFORE it reaches the remote command
+          # line. The input is typed boolean so GitHub only ever sends
+          # true/false, but the remote side is a string-concatenated shell
+          # command and this variable is the only thing that decides whether a
+          # production lock gets broken — so nothing but the two characters this
+          # branch can produce is allowed to travel.
+          BREAK_LOCK=0
+          if [ "${DISPATCH_BREAK_LOCK:-false}" = "true" ]; then
+            BREAK_LOCK=1
+            echo "::warning::break_deploy_lock=true — if the content instance's deploy lock is held, this run will END its holder. This is the MANUAL path; it does not consult the stale-holder age or liveness tests."
+          fi
           $SCP deploy/instance-deploy.sh "root@${GUERRILLA_HOST}:/tmp/instance-deploy.$R.sh"
           # The remote env assignment is quoted on the REMOTE side too, so a
           # malformed secret can only ever land in the script's validated variable
           # — never split into extra words of the remote command line.
-          $SSH "root@${GUERRILLA_HOST}" "BARKPARK_CLOUD_EGRESS_IPS='${CP_HOST}' bash /tmp/instance-deploy.$R.sh; rc=\$?; rm -f /tmp/instance-deploy.$R.sh; exit \$rc"
+          $SSH "root@${GUERRILLA_HOST}" "BARKPARK_CLOUD_EGRESS_IPS='${CP_HOST}' BARKPARK_DEPLOY_LOCK_BREAK='${BREAK_LOCK}' bash /tmp/instance-deploy.$R.sh; rc=\$?; rm -f /tmp/instance-deploy.$R.sh; exit \$rc"
       - name: Smoke test
         # THREE assertions, because the single `test "$code" = "200"` this step
         # used to be covers the dead-pool class and NOTHING else (charter D369,
@@ -552,16 +817,18 @@ jobs:
         # secret repointed at one box certify another. The deploy steps above own
         # that secret; this step asserts about the public name, and says so.
         run: |
-          code="$(curl -s -o /tmp/instance-schemas.json -w '%{http_code}' --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
+          code="$(bp_curl_code -s -o /tmp/instance-schemas.json --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
           echo "guerrilla /api/schemas = $code"
           test "$code" = "200"
           count="$(jq -e 'if type == "array" then length else error("not a JSON array") end' /tmp/instance-schemas.json)"
           echo "guerrilla /api/schemas catalog entries = $count"
           test "$count" -gt 0
-          dbcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+          dbcode="$(bp_curl_code -s -o /dev/null --max-time 15 \
             -X POST -H 'content-type: application/json' \
             -d '{"email":"deploy-smoke-probe@invalid.example","password":"x"}' \
-            "https://guerrilla.barkpark.cloud/v1/auth/login" || true)"
+            "https://guerrilla.barkpark.cloud/v1/auth/login" || echo 000)"
           echo "https://guerrilla.barkpark.cloud/v1/auth/login (bad creds) = $dbcode"
           test "$dbcode" = "401"
       - name: Assert the content instance serves this commit or a descendant
@@ -584,6 +851,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
           # Same contract as the control-plane assertion: the window is for
           # transport only, it EXPIRES INTO A FAILURE, and a clean `behind` or
           # `diverged` verdict is never retried.
@@ -596,8 +865,9 @@ jobs:
             attempt=$((attempt + 1))
             served=""
             body=""
-            if ! body="$(curl -sS --max-time 15 https://guerrilla.barkpark.cloud/status.json 2>&1)"; then
-              reason="/status.json was unreachable: $(printf '%s' "$body" | head -c 200)"
+            # stderr to a FILE, not 2>&1 — see the control-plane twin above.
+            if ! body="$(bp_curl_body -sS --max-time 15 https://guerrilla.barkpark.cloud/status.json 2>"${RUNNER_TEMP:-/tmp}/inst-status.err")"; then
+              reason="/status.json was unreachable: $(head -c 200 "${RUNNER_TEMP:-/tmp}/inst-status.err" 2>/dev/null)"
             else
               # NULL ARM, as above: `jq -r '.commit'` would print the literal
               # four-character string `null` and hand it to the oracle.
@@ -713,8 +983,21 @@ jobs:
     #     deploys nothing reports nothing.
     #
     #   * `failure()` NOT `always()`. `failure()` is FALSE for `cancelled`, and
-    #     that is deliberate: 344 of the window's 1,378 runs were cancelled, and
-    #     a cancellation here is never a lost delivery. It is now nearly extinct
+    #     that is deliberate: a cancellation here is never a lost delivery.
+    #     EVIDENCE, AND ITS DATE. The pair once quoted here — 344 of 1,378 runs
+    #     cancelled, ~25% — was written with NO window and NO run range, so it
+    #     could not be reproduced or aged; it is HISTORY, not a live fact, and
+    #     is kept only to date the reasoning. Re-derived 2026-09-11 over the
+    #     last 100 deploy.yml runs, run ids 34548108045..34589153315, window
+    #     2026-09-11T00:49:15Z-2026-09-11T10:25:35Z: 0 cancelled, 15 failure,
+    #     85 success — 0%, not 25%, which is the drift this comment could not
+    #     show. Nothing here quotes a rate any more: `scripts/crown-reconcile.sh`
+    #     prints CANCEL RATE, LIVE with its denominator every scheduled run
+    #     (`.github/workflows/crown-reconcile.yml`, `cron: 5 */6 * * *`), and
+    #     anyone can re-measure in one command:
+    #       gh run list -R FRIKKern/barkpark --workflow=deploy.yml --limit 100 \
+    #         --json conclusion,createdAt,databaseId
+    #     It is now nearly extinct
     #     as well — since task-8e5eae5c71635a5e each push holds its OWN
     #     concurrency group, so no queued push run is evicted by the next merge;
     #     what remains is a hand-cancel or a superseded dispatch. Either way
@@ -752,8 +1035,10 @@ jobs:
     # (dr-w33-s4, decided at review). Four other alert guards in this repository
     # widened to `failure() || cancelled()` this wave, because on a SCHEDULED
     # workflow a cancelled run is silence wearing a non-red conclusion. Here it
-    # is not: the bullet forty lines above already measured it — 344 of 1,378
-    # runs cancelled, `concurrency` is `cancel-in-progress: false`, and the
+    # is not: the bullet above carries the measurement WITH the window and run
+    # range it was taken over, and names the scheduled job that re-derives it —
+    # read the rate there, never from this line. `concurrency` is
+    # `cancel-in-progress: false`, and the
     # `changes` job anchors its diff base to the last SUCCESSFUL run, so the next
     # run deploys the UNION of every push not yet shipped. Since
     # task-8e5eae5c71635a5e a push run is not even EVICTABLE — its concurrency
@@ -1002,6 +1287,8 @@ jobs:
           INSTANCE_SERVED_SHA: ${{ needs.instance.outputs.served_sha }}
           INSTANCE_SERVING_SINCE: ${{ needs.instance.outputs.serving_since }}
         run: |
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
           # Same law as the clocks step: read every rc, exit 0, and set
           # `delivered=false` so report-recorder-failure below can be the red.
           set +e
@@ -1030,7 +1317,25 @@ jobs:
           # author's local commit time, which is not a merge instant at all —
           # and `%cd` cannot say "there was no merge". That case is the NULL arm
           # below; 200/200 commits on main today are GitHub-committed.
-          GITHUB_MERGE_COMMITTER="noreply@github.com"
+          #
+          # THE LITERAL IS NOT WRITTEN HERE ANY MORE, and that is the whole
+          # point of this read. It used to be one hard-coded address in this
+          # file, keying an arm that fails SILENTLY: the day merges start
+          # arriving under another identity — a merge queue, a bot, GitHub
+          # changing the address — every row's `merged_at` goes NULL, this job
+          # still reports `delivered=true`, and nothing anywhere reds. The
+          # address now has exactly one definition, in
+          # scripts/merged-at-committer-tripwire.sh, which is also the CHECK
+          # that loses when it stops matching reality (run over this job's own
+          # ranges below, and mutation-proved by
+          # scripts/merged-at-committer-tripwire.test.sh in shell-harnesses.yml).
+          # An empty read is not laundered into the old default: it lands every
+          # row on the NULL arm, which is exactly what the tripwire screams at.
+          MERGED_AT_TRIPWIRE="${GITHUB_WORKSPACE}/scripts/merged-at-committer-tripwire.sh"
+          GITHUB_MERGE_COMMITTER="$(bash "${GITHUB_WORKSPACE}/scripts/merged-at-committer-tripwire.sh" --print-committer)"
+          if [ -z "$GITHUB_MERGE_COMMITTER" ]; then
+            echo "::error::scripts/merged-at-committer-tripwire.sh did not name a merge committer — every row this run builds will land on merged_at's NULL arm"
+          fi
           delivered=true
 
           echo "delivering_ref_sha (github.sha, the TRIGGER — never a row's sha): ${DELIVERING_REF_SHA}"
@@ -1083,9 +1388,14 @@ jobs:
           # upper bound is a real datum; it is NOT the flip instant.
           CP_SERVED_SHA=""
           CP_SERVING_SINCE=""
+          # THE BASIS, AS A WORD THE TABLE CAN HOLD (W29). Not a new measurement:
+          # the two lines below already SAY this in prose, and until now nothing
+          # wrote it down, so a reader of platform_deliveries could not tell a
+          # process-start upper bound from a flip instant.
+          CP_SERVING_SINCE_BASIS="process_start"
           if [ "$CP_RESULT" = "success" ]; then
-            health="$(curl -s --max-time 15 https://barkpark.cloud/health)"
-            health_rc=$?
+            health_rc=0
+            health="$(bp_curl_body -s --max-time 15 https://barkpark.cloud/health)" || health_rc=$?
             if [ "$health_rc" -ne 0 ]; then
               echo "::error::/health did not answer (rc=$health_rc) — the control plane cannot say what it is serving, so the cp leg of run ${RUN_ID} records NOTHING"
               delivered=false
@@ -1111,6 +1421,7 @@ jobs:
           # name — reading it would MINT the first_seen_at it claims to observe.
           INSTANCE_SERVED=""
           INSTANCE_SINCE=""
+          INSTANCE_SERVING_SINCE_BASIS="deploy_flip_mtime"
           if [ "$INSTANCE_RESULT" = "success" ]; then
             INSTANCE_SERVED="$(resolve_served instance "$INSTANCE_SERVED_SHA")"
             if [ $? -ne 0 ] || [ -z "$INSTANCE_SERVED" ]; then
@@ -1134,6 +1445,14 @@ jobs:
             build="$4"
             out="$5"
             served="$6"
+            # WHICH CLOCK produced $serving (W29). Passed in by the caller rather
+            # than derived from $target here, so the word sits beside the code
+            # that actually read the value: the cp leg's comes from /health,
+            # whose own payload calls it process-derived, and the instance leg's
+            # is the mtime of .instance-deploy-last. Empty when this leg captured
+            # no serving_since at all — then no basis key is emitted either, and
+            # the column reads NULL: "not recorded", never a third basis.
+            serving_basis="$7"
             rangefile="/tmp/pd-range-${target}.txt"
             transition=unknown
             measured=0
@@ -1253,12 +1572,13 @@ jobs:
               --arg prev "$prev" \
               --arg transition "$transition" \
               --arg serving "$serving" \
+              --arg serving_basis "$serving_basis" \
               --arg merge_committer "$GITHUB_MERGE_COMMITTER" \
               --argjson measured "$measured" \
               --argjson queued "$QUEUED" \
               --argjson self "$SELF" \
               --argjson build "$build" \
-              '$lines | split("\n") | map(select(length > 0)) | map(split(" ")) | map({sha: .[0], delivering_run_id: $run, first_seen_at: $first_seen, merged_at: (if .[2] == $merge_committer then .[1] else null end), target: $target, queued_seconds: $queued, queued_self_seconds: $self, queued_pickup_seconds: null, queued_stall_seconds: null, build_seconds: $build, transition: $transition} + (if $measured == 1 then {carried: (.[0] != $head)} else {} end) + (if ($prev | length) > 0 then {previous_sha: $prev} else {} end) + (if ($serving | length) > 0 then {serving_since: $serving} else {} end))' > "$out"
+              '$lines | split("\n") | map(select(length > 0)) | map(split(" ")) | map({sha: .[0], delivering_run_id: $run, first_seen_at: $first_seen, merged_at: (if .[2] == $merge_committer then .[1] else null end), target: $target, queued_seconds: $queued, queued_self_seconds: $self, queued_pickup_seconds: null, queued_stall_seconds: null, build_seconds: $build, transition: $transition} + (if $measured == 1 then {carried: (.[0] != $head)} else {} end) + (if ($prev | length) > 0 then {previous_sha: $prev} else {} end) + (if ($serving | length) > 0 then {serving_since: $serving} else {} end) + (if ($serving | length) > 0 and ($serving_basis | length) > 0 then {serving_since_basis: $serving_basis} else {} end))' > "$out"
             if [ $? -ne 0 ]; then
               echo "::warning::${target}: the row payload could not be built — no row for this leg"
               printf '[]' > "$out"
@@ -1360,7 +1680,7 @@ jobs:
           printf '[]' > /tmp/pd-rows-cp.json
           printf '[]' > /tmp/pd-rows-instance.json
           if [ "$CP_RESULT" = "success" ] && [ -n "$CP_SERVED_SHA" ]; then
-            rows_for cp "$CP_PREVIOUS_SHA" "$CP_SERVING_SINCE" "$BUILD_CP" /tmp/pd-rows-cp.json "$CP_SERVED_SHA"
+            rows_for cp "$CP_PREVIOUS_SHA" "$CP_SERVING_SINCE" "$BUILD_CP" /tmp/pd-rows-cp.json "$CP_SERVED_SHA" "$CP_SERVING_SINCE_BASIS"
             if [ $? -ne 0 ]; then delivered=false; fi
           elif [ "$CP_RESULT" = "success" ]; then
             echo "control-plane deployed but could not be anchored — no cp row (delivered=false above)"
@@ -1368,7 +1688,7 @@ jobs:
             echo "control-plane result=${CP_RESULT} — no cp row"
           fi
           if [ "$INSTANCE_RESULT" = "success" ] && [ -n "$INSTANCE_SERVED" ]; then
-            rows_for instance "$INSTANCE_PREVIOUS_SHA" "$INSTANCE_SINCE" "$BUILD_INSTANCE" /tmp/pd-rows-instance.json "$INSTANCE_SERVED"
+            rows_for instance "$INSTANCE_PREVIOUS_SHA" "$INSTANCE_SINCE" "$BUILD_INSTANCE" /tmp/pd-rows-instance.json "$INSTANCE_SERVED" "$INSTANCE_SERVING_SINCE_BASIS"
             if [ $? -ne 0 ]; then delivered=false; fi
           elif [ "$INSTANCE_RESULT" = "success" ]; then
             echo "instance deployed but could not be anchored — no instance row (delivered=false above)"
@@ -1413,6 +1733,35 @@ jobs:
           echo "rows to record: ${count}"
           jq -c '.deliveries[0] // "no rows"' /tmp/pd-payload.json
 
+          # THE TRIPWIRE ON merged_at's NULL ARM. It re-derives, from the very
+          # `%H %cd %ce` lines the rows were built from, which arm each row
+          # landed on, and REFUSES when a batch of three or more produced NO
+          # timestamp at all while naming some OTHER committer. That is not a
+          # direct push (one or two of those is ordinary and stays green) — it
+          # is the merge identity having moved, the failure this job could
+          # previously suffer forever without a single red anywhere.
+          #
+          # IT IS AN `::error::` AND NOT A NON-ZERO EXIT, and the reason is this
+          # job's own first law: the `changes` job anchors its diff base to the
+          # last SUCCESSFUL run of this workflow, so a red here freezes that
+          # anchor and every later merge redeploys both hosts — this epic's
+          # known outage mechanism. The red that CAN be a red lives in CI, on
+          # scripts/merged-at-committer-tripwire.test.sh, which proves the check
+          # loses by mutating the literal.
+          MERGED_AT_LINE="not measured"
+          if [ -x "$MERGED_AT_TRIPWIRE" ] || [ -r "$MERGED_AT_TRIPWIRE" ]; then
+            tripwire_out="$(bash "${GITHUB_WORKSPACE}/scripts/merged-at-committer-tripwire.sh" /tmp/pd-range-cp.txt /tmp/pd-range-instance.txt 2>&1)"
+            tripwire_rc=$?
+            printf '%s\n' "$tripwire_out"
+            MERGED_AT_LINE="$(printf '%s\n' "$tripwire_out" | sed -n 's/^merged_at: \([0-9]*\/[0-9]* row.*\)$/\1/p')"
+            if [ -z "$MERGED_AT_LINE" ]; then MERGED_AT_LINE="no rows measured"; fi
+            if [ "$tripwire_rc" -ne 0 ]; then
+              MERGED_AT_LINE="**TRIPPED** — ${MERGED_AT_LINE}"
+            fi
+          else
+            echo "::error::scripts/merged-at-committer-tripwire.sh is not in this checkout — merged_at's null-rate went unmeasured for run ${RUN_ID}"
+          fi
+
           # WHAT THIS RUN IS ABOUT TO CLAIM, ON THE RUN'S OWN PAGE — the trigger
           # sha and the served shas side by side, because their gap is the whole
           # defect this job was rewritten for and a reader should not need the
@@ -1427,6 +1776,7 @@ jobs:
             echo "| instance serves | \`${INSTANCE_SERVED:-<not recorded>}\` |"
             echo "| build_seconds | cp ${BUILD_CP}, instance ${BUILD_INSTANCE} |"
             echo "| rows | ${count} |"
+            echo "| merged_at | ${MERGED_AT_LINE} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "${count:-0}" -eq 0 ]; then
@@ -1646,13 +1996,26 @@ jobs:
     # `api/**`, so judging it against the union would file a fabricated outage
     # every time an api-only merge lands.
     #
-    # THE CONTROL PLANE IS CHECKED EVEN WHEN ITS LEG SKIPPED, and that is the
-    # widening that catches the original incident. `/health` is public and
-    # anonymous, so the read costs nothing and needs no credential — and a box
-    # that nothing deployed is precisely the box this row is about. The content
-    # instance cannot be checked that way (its served sha is read over the SSH
-    # the instance job holds), so when that leg did not run this job says
-    # UNCHECKED out loud rather than counting silence as green.
+    # BOTH BOXES ARE CHECKED EVEN WHEN THEIR LEG SKIPPED, and that is the
+    # widening that catches the original incident. A box that nothing deployed
+    # is precisely the box this row is about, so a job that declines to look at
+    # it is blind in the one scenario it was built for. Both reads are public
+    # and anonymous and cost no credential: the control plane answers GET
+    # /health `git_sha`, and the content instance answers GET /status.json
+    # `commit` — public since #6422 and already the reader #13829 put on the
+    # instance job's own served-commit assertion.
+    #
+    # This job USED to read the instance's served sha from the instance leg's
+    # `served_sha` job output, which that job produces over the SSH it holds.
+    # That value exists only when the leg RAN, so the job printed UNCHECKED for
+    # the content box in exactly the strand case. The public endpoint removes
+    # that hole and deletes the second reader of the same fact. The `served_sha`
+    # output itself STAYS — record-delivery still anchors its row on it, and is
+    # now the ONLY consumer of it in this workflow; what is gone is this job's
+    # duplicate read.
+    #
+    # Silence is still never green: unreachable, or an answer carrying no
+    # commit, is UNCHECKED, which the adjudicator treats as a withheld verdict.
     #
     # IT CAN FAIL, AND THAT IS THE POINT (task-103b5cc5ec4a8ccd). Until
     # 2026-09-06 this job printed `converged=false` and exited 0 unconditionally,
@@ -1686,11 +2049,42 @@ jobs:
     # remediation, not the outage: it is what drags the missing commit onto the
     # box. It is self-limiting too — the first run that converges the box is
     # green again and the anchor moves forward with it.
+    # A LOCK STALL NO LONGER READS GREEN (task-a077f2e24350d3af). On
+    # 2026-09-22 all fifteen `instance` jobs that exited 15 behind the held
+    # deploy lock (35699709131 ... 35724457145) carried this check as SUCCESS:
+    # a queue of runs waiting on a lock IS a deploy in flight, permanently, so
+    # the middle row above kept it green for as long as the queue lasted. The
+    # middle row now EXPIRES on STRAND AGE — how long the box has served a
+    # commit behind the newest deploy-relevant main commit, measured from the
+    # merge date of the oldest relevant commit it lacks (each `converged` leg
+    # writes it via --emit-strand). Past 2 x the deploy lock wait read from
+    # the deploy scripts this ships (60 min today) the verdict is STALLED, exit
+    # 1; inside it the log says GREEN-BECAUSE-WAITING with the strand minutes,
+    # and a current box says GREEN-BECAUSE-SHIPPED. An unageable strand is
+    # CANNOT READ, exit 3.
     name: Production serves the newest deploy-relevant main commit
     needs: [changes, control-plane, instance]
+    # THE PRECONDITION IS A RULE NOW, NOT AN ENUMERATION (task-c5955c660c7b9e55).
+    #
+    # It used to read `(control-plane success || instance success)`. That was a
+    # PROXY for the thing #18010 actually wanted excluded — a SUPERSEDED run,
+    # which exits at START and skips BOTH deploy legs, so it must not reach this
+    # job or file a convergence issue (deploy-supersede-exit.test.sh B7).
+    #
+    # The proxy over-reached. "No leg succeeded" is also true when both legs
+    # FAILED, and that is not supersession — it is the exact moment an operator
+    # most needs this check to speak. It is how three consecutive runs on
+    # 2026-09-22 could have gone SILENT instead of merely green, and a skipped
+    # liveness check reads as "not applicable" and vanishes from the one surface
+    # meant to say production is stale.
+    #
+    # So state the rule the proxy stood in for: run unless BOTH legs SKIPPED.
+    # Nothing is hidden by that. Both-skipped means this run attempted no deploy
+    # at all, so there is no attempt whose outcome could be concealed — which is
+    # what separates it from a leg that ran and failed.
     if: >-
       always() && github.ref == 'refs/heads/main' &&
-      (needs.control-plane.result == 'success' || needs.instance.result == 'success')
+      !(needs.control-plane.result == 'skipped' && needs.instance.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 8
     outputs:
@@ -1710,8 +2104,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CP_RESULT: ${{ needs.control-plane.result }}
           INSTANCE_RESULT: ${{ needs.instance.result }}
-          INSTANCE_SERVED_SHA: ${{ needs.instance.outputs.served_sha }}
         run: |
+          # shellcheck disable=SC1091
+          . scripts/lib/bp-curl.sh   # 429 backoff, shared (task-c2f96f8121c64601)
           set +e
           converged=true
           detail=""
@@ -1747,10 +2142,19 @@ jobs:
             echo "::warning::the Actions API did not answer — using a 900s grace window instead of the leg start"
           fi
 
+          # ── THE STRAND RECORDS (task-a077f2e24350d3af) ───────────────────
+          # A stranded leg writes "strand_since served newest oldest" here, one
+          # line, via --emit-strand. The OLDEST strand across legs is what the
+          # adjudicator ages the in-flight suppression by. Pre-created empty so
+          # a converged leg contributes nothing rather than a missing file.
+          strand_cp="$RUNNER_TEMP/strand-cp"
+          strand_inst="$RUNNER_TEMP/strand-instance"
+          : > "$strand_cp"; : > "$strand_inst"
+
           # ── THE CONTROL PLANE: always, because /health is public ──────────
           echo "::group::control plane"
           cp_sha=""
-          if body="$(curl -s --max-time 15 https://barkpark.cloud/health)"; then
+          if body="$(bp_curl_body -s --max-time 15 https://barkpark.cloud/health)"; then
             cp_sha="$(printf '%s' "$body" | jq -r '.git_sha // empty')"
           fi
           if [ -z "$cp_sha" ]; then
@@ -1759,7 +2163,7 @@ jobs:
           else
             bash scripts/deploy-convergence-check.sh converged \
               --label "control plane (barkpark.cloud)" --target cp \
-              --served "$cp_sha" --tip "$TIP" $OWED_ARGS
+              --served "$cp_sha" --tip "$TIP" --emit-strand "$strand_cp" $OWED_ARGS
             case $? in
               0) detail="${detail}control-plane: converged. " ;;
               1) converged=false
@@ -1770,26 +2174,47 @@ jobs:
           fi
           echo "::endgroup::"
 
-          # ── THE CONTENT INSTANCE: only when its leg reported a served sha ──
+          # ── THE CONTENT INSTANCE: always, because /status.json is public ──
+          # The leg result is PRINTED, never branched on. A skipped instance leg
+          # is the strand case, not a reason to stop looking.
+          #
+          # `jq -er '.commit // empty'` is #13829's idiom, for its reason: plain
+          # `jq -r '.commit'` prints the literal four-character string `null`
+          # for an absent or null key, and that string would reach resolve() as
+          # if it were a sha. `// empty` makes the miss empty, and the empty
+          # string is what the UNCHECKED arm below is keyed on.
+          #
+          # `commit` is a NINE-character short sha. deploy-convergence-check.sh
+          # resolve() accepts 7-64 hex and this job checks out with
+          # fetch-depth 0, so it resolves.
           echo "::group::content instance"
-          if [ "$INSTANCE_RESULT" != "success" ]; then
-            echo "the instance leg did not run in this deploy (result=${INSTANCE_RESULT}) — UNCHECKED."
-            echo "Its served sha is readable only over the SSH that job holds, so silence here is"
-            echo "an absence of evidence and is reported as one, never as a green."
-            detail="${detail}instance: UNCHECKED (leg ${INSTANCE_RESULT}). "
-          elif [ -z "$INSTANCE_SERVED_SHA" ]; then
-            echo "::warning::the instance leg succeeded but reported no served sha — UNCHECKED, not green"
-            detail="${detail}instance: UNCHECKED (no served sha). "
+          echo "instance leg result=${INSTANCE_RESULT} — the served commit is read from the public endpoint either way"
+          inst_sha=""
+          # INST_STATE is this leg's read, kept as its own fact rather than
+          # re-derived from $detail later (task-c5955c660c7b9e55). The
+          # adjudicator needs to tell "the box is behind" from "the box would
+          # not say", and a substring match on prose cannot carry that.
+          inst_state=absent
+          if body="$(bp_curl_body -s --max-time 15 https://guerrilla.barkpark.cloud/status.json)"; then
+            inst_sha="$(printf '%s' "$body" | jq -er '.commit // empty' 2>/dev/null)" || inst_sha=""
+          fi
+          if [ -z "$inst_sha" ]; then
+            echo "::warning::the content instance did not say what it serves — UNCHECKED, not green"
+            detail="${detail}instance: UNCHECKED (/status.json gave no commit). "
+            inst_state=unchecked
           else
             bash scripts/deploy-convergence-check.sh converged \
               --label "content instance (guerrilla)" --target instance \
-              --served "$INSTANCE_SERVED_SHA" --tip "$TIP" $OWED_ARGS
+              --served "$inst_sha" --tip "$TIP" --emit-strand "$strand_inst" $OWED_ARGS
             case $? in
-              0) detail="${detail}instance: converged. " ;;
+              0) detail="${detail}instance: converged. "
+                 inst_state=converged ;;
               1) converged=false
-                 detail="${detail}instance: STRANDED (serving ${INSTANCE_SERVED_SHA}). " ;;
+                 detail="${detail}instance: STRANDED (serving ${inst_sha}). "
+                 inst_state=stranded ;;
               *) echo "::warning::the instance comparison could not be made — UNCHECKED, not green"
-                 detail="${detail}instance: UNCHECKED (the comparison refused). " ;;
+                 detail="${detail}instance: UNCHECKED (the comparison refused). "
+                 inst_state=unchecked ;;
             esac
           fi
           echo "::endgroup::"
@@ -1825,10 +2250,23 @@ jobs:
           # survives someone restoring -e, and it is the house form (PR #16314).
           unchecked=false
           case "$detail" in *UNCHECKED*) unchecked=true ;; esac
+          # The OLDEST strand across both legs: ISO-Z timestamps sort
+          # chronologically as text. awk NR==1, never head -1 (SIGPIPE under
+          # pipefail). An empty result is passed through as empty on purpose:
+          # the adjudicator answers a strand it cannot age with CANNOT READ
+          # (rc 3), never with "age 0".
+          strand_line="$(sort "$strand_cp" "$strand_inst" | awk 'NR==1')"
+          strand_since=""; strand_served=""; strand_newest=""
+          read -r strand_since strand_served strand_newest _ <<< "$strand_line"
+          echo "oldest strand: ${strand_line:-<none — no leg reported one>}"
           verdict_rc=0
           bash scripts/deploy-convergence-check.sh adjudicate \
             --label "production" --stranded "$([ "$converged" = "false" ] && echo true || echo false)" \
             --unchecked "$unchecked" --in-flight-source "$IN_FLIGHT_SOURCE" \
+            --instance-result "$INSTANCE_RESULT" --instance-state "$inst_state" \
+            --instance-served "$inst_sha" --instance-tip "$TIP" \
+            --strand-since "$strand_since" --strand-served "$strand_served" \
+            --strand-newest "$strand_newest" \
             < "${flight_file}.other" || verdict_rc=$?
 
           echo "converged=${converged}" >> "$GITHUB_OUTPUT"
@@ -1842,8 +2280,13 @@ jobs:
             echo "::error::the convergence verdict could not be adjudicated — refusing to conclude green"
             exit 2
           fi
-          if [ "$verdict_rc" -ne 0 ]; then
-            echo "::error::production is STRANDED and no deploy is in flight to carry the missing commit — ${detail}"
+          # rc 3 is CANNOT READ (task-a077f2e24350d3af): stranded, a deploy
+          # notionally in flight, and the strand's AGE could not be established
+          # — so the suppression had no expiry and refused rather than green.
+          if [ "$verdict_rc" -eq 3 ]; then
+            echo "::error::CANNOT READ — production is stranded and the strand age (or the deploy lock wait) is unreadable, so in-flight suppression cannot be bounded — ${detail}"
+          elif [ "$verdict_rc" -ne 0 ]; then
+            echo "::error::production is STRANDED — a failed deploy attempt, a strand STALLED past 2x the deploy lock wait, or nothing in flight to carry it (the adjudication above names which) — ${detail}"
           fi
           exit "$verdict_rc"
 

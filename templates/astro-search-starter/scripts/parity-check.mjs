@@ -18,6 +18,31 @@
 //   (c) --compare <baseline.json> re-runs and exits NON-ZERO on any per-(query,
 //       engine) hit-SET divergence.
 //
+// --compare ALSO RE-ASSERTS DETERMINISM (each pair fetched twice, exit 3 on a
+// wobble). That is not decoration: a comparison mode that only diffs can be
+// run in CI without any way to reach the determinism verdict, which is how the
+// determinism arm went structurally unreachable (task-4282890c59de377e). One
+// command, both verdicts.
+//
+// --compare NEVER WRITES. A missing baseline is a REFUSAL (exit 1), never a
+// silent regeneration: a comparator that produces its own expectation inside
+// the run it is judging cannot lose. The CI step therefore runs --compare
+// ONLY, against a baseline COMMITTED to the tree
+// (scripts/parity-stub-baseline.json), and regeneration is a deliberate human
+// command:
+//
+//   node scripts/smoke-stub-api.mjs --port 4320 &
+//   node scripts/parity-check.mjs --base http://127.0.0.1:4320 \
+//     --dataset smoke --type entry --write scripts/parity-stub-baseline.json
+//
+// The stub corpus is canned and deterministic, so a baseline taken from it is
+// a real frozen expectation — regenerate it only when the corpus deliberately
+// changes, and say so in the commit.
+//
+// The comparator's OWN failure arms are proved by scripts/parity-check.test.mjs
+// (identical run -> 0, trimmed baseline -> 2, flipping server -> 3, absent
+// baseline -> 1). Neuter sameSet() and that selftest reds.
+//
 // Parity is a SET relation, not an ordered one: both editions read the
 // identical route on the identical server, so hit ORDER is a server-side
 // ranking detail that jitters run-to-run at a capped result boundary — never
@@ -44,7 +69,7 @@
 // Sign-off (see README): capture a baseline against the Next edition's live
 // deploy, then --compare it against the Astro edition's live deploy. Both
 // exiting 0 IS the side-by-side parity proof, per engine.
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 
 // ── The committed fixture ──────────────────────────────────────────────────
 // N>=10 corpus-real paper queries. Chosen to exercise the finder's real
@@ -119,8 +144,10 @@ const USAGE = `parity-check.mjs — dual-engine finder parity instrument
   --fixture <path>        JSON [".."] or {"queries":[..]} overriding the built-in queries
   --write <baseline.json> record the sweep as the frozen reference
   --compare <baseline.json> re-run and exit non-zero on any hit-list divergence
+                          (also re-asserts determinism; never writes — an absent
+                          baseline is exit 1, not a regeneration)
 
-Exit codes: 0 ok · 1 network/usage · 2 compare divergence · 3 non-determinism`
+Exit codes: 0 ok · 1 network/usage/absent-baseline · 2 compare divergence · 3 non-determinism`
 
 // ── search ─────────────────────────────────────────────────────────────────
 function searchUrl(a, query, engine) {
@@ -272,14 +299,38 @@ async function main() {
   console.log(`parity-check :: ${a.base} · ${a.dataset}/${a.type} · engines ${a.engines.join(',')} · ${queries.length} queries`)
 
   if (a.compare) {
+    // THE REFUSAL. An absent baseline is the one input that would tempt this
+    // tool into producing its own expectation. It does not: it stops, names the
+    // deliberate regeneration command, and exits 1 so the CI step reds.
+    if (!existsSync(a.compare)) {
+      console.error(`parity-check: baseline ${a.compare} does not exist.`)
+      console.error('    --compare NEVER regenerates a baseline — a comparison against an expectation')
+      console.error('    this run produced is not a comparison. Restore the committed fixture, or')
+      console.error('    regenerate it deliberately and commit it:')
+      console.error(`      node scripts/parity-check.mjs --base ${a.base} --dataset ${a.dataset} --type ${a.type} --write ${a.compare}`)
+      return 1
+    }
     const baseline = JSON.parse(readFileSync(a.compare, 'utf8'))
     const bqueries = baseline._meta?.queries ?? Object.keys(baseline.results ?? {})
-    const { results } = await sweep({ ...a, engines: baseline._meta?.engines ?? a.engines }, bqueries, false)
-    console.log(`\nre-run counts:\n${fmtCounts({ ...a, engines: baseline._meta?.engines ?? a.engines }, results, bqueries)}`)
+    const bengines = baseline._meta?.engines ?? a.engines
+    // verifyDeterminism = true: the compare mode is the ONLY mode CI runs, so
+    // it has to be able to reach the determinism verdict as well as the
+    // divergence one. Each (query, engine) is fetched twice.
+    const { results, nondet } = await sweep({ ...a, engines: bengines }, bqueries, true)
+    console.log(`\nre-run counts:\n${fmtCounts({ ...a, engines: bengines }, results, bqueries)}`)
+
+    if (nondet.length) {
+      console.error(`\nFAIL — ${nondet.length} (query, engine) pair(s) returned a different hit SET across a repeat run:`)
+      for (const n of nondet) {
+        console.error(`  [${key(n.query, n.engine)}]  observed ${n.a.length} then ${n.b.length} hits`)
+        console.error('    next : a wobbling result set cannot be compared against any baseline — investigate the server before reading the diff below')
+      }
+      return 3
+    }
 
     const diffs = []
     for (const query of bqueries) {
-      for (const engine of baseline._meta?.engines ?? a.engines) {
+      for (const engine of bengines) {
         const want = baseline.results?.[query]?.[engine] ?? []
         const got = results[query]?.[engine] ?? []
         if (!sameSet(want, got)) diffs.push({ query, engine, want, got })

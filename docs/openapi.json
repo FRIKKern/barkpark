@@ -121,10 +121,12 @@
                   "create_wall",
                   "csrf_required",
                   "dataset_twin",
+                  "default_workspace_not_archivable",
                   "deploy_runner_unavailable",
                   "duplicate_of",
                   "duplicate_task",
                   "event_not_found",
+                  "export_already_running",
                   "export_build_failed",
                   "export_transport_failed",
                   "forbidden",
@@ -164,6 +166,7 @@
                   "missing_slug",
                   "missing_source",
                   "not_found",
+                  "paper_exists",
                   "paper_rev_unreadable",
                   "payload_too_large",
                   "precondition_failed",
@@ -174,7 +177,7 @@
                   "runtime_capacity",
                   "runtime_unavailable",
                   "schema_has_documents",
-                  "schema_unknown",
+                  "searchable_text_too_large",
                   "session_restarting",
                   "session_start_failed",
                   "share_expired",
@@ -190,6 +193,7 @@
                   "unsupported_media_type",
                   "validation_failed",
                   "webhook_not_found",
+                  "workspace_archived",
                   "workspace_scope_required",
                   "workspace_slug_conflict",
                   "workspace_suspended"
@@ -1653,6 +1657,136 @@
           "ticket-key"
         ],
         "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/plugins/bulldocs/papers/{slug}/create": {
+      "post": {
+        "operationId": "bulldocs.create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "blocks": {
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "blocks"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "description": "Native Paper blocks and authoring metadata. The authoring wall validates description and weighted tags.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "liveview_path": {
+                      "type": "string"
+                    },
+                    "ok": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    },
+                    "rev": {
+                      "type": "string"
+                    },
+                    "scoped_liveview_path": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "slug",
+                    "rev",
+                    "title",
+                    "liveview_path",
+                    "scoped_liveview_path"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Malformed native-block payload, draft namespace or unsupported revision fence."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a paper from native blocks without replacing an existing paper or draft. Returns 201 on creation; an occupied slug refuses with 409 paper_exists. Use bulldocs patch --if-rev to edit an existing paper.",
+        "tags": [
+          "bulldocs"
+        ],
+        "x-barkpark-scope": "ingest"
       }
     },
     "/v1/plugins/sheets/{slug}/export.md": {
@@ -4749,6 +4883,63 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/shares/media": {
+      "post": {
+        "operationId": "share.publish-media",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: scope.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Publish this scope's media — add the :media :read share so anonymous <img> loads resolve (never flips asset visibility).",
+        "tags": [
+          "share"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/auth/me": {
       "get": {
         "operationId": "auth.me",
@@ -5425,6 +5616,75 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/api/workspaces/{workspace_slug}/archive": {
+      "post": {
+        "operationId": "workspace.archive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Archive a workspace reversibly (the active --workspace): content is kept, scoped reads/writes answer 409 workspace_archived until restored.",
+        "tags": [
+          "workspace"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/chat/sessions/{id}/answer": {
       "post": {
         "operationId": "chat.answer",
@@ -5739,6 +5999,75 @@
           "media"
         ],
         "x-barkpark-scope": "none"
+      }
+    },
+    "/v1/tokens/{id}/rotate": {
+      "post": {
+        "operationId": "token.rotate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mint a successor for a token seated here (same permissions and scope); the old one expires after the grace window.",
+        "tags": [
+          "token"
+        ],
+        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/v1/plugins/sheets/{slug}/export.csv": {
@@ -6763,6 +7092,15 @@
         "operationId": "task.events",
         "parameters": [
           {
+            "description": "Narrow the replay to ONE task's events, oldest-first. Optional — omit for the global feed. This is the per-row audit view: `bp task events <id> --payload` answers 'who claimed and closed this row, on which epoch, when' from `payload.actor` without reading the (mutable) live claim map off the document. Composes with --since, so `--since <cursor> <id>` is a per-row tail.",
+            "in": "query",
+            "name": "doc_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Resume cursor: return only events whose id is greater than this (the last event id you saw). Omit to replay from the start of the backlog.",
             "in": "query",
             "name": "since",
@@ -6790,7 +7128,7 @@
             }
           },
           {
-            "description": "Carry each event's typed payload under `payload`. THE RECOVERY CHANNEL for a clobbered note: a `task.staged` event's `payload.staged.superseded_note` is the disposition_reason that stage displaced, and `payload.staged.note` the one it wrote. Off by default — two free-text notes ride in one stamp and a page is 500 events, so every poller that does not ask keeps the lean body it always got.",
+            "description": "Carry each event's typed payload under `payload`. THE ATTRIBUTION CHANNEL: a `task.claimed` / `task.closed` event's `payload.actor` is `{worker, epoch}` — the identity the CAS fenced on — so close provenance is reconstructable from the feed alone (`task.closed` also carries `payload.closed_by`). THE RECOVERY CHANNEL for a clobbered note: a `task.staged` event's `payload.staged.superseded_note` is the disposition_reason that stage displaced, and `payload.staged.note` the one it wrote. Off by default — two free-text notes ride in one stamp and a page is 500 events, so every poller that does not ask keeps the lean body it always got.",
             "in": "query",
             "name": "payload",
             "required": false,
@@ -7249,7 +7587,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Patch a document: --set the fields to change (key:=json for typed values).",
+        "summary": "Patch a document: --set the fields to change (key:=json for typed values), or --file for a JSON object of fields.",
         "tags": [
           "doc"
         ],
@@ -7479,6 +7817,63 @@
           "webhook"
         ],
         "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/workspace/locale": {
+      "patch": {
+        "operationId": "workspace.set-locale",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: locale.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set the Studio chrome language for the active --workspace (en | nb-NO). Schema titles and descriptions are never translated.",
+        "tags": [
+          "workspace"
+        ],
+        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/v1/webhooks/{dataset}/{id}/rotate": {
@@ -8634,6 +9029,75 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/api/workspaces/{workspace_slug}/restore": {
+      "post": {
+        "operationId": "workspace.restore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Restore an archived workspace (the active --workspace) to exactly its pre-archive state.",
+        "tags": [
+          "workspace"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/tasks/{doc_id}/claim": {
       "post": {
         "operationId": "task.claim",
@@ -9383,6 +9847,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Name the dataset this doc_id lives in. THE DISAMBIGUATOR the 409 `ambiguous_dataset` refusal names: one doc_id may live in two datasets of a single workspace+project, and the task doors REFUSE such an id rather than picking a dataset you did not name. Omit it and nothing is picked for you — an unambiguous id reads normally and an ambiguous one is still refused.",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9910,7 +10383,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Record that this task's work LANDED — a commit, a PR number, a sentence — WITHOUT holding its claim. This is the verb CI can actually call: there is no worker_id and no observed_epoch, because a push-to-main workflow holds neither, which is exactly why `bp task stamp` refuses it (409 not_holder) and why `bp task close` is not CI's to call. --commit/--pr/--note are UNIONED into content.landed, so a second landing accumulates a second commit instead of replacing the first, and a close's own land digest is never clobbered (one merge rule, shared with close). --criterion N (ZERO-BASED — the first criterion is 0) additionally flips ONE acceptance criterion to met=true with --note as its evidence, and ONLY when that row is MERGE-SHAPED: it carries \"merge_gate\": true, or its wording says MERGE-GATED / MERGE GATE / PR merged / merged to main. Any other index is refused (409 criterion_not_merge_shaped) and so is a row that is already met (409 criterion_already_met — a landing notice never overwrites somebody's proof). There is no override flag: unlike stamp's --merge-gated, here the predicate gates a PERMIT rather than a refusal, so a false positive would be a SILENT fabricated done and an explicit \"merge_gate\": false on the criterion VETOES the wording. --note is REQUIRED with --criterion (the note IS the evidence). Emits a task.landed event carrying the calling token id. Nothing else is writable through this verb: not lifecycle_status, not the claim, not a second criterion.",
+        "summary": "Record that this task's work LANDED — a commit, a PR number, a sentence — WITHOUT holding its claim. This is the verb CI can actually call: there is no worker_id and no observed_epoch, because a push-to-main workflow holds neither, which is exactly why `bp task stamp` refuses it (409 not_holder) and why `bp task close` is not CI's to call. --commit/--pr/--note/--files are UNIONED into content.landed, so a second landing accumulates a second commit instead of replacing the first, and a close's own land digest is never clobbered (one merge rule, shared with close). --criterion N (ZERO-BASED — the first criterion is 0) additionally flips ONE acceptance criterion to met=true with --note as its evidence, and ONLY when that row is MERGE-SHAPED: it carries \"merge_gate\": true, or its wording says MERGE-GATED / MERGE GATE / PR merged / merged to main. Any other index is refused (409 criterion_not_merge_shaped) and so is a row that is already met (409 criterion_already_met — a landing notice never overwrites somebody's proof). There is no override flag: unlike stamp's --merge-gated, here the predicate gates a PERMIT rather than a refusal, so a false positive would be a SILENT fabricated done and an explicit \"merge_gate\": false on the criterion VETOES the wording. --note is REQUIRED with --criterion (the note IS the evidence). Emits a task.landed event carrying the calling token id. Nothing else is writable through this verb: not lifecycle_status, not the claim, not a second criterion.",
         "tags": [
           "task"
         ],
@@ -11075,7 +11548,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Patch a document: --set the fields to change (key:=json for typed values).",
+        "summary": "Patch a document: --set the fields to change (key:=json for typed values), or --file for a JSON object of fields.",
         "tags": [
           "doc"
         ],
@@ -11356,9 +11829,18 @@
             }
           },
           {
-            "description": "Narrow the page to the DIRECT children of this parent task id (`parent_id` is an accepted alias server-side). This is the parent-scoped read that carries updated_at per row — the close-time field a \"which children closed between T1 and T2\" audit needs. `bp task get <parent>` renders the same rail but its child summaries are a lighter card; use this verb when you are querying by time rather than reading one task.",
+            "description": "Narrow the page to the DIRECT children of this parent task id (`parent_id` is an accepted alias server-side). Each row is the full card, claim, assignee and content included. `bp task get <parent>` lists the same children as summaries of at most seven keys (updated_at, the close-time field, included; no claim, assignee or content). Both omit criteria_progress on a row with no criteria.",
             "in": "query",
             "name": "parent",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Narrow the listing to ONE dataset — THE INDEX SCOPE SELECTOR. Absent: the page spans every dataset in the caller's workspace/project scope (`page.datasets` says which) and a doc_id living in more than one of them is WITHHELD and named once in `page.dataset_ambiguous`. Named: only that dataset's rows, `page.dataset_scope` reads \"named\", and a dataset holding no rows answers with an EMPTY page rather than the global one.",
+            "in": "query",
+            "name": "dataset",
             "required": false,
             "schema": {
               "type": "string"
@@ -12714,6 +13196,91 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/tokens/{id}/rotate": {
+      "post": {
+        "operationId": "token.rotate.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mint a successor for a token seated here (same permissions and scope); the old one expires after the grace window.",
+        "tags": [
+          "token"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      }
+    },
     "/v1/media/{dataset}/collections/{id}/assets": {
       "get": {
         "operationId": "media.collection-assets",
@@ -13458,7 +14025,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open, OR the row's OWN current state. Enforces the charter-D7 transition-legality table for those targets: considering⇄researching; considering|researching→open; open→considering; the terminal/blocked reopen edges done→open, cancelled→open, blocked→open, in_progress→open; same→same. THE TERMINAL SAME-STATE ADJUDICATION EDGE (PDS wave 25): a same-state no-op is accepted on EVERY status, not just the stageable ones — done→done, blocked→blocked, in_progress→in_progress — so a FINISHED row can record its disposition/reason/reopen-trigger IN PLACE instead of being resurrected to `open` first (which would leave it saying open while carrying claim.closed_by, and put it back in `bp task ready`). It widens ADJUDICATION, not MOVEMENT: the from-state is read from the locked row, never from your input, so state==current is satisfiable only by a row already in that state, and the write set never includes content.claim — a done→done stage leaves lifecycle_status=done and close attribution byte-identical. (The false-done reopen recipe DEPENDS on reopening a done task — it legitimately re-enters the ready backlog via stage, KEEPING its claim; no epoch machinery.) Writes content.engagement {object,holder,ts,lapse_ttl_seconds,lapses_at} — an EPHEMERAL lease the TtlSweeper deletes wholesale after ~900s — on →considering/researching and clears it on →open; a `note` does NOT ride that lease, it lands on the DURABLE content.disposition_reason (no sweeper owns it) on EVERY target including →open; BREAKING (2026-09-06): a --note that would DISPLACE a different non-blank disposition_reason is now REFUSED with 409 note_would_supersede — the refusal quotes the note it would have destroyed and names --supersede, the flag that allows the replacement on purpose; emits a task.staged event carrying staged.note_key. PDS wave 24: this verb also owns the ADJUDICATION TRIPLE — --disposition (open|parked|closed, normalised here because one writer means one normaliser), --note/content.disposition_reason and --reopen-trigger are written in that same CAS update or not at all, and a --disposition parked with no trigger on the stage and none on the row is refused BEFORE anything is written. Raw /v1/data/mutate changes of content.disposition on a type:task are refused and name this verb. done is reached ONLY through `bp task close`, in_progress ONLY through `bp task claim`, kills go through close (→ cancelled); an illegal transition (e.g. open → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
+        "summary": "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open, OR the row's OWN current state. Enforces the charter-D7 transition-legality table for those targets: considering⇄researching; considering|researching→open; open→considering; the terminal/blocked reopen edges done→open, cancelled→open, blocked→open, in_progress→open; same→same. THE TERMINAL SAME-STATE ADJUDICATION EDGE (PDS wave 25): a same-state no-op is accepted on EVERY status, not just the stageable ones — done→done, blocked→blocked, in_progress→in_progress — so a FINISHED row can record its disposition/reason/reopen-trigger IN PLACE instead of being resurrected to `open` first (which would leave it saying open while carrying claim.closed_by, and put it back in `bp task ready`). It widens ADJUDICATION, not MOVEMENT: the from-state is read from the locked row, never from your input, so state==current is satisfiable only by a row already in that state, and the write set never includes content.claim — a done→done stage leaves lifecycle_status=done and close attribution byte-identical. (The false-done reopen recipe DEPENDS on reopening a done task — it legitimately re-enters the ready backlog via stage, KEEPING its claim; no epoch machinery.) Writes content.engagement {object,holder,ts,lapse_ttl_seconds,lapses_at} — an EPHEMERAL lease the TtlSweeper deletes wholesale after ~900s — on →considering/researching and clears it on →open; a `note` does NOT ride that lease, it lands on the DURABLE content.disposition_reason (no sweeper owns it) on EVERY target including →open; BREAKING (2026-09-06): a --note that would DISPLACE a different non-blank disposition_reason is now REFUSED with 409 note_would_supersede — the refusal quotes the note it would have destroyed and names --supersede, the flag that allows the replacement on purpose; emits a task.staged event carrying staged.note_key. PDS wave 24: this verb also owns the ADJUDICATION TRIPLE — --disposition (open|parked|closed, normalised here because one writer means one normaliser), --note/content.disposition_reason and --reopen-trigger are written in that same CAS update or not at all, and a --disposition parked with no trigger on the stage and none on the row is refused BEFORE anything is written. Raw /v1/data/mutate changes of content.disposition on a type:task are refused and name this verb. TWO DURABLE SLOTS, TWO LIFETIMES (task-bd7476eecdede252): a VERDICT is a dated measurement a later measurement should replace (--note → content.disposition_reason, override --supersede), while an OPERATING INSTRUCTION is standing guidance nothing newer supersedes (--instruction → content.operating_instruction, override --supersede-instruction). They are SEPARATELY ADDRESSABLE keys with SEPARATE guards, so writing a verdict with --supersede leaves an instruction byte-identical and writing an instruction with --supersede-instruction leaves a verdict byte-identical — before this there was one slot, and a lane ruling on a row that carried pinned guidance could only destroy the guidance or record nothing. Existing rows are NOT reclassified and there is no migration: a legacy content.disposition_reason stays exactly where it is and content.operating_instruction is simply absent. done is reached ONLY through `bp task close`, in_progress ONLY through `bp task claim`, kills go through close (→ cancelled); an illegal transition (e.g. open → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
         "tags": [
           "task"
         ],
@@ -13885,6 +14452,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Bound each hit's projected prose to ~N characters: blocks/body are cut to the smallest whole-block document prefix carrying that much text, and a cut hit carries _bodyTruncated: true. Absent means unbounded (a limit=100 browse projecting blocks answers ~14 MB). A malformed value is a 400, never an unbounded 200.",
+            "in": "query",
+            "name": "bodyChars",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -14241,7 +14817,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Publish (upsert) a paper from a portable-doc block payload. blocks[] is the door: 56 renderer block types (chart, diagram, asciicast, diff, filetree, pipeline, …) with value-keyed inline leaves — items and cells are objects carrying a value key, never bare strings (a bare string publishes clean and renders blank). Guide: /papers/paper-authoring-excellence. body_html is a legacy last resort — hand-rolled HTML renders flat and loses tables in the terminal reader. Reader spacing law: empty paragraph blocks are editor scaffolds, not published layout — remove them from ingest payloads; shared reader tokens own section rhythm.",
+        "summary": "Publish (upsert) a paper from a portable-doc block payload. blocks[] is the door: 56 renderer block types (chart, diagram, asciicast, diff, filetree, pipeline, …) with value-keyed inline leaves — items and cells are objects carrying a value key, never bare strings (a bare string publishes clean and renders blank). Guide: /papers/paper-authoring-excellence. body_html is a legacy last resort — hand-rolled HTML renders flat and loses tables in the terminal reader. Reader spacing law: empty paragraph blocks are editor scaffolds, not published layout — remove them from ingest payloads; shared reader tokens own section rhythm. Composition caps, scoped to papers tagged epic-cycle-wave-paper: at most 80 top-level blocks and at most 16 top-level headings. Past either, the publish is refused 422 invalid_epic_paper_quality with details.failures naming top_level_block_overload / top_level_heading_overload and details.limits carrying that cap's max and your actual count. Untagged papers are unaffected. No if-rev on this verb: it is an unfenced create-or-replace, and a body carrying ifRev/if_rev is refused 400. The fenced path is POST /v1/plugins/bulldocs/papers/:slug/ops (bp bulldocs patch --if-rev), which rejects a stale rev with 412 precondition_failed.",
         "tags": [
           "bulldocs"
         ],
@@ -14697,6 +15273,15 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Bound each hit's projected prose to ~N characters: blocks/body are cut to the smallest whole-block document prefix carrying that much text, and a cut hit carries _bodyTruncated: true. Absent means unbounded (a limit=100 browse projecting blocks answers ~14 MB). A malformed value is a 400, never an unbounded 200.",
+            "in": "query",
+            "name": "bodyChars",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -15367,9 +15952,18 @@
             }
           },
           {
-            "description": "Max revisions to return.",
+            "description": "Max revisions to return (max 200).",
             "in": "query",
             "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Skip this many revisions — pages past the first. The response carries limit, offset and has_more.",
+            "in": "query",
+            "name": "offset",
             "required": false,
             "schema": {
               "type": "integer"
@@ -16586,7 +17180,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES --criterion-text \"<the criterion's exact stored wording>\": the index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated \"<why this stamp is yours to make>\" (the override takes a REASON, and a bare --merge-gated is refused; the reason lands at content.merge_gate_autostamp.stamp_overrides[].reason); a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal. THE WITHDRAWAL: --withdraw --note \"<why>\" (with --criterion-text) is the verb that LOWERS a met flag when review refutes the proof. It sets met=false so criteria_progress drops, LEAVES the original evidence in place, and appends a signed {who,why,when,superseded_evidence} record to the criterion's withdrawals list. A raw met:true -> met:false patch is still refused — an un-flip that leaves no trace is the silent rewrite append-only exists to prevent. Because review lands AFTER the close, --withdraw is the ONE stamp outcome allowed on a sealed row: on an in_progress row it is holder-only + epoch-fenced like any stamp, and on any other row (done/cancelled/blocked/open) it requires --observed-rev <the rev you read> instead (409 observed_rev_required) — a sealed row keeps its claim only as a receipt, so liveness decides, not presence. Withdrawing an already-unmet criterion is refused (409 criterion_not_met), and a merge gate needs no --merge-gated to be withdrawn — lowering a lock can never fabricate a done.",
+        "summary": "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES the criterion's exact stored wording, and it must ride a FILE: --criterion-text-file <path> (or `-` for stdin) reads the bytes without a shell ever touching them. Do NOT retype it inline as --criterion-text \"…\" — criterion wording is MARKDOWN, and a backticked code span inside a double-quoted shell argument is COMMAND SUBSTITUTION, so bash/zsh EXECUTE it and bp is handed text that is not the stored wording. The index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated \"<why this stamp is yours to make>\" (the override takes a REASON, and a bare --merge-gated is refused; the reason lands at content.merge_gate_autostamp.stamp_overrides[].reason); a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps to an EXISTING criterion never trip close's work-digest fence — met/evidence/attempts are your progress record, and WorkDigest D5 reduces them away before hashing. A SEED IS THE EXCEPTION, and the refusal is CORRECT: stamping one past the end adds criterion TEXT, text IS work-defining, so your own next DEFAULT-path close is refused 409 doc_changed_since_claim with changed_fields [\"acceptance_criteria\"]. You moved the bar the row will be judged against, so re-read the row and close with --set observed_rev=<the rev you read AFTER the seed>; do not read that 409 as breakage. Emits a task.criterion event. Stamp is progress; close is the seal. THE WITHDRAWAL: --withdraw --note \"<why>\" (with --criterion-text-file) is the verb that LOWERS a met flag when review refutes the proof. It sets met=false so criteria_progress drops, LEAVES the original evidence in place, and appends a signed {who,why,when,superseded_evidence} record to the criterion's withdrawals list. A raw met:true -> met:false patch is still refused — an un-flip that leaves no trace is the silent rewrite append-only exists to prevent. Because review lands AFTER the close, --withdraw is the ONE stamp outcome allowed on a sealed row: on an in_progress row it is holder-only + epoch-fenced like any stamp, and on any other row (done/cancelled/blocked/open) it requires --observed-rev <the rev you read> instead (409 observed_rev_required) — a sealed row keeps its claim only as a receipt, so liveness decides, not presence. Withdrawing an already-unmet criterion is refused (409 criterion_not_met), and a merge gate needs no --merge-gated to be withdrawn — lowering a lock can never fabricate a done. THE AMENDMENT: --amend --amended-criterion-file <path> --note \"<why>\" (with --criterion-text-file) is the verb that CORRECTS A CRITERION'S WORDING when the sentence itself turns out false — e.g. a criterion asserting that code is NOT on origin/main while origin/main carries it, closed \"remains NOT MET\" beside met=true. It replaces acceptance_criteria[N].criterion AND re-derives the brief's criteria-list mirror in ONE rev-fenced write, so both surfaces move or neither does; patching one surface is the half-fix this verb exists to end. It is NEVER a silent rewrite: the superseded sentence is snapshotted onto an UNBOUNDED amendments list with {note,ts,worker,superseded_criterion}. It moves NO lock — met is pinned to its stored value and evidence is untouched — so it can neither fabricate a done nor erase a proof, which is also why a MERGE GATE is amendable with no --merge-gated. Fenced exactly like --withdraw: on an in_progress row holder-only + epoch, on any other row (done/cancelled/blocked/open) --observed-rev <the rev you read> (409 observed_rev_required). The criterion-text CAS is REQUIRED (409 criterion_text_required) — re-wording the wrong neighbour is as much a lie as flipping it. Blank replacement wording is refused (409 amended_criterion_required: emptying a criterion is a DELETION, not a correction), wording identical to the stored text is refused (409 criterion_unchanged), and an amendment can never SEED a criterion one past the end (409 criteria_index_out_of_range).",
         "tags": [
           "task"
         ],
@@ -17410,6 +18004,83 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/workspace/locale": {
+      "patch": {
+        "operationId": "workspace.set-locale.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: locale.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set the Studio chrome language for the active --workspace (en | nb-NO). Schema titles and descriptions are never translated.",
+        "tags": [
+          "workspace"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/history/{dataset}/{type}/{doc_id}": {
       "get": {
         "operationId": "doc.history.scoped",
@@ -17455,9 +18126,18 @@
             }
           },
           {
-            "description": "Max revisions to return.",
+            "description": "Max revisions to return (max 200).",
             "in": "query",
             "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Skip this many revisions — pages past the first. The response carries limit, offset and has_more.",
+            "in": "query",
+            "name": "offset",
             "required": false,
             "schema": {
               "type": "integer"

@@ -525,6 +525,75 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
              end)
     end
 
+    # cch — the `team_id: tid` half of `Accounts.revoke_invitation/2`'s
+    # `Repo.get_by`, at the seam that matters: `with_team_role(conn, "admin", …)`
+    # gates the PATH team, so an admin of team A who learns team B's invitation
+    # UUID clears that gate. Only the fence stops the delete — and because the
+    # router wraps the revoke in `Accounts.audit/3`, a leak would ALSO stamp an
+    # `invitation.revoked` row for B's invitation under team A's audit log.
+    #
+    # The actor is deliberately an admin of A ONLY (unlike the context-level
+    # twin fixture in accounts_invitations_test.exs, where the shared inviter
+    # holds both teams so `invited_by_id` is not a free variable): here the
+    # point is that she has NO standing in team B at all.
+    # Each claim gets its OWN test and leads with its own assertion. ExUnit
+    # stops at the first failure, so folding status + audit row + survival into
+    # one test would leave every claim after the first unproved under the
+    # mutation.
+    defp cross_team_revoke_attempt do
+      {_alice, team_a, token_a} = logged_in()
+      {bob, team_b, _} = logged_in()
+
+      {:ok, %{invitation: inv_b}} =
+        Accounts.invite_member(team_b, "victim@x.io", "member", bob)
+
+      conn = call(:delete, "/v1/teams/#{team_a.id}/invitations/#{inv_b.id}", nil, token_a)
+      %{conn: conn, team_a: team_a, team_b: team_b, bob: bob, inv_b: inv_b}
+    end
+
+    test "DELETE with ANOTHER team's invitation id 404s" do
+      %{conn: conn} = cross_team_revoke_attempt()
+      assert conn.status == 404
+      assert json_body(conn) == %{"error" => "not_found"}
+    end
+
+    test "DELETE with ANOTHER team's invitation id writes NO invitation.revoked audit row" do
+      %{team_a: team_a, team_b: team_b, inv_b: inv_b} = cross_team_revoke_attempt()
+
+      # [1] THE AUDIT-ROW ASSERTION, first in its own test so the mutation reds
+      # it directly rather than short-circuiting on the status code.
+      # `Accounts.audit/3` rolls the whole transaction back on `{:error, _}`, so
+      # a fence that refuses stamps nothing. A fence that LEAKED would stamp
+      # `invitation.revoked` for team B's invitation under TEAM A's audit log.
+      refute "invitation.revoked" in actions(team_a)
+      refute "invitation.revoked" in actions(team_b)
+
+      # Team-scoped, not a global aggregate: every agent shares one test
+      # database, so a whole-table count would measure other suites' rows.
+      refute Enum.any?(Accounts.list_audit_events(team_a), &(&1.target_id == inv_b.id))
+      refute Enum.any?(Accounts.list_audit_events(team_b), &(&1.target_id == inv_b.id))
+    end
+
+    test "DELETE with ANOTHER team's invitation id leaves that invitation ALIVE" do
+      %{team_a: team_a, team_b: team_b, inv_b: inv_b} = cross_team_revoke_attempt()
+
+      # Re-read, not the response body.
+      assert [%{id: alive}] = Accounts.list_invitations(team_b)
+      assert alive == inv_b.id
+      assert Accounts.list_invitations(team_a) == []
+    end
+
+    test "HAPPY-PATH CONTROL — team B's own admin revokes the SAME row through B's route" do
+      %{team_b: team_b, bob: bob, inv_b: inv_b} = cross_team_revoke_attempt()
+
+      {:ok, token_b} = Accounts.create_user_session_token(bob)
+      ok = call(:delete, "/v1/teams/#{team_b.id}/invitations/#{inv_b.id}", nil, token_b)
+
+      assert ok.status == 200
+      assert "invitation.revoked" in actions(team_b)
+      assert Accounts.list_invitations(team_b) == []
+    end
+
     test "POST /v1/invitations/accept writes invitation.accepted under the team" do
       {owner, team, _owner_token} = logged_in()
       invitee = user_fixture(%{email: "invitee-#{System.unique_integer([:positive])}@x.io"})

@@ -30,7 +30,6 @@ defmodule Barkpark.Tasks.CloseAcknowledgementTest do
   @dataset "production"
 
   setup do
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
 

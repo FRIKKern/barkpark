@@ -35,7 +35,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, realpathSync, openSync, closeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -494,7 +494,7 @@ test("a broken stream never takes the verb down with it", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// THE THREE WIRED ENTRY POINTS — banner on STDERR, stdout untouched
+// THE FOUR WIRED ENTRY POINTS — banner on STDERR, stdout untouched
 // ─────────────────────────────────────────────────────────────────────────────
 
 test("census --ledger --json: the banner is on stderr and stdout still JSON.parses", () => {
@@ -534,8 +534,58 @@ test("cli --help: the banner is on stderr and stdout is the help text alone", ()
   assert.match(r.stdout, /adjudicate source-of-truth facts/);
 });
 
+test("screen.mjs --selftest: the banner is on stderr and stdout is the report alone", () => {
+  // screen.mjs was the last runnable grip entry point with no banner. Its report
+  // — "DANGER SET 134/134 refused" — is exactly the kind of answer that reads
+  // identically from a 200-commit-stale checkout whose allowlist predates the
+  // commands it is screening. A safety verdict that cannot name its tree
+  // certifies nothing.
+  const r = run("screen.mjs", ["--selftest"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /^\[grip-provenance\] /m, "no banner on stderr");
+  assert.equal(r.stdout.includes(PROVENANCE_PREFIX), false,
+    "the banner reached STDOUT — screen's stdout is the classification report and a pipe reads it");
+  // Not "no banner string" but "the report is still whole": a banner spelled
+  // differently would slip past a prefix search, so pin the report's own lines.
+  assert.match(r.stdout, /^DANGER SET\s+\d+\/\d+ refused$/m, `stdout lost the DANGER SET line: ${r.stdout}`);
+  assert.match(r.stdout, /^PASS: all three named sets hold\.$/m, `stdout lost the PASS line: ${r.stdout}`);
+});
+
+test("screen.mjs prints provenance BEFORE its first classification — ordering, on one stream", () => {
+  // stdout and stderr are separate pipes, so asserting on each in isolation
+  // cannot see ORDER: a banner emitted last would satisfy both assertions above.
+  // Point both descriptors at ONE file and read the interleaving the operator's
+  // terminal actually shows. `2>&1` is what a reader running this by hand gets.
+  const dir = mkdtempSync(join(tmpdir(), "grip-screen-order-"));
+  const out = join(dir, "merged.txt");
+  try {
+    const fd = openSync(out, "w");
+    try {
+      const r = spawnSync(process.execPath, [join(GRIP, "screen.mjs"), "--selftest"],
+        { cwd: REPO_ROOT, stdio: ["ignore", fd, fd] });
+      assert.equal(r.status, 0, `screen.mjs --selftest exited ${r.status}`);
+    } finally {
+      closeSync(fd);
+    }
+    const lines = readFileSync(out, "utf8").split("\n").filter((l) => l.length > 0);
+    // CONTROL FIRST: the merged capture really did catch BOTH streams, so a
+    // pass below cannot be "the classification lines were never written".
+    assert.ok(lines.some((l) => l.startsWith("DANGER SET")),
+      `the merged capture holds no classification lines — it caught nothing: ${lines.join(" | ")}`);
+    assert.ok(lines[0].startsWith(PROVENANCE_PREFIX),
+      `the first line printed was not the banner — provenance must be the FIRST act: ${lines[0]}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("every banner names the tree root and states the origin/main comparison", () => {
-  for (const [script, args] of [["census.mjs", ["--help"]], ["acceptance.mjs", ["--json"]], ["cli.mjs", ["--help"]]]) {
+  for (const [script, args] of [
+    ["census.mjs", ["--help"]],
+    ["acceptance.mjs", ["--json"]],
+    ["cli.mjs", ["--help"]],
+    ["screen.mjs", ["--selftest"]],
+  ]) {
     const r = run(script, args);
     const banner = r.stderr.split("\n").find((l) => l.startsWith(PROVENANCE_PREFIX));
     assert.ok(banner, `${script} printed no banner`);

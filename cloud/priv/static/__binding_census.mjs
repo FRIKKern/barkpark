@@ -50,7 +50,7 @@
 // a live regression. Both arms name the arrival AND the departure by call site.
 //
 // KEYING BY CALL SITE IS THE WHOLE POINT, and it is not a style preference.
-// The 79 write call sites collapse to 67 route keys; 11 of those keys are
+// The 88 write call sites collapse to 76 route keys; 11 of those keys are
 // multi-site. The decisive case is POST /v1/providers:
 //
 //   submitProviderCred()        — reached from the launch wizard's
@@ -73,15 +73,16 @@
 //
 //   (Re-derive both: grep -n 'function submitProviderCred' app.js, and the same
 //   for submitInlineProviderCred. NO LINE NUMBER IS WRITTEN DOWN IN THIS FILE,
-//   and every line number this census prints — app.js sites and the six router
+//   and every line number this census prints — app.js sites and the router
 //   overlay sites alike — is DERIVED at run time from the live file. That is a
 //   description of the file as it stands, not an aspiration: it was FALSE until
-//   charter D528, when the PIN's 79 documentary `line:` fields were deleted
-//   (nothing read them; all 79 were stale) and the inline-cond overlay's six
-//   typed-and-printed router lines were replaced by a resolver over the live
-//   router source. Line numbers rot on any sibling shift — charter D41 /
-//   bp-honest-gates D5 — so the PIN is keyed on the function name, and a
-//   printed numeral is only ever this run's reading of the tree. cch-w47-rv
+//   charter D528, when every documentary `line:` field the PIN then carried was
+//   deleted (nothing read them; every one of them was stale) and the
+//   inline-cond overlay's typed-and-printed router lines were replaced by a
+//   resolver over the live router source. Line numbers rot on any sibling
+//   shift — charter D41 / bp-honest-gates D5 — so the PIN is keyed on the
+//   function name, and a printed numeral is only ever this run's reading of
+//   the tree. cch-w47-rv
 //   made that sentence a CHECK rather than a promise: (2h) below reads this
 //   file's own bytes and exits 2 on any typed `<file>:<digits>`. It had to —
 //   D528 left seven of them behind in `note:` prose, all seven already stale.)
@@ -99,18 +100,23 @@
 //     no-op for it". The check discriminates PATs, not people. Every console
 //     call site whose only guard above membership is `require_ability` (or
 //     `with_team_site(conn, {:ability, "write"}, …)`) is therefore PLAIN
-//     MEMBER here: loadSite (PATCH /v1/sites/:*), runPromote, runSiteRollback,
-//     createAndDeploy and runDeploy. A builder who counts `require_ability` as
-//     elevated gets 46, not 40 — those five plus submitToken, whose whole
-//     authority also lives below the router (see (c)).
+//     MEMBER here: 9 rows — loadSite (PATCH /v1/sites/:*), runPromote,
+//     runSiteRollback, runSiteDelete, createAndDeploy, runDeploy and the
+//     three form-inbox writes in wireSiteForms (N-08). Note who
+//     is NOT among them: openSiteEnvModal's guard is `with_team_site(conn, fn)`,
+//     tenancy with no ability term at all, so promoting it would need a
+//     different mistake than this one. A builder who counts `require_ability`
+//     as elevated gets 60, not 50 — those 9 plus the 1 row whose whole
+//     authority lives below the router in Accounts.pat_abilities_allowed?/2,
+//     submitToken (see (c)).
 //
 // (b) THE VACUITY FLOOR ASSERTS "RESOLVED TO A ROUTE", NEVER "SEEN". A literal
-//     path extractor silently drops 13 of the 79 — they build their path from a
-//     variable or a helper — and a census that counted what it saw would call
-//     that 66-of-66 and go green over a hole. Two of the dropped are the
-//     console's HIGHEST-privilege writes (fleetRolloutAction and
-//     operatorConfirmBrake, the operator autoupdate brake). Worse, a 14th does
-//     not drop at all: submitActivateDecision builds
+//     path extractor cannot read 15 of the 88 — they build their path from a
+//     variable or a helper — and a census that counted only what it read
+//     literally would call that 73-of-73 and go green over a hole. Two of those
+//     15 are the console's HIGHEST-privilege writes (fleetRolloutAction and
+//     operatorConfirmBrake, the operator autoupdate brake). Worse, one of them
+//     does not drop at all: submitActivateDecision builds
 //     `"/v1/auth/device/" + decision` — a literal PREFIX with a variable last
 //     segment, which a naive extractor ACCEPTS and mis-routes to
 //     "/v1/auth/device/". Silent mis-routing beats silent dropping for damage,
@@ -167,7 +173,8 @@
 //   `fence`, removing the predicate around the call site IS now reachable —
 //   deleting the band read, neutering the decision, or dropping the fence pin
 //   itself each exit 2. The narrowing is exactly as wide as the fence pins go,
-//   and today that is ONE BAND. Every other predicated row is still LIMIT 1.
+//   and today that is 10 bands over 41 of the 49 predicated rows. Every other
+//   predicated row is still LIMIT 1.
 //
 //   LIMIT 1b — (2i-4)'s ACCOUNTING IS OVER READ SITES, NOT OVER ROWS. It walks
 //   the band's live call sites and demands each enclosing function be claimed
@@ -187,21 +194,23 @@
 //   ratchet, not a proof of absence.
 //
 //   LIMIT 3 — THE INLINE-COND OVERLAY IS CONTENT-MATCHED, NOT LINE-PINNED.
-//   Eight router routes refuse non-admins inside a `cond` rather than through an
+//   6 router routes refuse non-admins inside a `cond` rather than through an
 //   `Auth.*` guard, so they are invisible to any guard grep. They are checked
 //   by counting the exact `Accounts.team_admin?(conn.assigns.current_user,
 //   conn.assigns.current_team)` form, so the check survives line drift — but it
-//   cannot tell WHICH route grew a ninth. It tells you to go look.
+//   cannot tell WHICH route grew a 7th. It tells you to go look.
 //
 //   The overlay also PRINTS a `router.ex:NNNN` per route, and those numbers
 //   are DERIVED by the same two regexes at run time — nothing compares them to
-//   anything, so they cannot red and cannot go stale. What IS pinned is the six
-//   ROUTE NAMES, and the print pairs name to line BY SOURCE ORDER. So the one
-//   thing this print can still get wrong is a router that REORDERS these eight
-//   while keeping the count at eight: the lines stay right and the names slide.
-//   On any count change the pairing is dropped and the derived lines print
-//   UNLABELED, because a mis-labelled failure message is a new false statement
-//   of exactly the kind this census exists to remove.
+//   anything, so they cannot red and cannot go stale. What IS pinned is the 6
+//   ROUTE NAMES — and which name sits beside which number is DERIVED too
+//   (cchi-w47-bl): overlayLabel() scans back from each site to its enclosing
+//   route macro or def/defp and names the recorded row that encloser belongs
+//   to. It used to pair name to line BY SOURCE ORDER, so a router that
+//   REORDERS these 6 while keeping the count at 6 kept every line right and
+//   slid every name one place, all green. A site whose encloser names no
+//   recorded row prints UNLABELED with the encloser's own text. The lookup
+//   chooses a label and nothing else: it is not a comparison and cannot red.
 //
 // Exit codes:
 //   0 — the derived call-site set EQUALS the pin, and every invariant holds
@@ -233,6 +242,20 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { bootScenario, flush } from "./__preview__/smoke.mjs";
+import { SCENARIOS, SCENARIO_NAMES, route } from "./__preview__/scenarios.mjs";
+import { scanControls } from "./__preview__/member-authority-sweep.mjs";
+// THE ROUTE -> FENCE TABLE IS NOT HERE ANY MORE (cch-w50-bl). The tier names,
+// the inline-cond overlay and the derivation live in __route_fence.mjs, which
+// member-authority-sweep.mjs imports too — the sweep used to keep a SECOND,
+// typed fence column citing this file's PIN rows in prose. One table now, and
+// (2n) below re-reads the PIN against it so the two cannot drift apart.
+import {
+  A_USER, A_TADMIN, A_PTADMIN, A_PTOWNER, A_OPERATOR, A_USER_OR_PAT, A_ABILITY, H_TEAM_ROLE,
+  H_TEAM_ROLE_OWNER,
+  INLINE_COND_ROUTES, INLINE_COND_EXCLUDED,
+  ROUTE_TIERS, ELEVATED, fenceFor, overlayGapReport, routeKey,
+} from "./__route_fence.mjs";
 
 const here = path.dirname(new URL(import.meta.url).pathname);
 // ── THE FIXTURE MODE FLAG IS RESOLVED HERE, AT THE `APP` BINDING ────────────
@@ -247,10 +270,31 @@ const FIXTURE_FLAGS = ["--add-check", "--remove-check", "--ratchet-check"];
 const fixtureFlagAt = process.argv.findIndex((a) => FIXTURE_FLAGS.includes(a));
 const FIXTURE_MODE = fixtureFlagAt === -1 ? null : process.argv[fixtureFlagAt];
 const FIXTURE_FILE = FIXTURE_MODE ? process.argv[fixtureFlagAt + 1] : null;
-if (FIXTURE_MODE && !FIXTURE_FILE) {
-  console.error(`FAIL(2): ${FIXTURE_MODE} needs a fixture file argument.`);
-  console.error("  e.g. node cloud/priv/static/__binding_census.mjs --add-check cloud/priv/static/__binding_census.add.fixture.js");
+
+// ── THE ONE REFUSAL VOCABULARY (cch-w63-bl) ─────────────────────────────────
+// EVERY exit-2 path in this file ends with exactly ONE line, on STDERR:
+//
+//     !! BINDING CENSUS (exit 2): REFUSED TO MEASURE — <reason>
+//
+// It is the same shape __preview__/exit-vocabulary.mjs already emits for the
+// browser instruments, so ONE reader covers the whole console fence. Before
+// this, six of console-unit's nine exit-2 sites spoke a private vocabulary
+// (BARE `console.error` lines with no prefix at all) that no `!!`-anchored capture could see — a gate that CAPTURES the
+// refusing instrument's own summary line would have replaced a wrong sentence
+// with NO sentence, in the wave about silence.
+//
+// THE READER IS scripts/console-refusal-capture.mjs, and its unit test
+// ENUMERATES this file from source: a new exit-2 path that does not go through
+// `refuse2` reds that test. Do not add one.
+const REFUSAL_NAME = "BINDING CENSUS";
+const refuse2 = (reason) => {
+  process.stderr.write(`!! ${REFUSAL_NAME} (exit 2): REFUSED TO MEASURE — ${reason}\n`);
   process.exit(2);
+};
+
+if (FIXTURE_MODE && !FIXTURE_FILE) {
+  console.error("  e.g. node cloud/priv/static/__binding_census.mjs --add-check cloud/priv/static/__binding_census.add.fixture.js");
+  refuse2(`${FIXTURE_MODE} needs a fixture file argument.`);
 }
 
 const APP = FIXTURE_FILE || process.argv[2] || path.join(here, "app.js");
@@ -268,7 +312,8 @@ const AUTHZ = (FIXTURE_MODE ? null : process.argv[5]) || path.join(here, "../../
 // than assuming accounts.ex. A module-qualified context_fn whose module is
 // absent here is a FAILURE, not a skip — otherwise naming an unmapped module
 // would be the way to buy silence from the check.
-const CONTEXT_SOURCES = { Accounts: ACCOUNTS, Authz: AUTHZ };
+const ERASURE = path.join(here, "..", "..", "lib", "barkpark_cloud", "accounts", "erasure.ex");
+const CONTEXT_SOURCES = { Accounts: ACCOUNTS, Authz: AUTHZ, Erasure: ERASURE };
 const MODULE_QUALIFIED = /^([A-Z][A-Za-z0-9_]*)\.(.+)$/;
 // Report against a stable repo-relative label so the output reads the same from
 // any cwd; a mutant copy passed as argv[2] keeps its own path.
@@ -277,13 +322,14 @@ const LABEL = APP === path.join(here, "app.js") ? "cloud/priv/static/app.js" : A
 const src = fs.readFileSync(APP, "utf8");
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE PIN — 79 write call sites, keyed by `fn|VERB route`.
+// THE PIN — 88 write call sites, keyed by `fn|VERB route`.
 //
 // A PIN ROW CARRIES NO LINE NUMBER, and adding one back is a regression. Every
 // `app.js:NNNN` this census prints is DERIVED from the live file at run time
 // (`lineOf`, below) and looked up by KEY, so it is correct by construction. The
-// rows used to carry a documentary `line:` beside it; measured, all 79 were
-// stale (median drift 524, max 928, zero correct) and nothing read them —
+// rows used to carry a documentary `line:` beside it; measured, every one of
+// them was stale (median drift 524, max 928, zero correct) and nothing read
+// them —
 // setting one to 999999 left the report BYTE-IDENTICAL at rc 0. A number no
 // check can red and no reader can trust is not orientation, it is a second
 // answer that disagrees with the first. Deleted (charter D528).
@@ -292,14 +338,11 @@ const src = fs.readFileSync(APP, "utf8");
 // dishonesty is owned by a filed task". It is never a way to quiet the gate.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const A_USER = "Auth.require_user";
-const A_TADMIN = "Auth.require_team_admin";
-const A_PTADMIN = "Auth.require_current_team_admin";
-const A_PTOWNER = "Auth.require_current_team_owner";
-const A_OPERATOR = "Auth.require_platform_operator";
-const A_USER_OR_PAT = "Auth.require_user_or_pat";
-const A_ABILITY = "Auth.require_ability";
-const H_TEAM_ROLE = 'with_team_role(conn, "admin")';
+// The A_* tier names are IMPORTED from __route_fence.mjs (see the header
+// there): the sweep needs the same vocabulary to derive a fence, and two files
+// spelling `Auth.require_user_or_pat` independently is how the strings drift.
+// H_TEAM_ROLE rides with them: the shared derivation has to classify it as
+// elevated, so it is the same string on both sides or neither.
 const H_TEAM_SITE = 'with_team_site(conn, {:ability, "write"})';
 const H_TEAM_SITE_M = "with_team_site(conn, fn)";
 const H_PROXY = "proxy_instance_webhook/2";
@@ -325,6 +368,119 @@ const C_MEMBER_REMOVE = "Accounts.remove_member_as/3";
 const INSTANCE_BAND = "instanceAdminAuthority";
 const F_INST = (read, decide) => ({ band: INSTANCE_BAND, read: read, decide: decide });
 
+// THE LAUNCH-CHECKOUT BAND's fence constructor (cch-w48-bl, band 2 of the ten
+// (2i) left unchecked). launchCheckoutAuthority(me) is three-valued —
+// "unknown" / "owner" / "blocked" — and BOTH of its live read sites are the
+// PIN rows themselves: renderLaunchPlan derives it from meCache at paint time,
+// and renderNewPricing takes it as an argument and re-derives it from a LATE
+// GET /v1/me when the caller passed none. Both then hand the answer to ONE
+// decide helper, launchPlanGridHtml, whose `authority !== "blocked"` fork is
+// what withholds the .new-plan CTA. So this band's (2i-4) accounting closes
+// with READ_EXEMPT EMPTY — no reader is unclaimed, and no hole is asserted.
+const LAUNCH_CHECKOUT_BAND = "launchCheckoutAuthority";
+const F_LCO = (read) => ({ band: LAUNCH_CHECKOUT_BAND, read: read, decide: "launchPlanGridHtml" });
+
+// THE LAUNCH BAND's fence constructor (cch-w48-bl, band 3). launchAuthority()
+// is FIVE-valued — "loading"/"failed"/"stale"/"grant"/"refuse" — and it is the
+// most-read band in the console: EIGHT live read sites. Only two of them stand
+// in front of a write, and those two are the rows pinned below. The other five
+// are NAVIGATION: they hide or omit a DOOR into the launch wizard (the scope
+// menu row, the two header buttons, the palette action) or write the overview
+// SUBTITLE. app.js names them itself at the launchFlow read — "the four OFFER
+// sites ... branch on `=== \"refuse\"`". They cannot be claimed as a row's
+// `read`, because this census pins rows at WRITE call sites and none of the
+// five is one, so they are named in READ_EXEMPT with that reason. That is a
+// hole with a stated reason, not a pass: if any of them stops reading the band
+// the exemption goes stale and (2i-4) reds on it.
+const LAUNCH_BAND = "launchAuthority";
+const F_LAUNCH = (read, decide) => ({ band: LAUNCH_BAND, read: read, decide: decide });
+
+// ── cch-r16-w11 — THE LAUNCH WIZARD'S WRITE BAND, and it is a NEW SIBLING of
+// ── launchAuthority for the same reason launchAuthority is a new sibling of
+// ── instanceAdminAuthority: the caller vocabularies differ. launchAuthority
+// ── answers five values (grant/refuse/loading/failed/stale) and the launch
+// ── step branches on all five by name; adminWriteControlHtml answers three
+// ── (grant / refuse / unknown) and its refusal arm DROPS the mount hook.
+// ── newWriteAuthority() is the narrowing — `launchAuthority()` mapped onto
+// ── that vocabulary, failing CLOSED so loading/failed/stale can never read as
+// ── a grant at a call site that never heard about them. It is a band in its
+// ── own right here because (2i-2) checks that each pinned READ calls the band
+// ── it names, and these three reads call the narrowing, not the source.
+const NEW_WRITE_BAND = "newWriteAuthority";
+const F_NEWWRITE = (read, decide) => ({ band: NEW_WRITE_BAND, read: read, decide: decide });
+
+// ── cch-r17-w12 — THE PROVIDER BAND'S WRITE VOCABULARY, and it is the SAME
+// ── narrowing shape NEW_WRITE_BAND is, for the same reason. providerCanWrite is
+// ── a BOOLEAN band (`teamAuthorityState() === "grant"`) and every caller of it
+// ── branches on truthiness; adminWriteControlHtml needs the three-valued
+// ── grant/refuse/unknown vocabulary and its refusal arm drops the mount hook.
+// ── providerWriteAuthority() is that narrowing — teamAuthorityState()'s five
+// ── values mapped onto the helper's three, failing CLOSED — and it is a band in
+// ── its own right here because (2i-2) checks that each pinned READ calls the
+// ── band it names, and the credential sheet calls the narrowing, not the
+// ── boolean. It is DELIBERATELY NOT the launch band: the route is POST
+// ── /v1/providers (require_team_admin), and the launch wizard being this
+// ── sheet's only door is reachability, not this row's predicate.
+const PROVIDER_WRITE_BAND = "providerWriteAuthority";
+const F_PROVWRITE = (read, decide) => ({ band: PROVIDER_WRITE_BAND, read: read, decide: decide });
+
+// ── THE BOOLEAN BANDS (bands 4-7), pinnable only since (2i-3) grew its shape
+// ── arm. Every one of them answers `someState() === "grant"`, so there is no
+// ── vocabulary to derive and nothing for the string arm to compare; what each
+// ── one has is a VALUE, which the row names so (2i-3) can prove the decide
+// ── still binds it and still branches on it. The three cheap ones below have
+// ── exactly ONE live read site each, so their (2i-4) accounting closes with
+// ── READ_EXEMPT EMPTY — no hole is asserted because none exists.
+//
+// providerCanWrite has TWO affordance surfaces and therefore two fences: the
+// providers page threads the answer into renderProviderPage as `canWrite` (the
+// roster's Disconnect wiring and the whole Connect card hang off it), and the
+// GitHub card threads it into githubCardHtml. renderProviderPage is BOTH a
+// decide and a read — its own meState()-unknown Retry closure re-asks the band
+// for the re-render — so it is listed in `read` as well, because the honest
+// alternative is an exemption where a true claim was available.
+const PROVIDER_BAND = "providerCanWrite";
+const F_PROV = (read, decide, value) => ({ band: PROVIDER_BAND, read: read, decide: decide, value: value });
+
+// notifCanManage: read and decide are ONE function on purpose. renderNotifications
+// asks the band, and its own body is what withholds every write on the page —
+// it returns before wiring the email/channel/matrix forms on the member arm and
+// sets `#notif-test`.hidden from the same value. There is no pure helper to name
+// for those five writes (notifPageHtml decides the page BODY, not the wiring),
+// and inventing one would be a D530 split this console does not have.
+const NOTIF_BAND = "notifCanManage";
+const F_NOTIF = () => ({ band: NOTIF_BAND, read: "renderNotifications", decide: "renderNotifications", value: "canManage" });
+
+// canManageOnboarding: the D530 split proper. paintOverviewState reads the band
+// and threads it into overviewStateHtml's opts; runwayCardHtml emits the
+// .runway-dismiss button only when `opts.canManage`, which is the affordance
+// dismissRunway's POST /v1/onboarding hangs off.
+const ONBOARDING_BAND = "canManageOnboarding";
+const F_ONBOARD = () => ({ band: ONBOARDING_BAND, read: "paintOverviewState", decide: "runwayCardHtml", value: "opts.canManage" });
+
+// operatorRouteAllowed: the `value`-less shape. loadOperator both asks and
+// decides, in one `if (!operatorRouteAllowed(meCache))` that empties the body
+// and bounces the hash — there is no threaded identifier to name, so the row
+// omits `value` and (2i-3) consults the band CALL itself. Both operator write
+// rows live behind that one bounce.
+// githubInstallWriteAuthority: the GITHUB-INSTALL RETURN LEG's band (cch-w73-bl).
+// The one row in this pin whose affordance is an ACT and not a control. GitHub
+// redirects the browser back to the App's Setup URL after an install, and the
+// console consumes that redirect at boot — there is no button to withhold, so
+// adminWriteControlHtml has nothing to draw and the fence lives at the decision
+// instead. The band is teamAuthorityState() narrowed the way newWriteAuthority()
+// narrows launchAuthority() (#18136): "grant"/"refuse"/"unknown", so the two
+// states this leg cannot read are folded into one rather than read as truthy.
+// resolveGithubInstallReturn READS it (and re-asks once, because at boot /v1/me
+// is still in flight and a first read is always "unknown" — deciding on that
+// would be a fence that never fires); githubInstallDecision DECIDES, and only
+// its `authority === "refuse"` arm withholds the write.
+const GITHUB_INSTALL_BAND = "githubInstallWriteAuthority";
+const F_GHINST = () => ({ band: GITHUB_INSTALL_BAND, read: "resolveGithubInstallReturn", decide: "githubInstallDecision" });
+
+const OPERATOR_BAND = "operatorRouteAllowed";
+const F_OPERATOR = () => ({ band: OPERATOR_BAND, read: "loadOperator", decide: "loadOperator" });
+
 const PIN = [
   // ── account & session self-service — every one of these acts on the caller's
   // ── OWN account, so plain membership is the honest tier.
@@ -341,26 +497,42 @@ const PIN = [
   { fn: "openResurrectModal", verb: "POST", route: "/v1/resurrect", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadArchives", "archiveRowHtml"), auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "cch-w48-s4 re-pin: loadArchives reads the band and threads it into archivesModel; archiveRowHtml emits .archive-resurrect-btn ONLY on a grant — refuse/unknown draw the CLI chip alone, with no button to mount. Was pinned UNPREDICATED, which stopped being true when the offer-time answer shipped. resurrect/1 still refuses non-admins inside a cond, so the context_fn and the overlay stay" },
 
   // ── providers — THE DECISIVE PAIR. Same route, opposite verdicts.
-  { fn: "submitProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED — but NOT for the reason this row used to give. The old note said the .launch-connect-provider button 'renders unconditionally' and credited a renderLaunchConnect that app.js does not declare; both halves were false (cch-w48-s4). What is true: catalogPanelHtml draws the button, and it is only ever reached inside the launch wizard, which launchFlow withholds unless launchAuthority() === 'grant'. That fence is THREE HOPS away, belongs to the LAUNCH band, and guards POST /v1/launch — not this row's POST /v1/providers, whose own tier is require_team_admin. A predicate this row does not evaluate is not this row's predicate, so it stays null and stays owned" },
-  { fn: "submitInlineProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "renderConnectCard mounts only when providerCanWrite()" },
-  { fn: "run", verb: "DELETE", route: "/v1/providers/:*", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "wireProviderDisconnect runs only when providerCanWrite()" },
+  { fn: "submitProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: PROVIDER_WRITE_BAND, fence: F_PROVWRITE("openProviderCredential", "adminWriteControlHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-r17-w12: FENCED, and the row leaves the UNPREDICATED list on that fence and not on a re-worded note. The old note was right that the launch wizard's own fence does not count — it is THREE HOPS away, belongs to the LAUNCH band and guards POST /v1/launch, while this route's tier is require_team_admin. So the sheet now asks its OWN question: openProviderCredential reads providerWriteAuthority() (teamAuthorityState() narrowed to adminWriteControlHtml's three-valued vocabulary, failing closed) and draws the submit through adminWriteControlHtml(…, \"wizard-block\") — the refusal arm DROPS liveAttrs, so a refused principal gets no id=\"cred-submit\" and the wiring below binds nothing. MEASURED BOTH WAYS in the RENDERED BYTES of two committed scenarios, with the band read from each fixture's own /v1/me and only the OPENING gesture supplied: providers-member paints the disabled-and-explained arm with zero id=\"cred-submit\", providers-connected paints the live btn-primary btn-block button. The sheet's only forward door (.launch-connect-provider) sits inside a wizard launchFlow withholds from a member entirely, so no member fixture can reach it by clicking and minting one that could would be fiction — the same boundary member-authority-sweep.mjs declares for #new-vercel-claim" },
+  { fn: "submitInlineProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: PROVIDER_BAND, fence: F_PROV(["loadProviders", "renderProviderPage"], "renderProviderPage", "canWrite"), auth_fn: A_TADMIN, context_fn: null, note: "renderConnectCard mounts only when providerCanWrite()" },
+  { fn: "run", verb: "DELETE", route: "/v1/providers/:*", elevated: true, predicate: PROVIDER_BAND, fence: F_PROV(["loadProviders", "renderProviderPage"], "renderProviderPage", "canWrite"), auth_fn: A_TADMIN, context_fn: null, note: "wireProviderDisconnect runs only when providerCanWrite()" },
 
   // ── github (team-level installation)
   // cch-w48-s3, re-pinned here in review: the old note ("wired whenever an
   // installation exists") stopped being true the moment s3 landed —
   // githubCardHtml(g, canWrite) emits #github-disconnect only when
-  // providerCanWrite() is true, and OMITS it otherwise. NOT fence-pinned:
-  // providerCanWrite is a boolean, not a three-valued band, so (2i-3)'s
-  // vocabulary derivation has nothing to read. LIMIT 1, and honest about it.
-  { fn: "disconnectGithub", verb: "DELETE", route: "/v1/github/installation", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s3: githubCardHtml OMITs #github-disconnect unless providerCanWrite()" },
+  // providerCanWrite() is true, and OMITS it otherwise. FENCE-PINNED since
+  // (2i-3) grew its shape arm: providerCanWrite is a boolean, so there is no
+  // vocabulary to derive — the row names `canWrite`, the value githubCardHtml
+  // is handed, and the arm proves that helper still binds it and still branches.
+  { fn: "disconnectGithub", verb: "DELETE", route: "/v1/github/installation", elevated: true, predicate: PROVIDER_BAND, fence: F_PROV("renderGithub", "githubCardHtml", "canWrite"), auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s3: githubCardHtml OMITs #github-disconnect unless providerCanWrite()" },
+  // cch-w73-bl — THE INSTALL RETURN LEG, and the one row here whose affordance
+  // is not drawn. ROUTER GROUND TRUTH, read off origin/main and pasted so the
+  // tier is not a memory: `post "/v1/github/installations" do` is followed by
+  // `conn = Auth.require_team_admin(conn, [])` — team admin, full stop, with the
+  // rest of the handler a cond over configured?/valid-id. So the write IS
+  // elevated and a plain member who lands on the App's Setup URL (bookmarkable,
+  // replayable out of history) would have POSTed and collected a 403 that the
+  // leg then rendered through its can't-confirm sentence — blaming the install
+  // for a refusal about the reader. FENCED, not excused: githubInstallDecision
+  // issues no write on a determinate refuse and says who can. The band's
+  // "unknown" arm RECORDS, which is the one place this row departs from the
+  // rendered bands' fail-closed habit, and the reason is in app.js beside
+  // resolveGithubInstallReturn: the installation_id is spent and unrepeatable,
+  // so a failed /v1/me must not be allowed to destroy a real admin's install.
+  { fn: "recordGithubInstall", verb: "POST", route: "/v1/github/installations", elevated: true, predicate: GITHUB_INSTALL_BAND, fence: F_GHINST(), auth_fn: A_TADMIN, context_fn: null, note: "cch-w73-bl: githubInstallDecision withholds the POST on a determinate refuse and toasts the admin-only truth instead; resolveGithubInstallReturn is the read, and it re-asks ONCE because a boot-time first read is always unknown" },
 
   // ── notifications — every write is wired behind notifCanManage()
-  { fn: "saveNotifEmail", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "loadNotifications returns before wiring when !canManage" },
-  { fn: "next", verb: "PUT", route: "/v1/notifications/channels", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "chat-channel save; same wiring fence" },
-  { fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → settings axis" },
-  { fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/events", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → per-event axis" },
-  { fn: "sendChatTest", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "per-channel test send" },
-  { fn: "sendTestNotification", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "#notif-test is hidden when !canManage" },
+  { fn: "saveNotifEmail", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "loadNotifications returns before wiring when !canManage" },
+  { fn: "next", verb: "PUT", route: "/v1/notifications/channels", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "chat-channel save; same wiring fence" },
+  { fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → settings axis" },
+  { fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/events", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → per-event axis" },
+  { fn: "sendChatTest", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "per-channel test send" },
+  { fn: "sendTestNotification", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: NOTIF_BAND, fence: F_NOTIF(), auth_fn: A_TADMIN, context_fn: null, note: "#notif-test is hidden when !canManage" },
 
   // ── tokens — see ruling (c). NOT elevated; the cap is on the ability set.
   { fn: "submitToken", verb: "POST", route: "/v1/tokens", elevated: false, predicate: "canMintAnyAbility", auth_fn: A_USER, context_fn: C_PAT_ABILITIES, note: "any member may mint; the owner/admin cap is on the requested abilities, below the router" },
@@ -374,7 +546,8 @@ const PIN = [
 
   // ── studio / onboarding
   { fn: "openStudio", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
-  { fn: "dismissRunway", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: "canManageOnboarding", auth_fn: A_PTADMIN, context_fn: null, note: "the runway renders with canManage: canManageOnboarding()" },
+  { fn: "dismissRunway", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: ONBOARDING_BAND, fence: F_ONBOARD(), auth_fn: A_PTADMIN, context_fn: null, note: "the runway renders with canManage: canManageOnboarding()" },
+  { fn: "ackRunwayStep", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: ONBOARDING_BAND, fence: F_ONBOARD(), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w55-bl: the published-doc step ack; same runway, same canManage gate as dismissRunway" },
 
   // ── instance detail — the console's densest unpredicated cluster
   { fn: "runDecommission", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["wireLifecycleActions", "repaintLifecycleAuthority"], "decommissionAction"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: decommissionAction answers mode:\"disabled\" for refuse and for unknown, and the rail emits the LIVE arm's `data-life-name` companion only on that arm — the same disabled-ghost shape rows rollbackInstance/attachDomain are already pinned on (D428). cch-w46-bl RE-POINTED THE HOOK: the refused arm now carries the same `data-life-verb` as the live one (one verb, ONE identity, offered or refused), so bare `data-life-verb` stopped discriminating the two arms and the probe below moved to `data-life-verb=\"decommission\" data-life-name=`, which lifecycleActionHtml writes in the mode===\"live\" branch alone; paintLifecycleActions also binds only a non-disabled control now. Read twice, on purpose: the rail is mounted by wireLifecycleActions and re-offered by repaintLifecycleAuthority when /v1/me answers late" },
@@ -390,20 +563,33 @@ const PIN = [
 
   // ── operator console — the console's highest-privilege writes, and both of
   // ── them build their path from a constant (ruling (b)).
-  { fn: "fleetRolloutAction", verb: "POST", route: "/v1/operator/autoupdate/halt|/v1/operator/autoupdate/resume", elevated: true, predicate: "operatorRouteAllowed", auth_fn: A_OPERATOR, context_fn: null, note: "the operator route refuses to render at all unless operatorRouteAllowed(meCache)" },
-  { fn: "operatorConfirmBrake", verb: "POST", route: "/v1/operator/autoupdate/halt", elevated: true, predicate: "operatorRouteAllowed", auth_fn: A_OPERATOR, context_fn: null, note: "same route fence" },
+  { fn: "fleetRolloutAction", verb: "POST", route: "/v1/operator/autoupdate/halt|/v1/operator/autoupdate/resume", elevated: true, predicate: OPERATOR_BAND, fence: F_OPERATOR(), auth_fn: A_OPERATOR, context_fn: null, note: "the operator route refuses to render at all unless operatorRouteAllowed(meCache)" },
+  { fn: "operatorConfirmBrake", verb: "POST", route: "/v1/operator/autoupdate/halt", elevated: true, predicate: OPERATOR_BAND, fence: F_OPERATOR(), auth_fn: A_OPERATOR, context_fn: null, note: "same route fence" },
+  { fn: "operatorConfirmDigestSend", verb: "POST", route: "/v1/operator/digest/send", elevated: true, predicate: OPERATOR_BAND, fence: F_OPERATOR(), auth_fn: A_OPERATOR, context_fn: null, note: "same route fence as the brake above, and the same authority exactly — require_platform_operator. gr-backlog-operator-digest-send: the button lives inside the Operator page, which does not render at all unless operatorRouteAllowed(meCache), so a plain member never sees it; the ROUTE is what actually refuses, and it 401s/403s/fails-closed-on-an-unconfigured-allowlist under test. This is the console's only write that mails strangers, which is why it also asks through a danger confirm the brake's tier already established" },
 
   // ── sites
   { fn: "openCreateSiteModal", verb: "POST", route: "/v1/sites", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "any member may create a site" },
 
-  // ── webhook catalog proxy — user-authed + team-scoped, member tier
-  { fn: "sendWebhookTest", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/test-send", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy: user-authed + team-scoped fail-closed" },
-  { fn: "toggleWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { fn: "rotateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/rotate", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { fn: "submitEditWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { fn: "submitCreateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { fn: "deleteWebhook", verb: "DELETE", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { fn: "replayDelivery", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/deliveries/:*/replay", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  // ── webhook catalog proxy — TEAM ADMIN since task-8ccc571ab4d4e713 / #18480,
+  //    and these rows said "member tier" until cch-r21-w16. Every verb below now
+  //    carries `Auth.require_team_admin(conn, [])` AHEAD of
+  //    proxy_instance_webhook/2 in router.ex (grep the route literals there); the
+  //    proxy remains the team-scoped fail-closed layer behind it, which is why
+  //    context_fn keeps H_PROXY. The tier did not move here — the ROWS caught up
+  //    with a tier that moved under them. Only `webhook.list`/`webhook.show`
+  //    stayed member, and neither is a write, so neither has a row.
+  //
+  //    The console fence is ONE band read, in mountWebhooksTab, threaded to the
+  //    three pure builders (there are three DOM paint sites in this tab and three
+  //    independent reads could disagree inside one visible tab). `decide` names
+  //    the builder that OMITS each affordance on a determinate "refuse".
+  { fn: "sendWebhookTest", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/test-send", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhookCardHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16: webhookCardHtml OMITS the whole action bar (Send test among it) unless authority !== \"refuse\"; D514 rules these OMITTED rather than disabled-and-explained, and one FORBIDDEN_ROLE_COPY.admin sentence replaces the bar" },
+  { fn: "toggleWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhookCardHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16: the enable/disable toggle IS the update PUT. Its two doors are both gated — the action-bar button (webhookCardHtml) and the auto-disable banner's Re-enable (webhookBannerHtml, which takes the same threaded answer)" },
+  { fn: "rotateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/rotate", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhookCardHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16: a CREDENTIAL verb (task-a0f4f8757ba28e76); the button is in the omitted action bar" },
+  { fn: "submitEditWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhookCardHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16: the Edit button is in the omitted action bar, so the modal has no door" },
+  { fn: "submitCreateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhooksTabShellHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16: the New webhook CTA has TWO doors and both are gated — the toolbar (webhooksTabShellHtml) and the empty-state (loadWebhooks, which reads the same captured answer). The TAB is not removed: webhook.list is member-tier by the router's own written ruling, so the dataset picker and Load stay live" },
+  { fn: "deleteWebhook", verb: "DELETE", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhookCardHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16: the Delete button is in the omitted action bar" },
+  { fn: "replayDelivery", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/deliveries/:*/replay", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhookCardHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16 — FENCED TRANSITIVELY, stated rather than overclaimed. deliveryRowHtml still renders Replay unconditionally; what gates it is that the ONLY door to the delivery log is the card's Deliveries button, which webhookCardHtml omits on a refusal (and GET .../deliveries is itself team-admin, so a member could not name an event_id anyway). A direct fence on deliveryRowHtml would be a second read of the same answer for an affordance that cannot be reached" },
 
   { fn: "runVerifyNow", verb: "POST", route: "/v1/barkparks/:*/verify", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
 
@@ -412,6 +598,9 @@ const PIN = [
   { fn: "openSiteEnvModal", verb: "POST", route: "/v1/sites/:*/env", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE_M, note: "team-scoped member action" },
   { fn: "runPromote", verb: "POST", route: "/v1/sites/:*/deployments/:*/promote", elevated: false, predicate: null, auth_fn: A_USER_OR_PAT + " + " + A_ABILITY, context_fn: null, note: "ruling (a): the promote/rollback pair are plain-member for a session" },
   { fn: "runSiteRollback", verb: "POST", route: "/v1/sites/:*/rollback", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
+  { fn: "wireSiteForms", verb: "PUT", route: "/v1/sites/:*/forms", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "N-08 ruling (a): turning a site's form endpoint on/off is with_team_site(conn, {:ability, \"write\"}); no role read on the path" },
+  { fn: "wireSiteForms", verb: "PATCH", route: "/v1/sites/:*/forms/submissions/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "N-08 ruling (a): marking a submission seen/new/spam is the same team-scoped write tier" },
+  { fn: "wireSiteForms", verb: "POST", route: "/v1/sites/:*/forms/export", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "N-08 ruling (a): export is gated on write (a bulk personal-data copy) but still team-scoped only, no role read" },
   { fn: "runSiteDelete", verb: "DELETE", route: "/v1/sites/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "cch-w67 crown: the console's FIRST caller of DELETE /v1/sites/:id. NOT elevated, and the judgement is re-derivable rather than inherited: the route is with_team_site(conn, {:ability,\"write\"}), a browser session is assigned [\"root\"], and Registry.get_team_site filters on TENANCY only — no role read exists anywhere on the path. The INSTANCE Decommission on the same screen family is require_current_team_admin, a strictly higher tier; predicating this row on that band would withhold a control the server honours" },
   { fn: "createAndDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
   { fn: "runDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a); second call site on the same route as :12059" },
@@ -425,11 +614,11 @@ const PIN = [
   { fn: "disconnectSiteGithub", verb: "DELETE", route: "/v1/sites/:*/github", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadSite", "siteDetailHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s2: same door, same fence — disconnect is reached only from the connected arm of #site-github" },
 
   { fn: "submitInviteAccept", verb: "POST", route: "/v1/invitations/accept", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "the invitation token is the authority" },
-  { fn: "resumeStudioLogin", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "second call site on the same route as :5544" },
+  { fn: "resumeStudioLogin", verb: "POST", route: "/v1/auth/studio-signin", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "the instance-INITIATED Studio entry: the console holds no id and no team here, only the public host the deep link arrived with, so the row is resolved server-side by host (custom_host OR the url origin) and the grant is read against the RESOLVED row's team — never conn.assigns.current_team, which falls back to the caller's primary team when no team header is sent. No client predicate is possible or wanted: the console cannot know whether a host is registered, and probing to find out would make the button an existence oracle. Replaced a second POST /v1/barkparks/:*/studio-link call site that matched the fleet client-side and was therefore wrong for a non-selected team and dead on every custom host" },
 
   // ── launch + billing
-  { fn: "submitLaunchFlow", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w47-s1, re-pinned cch-w48-s4: launchFlow withholds the WHOLE form unless launchAuthority() === \"grant\" — fail-closed on loading and on failed, so there is no submit to reach. NO `fence` PIN: arm (2i) is scoped to the instanceAdminAuthority band this wave, and pinning the launch band without doing its read accounting would be a claim this file cannot back. go_live/1 still refuses non-admin sessions inside a cond, so the overlay stays" },
-  { fn: "renderLaunchPlan", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the plan grid draws its CTA only for an owner authority" },
+  { fn: "submitLaunchFlow", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", fence: F_LAUNCH(["launchFlow", "repaintLaunchAuthority"], "launchFlow"), auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w47-s1, re-pinned cch-w48-s4: launchFlow withholds the WHOLE form unless launchAuthority() === \"grant\" — fail-closed on loading and on failed, so there is no submit to reach. cch-w48-bl DOES the read accounting the old note said this file could not back, and PINS the fence. READ AND DECIDE ARE THE SAME FUNCTION HERE, on purpose: launchFlow asks the band and immediately forks on the answer in its own body (refuse draws launchRefusalHtml and returns; loading/failed draw the one exit), so there is no threaded value and no pure helper to name — the D530 split is a shape this console uses where the read happens at a DOM mount, and this one does not. READ TWICE: repaintLaunchAuthority re-asks when a late /v1/me lands and re-enters launchFlow only on a MOVED answer. go_live/1 still refuses non-admin sessions inside a cond, so the overlay stays" },
+  { fn: "renderLaunchPlan", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", fence: F_LCO("renderLaunchPlan"), auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the plan grid draws its CTA only for an owner authority. cch-w48-bl FENCE PIN: renderLaunchPlan is the read (`opts.authority || launchCheckoutAuthority(meCache)` — the || arm is a node-harness override seam, not a second policy), and launchPlanGridHtml is the decide: `withCta = authority !== \"blocked\"` is the single fork, and launchPlanTierHtml is handed `withCta && offered[t.plan]`, so a blocked principal gets the tier cards with NO .new-plan button to bind — the omit shape, not a disabled ghost (GR36)" },
   { fn: "openCancelPlanModal", verb: "POST", route: "/v1/billing/cancel", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "renderBilling returns read-only when !billingIsOwner()" },
   { fn: "openBillingPortal", verb: "POST", route: "/v1/billing/portal", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
   { fn: "subscribe", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
@@ -446,16 +635,18 @@ const PIN = [
   // takes launchAuthority()'s band through newLaunchOffer, which emits
   // #new-launch-btn only on "grant". NOT fence-pinned: the launch band's read
   // accounting is not done (cch-w48-bl-fence-pins-for-the-other-eight-bands).
-  { fn: "newLaunch", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w48-s1: newLaunchOffer emits #new-launch-btn only on \"grant\"; refuse omits it, unknown withholds it and renders the one exit" },
-  { fn: "renderNewPricing", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the /new plan grid draws its CTA only for an owner authority" },
-  { fn: "newVercelDeploy", verb: "POST", route: "/v1/barkparks/:*/vercel-deploy", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
-  { fn: "newCreateRepo", verb: "POST", route: "/v1/github/repos", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "newLaunch", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", fence: F_LAUNCH("renderNewLaunch", "newLaunchOffer"), auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w48-s1: newLaunchOffer emits #new-launch-btn only on \"grant\"; refuse omits it, unknown withholds it and renders the one exit. cch-w48-bl FENCE PIN: renderNewLaunch is the read (`newLaunchOffer(launchAuthority(), tpl)`) and newLaunchOffer is the decide — the classic D530 split, the answer threaded as a value into a pure helper. renderNewLaunch also binds the submit ONLY on offer.mode === \"grant\", so a refused principal has no form to submit" },
+  { fn: "renderNewPricing", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", fence: F_LCO("renderNewPricing"), auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the /new plan grid draws its CTA only for an owner authority. cch-w48-bl FENCE PIN: renderNewPricing READS the band itself — when its caller passed no authority it fires one GET /v1/me and calls launchCheckoutAuthority(r.data), repainting only if the answer is \"blocked\" and only while the pricing screen is still mounted. Same decide as its sibling: launchPlanGridHtml owns the omit fork" },
+  { fn: "newVercelDeploy", verb: "POST", route: "/v1/barkparks/:*/vercel-deploy", elevated: true, predicate: NEW_WRITE_BAND, fence: F_NEWWRITE(["newReadyHtml", "newVercelDeploy"], "adminWriteControlHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-r16-w11: FENCED, and the row leaves the UNPREDICATED list on that fence and not on a re-worded note. newReadyHtml reads the band ONCE per paint through newWriteAuthority() (launchAuthority() narrowed to adminWriteControlHtml\'s three-valued vocabulary) and threads it into vercelClaimHtml -> vercelClaimInnerHtml, whose deploy/re-mint arm is drawn by adminWriteControlHtml(…, \"vercel\") — the refusal arm DROPS liveAttrs, so #new-vercel-claim and its mount hook are absent for a member. READ TWICE: newVercelDeploy re-asks for the in-place swap it paints after a successful POST, so a claim area repainted post-deploy cannot come back live under a band that has since moved. THE THEATER\'S OWN /v1/me: the resume path never loaded one, so newStartProgress kicks newAskTheaterAuthority (latched with the launch step\'s ask) and the answer repaints the mounted step. NOT OBSERVABLE FROM THE CORPUS (member-authority-sweep BLIND SPOT B6): the control renders only when GET /v1/barkparks/:id/bootstrap answers a vercel envelope and THAT read is itself require_team_admin, so no actor paints it; its bytes are pinned both ways in __app.test.mjs instead" },
+  { fn: "newCreateRepo", verb: "POST", route: "/v1/github/repos", elevated: true, predicate: NEW_WRITE_BAND, fence: F_NEWWRITE("newReadyHtml", "adminWriteControlHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-r16-w11: FENCED, and the row leaves the UNPREDICATED list on that fence and not on a re-worded note. newReadyHtml reads the band once and threads it into newGithubHtml, whose Create-GitHub-repo control is drawn by adminWriteControlHtml(…, \"wizard\") — the refusal arm drops #new-gh-create, and the repo-name field beside it is disabled in the same arm. MEASURED BOTH WAYS in the rendered bytes: theater-ready-github paints 1, theater-ready-github-member paints 0 (member-authority-sweep WATCHED row #new-gh-create)" },
   { fn: "newSubmitSiteUrl", verb: "POST", route: "/v1/barkparks/:*/site-url", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
-  { fn: "newRenderFailed", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED; second call site on the same route as :6776" },
+  { fn: "newRenderFailed", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: NEW_WRITE_BAND, fence: F_NEWWRITE("newRenderFailed", "adminWriteControlHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-r16-w11: FENCED, and the row leaves the UNPREDICATED list on that fence and not on a re-worded note. THE THIRD offer site of the verb #12996 fenced twice (instanceTimelineHtml\'s [data-tl-retry] and verifyNoteHtml\'s [data-vf-reprovision]) — on the launch wizard\'s own failure screen, which that PR never entered. newRenderFailed reads newWriteAuthority() once and draws Retry setup through adminWriteControlHtml(…, \"wizard-block\"); the refusal arm drops #new-retry, and the click wiring below it is guarded on the hook so a refused principal has nothing bound. MEASURED BOTH WAYS: theater-failed paints 1, theater-failed-member paints 0 (member-authority-sweep WATCHED row #new-retry)" },
 
   // ── team membership — every write behind assignableRoles(ctx.role)
   { fn: "submitInvite", verb: "POST", route: "/v1/teams/:*/invitations", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "canManage = assignableRoles(ctx.role).length > 0" },
   { fn: "openRoleModal", verb: "PATCH", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "canChangeMemberRole", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_ROLE, note: "RANK-RELATIVE below the router — the same admin is refused on a peer and allowed on a member. RE-PINNED off assignableRoles by the (2k) arm below: the crown (cch-w42-s3) shipped canChangeMemberRole(actorRole, targetRole, isSelf), which mirrors update_member_role_as/4 including its self? bypass and its ABSENT owner escape hatch. The old pin named the tier question, arity 1 over the ACTOR, in front of a relation — and every other arm in this file scored that PREDICATED" },
+  { fn: "runEraseTeam", verb: "DELETE", route: "/v1/teams/:*", elevated: true, predicate: "teamDangerZoneHtml", auth_fn: H_TEAM_ROLE_OWNER, context_fn: "Erasure.delete_team/2", note: "TEAM ERASURE. The OWNER rung of with_team_role — the only route on it — so the affordance is owner-only client-side too: teamDangerZoneHtml returns \"\" for any ctx.role but \"owner\", and membersContext's fail-closed floor means an unresolved authority renders nothing rather than a destroy button. The SECOND refusal (409 instances_present) is deliberately NOT a client predicate: the count is the server's, measured under a lock, and a console that hid the button on a stale cache would hide it from an owner who had just decommissioned" },
+  { fn: "runEraseAccount", verb: "DELETE", route: "/v1/account", elevated: false, predicate: null, auth_fn: A_USER, context_fn: "Erasure.delete_user/2", note: "ACCOUNT ERASURE, self-scope — the session IS the authority, exactly like its /v1/account siblings, so there is no role band to mirror and an unconditional affordance is the honest one. What the route adds on top is REAUTHENTICATION (the account password, in the confirm modal's body slot), which is an identity proof, not an authority tier: a member and an owner pass or fail it identically" },
   { fn: "runRemoveMember", verb: "DELETE", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "canRemoveMember", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_REMOVE, note: "RANK-RELATIVE below the router, with an owner escape hatch the PATCH path lacks. RE-PINNED off assignableRoles by the (2k) arm below: canRemoveMember(actorRole, targetRole, isSelf) mirrors remove_member_as/3, hatch included. A SEPARATE predicate from the PATCH row on purpose — the two laws disagree on owner-vs-owner, so one boolean cannot state both" },
   { fn: "confirmRevokeInvite", verb: "DELETE", route: "/v1/teams/:*/invitations/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
 
@@ -479,6 +670,7 @@ const RESOLVERS = [
   { fn: "newSubmitAuth", verb: "POST", expr: "path", route: "/v1/auth/login|/v1/auth/register", why: "newAuthMode branch, same two routes" },
   { fn: "fleetRolloutAction", verb: "POST", expr: "path", route: "/v1/operator/autoupdate/halt|/v1/operator/autoupdate/resume", why: "OPERATOR_AUTOUPDATE + (verb === 'halt' ? '/halt' : '/resume')" },
   { fn: "operatorConfirmBrake", verb: "POST", expr: 'OPERATOR_AUTOUPDATE + "/halt"', route: "/v1/operator/autoupdate/halt", why: "OPERATOR_AUTOUPDATE = '/v1/operator/autoupdate'" },
+  { fn: "operatorConfirmDigestSend", verb: "POST", expr: "OPERATOR_DIGEST_SEND", route: "/v1/operator/digest/send", why: "OPERATOR_DIGEST_SEND = '/v1/operator/digest/send' — the operator send-now write (gr-backlog-operator-digest-send). A bare const, so it only needs a row because the census resolves LITERAL paths: it is the console's only write that mails strangers, and an unresolved site here would have hidden exactly the class the two autoupdate rows above exist for" },
   { fn: "sendWebhookTest", verb: "POST", expr: 'whPath(bp, "/" + encodeURIComponent(wh.id) + "/test-send", ds)', route: "/v1/barkparks/:*/api/webhooks/:*/test-send", why: "whPath/3 → /v1/barkparks/<id>/api/webhooks<suffix>?dataset=" },
   { fn: "toggleWebhook", verb: "PUT", expr: 'whPath(bp, "/" + encodeURIComponent(wh.id), ds)', route: "/v1/barkparks/:*/api/webhooks/:*", why: "whPath/3" },
   { fn: "rotateWebhook", verb: "POST", expr: 'whPath(bp, "/" + encodeURIComponent(wh.id) + "/rotate", ds)', route: "/v1/barkparks/:*/api/webhooks/:*/rotate", why: "whPath/3" },
@@ -495,45 +687,14 @@ const RESOLVERS = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE INLINE-COND OVERLAY (charter D421) — eight router routes whose refusal of a
-// non-admin lives in a `cond` clause, invisible to any `Auth.*` grep. Recorded
-// here because four of the console's unpredicated elevated writes are elevated
-// ONLY by these, and a census that read `Auth.*` alone would call them member.
-//
-// SIX, NOT SEVEN. cch-w36-s5's brief mandated "the SEVEN post-guard inline-cond
-// routes"; the grep it prescribed returns SIX. The seventh site BY CONTENT is
-// the one reading `admin? = Accounts.team_admin?(user, team)` — invisible to
-// that grep because it binds a local; its line is DERIVED and printed as the
-// overlay's EXCLUDED row, never written down here. It is EXCLUDED BY NAME, not counted: it
-// is a self-scope NARROWING on a GET (the notification delivery log fences a
-// member to their own rows), never a refusal. Inventing a seventh row would
-// have made the overlay wrong in the other direction.
-//
-// EIGHT SINCE PDF-D94 (pdf-bl-console-key-custody): the agent-key POST and its
-// status-poll GET both refuse non-admin sessions inside the same cond shape as
-// POST /v1/fleet/supports (the read narrates a write only admins can make, so
-// it carries the same disjunction). Recorded the day they landed, in the same
-// commit as the routes.
+// THE INLINE-COND OVERLAY (charter D421) — MOVED, NOT DELETED (cch-w50-bl).
+// The routes, the SIX-not-seven ruling, the excluded local-binding site and the
+// never-pin-a-line-number ruling now live in __route_fence.mjs, imported at the
+// top of this file and imported by member-authority-sweep.mjs too. The overlay
+// is half of the route -> fence answer, and the answer is one table or it is
+// two tables that disagree. (2f) below still checks it against router.ex, and
+// (2n) checks the shared table against the PIN.
 // ═══════════════════════════════════════════════════════════════════════════
-
-// THE ROUTES ARE PINNED. THE LINE NUMBERS ARE NOT, AND NEVER AGAIN WILL BE.
-// These six used to carry a typed `line:` that the census PRINTED, and all six
-// were stale (drift 82, 87, 94, 98, 230, 235; router.ex at the recorded 8082 is
-// now a bare `conn`). Pin-and-check was built and REFUSED: router.ex took 102
-// commits in 30 days and all six of these lines moved within a SINGLE calendar
-// day, so a numeral corrected at merge is wrong by the next one — and this
-// census runs FIRST of three in the same CI job (console-harness.yml), so a
-// drift red would convert an unrelated router insertion into a three-census
-// outage. DERIVE AND PRINT; never pin and compare.
-const INLINE_COND_ROUTES = [
-  "POST /v1/fleet/supports",
-  "DELETE /v1/fleet/supports/:id",
-  "POST /v1/barkparks/:id/agent-key",
-  "GET /v1/barkparks/:id/agent-key (status poll — same cond, admin-narrated read)",
-  "POST /v1/launch + POST /v1/go-live (go_live/1)",
-  "POST /v1/resurrect (resurrect/1)",
-];
-const INLINE_COND_EXCLUDED = { why: "self-scope NARROWING on GET /v1/notifications/deliveries — binds `admin?` as a local, never refuses" };
 
 // KEY ON THE TWO PRECISE FORMS, NEVER THE BARE STRING. `grep -n 'team_admin?'
 // router.ex` returns MORE hits than the eight refusal-form sites and the one
@@ -558,6 +719,52 @@ const LOCAL_FORM = /admin\?\s*=\s*Accounts\.team_admin\?\(user, team\)/;
 // One entry PER OCCURRENCE (a line carrying the form twice yields it twice), so
 // the derived array's LENGTH is exactly the occurrence count check (2f) tests —
 // deriving the lines must not quietly change what the check counts.
+// THE LABEL IS DERIVED FROM THE SITE, NOT FROM ITS INDEX (cchi-w47-bl).
+// enclosingAnchor() walks back from a derived line to the nearest route macro
+// (`get|post|put|patch|delete "/path"`) or `def`/`defp` head. overlayLabel()
+// names the INLINE_COND_ROUTES row that anchor belongs to: a route macro by its
+// normalised route key against the row's `VERB /route` parts, a def/defp by the
+// row's `(name/arity)` gloss. No match returns null and the print says so with
+// the encloser's own text. This is a label lookup, never a check — it adds no
+// comparison, no exit path, and on the clean tree it names exactly what the
+// old positional pairing named.
+const ROUTE_MACRO = /^\s*(get|post|put|patch|delete)\s+"([^"]+)"/;
+const DEF_HEAD = /^\s*defp?\s+([a-z_][A-Za-z0-9_]*[?!]?)/;
+function enclosingAnchor(sourceLines, line) {
+  for (let i = line - 1; i >= 0; i--) {
+    const text = sourceLines[i];
+    let m = ROUTE_MACRO.exec(text);
+    if (m) return { line: i + 1, text: text.trim(), key: routeKey(m[1], m[2]) };
+    m = DEF_HEAD.exec(text);
+    if (m) return { line: i + 1, text: text.trim(), fn: m[1] };
+  }
+  return null;
+}
+const overlayRowKeys = (row) =>
+  row
+    .replace(/\s*\([^)]*\)\s*$/, "")
+    .split("+")
+    .map((part) => /^([A-Z]+)\s+(\/\S*)$/.exec(part.trim()))
+    .filter(Boolean)
+    .map((m) => routeKey(m[1], m[2]));
+function overlayLabel(anchor) {
+  if (!anchor) return null;
+  const hit = anchor.fn
+    ? (row) => new RegExp("\\(" + anchor.fn.replace(/[?!]/g, "\\$&") + "/\\d+\\)\\s*$").test(row)
+    : (row) => overlayRowKeys(row).includes(anchor.key);
+  return INLINE_COND_ROUTES.find(hit) ?? null;
+}
+// One printed row per derived site: its line, then the derived label — or,
+// when the encloser names no recorded row, the encloser's own text.
+function overlaySiteRow(sourceLines, l, indent) {
+  const anchor = enclosingAnchor(sourceLines, l);
+  const label = overlayLabel(anchor);
+  return `${indent}router.ex:${pad(String(l), 8)}` + (label ??
+    (anchor
+      ? `UNLABELED — enclosed by \`${anchor.text}\` at router.ex:${anchor.line}, which names no recorded overlay route`
+      : "UNLABELED — no enclosing route macro or def/defp above it"));
+}
+
 function siteLines(source, re) {
   const g = new RegExp(re.source, "g");
   const out = [];
@@ -607,6 +814,41 @@ const innermost = (pos) => {
   return best;
 };
 const lineOf = (i) => src.slice(0, i).split("\n").length;
+
+// Comments and string bodies blanked, LENGTH PRESERVED, so every offset still
+// maps to the same line in `src`. Blanking matters twice over: this file's own
+// prose says "instanceAdminAuthority()" in half a dozen comments, and counting
+// those as call sites would invent read sites that do not exist. Module-level
+// because arms (2i) and (2o) both need it and two copies could drift.
+const codeMask = (s) => {
+  const out = s.split("");
+  let inS = null, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inS) {
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { esc = true; continue; }
+      if (c === inS) inS = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { inS = c; continue; }
+    if (c === "/" && s[i + 1] === "/") {
+      const nl = s.indexOf("\n", i);
+      const end = nl < 0 ? s.length : nl;
+      for (let k = i; k < end; k++) out[k] = " ";
+      i = end;
+      continue;
+    }
+    if (c === "/" && s[i + 1] === "*") {
+      const close = s.indexOf("*/", i + 2);
+      const end = close < 0 ? s.length : close + 2;
+      for (let k = i; k < end; k++) if (out[k] !== "\n") out[k] = " ";
+      i = end - 1;
+      continue;
+    }
+  }
+  return out.join("");
+};
 
 // Read the FIRST argument expression after `api("VERB",` — up to the top-level
 // comma (or the closing paren for a one-argument call), tracking nesting and
@@ -709,7 +951,21 @@ for (const s of sites) if (!seenByKey.has(keyOf(s))) seenByKey.set(keyOf(s), s);
 // The rule check (2d-ii) enforces, named here because THE FIXTURE CONTROL below
 // must exercise the very same function the live check runs. A control that
 // re-implements the rule it is proving has proven its own copy and nothing else.
-const verdictContrastLost = (pair) => pair.length > 1 && pair.every((r) => r.predicate === null);
+//
+// `!r.predicate`, NOT `r.predicate === null` — and that change is the whole of
+// cch-bl-2d-ii-identical-predicate's clause. The `=== null` spelling made this
+// rule disagree with the definition of "unpredicated" every other arm in this
+// file uses: `isUnboundElevated` just below tests `!r.predicate`, and so does
+// the classification summary's `pinnedUnpredicated`. A pair pinned
+// `predicate: ""` on both rows was therefore BOTH UNPREDICATED to the ratchet
+// and to the report, and PREDICATED to (2d-ii) — a flattening that the rule's
+// own sentence ("the pair may not go BOTH unpredicated") forbids and its code
+// could not see. One definition now, shared.
+//
+// THIS IS NOT A BAN ON THE PAIR SHARING A PREDICATE NAME. See THE RULING at
+// (2d) below: two rows carrying the SAME non-empty predicate is the shape the
+// fix this census exists to motivate produces, and it passes here on purpose.
+const verdictContrastLost = (pair) => pair.length > 1 && pair.every((r) => !r.predicate);
 
 // THE RATCHET'S RULE, named here for the same reason: the fixture control below
 // and the live arm (2j) far down this file both call THIS function. A control
@@ -752,7 +1008,7 @@ const ratchetVerdict = (pinRows, ceilingKeys) => {
 //
 // WHY IT SHORT-CIRCUITS HERE — after `seenByKey`, before every check below. A
 // fixture is not app.js, and the checks are statements ABOUT app.js: (2b)'s
-// EXPECT {79, 40, …} is nonsense against four hundred bytes of fixture, and
+// EXPECT's live totals are nonsense against four hundred bytes of fixture, and
 // (2e)/(2f) read Elixir the fixture has nothing to do with. Measured before this
 // block existed: handing a fixture to the bare census resolves cleanly through
 // (2a) and then dies at (2d) with `submitProviderCred → MISSING` — a red that
@@ -822,7 +1078,7 @@ if (FIXTURE_MODE) {
     console.error("  This is NOT the census failing on the console. It is the control that proves the");
     console.error("  census can fail failing to behave as its own fixture declares. Fix the fixture or");
     console.error("  the arm, never the declaration alone.");
-    process.exit(2);
+    refuse2("the fixture control lost its footing — " + LABEL);
   };
 
   // ── the declarations, read from the fixture's own bytes ───────────────────
@@ -844,10 +1100,15 @@ if (FIXTURE_MODE) {
       continue;
     }
     if (kind === "pin-override") {
-      const om = rest.match(/^(.+?)[ \t]+predicate=(null|[A-Za-z_$][A-Za-z0-9_$]*)$/);
+      // `""` is a THIRD spelling on purpose, not typo-tolerance. The pin's
+      // falsy-but-not-null predicate is the flattening (2d-ii) could not see
+      // before cch-bl-2d-ii-identical-predicate, so the fixture has to be able
+      // to WRITE one: a mutant the fixture language cannot express is a mutant
+      // nobody can prove the rule against.
+      const om = rest.match(/^(.+?)[ \t]+predicate=(null|""|[A-Za-z_$][A-Za-z0-9_$]*)$/);
       if (!om) dieFixture(["  unparseable @pin-override: " + JSON.stringify(rest),
-        "  shape: @pin-override <fn>|<VERB> <route> predicate=<name|null>"]);
-      overrides.push({ key: om[1].trim(), predicate: om[2] === "null" ? null : om[2] });
+        '  shape: @pin-override <fn>|<VERB> <route> predicate=<name|null|"">']);
+      overrides.push({ key: om[1].trim(), predicate: om[2] === "null" ? null : om[2] === '""' ? "" : om[2] });
       continue;
     }
     const am = rest.match(/^([A-Z-]+)[ \t]+(.+)$/);
@@ -1014,13 +1275,25 @@ for (const r of rows) {
 const pinnedElevated = PIN.filter((r) => r.elevated);
 const pinnedPredicated = pinnedElevated.filter((r) => r.predicate);
 const pinnedUnpredicated = pinnedElevated.filter((r) => !r.predicate);
+
+// Ruling (a)'s counterfactual, DERIVED rather than typed. The rows a builder
+// would wrongly promote are exactly the ones this pin marks NOT elevated whose
+// only guard above membership is the router's ability check (or the
+// with_team_site ability tuple), plus the rows whose cap lives in
+// Accounts.pat_abilities_allowed?/2 below the router. Both sets are read off
+// the pin, so the counterfactual moves when the pin does.
+const abilityGuard = (r) => /require_ability/.test(r.auth_fn || "") || /\{:ability,/.test(r.context_fn || "");
+const patAbilityGuard = (r) => /pat_abilities_allowed/.test(r.context_fn || "");
+const pinnedAbilityOnly = PIN.filter((r) => !r.elevated && abilityGuard(r));
+const pinnedPatAbility = PIN.filter((r) => !r.elevated && patAbilityGuard(r));
+const naiveAbilityElevated = pinnedElevated.length + pinnedAbilityOnly.length + pinnedPatAbility.length;
 const liveByKey = (r) => seenByKey.get(keyOf(r));
 
 console.log("");
 console.log(`classification   : ${PIN.length} call sites · ${pinnedElevated.length} ELEVATED above plain member · ` +
   `${pinnedPredicated.length} PREDICATED · ${pinnedUnpredicated.length} UNPREDICATED`);
 console.log("                   (require_ability is NOT elevated for the console — a session carries [\"root\"];");
-console.log("                    counting it would give 46, not " + pinnedElevated.length + ". See ruling (a) at the top of this file.)");
+console.log("                    counting it would give " + naiveAbilityElevated + ", not " + pinnedElevated.length + ". See ruling (a) at the top of this file.)");
 console.log("");
 console.log(`THE ${pinnedUnpredicated.length} UNPREDICATED ELEVATED WRITES — an affordance a plain member can see, click, and be refused for.`);
 console.log("This census does NOT fix them. cch-w38-s1 (criterion 3) took the THREE this list was named for —");
@@ -1057,8 +1330,319 @@ for (const r of withContext) {
 const die2 = (lines) => {
   console.error("");
   for (const l of lines) console.error(l);
-  process.exit(2);
+  refuse2(String(lines[0] || "the census lost its footing").replace(/^FAIL\(2\):\s*/, ""));
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// (2m) THE POPULATION SPLIT — the unpredicated column is THREE populations
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// THE DEFECT THIS ARM CLOSES (cchi-w46-bl-elevated-writes-column-conflates-
+// three-populations). Everything above prints ONE number for the unpredicated
+// elevated writes, under a sentence that reads "an affordance a plain member
+// can see, click, and be refused for". That sentence is true of SOME of them
+// and unprovable for the rest, and the column could not tell you which:
+//
+//   PROVEN-REACHABLE   a member-actor scenario RENDERS the offer. The console
+//                      is handing a plain member a write the server refuses.
+//                      This is the disease. It is the only population the
+//                      one-number column's sentence was ever true of.
+//   PROVEN-OMITTED     the corpus renders the offer, NO member-actor scenario
+//                      does, and a member-actor scenario painted the very
+//                      mount it renders into. The member stood on that surface
+//                      and the offer was not there.
+//   UNOBSERVABLE       nothing renders it at all, or the only mounts that do
+//                      are mounts no member actor ever paints. The corpus
+//                      cannot speak, so NO guard over the row — present or
+//                      absent — can be proven by rendering it.
+//
+// An instrument that adds those three together and prints the sum is telling a
+// merge something it cannot support: it counts a proven-omitted affordance as
+// one a member can click, and it counts an unobservable one as a measurement.
+//
+// HOW IT MEASURES: the RENDERED BYTES, through smoke.mjs's own shim — the same
+// renderer member-authority-sweep.mjs boots, and the same nesting-aware control
+// scanner, imported rather than re-implemented. A source-text scan cannot do
+// this job: the console's fencing idiom is hide-or-don't-wire the element, so
+// the string is in app.js either way (charter D505). Nothing here is typed from
+// a transcript — every scenario in the committed corpus is booted on this run.
+//
+// WHAT IT DOES NOT CLAIM. PROVEN-OMITTED is ABSENCE IN THE MEMBER'S BYTES, never
+// a fence. A member fixture differs from a privileged one in DATA as well as in
+// actor, and an offer that only renders per-row is absent from an empty roster
+// for a reason that has nothing to do with authority. So a row leaves the
+// unpredicated list on a FENCE, exactly as the block above says — never on this
+// arm's verdict. This arm classifies; it does not absolve.
+// The corpus-wide control floor. DERIVED by running this sweep and reading the
+// number it PRINTED, then set well under it: the threat is a corpus that stopped
+// painting, not one that grew. Every scenario's every mount contributes, so this
+// is not a per-screen expectation and grows monotonically with the corpus.
+const CONTROL_FLOOR = 1000;
+
+const OFFERS = [
+  // cch-r17-w12 REMOVED the submitProviderCred row that sat here. This list is a
+  // PREDICATE OVER THE PIN — one entry per unpredicated row, both directions
+  // checked — so a row that leaves the unpredicated population must leave this
+  // list in the same commit or the arm reds as an offer spec for a row nobody
+  // classifies. Its offer site did not disappear; it is FENCED, and #cred-submit
+  // is now measured in the rendered bytes by smoke.mjs on BOTH bands
+  // (providers-member refuses, providers-connected offers).
+  {
+    key: "submitAgentKey|POST /v1/barkparks/:*/agent-key",
+    data: "data-agent-key-send",
+    what: "supportRowHtml's Deliver-key button, one per LIVE support row",
+  },
+  // cch-r16-w11 REMOVED the three launch-wizard rows that sat here
+  // (newVercelDeploy / newCreateRepo / newRenderFailed). This list is a
+  // PREDICATE OVER THE PIN — one entry per unpredicated row, both directions
+  // checked — so a row that leaves the unpredicated population must leave this
+  // list in the same commit or the arm reds as an offer spec for a row nobody
+  // classifies. Their offer sites did not disappear; they are FENCED, and the
+  // three ids (#new-vercel-claim, #new-gh-create, #new-retry) are now measured
+  // by member-authority-sweep.mjs's WATCHED arm and by __app.test.mjs instead.
+];
+
+// THE OFFER SET IS A PREDICATE OVER THE PIN, NOT A LIST BESIDE IT. A new
+// unpredicated row with no offer spec would otherwise be silently classified by
+// nobody and quietly drop out of the three counts — the same conflation one
+// level down. Both directions red.
+{
+  const want = new Set(pinnedUnpredicated.map(keyOf));
+  const have = new Set(OFFERS.map((o) => o.key));
+  const missing = [...want].filter((k) => !have.has(k));
+  const extra = [...have].filter((k) => !want.has(k));
+  if (missing.length || extra.length) {
+    die2([
+      "FAIL(2m): the offer specs and the UNPREDICATED population do not describe the same rows.",
+      ...missing.map((k) => `  NO OFFER SPEC  ${k}` +
+        " — it is pinned unpredicated and this arm cannot say which population it is in."),
+      ...extra.map((k) => `  ORPHAN SPEC    ${k}` +
+        " — no unpredicated PIN row carries this key; the row was fixed or re-keyed and the spec did not follow."),
+      "",
+      "  Add or delete the spec in the same commit that moves the row. An offer spec names the",
+      "  SELECTOR the console draws, so it is checkable against the shipped file; a stale one is not.",
+    ]);
+  }
+}
+
+// THE CONTROL, and it is load-bearing. Three of the five verdicts below are
+// ZEROES, and an absence read off a broken instrument looks exactly like an
+// absence read off a working one. So the same sweep, on the same run, probes a
+// control that MUST be found — a plain member-reachable button drawn on a
+// member-actor screen. If it comes back zero, or comes back with no member-actor
+// render, the sweep did not see and every zero above it is manufactured.
+const CONTROL_PROBE = {
+  key: "CONTROL|#site-new-btn",
+  id: "site-new-btn",
+  what: "openCreateSiteModal's + New site — pinned MEMBER in this census, and drawn on a member-actor instance screen",
+};
+
+// THE FILING'S FIVE, RE-DERIVED BY SELECTOR. The row that ordered this arm named
+// five ids as its unobservable population and pinned each to an app.js LINE. The
+// lines rotted (D41) and two of the five are not unpredicated rows at all any
+// more, so re-deriving the CLAIM means asking the corpus about the SELECTORS and
+// letting the answer land where it lands. Each name is checked against the
+// shipped file below, so a rotted id reds instead of answering "zero" forever.
+const FILING_FIVE = [
+  { key: "FILING|#github-disconnect", id: "github-disconnect" },
+  { key: "FILING|#github-connect-go", id: "github-connect-go" },
+  { key: "FILING|#github-disconnect-site", id: "github-disconnect-site" },
+  { key: "FILING|#new-vercel-claim", id: "new-vercel-claim" },
+  { key: "FILING|#new-gh-create", id: "new-gh-create" },
+];
+{
+  const rotted = FILING_FIVE.filter((f) => src.indexOf('id="' + f.id + '"') === -1);
+  if (rotted.length) {
+    die2([
+      "FAIL(2m): a selector this arm reports a ZERO for is no longer authored in the console.",
+      ...rotted.map((f) => `  #${f.id}`),
+      "",
+      "  A zero-render verdict over a selector the file does not draw is vacuously true and says",
+      "  NOTHING about the affordance. Re-derive the id from the shipped file, or delete the entry.",
+    ]);
+  }
+}
+
+const PROBES = [...OFFERS, CONTROL_PROBE, ...FILING_FIVE];
+const probeMatches = (c, p) => {
+  if (p.id && c.id !== p.id) return false;
+  if (p.data && !c.data.includes(p.data)) return false;
+  if (p.withoutData && c.data.includes(p.withoutData)) return false;
+  return true;
+};
+
+// The actor axis is DERIVED, never typed: a scenario is a member-actor scenario
+// when its own GET /v1/me answers role === "member". Same derivation
+// member-authority-sweep.mjs uses, and for the same reason — a typed actor list
+// dates the moment the corpus grows.
+const meRole = (name) => {
+  try {
+    const r = route(name, "GET", "/v1/me", {});
+    return r && r.body ? r.body.role || null : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const renderHits = new Map(PROBES.map((p) => [p.key, []]));
+const paintedMounts = new Map();
+const bootFailures = [];
+let controlsScanned = 0;
+for (const name of SCENARIO_NAMES) {
+  let boot;
+  try {
+    boot = bootScenario(name, {});
+    await flush();
+  } catch (e) {
+    bootFailures.push(`  ${name} — ${e && e.message ? e.message : e}`);
+    continue;
+  }
+  const painted = new Set();
+  for (const [mountId, el] of boot.registry) {
+    const html = el && typeof el.innerHTML === "string" ? el.innerHTML : "";
+    if (!html) continue;
+    painted.add(mountId);
+    const { controls } = scanControls(html);
+    controlsScanned += controls.length;
+    for (const c of controls) {
+      for (const p of PROBES) {
+        if (probeMatches(c, p)) renderHits.get(p.key).push({ scenario: name, mount: mountId });
+      }
+    }
+  }
+  paintedMounts.set(name, painted);
+}
+
+const memberScenarios = SCENARIO_NAMES.filter((n) => meRole(n) === "member");
+const memberMounts = new Set();
+for (const n of memberScenarios) for (const m of paintedMounts.get(n) || []) memberMounts.add(m);
+
+// (2m-i) THE SWEEP'S OWN FOOTING. Every one of these makes a zero MEAN something.
+{
+  const broken = [];
+  if (bootFailures.length) {
+    broken.push("  " + bootFailures.length + " scenario(s) failed to boot — a scenario that never rendered",
+      "  cannot be counted as one that did not render the offer:", ...bootFailures);
+  }
+  if (!memberScenarios.length) {
+    broken.push("  ZERO member-actor scenarios in the corpus. Without one, PROVEN-REACHABLE and",
+      "  PROVEN-OMITTED are both unreachable verdicts and every row would classify UNOBSERVABLE",
+      "  by construction — a uniform verdict, which is the signature of a broken instrument.");
+  }
+  if (controlsScanned < CONTROL_FLOOR) {
+    broken.push(`  only ${controlsScanned} control(s) scanned across the whole corpus, under the floor of ` +
+      `${CONTROL_FLOOR}. A corpus that painted almost nothing answers "absent" to everything.`);
+  }
+  const ctrl = renderHits.get(CONTROL_PROBE.key);
+  const ctrlMember = ctrl.filter((h) => meRole(h.scenario) === "member");
+  if (!ctrl.length) {
+    broken.push("  the CONTROL probe #" + CONTROL_PROBE.id + " was found in ZERO scenarios. It is drawn by a",
+      "  pinned member-tier writer on a screen this corpus renders, so a zero here is the SWEEP",
+      "  failing to see — and every zero it reports is then manufactured, not measured.");
+  } else if (!ctrlMember.length) {
+    broken.push("  the CONTROL probe #" + CONTROL_PROBE.id + " renders in " + ctrl.length + " scenario(s) but in no",
+      "  MEMBER-actor one. The member arm of this sweep is then unexercised, so \"no member-actor",
+      "  scenario renders it\" is a sentence this run cannot earn about anything.");
+  }
+  if (broken.length) {
+    die2(["FAIL(2m): the rendered-bytes sweep cannot support a verdict.", "", ...broken]);
+  }
+}
+
+// (2m-ii) THE SPLIT.
+const populations = OFFERS.map((o) => {
+  const hits = renderHits.get(o.key);
+  const memberHits = hits.filter((h) => meRole(h.scenario) === "member");
+  const onMemberMount = hits.filter((h) => memberMounts.has(h.mount));
+  const scenarios = [...new Set(hits.map((h) => h.scenario))];
+  const mounts = [...new Set(hits.map((h) => h.mount))];
+  let population, why;
+  if (memberHits.length) {
+    population = "PROVEN-REACHABLE";
+    why = "rendered to a plain member in " + [...new Set(memberHits.map((h) => h.scenario))].join(", ");
+  } else if (hits.length && onMemberMount.length) {
+    population = "PROVEN-OMITTED";
+    why = "renders in " + scenarios.length + " scenario(s) into #" + mounts.join(", #") +
+      "; a member-actor scenario paints that mount and does NOT draw it";
+  } else if (hits.length) {
+    population = "UNOBSERVABLE";
+    why = "renders only into #" + mounts.join(", #") + ", which NO member-actor scenario paints — the " +
+      "member never reached the surface, so its absence measures REACH, not authority";
+  } else {
+    population = "UNOBSERVABLE";
+    why = "renders in ZERO committed scenarios — nothing can be said, and no guard over it can be proven";
+  }
+  return { ...o, hits, scenarios, mounts, population, why };
+});
+
+const countOf = (p) => populations.filter((x) => x.population === p).length;
+const POP = {
+  reachable: countOf("PROVEN-REACHABLE"),
+  omitted: countOf("PROVEN-OMITTED"),
+  unobservable: countOf("UNOBSERVABLE"),
+};
+
+console.log("");
+console.log(`population split : ${pinnedUnpredicated.length} UNPREDICATED = ${POP.reachable} PROVEN-REACHABLE · ` +
+  `${POP.omitted} PROVEN-OMITTED · ${POP.unobservable} UNOBSERVABLE`);
+console.log(`                   DERIVED this run from the rendered bytes of all ${SCENARIO_NAMES.length} committed scenario(s) ` +
+  `(${memberScenarios.length} member-actor,`);
+console.log(`                   ${controlsScanned} controls scanned). PROVEN-OMITTED is absence in the member's bytes, NEVER a fence:`);
+console.log("                   a member fixture differs in DATA as well as in actor. A row leaves the list above");
+console.log("                   on a FENCE, never on this verdict.");
+for (const p of populations) {
+  console.log("  " + pad(p.population, 18) + p.key);
+  console.log("  " + " ".repeat(18) + p.why);
+}
+console.log("  " + pad("CONTROL", 18) + "#" + CONTROL_PROBE.id + " — " +
+  renderHits.get(CONTROL_PROBE.key).length + " render(s), " +
+  renderHits.get(CONTROL_PROBE.key).filter((h) => meRole(h.scenario) === "member").length +
+  " of them member-actor. The sweep can SEE; the zeroes above are measurements.");
+
+console.log("");
+console.log("the filing's five ids, RE-DERIVED BY SELECTOR (its app.js line numbers had rotted, and two of");
+console.log("the five are no longer unpredicated rows at all — the census owner column says which):");
+for (const f of FILING_FIVE) {
+  const hits = renderHits.get(f.key);
+  const owner = OFFERS.find((o) => o.id === f.id);
+  const scen = [...new Set(hits.map((h) => h.scenario))];
+  console.log("  " + pad("#" + f.id, 26) +
+    (hits.length ? `${hits.length} render(s) in ${scen.join(", ")}` : "ZERO renders in the committed corpus") +
+    (owner ? `   [unpredicated PIN row ${owner.key}]` : "   [not an unpredicated PIN row]"));
+}
+
+// THE PIN ON THE SPLIT. Same doctrine as EXPECT below: the numbers are the
+// receipt. Moving one means saying, in the commit message, WHICH direction the
+// console moved — a row that becomes PROVEN-REACHABLE is a defect arriving, and
+// one that leaves UNOBSERVABLE means the corpus grew a scenario that can finally
+// see it. Neither should land silently.
+// cch-r16-w11 moved UNOBSERVABLE 4 -> 1, and the direction is the GOOD one
+// twice over: three rows left the unpredicated population entirely (they are
+// FENCED now, not merely re-classified), and all three were unobservable rows,
+// so what is left is the two this slice does not own. RE-DERIVED by RUNNING
+// this census and reading the `found` line it PRINTED ("0 reachable · 1 omitted
+// · 1 unobservable"), never by subtracting three.
+// cch-r17-w12 moved UNOBSERVABLE 1 -> 0, and the direction is the GOOD one
+// twice over: the row left the unpredicated population entirely (it is FENCED
+// now, not merely re-classified), and it was the last UNOBSERVABLE one — what
+// is left is the single PROVEN-OMITTED row this slice does not own. RE-DERIVED
+// by RUNNING this census and reading the split line it PRINTED, never by
+// subtracting one.
+const EXPECT_POPULATIONS = { reachable: 0, omitted: 1, unobservable: 0 };
+if (POP.reachable !== EXPECT_POPULATIONS.reachable ||
+    POP.omitted !== EXPECT_POPULATIONS.omitted ||
+    POP.unobservable !== EXPECT_POPULATIONS.unobservable) {
+  die2([
+    "FAIL(2m): the unpredicated population no longer splits the way this census documents.",
+    `  expected  ${EXPECT_POPULATIONS.reachable} reachable · ${EXPECT_POPULATIONS.omitted} omitted · ${EXPECT_POPULATIONS.unobservable} unobservable`,
+    `  found     ${POP.reachable} reachable · ${POP.omitted} omitted · ${POP.unobservable} unobservable`,
+    "",
+    "  REACHABLE GOING UP is the disease itself: the console has started drawing an elevated write",
+    "  to a plain member. UNOBSERVABLE GOING DOWN is good news and still needs saying — the corpus",
+    "  grew an actor or a state that can finally see the offer. Move the pin in the same commit.",
+  ]);
+}
+
 
 // (2a) THE VACUITY FLOOR. Not "79 seen" — 79 RESOLVED TO A ROUTE.
 if (unresolved.length) {
@@ -1125,7 +1709,65 @@ if (unresolved.length) {
 // is pre-session, so it adds nothing to `elevated` and therefore nothing to
 // `predicated`/`unpredicated`. A bump that moved `unpredicated` would mean the
 // console had grown an affordance the server can refuse — this one did not.
-const EXPECT = { total: 80, elevated: 39, predicated: 34, unpredicated: 5 };
+// predicated 34 → 37, unpredicated 5 → 2 (cch-r16-w11): newVercelDeploy,
+// newCreateRepo and newRenderFailed — the three unowned rows on the
+// UNPREDICATED list — are now fenced on the LAUNCH band through
+// adminWriteControlHtml, so each moves from the unpredicated column into the
+// predicated one. `total` and `elevated` are UNMOVED and that is the
+// load-bearing part of this bump: no call site was added or removed and no
+// route's tier changed — the same 39 elevated writes are simply decided by 37
+// bands instead of 34. RE-DERIVED by RUNNING this census and reading the
+// `found` line it PRINTED ("80 rows · 39 elevated · 37 predicated · 2
+// unpredicated"), never by adding three and subtracting three.
+// predicated 37 → 38, unpredicated 2 → 1 (cch-r17-w12): submitProviderCred, the
+// FOURTH unowned row on the UNPREDICATED list, is now fenced on the PROVIDER
+// band through adminWriteControlHtml, so it moves from the unpredicated column
+// into the predicated one. `total` and `elevated` were UNMOVED by that bump.
+//
+// cch-w73-bl MOVES total AND elevated, which cch-r17-w12 deliberately did not:
+// the console grew a NEW write call site (recordGithubInstall's POST
+// /v1/github/installations, the GitHub App install return leg), on a route
+// whose router tier is Auth.require_team_admin. So on top of w12's tree,
+// total 80 -> 81, elevated 39 -> 40, predicated 38 -> 39, and `unpredicated`
+// does NOT move — the site arrived WITH its fence, which is the only way a new
+// elevated affordance is allowed to land. RE-DERIVED by RUNNING this census on
+// the REBASED tree and reading the `found` line it PRINTED, never by arithmetic
+// over two branches' numbers: this row was authored against 80/39/37/2 and the
+// base has since moved twice.
+// gr-backlog-operator-digest-send: the console grew ONE new write call site —
+// operatorConfirmDigestSend's POST /v1/operator/digest/send, the Send-one-now
+// button GR40 cut and this row's route restored. Its tier is the operator band,
+// identical to the brake beside it (Auth.require_platform_operator), and it
+// arrived WITH its fence, so total 81 -> 82, elevated 40 -> 41, predicated
+// 39 -> 40, and `unpredicated` does NOT move — the only way a new elevated
+// affordance is allowed to land. RE-DERIVED by RUNNING this census on this tree
+// and reading the `found` line it PRINTED (82/41/40/1), never by arithmetic.
+// cch-r21-w16 (task-e62943f720e80c70): NO ROW WAS ADDED AND NO TIER MOVED — the
+// seven instance-webhook `:mutate` rows CAUGHT UP with a tier that had already
+// moved under them. task-8ccc571ab4d4e713 / #18480 put
+// `Auth.require_team_admin(conn, [])` in front of create, update, delete,
+// rotate, deliveries, replay and test-send, while these rows still read
+// `elevated: false, predicate: null` under a comment calling them "member tier".
+// So the count moves by SEVEN in exactly two columns: elevated 42 -> 49,
+// predicated 41 -> 48. `total` does NOT move (84 rows before and after — no new
+// write call site), and `unpredicated` does NOT move: all seven arrived WITH a
+// fence in the same commit, which is the only way an elevated affordance is
+// allowed to sit here. The fence is one instanceAdminAuthority() read in
+// mountWebhooksTab threaded to webhooksTabShellHtml / webhookCardHtml /
+// webhookBannerHtml — and it is what (2i-4) refused on until this pin existed,
+// which is the arm working exactly as designed. RE-DERIVED by RUNNING this
+// census on this tree and reading the `found` line it PRINTED (84/49/48/1),
+// never by arithmetic over two branches' numbers.
+// task-71082f5541c13b53 (N-08): THREE MEMBER ROWS ADDED, no tier moved — the
+// form inbox's PUT /v1/sites/:*/forms, PATCH /v1/sites/:*/forms/submissions/:*
+// and POST /v1/sites/:*/forms/export, all three in wireSiteForms. Each route is
+// `with_team_site(conn, {:ability, "write"}, …)`: a browser session carries
+// ["root"] and Registry.get_team_site filters on TENANCY only, so there is no
+// role read anywhere on the path and nothing for a predicate to agree with —
+// ruling (a), the same judgement as PATCH /v1/sites/:* and DELETE /v1/sites/:*.
+// So total 85 -> 88 and nothing else moves. RE-DERIVED by RUNNING this census
+// on this tree and reading the `found` line it PRINTED, never by arithmetic.
+const EXPECT = { total: 88, elevated: 50, predicated: 49, unpredicated: 1 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||
@@ -1137,6 +1779,150 @@ if (PIN.length !== EXPECT.total ||
     "  If the population genuinely moved, move EXPECT in the same commit and say why in the",
     "  message — the numbers are the doctrine's receipt, not a convenience.",
   ]);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// (2p) THE ORIENTATION PROSE IS DERIVED-OR-DEAD (task-597f2ffeeb9a43d4)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// THE DEFECT THIS ARM CLOSES. Everything above this line is checked. The
+// paragraphs a reader starts from were not: they carried typed populations
+// that no arm compared to anything, so they decayed silently while the gate
+// itself stayed green — the same shape charter D528 removed from the pin rows
+// and (2h) removed from the note strings, left standing one level up, in the
+// sentences that TELL A READER WHAT THE INSTRUMENT MEASURES. Measured on the
+// tree this arm landed against: five asserting sentences described a
+// population five rows smaller than the pin sitting underneath them, and the
+// counterfactual the summary PRINTS was smaller than the number it contrasted
+// itself with.
+//
+// HOW IT WORKS. Every comment line in this file is flattened to one whitespace-
+// normalised string, and each claim below names a regex whose captures ARE the
+// numerals of one sentence, paired with the live quantity each must equal. A
+// claim whose regex does not match EXACTLY ONCE is a FAILURE, never a skip:
+// zero matches means the sentence was reworded out from under its own check
+// (which is how a prose check goes quietly vacuous), and two mean the regex is
+// no longer pointing at one sentence. The claim list may not be empty either.
+//
+// WHAT IS PINNED RATHER THAN DERIVED, said out loud. Numerals that record a
+// PAST tree — what D528 deleted, what a wave moved — are not in this list, and
+// they are not in the prose either: they were removed rather than pinned,
+// because a number describing a tree that no longer exists is the decoy this
+// census exists to delete, not orientation a reader can use.
+{
+  const selfSrc = fs.readFileSync(new URL(import.meta.url).pathname, "utf8");
+  const prose = selfSrc
+    .split("\n")
+    .filter((l) => /^\s*\/\//.test(l))
+    .map((l) => l.replace(/^\s*\/\/ ?/, ""))
+    .join(" ")
+    .replace(/\s+/g, " ");
+  if (prose.length < 10000) {
+    die2([
+      "FAIL(2): (2p) could not read this file's own comment prose (" + prose.length + " chars).",
+      "  The orientation check has no subject, which is indistinguishable from a passing check.",
+    ]);
+  }
+
+  const total = PIN.length;
+  const keys = PIN.map((r) => r.verb + " " + r.route);
+  const keyCount = new Map();
+  for (const k of keys) keyCount.set(k, (keyCount.get(k) || 0) + 1);
+  const routeKeys = keyCount.size;
+  const multiSiteKeys = [...keyCount.values()].filter((n) => n > 1).length;
+  const resolverSites = sites.filter((s) => s.via === "resolver").length;
+  const literalSites = sites.length - resolverSites;
+  const fenceRows = PIN.filter((r) => r.fence);
+  const fenceBands = new Set(fenceRows.map((r) => r.fence.band)).size;
+  const inlineCond = INLINE_COND_ROUTES.length;
+
+  const CLAIMS = [
+    { id: "collapse",
+      re: /The (\d+) write call sites collapse to (\d+) route keys; (\d+) of those keys are multi-site/g,
+      want: [total, routeKeys, multiSiteKeys],
+      names: ["pin rows", "distinct VERB+route keys", "keys with more than one call site"] },
+    { id: "pin-banner",
+      re: /THE PIN — (\d+) write call sites, keyed by/g,
+      want: [total],
+      names: ["pin rows"] },
+    { id: "ruling-a-rows",
+      re: /MEMBER here: (\d+) rows — loadSite/g,
+      want: [pinnedAbilityOnly.length],
+      names: ["non-elevated rows guarded only by the ability check"] },
+    { id: "ruling-a-naive",
+      re: /counts `require_ability` as elevated gets (\d+), not (\d+) — those (\d+) plus the (\d+) row whose whole authority lives below the router/g,
+      want: [naiveAbilityElevated, pinnedElevated.length, pinnedAbilityOnly.length, pinnedPatAbility.length],
+      names: ["the counterfactual total", "pinned elevated rows", "ability-guarded rows", "pat-ability rows"] },
+    { id: "ruling-b-drop",
+      re: /path extractor cannot read (\d+) of the (\d+) — they build their path/g,
+      want: [resolverSites, sites.length],
+      names: ["live sites resolved through RESOLVERS", "live write call sites"] },
+    { id: "ruling-b-floor",
+      re: /would call that (\d+)-of-(\d+) and go green over a hole\. Two of those (\d+) are/g,
+      want: [literalSites, literalSites, resolverSites],
+      names: ["literally-readable sites", "literally-readable sites", "resolver sites"] },
+    { id: "limit1-fences",
+      re: /as wide as the fence pins go, and today that is (\d+) bands over (\d+) of the (\d+) predicated rows/g,
+      want: [fenceBands, fenceRows.length, pinnedPredicated.length],
+      names: ["distinct fence bands", "fence-pinned rows", "predicated rows"] },
+    { id: "limit3-count",
+      re: /(\d+) router routes refuse non-admins inside a `cond` rather than through an/g,
+      want: [inlineCond],
+      names: ["inline-cond overlay routes"] },
+    { id: "limit3-next",
+      re: /cannot tell WHICH route grew a (\d+)th\./g,
+      want: [inlineCond + 1],
+      names: ["one more than the overlay count"] },
+    { id: "limit3-names",
+      re: /What IS pinned is the (\d+) ROUTE NAMES/g,
+      want: [inlineCond],
+      names: ["inline-cond overlay routes"] },
+    { id: "limit3-reorder",
+      re: /REORDERS these (\d+) while keeping the count at (\d+)/g,
+      want: [inlineCond, inlineCond],
+      names: ["inline-cond overlay routes", "inline-cond overlay routes"] },
+  ];
+
+  if (!CLAIMS.length) {
+    die2(["FAIL(2): (2p) has no claims left to check — an empty claim list passes everything."]);
+  }
+
+  const lost = [];
+  const wrong = [];
+  for (const c of CLAIMS) {
+    const hits = [...prose.matchAll(c.re)];
+    if (hits.length !== 1) {
+      lost.push("  " + c.id + "  — matched " + hits.length + " time(s) in this file's prose, needs exactly 1");
+      continue;
+    }
+    const got = hits[0].slice(1).map(Number);
+    got.forEach((n, i) => {
+      if (n !== c.want[i]) {
+        wrong.push("  " + c.id + "[" + i + "]  prose says " + n + ", live " + c.names[i] + " = " + c.want[i]);
+      }
+    });
+  }
+  if (lost.length) {
+    die2([
+      "FAIL(2): (2p) lost the sentence it checks. A prose claim with no subject is a check that cannot lose.",
+      ...lost,
+      "",
+      "  Re-word the sentence back onto its regex, or move the regex onto the new wording —",
+      "  but do not delete the claim to make this quiet.",
+    ]);
+  }
+  if (wrong.length) {
+    die2([
+      "FAIL(2): the orientation prose at the top of this file states a population this tree does not have.",
+      ...wrong,
+      "",
+      "  The prose is what a reader takes the instrument to measure. Correct the sentence in the",
+      "  same commit that moves the population — the numbers are orientation, not decoration.",
+    ]);
+  }
+  console.log("");
+  console.log("(2p) orientation prose : " + CLAIMS.length + " claim(s), " +
+    CLAIMS.reduce((n, c) => n + c.want.length, 0) + " numeral(s), each located exactly once and equal to the live derivation");
 }
 
 // ── (2j) THE RATCHET. LEGACY_UNPREDICATED is a CEILING, not a count. ────────
@@ -1195,11 +1981,19 @@ const LEGACY_UNPREDICATED = [
   //     for (const m of s.matchAll(/\{ fn: "([^"]+)", verb: "([^"]+)", route: "([^"]+)", elevated: true, predicate: null,/g))
   //       console.log(`"${m[1]}|${m[2]} ${m[3]}",`)'
   // …or simply read the "UNPREDICATED ELEVATED WRITES" block this file prints.
-  "submitProviderCred|POST /v1/providers",
   "submitAgentKey|POST /v1/barkparks/:*/agent-key",
-  "newVercelDeploy|POST /v1/barkparks/:*/vercel-deploy",
-  "newCreateRepo|POST /v1/github/repos",
-  "newRenderFailed|POST /v1/barkparks/:*/retry",
+  // cch-r17-w12 RATCHETED THIS CEILING DOWN BY ONE MORE. submitProviderCred is
+  // fenced through adminWriteControlHtml on the PROVIDER band, so it is no
+  // longer an unpredicated row and may not sit on a list whose whole job is to
+  // name what is still unfixed. Removing it is the ratchet TIGHTENING: the day
+  // it regresses to predicate:null it reds as NOVEL rather than being absorbed
+  // by a stale ceiling.
+  // cch-r16-w11 RATCHETED THIS CEILING DOWN BY THREE. newVercelDeploy,
+  // newCreateRepo and newRenderFailed are fenced through adminWriteControlHtml
+  // on the launch band, so they are no longer unpredicated rows and may not sit
+  // on a list whose whole job is to name what is still unfixed. Removing them
+  // is the ratchet TIGHTENING: the day one of them regresses to predicate:null
+  // it reds as NOVEL rather than being absorbed by a stale ceiling.
 ];
 {
   if (new Set(LEGACY_UNPREDICATED).size !== LEGACY_UNPREDICATED.length) {
@@ -1317,6 +2111,63 @@ if (dupes.length) {
 //              predicate is still standing. It is strictly the weaker rule, so
 //              (2d-iii) subsumes it; (2d-ii) is kept for its message, which
 //              names the flattening case a reader is most likely to hit.
+//
+//      ── THE RULING ON AN IDENTICAL PREDICATE ACROSS THE PAIR ──────────────
+//      (cch-bl-2d-ii-identical-predicate.) The filing asks whether the pair
+//      going to ONE SHARED PREDICATE NAME is a flattening (2d-ii) ought to
+//      refuse. The answer is in two halves, and both are now mechanical.
+//
+//      HALF ONE — A SHARED NON-EMPTY PREDICATE IS PERMITTED, and that is a
+//      ruling, not an omission. If someone puts `providerCanWrite()` in front
+//      of the launch wizard's provider button, the bare row is honestly
+//      re-pinned `providerCanWrite` and the pair reads the same name twice.
+//      THAT IS THE FIX THIS CENSUS EXISTS TO MOTIVATE. Reding on it would
+//      re-commit the exact error charter D452 retired: `bp.predicate !== null`
+//      froze the defect by demanding the bare row stay unpredicated forever, and
+//      "the pair may not share a name" would freeze it one step later, by
+//      demanding the fix invent a second predicate for a single write law. One
+//      predicate for one family is not a lost fence; it is one fence, correctly
+//      named twice.
+//
+//      What a shared name COULD hide is a pin edit that copies the gated row's
+//      predicate onto the bare row without touching app.js. That is a claim
+//      about the TREE, and no pin-side rule can adjudicate it — (2d-ii) reads
+//      only the pin, so it would be guessing. The arm that can ask the tree is
+//      (2l), which renders an offer on `grant` and on `refuse` and reds on the
+//      disagreement; the residue is already named there as its own LIMIT A, and
+//      it belongs to that arm, not to this one. A rule that cannot tell the fix
+//      from the forgery must not pretend to: it permits both and points at the
+//      arm that measures.
+//
+//      HALF TWO — AN IDENTICAL FALSY PREDICATE IS REFUSED, and it was not
+//      before. `verdictContrastLost` used to spell "unpredicated"
+//      `predicate === null`, while `isUnboundElevated` and the classification
+//      summary both spell it `!predicate`. So a pair pinned `predicate: ""` on
+//      both rows was counted UNPREDICATED twice in the report and read as
+//      PREDICATED here — the one identical-predicate shape that really IS the
+//      pair going both unbound, sliding under the rule that names it. The two
+//      spellings are one now.
+//
+//      THE FIXTURE DRIVES THE MIXED CASE ON PURPOSE. The add fixture's
+//      `@pin-override` sets the gated row to `""` against a bare row pinned
+//      `null`, so the pair is {null, ""} — a mutant no single-value equality
+//      catches: `=== null` goes silent on it and `=== ""` goes silent on it, so
+//      either regression reds that cell instead of passing it. A both-null
+//      mutant proves strictly less, because it fires under the OLD spelling too.
+//      The remove fixture carries the other half: its `@pin-override` flattens
+//      the pair to `fixtureCanWrite` on BOTH rows and declares the arm must stay
+//      silent, so HALF ONE's ruling reds this file the day someone turns it into
+//      a name-sharing ban.
+//
+//      NAMED RESIDUE, so the next reader inherits it rather than rediscovering
+//      it: (2d-iii) still spells its own test `gp.predicate === null`. For the
+//      live pair that gap is closed by (2d-ii) — bare `null` plus gated `""` is
+//      now a red, just with (2d-ii)'s message instead of (2d-iii)'s. It stays
+//      open only for a pair whose BARE row is predicated and whose gated row is
+//      `""`, which requires the fix to have landed first. Left alone
+//      deliberately: widening it here would add a clause no fixture in this file
+//      drives, and an unproven clause is what this whole control exists to
+//      refuse.
 {
   const bare = sites.find((s) => s.fn === "submitProviderCred" && s.route === "/v1/providers");
   const gated = sites.find((s) => s.fn === "submitInlineProviderCred" && s.route === "/v1/providers");
@@ -1399,6 +2250,7 @@ if (dupes.length) {
   }
   const refusalLines = siteLines(router, REFUSAL_FORM);
   const localLines = siteLines(router, LOCAL_FORM);
+  const routerLines = router.split("\n");
   const refusals = refusalLines.length;
   const locals = localLines.length;
   const paired = refusals === INLINE_COND_ROUTES.length;
@@ -1421,18 +2273,14 @@ if (dupes.length) {
       "  Recorded overlay ROUTES (the pinned half — line numbers are never recorded here):",
       ...INLINE_COND_ROUTES.map((r) => `    ${r}`),
       "",
-      // TRAP (iii): pairing derived lines to route names POSITIONALLY is only
-      // meaningful when there are as many lines as names. On an ADD there are
-      // more, and pairing would print 8 lines against 6 names — the gate's own
-      // failure text would become a NEW false statement, which is the exact
-      // defect class this instrument exists to close. Unlabeled instead.
-      paired
-        ? "  Derived refusal-form lines in router.ex, paired to those routes by source order:"
-        : "  Derived refusal-form lines in router.ex, UNLABELED — there are " + refusals + " of them and " +
-          INLINE_COND_ROUTES.length + " recorded routes,\n  so naming them positionally would mis-label every site after the change:",
-      ...(paired
-        ? refusalLines.map((l, i) => `    router.ex:${pad(String(l), 8)}${INLINE_COND_ROUTES[i]}`)
-        : refusalLines.map((l) => `    router.ex:${l}`)),
+      // TRAP (iii): pairing derived lines to route names POSITIONALLY mis-labels
+      // every site the moment the count or the order changes — and a failure
+      // message naming the wrong route is a NEW false statement, the exact
+      // defect class this instrument exists to close. Each label is derived
+      // from the site's own encloser instead, so it holds at any count; a
+      // site whose encloser is not a recorded route prints UNLABELED.
+      "  Derived refusal-form lines in router.ex, each labelled by its enclosing route or def/defp:",
+      ...refusalLines.map((l) => overlaySiteRow(routerLines, l, "    ")),
       locals === 1
         ? `    EXCLUDED router.ex:${localLines[0]} — ${INLINE_COND_EXCLUDED.why}`
         : `    EXCLUDED local-binding form: ${locals} site(s)${locals ? " at router.ex:" + localLines.join(", router.ex:") : ""} — expected exactly 1, ${INLINE_COND_EXCLUDED.why}`,
@@ -1440,18 +2288,107 @@ if (dupes.length) {
   }
 
   // THE DERIVED PRINT SITS HERE, BEHIND THE CHECK — never in front of it.
-  // Reaching this line means the content-matched check already agreed that the
-  // overlay is the six routes it records, so pairing line to route by source
-  // order is sound. Put a drift check FIRST and a real elevation — a seventh
+  // Reaching this line means the content-matched check already agreed on the
+  // COUNT; it says nothing about ORDER, which is why each label is derived from
+  // the site's encloser and never from its index. Put a drift check FIRST and a real elevation — a seventh
   // inline-cond refusal — gets reported as "line numbers are stale", which is
   // the misdiagnosis this ordering exists to prevent.
   console.log("");
   console.log("inline-cond overlay (charter D421): " + INLINE_COND_ROUTES.length + " router routes refuse non-admins inside a `cond`");
-  console.log("  (every line below DERIVED from the live router.ex just now, paired by source order):");
-  for (let i = 0; i < INLINE_COND_ROUTES.length; i++) {
-    console.log(`  router.ex:${pad(String(refusalLines[i]), 8)}${INLINE_COND_ROUTES[i]}`);
-  }
+  console.log("  (every line below DERIVED from the live router.ex just now, labelled by its enclosing route or def/defp):");
+  for (const l of refusalLines) console.log(overlaySiteRow(routerLines, l, "  "));
   console.log(`  EXCLUDED  router.ex:${localLines[0]} — ${INLINE_COND_EXCLUDED.why}`);
+}
+
+// (2n) THE SHARED ROUTE -> FENCE TABLE MUST AGREE WITH THIS PIN (cch-w50-bl).
+// ((2m) is the population split that landed in #17269; this arm is the next letter.)
+//
+// __route_fence.mjs is the ONE route -> fence table, and member-authority-sweep.mjs
+// derives every one of its hook fences from it. Before cch-w50-bl the sweep kept a
+// SECOND, typed fence column whose only tie to this file was a prose citation
+// ("census PIN: runPromote, ruling (a)") that nothing re-read — so the census
+// could move and the sweep would keep answering the old tier, silently, forever.
+//
+// THE FAIL-OPEN THIS ARM EXISTS FOR. A require_*-only derivation is not merely
+// incomplete, it is WRONG IN THE PERMISSIVE DIRECTION: POST /v1/fleet/supports is
+// mounted under Auth.require_user_or_pat and derives to plain member, while its
+// refusal of a non-admin session lives in a `cond` no `Auth.*` grep can see. The
+// shipped derivation layers the inline-cond overlay on top, and the two halves of
+// this arm make that losable from both ends:
+//
+//   · overlayGapReport() — a route typed `overlay_required` whose naive fence is
+//     no longer raised (delete an overlay row and this fires, by route name), or
+//     a route the overlay raises that nobody typed.
+//   · the PIN cross-read — every table row names the PIN key it is proven against,
+//     and this re-reads it: same tier string, and the derived fence's
+//     elevated-ness equal to the row's own `elevated` verdict. Under-fence a route
+//     in the shared table and the census's own pin refutes it here.
+//
+// A table row may decline to name a PIN key, but then it must say WHY and this
+// prints the reason — the PIN covers WRITE call sites only, so a read route or a band
+// label has nothing there to bind to. Bind or explain is a rule, not a list, which
+// is why a third unbound row cannot appear quietly.
+{
+  const gap = overlayGapReport();
+  if (!gap.ok) {
+    die2([
+      "FAIL(2): the shared route -> fence derivation lost the inline-cond overlay.",
+      "  __route_fence.mjs derives a route's fence from its Auth.require_* tier and THEN raises it",
+      "  with the overlay. Without the raise, a require_*-only answer is fail-open — it calls an",
+      "  admin-fenced route member-reachable, and the console offers a write the server refuses.",
+      "",
+      ...gap.bad.map((b) => "  " + b),
+    ]);
+  }
+
+  const bad = [];
+  const unbound = [];
+  for (const entry of ROUTE_TIERS) {
+    const derived = fenceFor(entry);
+    if (!entry.pin) {
+      if (!entry.why_no_pin) {
+        bad.push(entry.key + " names no PIN key and gives no reason. Bind it to a PIN row, or write why_no_pin.");
+      } else {
+        unbound.push(entry);
+      }
+      continue;
+    }
+    const rows = PIN.filter((r) => routeKey(r.verb, r.route) === routeKey(...entry.pin.split(/\s+(.+)/)));
+    if (!rows.length) {
+      bad.push(entry.key + " claims PIN key `" + entry.pin + "`, and the PIN has no row on that route any more. " +
+        "Either the call site went away (drop the table row, or say why_no_pin) or the route was renamed.");
+      continue;
+    }
+    for (const r of rows) {
+      if ((r.auth_fn || null) !== (entry.auth_fn || null)) {
+        bad.push(entry.key + ": the table says tier `" + entry.auth_fn + "`, PIN row " + r.fn + " says `" + r.auth_fn +
+          "`. One of them is describing a router that no longer exists.");
+      }
+      if (ELEVATED.has(derived) !== !!r.elevated) {
+        bad.push(entry.key + ": the shared derivation answers " + derived + " (elevated=" + ELEVATED.has(derived) +
+          ") and PIN row " + r.fn + " scores elevated=" + !!r.elevated + ". A route cannot be above plain membership " +
+          "for one instrument and at it for the other — that disagreement IS the defect class this table was extracted " +
+          "to end.");
+      }
+    }
+  }
+  if (bad.length) {
+    die2([
+      "FAIL(2): the shared route -> fence table and this PIN disagree.",
+      ...bad.map((b) => "  " + b),
+    ]);
+  }
+
+  const gapKeys = gap.lines.length;
+  console.log("");
+  console.log("shared route->fence table (cch-w50-bl): " + ROUTE_TIERS.length + " route(s), " +
+    (ROUTE_TIERS.length - unbound.length) + " bound to a PIN row and re-read just now");
+  console.log("  a require_*-only derivation UNDER-FENCES " + gapKeys + " of them — the overlay is what catches these:");
+  for (const l of gap.lines) console.log("    " + l);
+  for (const u of unbound) {
+    console.log("  NOT PIN-BOUND  " + u.key + " (" + fenceFor(u) + ")");
+    console.log("                 " + u.why_no_pin);
+  }
 }
 
 // (2g) EVERY PINNED PREDICATE MUST NAME A REAL DECLARATION IN app.js.
@@ -1921,47 +2858,21 @@ if (dupes.length) {
 //        (2i-1) band, every read, and decide are DECLARED in app.js, and the
 //               row's `predicate` names the same band.
 //        (2i-2) each read's body still CALLS the band.
-//        (2i-3) decide's body still BRANCHES on a value the band can return —
-//               where the vocabulary is DERIVED from the band's own returns,
-//               not typed here.
+//        (2i-3) decide's body still CONSULTS what the band answers, where the
+//               band's SHAPE is DERIVED from its own returns, not typed here:
+//               a STRING band must still be compared against one of its derived
+//               values; an ARRAY band must still be asked whether it is EMPTY
+//               (its members are a list, never a branch vocabulary); a BOOLEAN
+//               band — seven of this console's nine — has no vocabulary at all,
+//               so the row names the `value` the decide is given and the arm
+//               proves the decide still BINDS it and still branches on it.
 //        (2i-4) DERIVED ACCOUNTING over every live call site of every pinned
 //               band: each enclosing function must be claimed by some row's
 //               `read`. This is what reds when a row quietly reverts to no
 //               fence, with no graph and no hop walk.
 {
-  // Comments blanked, LENGTH PRESERVED, so every offset still maps to the same
-  // line in `src`. Blanking matters twice over: this file's own prose says
-  // "instanceAdminAuthority()" in half a dozen comments, and counting those as
-  // call sites would invent read sites that do not exist.
-  const codeMask = (s) => {
-    const out = s.split("");
-    let inS = null, esc = false;
-    for (let i = 0; i < s.length; i++) {
-      const c = s[i];
-      if (inS) {
-        if (esc) { esc = false; continue; }
-        if (c === "\\") { esc = true; continue; }
-        if (c === inS) inS = null;
-        continue;
-      }
-      if (c === '"' || c === "'" || c === "`") { inS = c; continue; }
-      if (c === "/" && s[i + 1] === "/") {
-        const nl = s.indexOf("\n", i);
-        const end = nl < 0 ? s.length : nl;
-        for (let k = i; k < end; k++) out[k] = " ";
-        i = end;
-        continue;
-      }
-      if (c === "/" && s[i + 1] === "*") {
-        const close = s.indexOf("*/", i + 2);
-        const end = close < 0 ? s.length : close + 2;
-        for (let k = i; k < end; k++) if (out[k] !== "\n") out[k] = " ";
-        i = end - 1;
-        continue;
-      }
-    }
-    return out.join("");
-  };
+  // codeMask is module-level (see its own note): comments and string bodies
+  // blanked, LENGTH PRESERVED, so every offset still maps to the same line.
   const code = codeMask(src);
 
   const declsOf = (name) => fns.filter((f) => f.name === name);
@@ -1978,6 +2889,31 @@ if (dupes.length) {
   // band it is the ACTUAL state: all four of its read sites are claimed.
   const READ_EXEMPT = {
     // band: [{ fn: "<enclosing fn>", why: "<a stated reason, because a hole nobody named is a lie>" }]
+    //
+    // cch-w48-bl. The launch band is read by EIGHT functions and only two of
+    // them stand in front of a write; the five below gate a DOOR into the
+    // launch wizard, or a sentence about it, and this census pins rows at
+    // WRITE call sites, so no row can honestly claim them. Each is a hole with
+    // a reason. Note what the exemption does NOT excuse: the arm still demands
+    // every name here be a LIVE read of the band, so deleting the read out of
+    // any of the five reds (2i-4) as a stale exemption.
+    launchAuthority: [
+      { fn: "renderScopeMenu", why: "NAV, not a write: it omits the #scope-launch row from the scope menu on a determinate \"refuse\". The menu re-renders on every open, so it re-asks the band itself and has no repaint seam a row could claim" },
+      { fn: "setHeaderLaunchHidden", why: "NAV, not a write: it sets `.hidden` on #overview-launch / #fleet-launch — the two header DOORS into the wizard. It is a one-line DOM setter shared by both buttons and by refreshLaunchOffers; the write it fronts is submitLaunchFlow, whose own fence (launchFlow) withholds the form behind these doors" },
+      { fn: "refreshLaunchOffers", why: "NAV, not a write: it drives setHeaderLaunchHidden for those same two header doors after a fleet load, because that path never re-enters the wizard. Same affordance as setHeaderLaunchHidden, one hop up" },
+      { fn: "paintOverviewHead", why: "COPY, not an affordance at all: the only thing this read changes is the text of #overview-sub — launchRefusalCopy().title on a determinate refusal, the shipped line otherwise. There is no control here to withhold, so there is nothing for a row to pin" },
+      { fn: "paletteActionItems", why: "NAV, not a write: it filters the act-launch entry out of the palette on a determinate \"refuse\". The palette re-emits on every open and, like the scope menu, keeps the row on \"loading\"/\"failed\" rather than deleting an owner's action over a slow /v1/me" },
+      // cch-r16-w11 — the SIXTH reader of the launch band, and the only one that
+      // is neither a write nor a door: newWriteAuthority() is the NARROWING that
+      // maps launchAuthority()'s five values onto adminWriteControlHtml's three.
+      // It decides nothing itself and fronts no control; the three rows that DO
+      // front a control (newVercelDeploy, newCreateRepo, newRenderFailed) claim
+      // `newWriteAuthority` as their band and their own render functions as the
+      // read, which is where (2i-2) checks the question is actually asked. A row
+      // claiming THIS function as its launchAuthority read would be pinning the
+      // adapter instead of the affordance.
+      { fn: "newWriteAuthority", why: "NARROWING, not a write and not a door: it maps launchAuthority()'s five-valued band onto adminWriteControlHtml's three-valued one, failing closed (loading/failed/stale -> \"unknown\"). It fronts no control of its own — the three launch-wizard write rows pin the NEW_WRITE_BAND it produces, and their reads are the render functions that call it" },
+    ],
   };
 
   if (!FENCED.length) {
@@ -2042,50 +2978,173 @@ if (dupes.length) {
     }
   }
 
-  // ── (2i-3) DECIDE still BRANCHES on the band's own vocabulary ────────────
-  //     The vocabulary is DERIVED from the band's `return` statements, never
-  //     typed here: a band that stops returning a vocabulary at all (the
-  //     `return true` neutering) leaves nothing to branch on and reds below,
-  //     and a band that gains a value does not need this file edited.
+  // ── (2i-3) DECIDE still CONSULTS WHAT THE BAND ANSWERS ───────────────────
+  //     The band's SHAPE is DERIVED from its own `return` statements, never
+  //     typed here, and the shape picks which of three checks runs.
+  //
+  //       STRING  — some return carries a literal the band ANSWERS with.
+  //                 Literals on the RIGHT of a comparison are blanked first:
+  //                 `meCache.role === "owner"` is an INPUT the band reads, not
+  //                 a value it can answer with, and counting it would widen the
+  //                 vocabulary to the role names. The decide must compare
+  //                 against one of the answered values. This is the shipped
+  //                 arm, unchanged.
+  //       ARRAY   — some return is an array literal. Its member strings are NOT
+  //                 a branch vocabulary: assignableRoles answers
+  //                 ["owner", "admin", "member"] and every consumer branches on
+  //                 `.length`, never on a member, so a decide matching a member
+  //                 literal would have passed BY ACCIDENT. The array arm demands
+  //                 the EMPTINESS consult and accepts nothing else.
+  //       BOOLEAN — no answered literal and no array literal. SEVEN of this
+  //                 console's bands are `return someState() === "grant"`, so the
+  //                 derived vocabulary is EMPTY. That emptiness used to die at
+  //                 band level ("returns no string vocabulary at all"), which is
+  //                 why the shipped arm could pin two bands and not nine: the
+  //                 bands were not unpinnable, the ARM was string-only. A
+  //                 boolean band has no vocabulary to enumerate; what it has is
+  //                 a VALUE, and the decide must still consult it.
+  //
+  //     WHAT A BOOLEAN/ARRAY ROW DECLARES, and why this is still not a call
+  //     graph (D517) or a body scope (D530): the row names `value` — the
+  //     identifier the decide is GIVEN (`canWrite`, `opts.canManage`). No hop
+  //     is walked and no span is contained; two regex teeth over the decide's
+  //     own body, both the SAME mutation direction, "the decide stops
+  //     consulting the value at all":
+  //       · it must still BIND that name — a parameter of the decide, or a
+  //         local it declares; and
+  //       · its body must still use the name in a BRANCH position: `!v`,
+  //         `if (v)`, `v ?`, `v &&`, `v ||`, `v === …`, `v.length`.
+  //     Passing the value onward as a plain call argument is NOT a branch and
+  //     does not satisfy this arm. A row whose decide is ALSO one of its own
+  //     reads may omit `value`; then the consulted expression is the band CALL
+  //     itself, which is the shape loadOperator ships and the only shape where
+  //     there is no threaded identifier to name.
+  //
+  //     THE LIMIT THIS ARM STILL HAS, for the STRING shape, is PRINTED BY NAME
+  //     beside every string band in the accounting below rather than left for
+  //     the next reader to rediscover: it is an EXISTENCE check over the whole
+  //     vocabulary, so neutering ONE arm of a multi-valued decide while another
+  //     comparison survives is invisible here. That was measured, not feared —
+  //     replacing only newLaunchOffer's `=== "grant"` and `=== "refuse"` forks
+  //     left the census at exit 0 because its residual `=== "failed"` arm still
+  //     satisfied "branches on SOME value". The print now names, per band and
+  //     per decide, which values ARE compared and which are not, so the hole is
+  //     stated in the census's own output on every clean run.
   const vocabOf = {};
+  const shapeOf = {};
+  const consultOf = {};   // row key -> what (2i-3) proved a boolean/array decide consults
+  const comparedOf = {};  // string band -> decide -> the values it actually compares
   {
     const bad = [];
     for (const band of BANDS) {
       const body = declsOf(band).map(bodyOf).join("\n");
-      const vocab = new Set();
+      const rets = [];
       const ret = /\breturn\b([^;]*)/g;
       let m;
-      while ((m = ret.exec(body))) {
-        // A literal on the RIGHT of a comparison is an INPUT the band reads
-        // (`meCache.role === "owner"`), not a value it can answer with. Blank
-        // those first or the vocabulary quietly widens to include the role
-        // names, and (2i-3) would accept a decide branching on the wrong thing.
-        const answered = m[1].replace(/(===|!==|==|!=)\s*(?:"[^"\\]*"|'[^'\\]*')/g, "$1 0");
+      while ((m = ret.exec(body))) rets.push(m[1]);
+      const vocab = new Set();
+      for (const raw of rets) {
+        const answered = raw.replace(/(===|!==|==|!=)\s*(?:"[^"\\]*"|'[^'\\]*')/g, "$1 0");
         const lits = answered.match(/"([^"\\]*)"|'([^'\\]*)'/g) || [];
         for (const l of lits) vocab.add(l.slice(1, -1));
       }
       vocabOf[band] = [...vocab];
-      if (!vocabOf[band].length) {
-        bad.push(`  band ${band} returns no string vocabulary at all — there is nothing left for a caller to branch on`);
+      // An array LITERAL in answer position, never an index: `return roles[0]`
+      // has a `[` too, and it answers a member, not a list. The literal is only
+      // recognised where a VALUE may start — at the head of the return, or after
+      // a ternary arm / an opening bracket / a comma / a logical operator.
+      const ARRAY_LITERAL = /(^|[?:(,=]|&&|\|\|)\s*\[/;
+      // SHAPE, in this order and for this reason: an array literal is checked
+      // FIRST because its members survive the comparison blanking and would
+      // otherwise be read as an answered vocabulary; BOOLEAN is the residual,
+      // but a POSITIVE residual — a band that answers nothing, or answers an
+      // object, is not silently treated as a boolean, it dies below.
+      const exprs = rets.map((r) => r.trim()).filter((r) => r.length);
+      if (!exprs.length) {
+        shapeOf[band] = null;
+        bad.push(`  band ${band} has no value-bearing \`return\` at all — it answers nothing, so no decide can be consulting it`);
+      } else if (exprs.some((e) => ARRAY_LITERAL.test(e))) {
+        shapeOf[band] = "array";
+      } else if (vocabOf[band].length) {
+        shapeOf[band] = "string";
+      } else if (exprs.every((e) => !e.startsWith("{"))) {
+        shapeOf[band] = "boolean";
+      } else {
+        shapeOf[band] = null;
+        bad.push(`  band ${band} answers an OBJECT — (2i-3) classifies string, array and boolean bands and refuses to guess at this one`);
       }
     }
+
+    // A dotted `value` is matched as a path with whitespace tolerated around
+    // the dot, so `opts.canManage` and `opts . canManage` are the same claim.
+    const pathRe = (v) => v.split(".").map(esc0).join("\\s*\\.\\s*");
+    const BRANCH = (t) => [
+      ["negation", new RegExp("!\\s*" + t)],
+      ["if-test", new RegExp("\\bif\\s*\\(\\s*" + t + "\\s*\\)")],
+      ["ternary", new RegExp(t + "\\s*\\?")],
+      ["short-circuit", new RegExp(t + "\\s*(&&|\\|\\|)")],
+      ["comparison", new RegExp(t + "\\s*(===|!==|==|!=)")],
+      ["emptiness", new RegExp(t + "\\s*\\.\\s*length")],
+    ];
+
     for (const r of FENCED) {
-      const vocab = vocabOf[r.fence.band] || [];
-      if (!vocab.length) continue;
+      const band = r.fence.band;
+      const shape = shapeOf[band];
+      if (!shape) continue; // the band-level die above already owns every row on it
+
       const body = declsOf(r.fence.decide).map(bodyOf).join("\n");
-      const branches = vocab.some((v) => new RegExp("(===|!==)\\s*[\"']" + esc0(v) + "[\"']").test(body));
-      if (!branches) {
-        bad.push(`  ${keyOf(r)} -> decide ${r.fence.decide} branches on none of ${r.fence.band}'s values [${vocab.join(", ")}]`);
+
+      if (shape === "string") {
+        const vocab = vocabOf[band];
+        const hit = vocab.filter((v) => new RegExp("(===|!==)\\s*[\"']" + esc0(v) + "[\"']").test(body));
+        comparedOf[band] = comparedOf[band] || {};
+        comparedOf[band][r.fence.decide] = hit;
+        if (!hit.length) {
+          bad.push(`  ${keyOf(r)} -> decide ${r.fence.decide} branches on none of ${band}'s values [${vocab.join(", ")}]`);
+        }
+        continue;
+      }
+
+      const named = r.fence.value || null;
+      if (!named && !readsOf(r).includes(r.fence.decide)) {
+        bad.push(`  ${keyOf(r)} -> ${band} is ${shape.toUpperCase()}-valued, so the row must name the \`value\` its decide ${r.fence.decide} is given — only a decide that is ALSO one of its own reads may omit it and consult the band call directly`);
+        continue;
+      }
+      const token = named ? pathRe(named) : esc0(band) + "\\s*\\([^)]*\\)";
+      const label = named || band + "()";
+
+      if (named) {
+        const root = named.split(".")[0];
+        const header = /function\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(([^)]*)\)/.exec(body);
+        const params = header ? header[1].split(",").map((p) => p.trim()) : [];
+        const bound = params.includes(root) || new RegExp("\\b(var|let|const)\\s+" + esc0(root) + "\\b").test(body);
+        if (!bound) {
+          bad.push(`  ${keyOf(r)} -> decide ${r.fence.decide} no longer BINDS ${root}: the value this fence threads into it is neither a parameter nor a local, so whatever it renders, it is not the band's answer`);
+          continue;
+        }
+      }
+
+      const shapes = BRANCH(token).filter(([n]) => shape !== "array" || n === "emptiness");
+      const hit = shapes.filter(([, re]) => re.test(body)).map(([n]) => n);
+      consultOf[keyOf(r)] = { decide: r.fence.decide, label: label, shapes: hit };
+      if (!hit.length) {
+        bad.push(shape === "array"
+          ? `  ${keyOf(r)} -> decide ${r.fence.decide} never asks whether ${label} is EMPTY — ${band} answers a LIST, whose members are not a branch vocabulary, so \`.length\` is the only consult that means anything here`
+          : `  ${keyOf(r)} -> decide ${r.fence.decide} does not consult ${label} in any branch position — ${band} is BOOLEAN-valued, and a decide that never tests the value renders the same offer whatever the band answers`);
       }
     }
+
     if (bad.length) {
       die2([
         "FAIL(2i-3): a fence is still wired and no longer decides anything.",
         "  The read still asks the question and the answer still arrives — and then the decide",
         "  helper renders the same offer whatever it says. That is the NEUTERED fence: every",
         "  other arm of this census goes green over it, and a plain member gets the button back.",
-        "  This check is a ratchet, not a proof: it asserts the comparison is still THERE, not",
-        "  that its two arms are still right.",
+        "  On a STRING band this check is a ratchet, not a proof: it asserts the comparison is",
+        "  still THERE, not that its two arms are still right, and the accounting print names",
+        "  which values each decide compares so the gap is never silent. On a BOOLEAN or ARRAY",
+        "  band there is no vocabulary to compare against, so the claim is narrower and exact:",
+        "  the decide BINDS the value the fence threads into it and still uses it in a branch.",
         "",
         ...bad,
       ]);
@@ -2170,7 +3229,33 @@ if (dupes.length) {
   for (const a of accounting) {
     console.log(`  ${a.band}  —  ${a.sites} live read site(s) in ${a.readers.length} function(s), ${a.claimed.length} claimed by rows` +
       (a.exempt.length ? `, ${a.exempt.length} exempt` : ", READ_EXEMPT empty") + ", 0 orphaned");
-    console.log(`    vocabulary DERIVED from its returns: ${vocabOf[a.band].map((v) => '"' + v + '"').join(" · ")}`);
+    const shape = shapeOf[a.band];
+    if (shape === "string") {
+      console.log(`    STRING-valued; vocabulary DERIVED from its returns: ${vocabOf[a.band].map((v) => '"' + v + '"').join(" · ")}`);
+      // THE (2i-3) HOLE, PRINTED RATHER THAN REMEMBERED. This arm asks whether
+      // SOME value is still compared, so a decide that compares two of five is
+      // a decide whose other three arms can be neutered in silence. Naming the
+      // uncompared values here costs nothing and stops the next reader having
+      // to re-measure it on a mutant, which is how it was found.
+      for (const [decide, hitv] of Object.entries(comparedOf[a.band] || {})) {
+        const missed = vocabOf[a.band].filter((v) => !hitv.includes(v));
+        console.log(`    (2i-3) is an EXISTENCE check: decide ${decide} compares ${hitv.length} of ` +
+          `${vocabOf[a.band].length} — [${hitv.join(", ")}]` +
+          (missed.length
+            ? `; neutering ONLY the arm(s) for [${missed.join(", ")}] is INVISIBLE to this arm`
+            : `; every value the band answers is compared, so no per-arm neuter hides behind this decide`));
+      }
+    } else {
+      console.log(`    ${shape === "array" ? "ARRAY" : "BOOLEAN"}-valued — no branch vocabulary to derive, so (2i-3) checks the SHAPE instead` +
+        (shape === "array" ? `: members [${vocabOf[a.band].join(", ")}] are a LIST, never a vocabulary, and only an emptiness consult counts` : ""));
+      const said = new Set();
+      for (const r of FENCED.filter((x) => x.fence.band === a.band)) {
+        const c = consultOf[keyOf(r)];
+        if (!c) continue;
+        const line = `    (2i-3) decide ${c.decide} BINDS and consults ${c.label} — ${c.shapes.join(", ")}`;
+        if (!said.has(line)) { said.add(line); console.log(line); }
+      }
+    }
     console.log(`    read sites: ${a.readers.join(", ")}`);
   }
   const unfenced = pinnedPredicated.filter((r) => !r.fence);
@@ -2180,6 +3265,282 @@ if (dupes.length) {
     `${byBand.size} band(s) — ` + [...byBand].map(([b, n]) => `${b} ×${n}`).join(", "));
   console.log("  The accounting is over READ SITES, not rows: rows share reads, so a row whose read a");
   console.log("  sibling already claims is NOT discovered here. Anti-decay bookkeeping, never discovery.");
+}
+
+// (2o) A PAINT-TIME BAND READ ON A VIEW loadMe CANNOT RE-ENTER (cch-w48-bl).
+//
+//      THE DEFECT, MEASURED TWICE IN ONE WAVE, ON TWO INDEPENDENTLY-BUILT
+//      SLICES. cch-w48-s2 fenced #site-github on instanceAdminAuthority(), read
+//      INLINE in loadSite. cch-w48-s3 fenced the GitHub card's Disconnect and
+//      its Connect anchor on providerCanWrite(), read off loadGithub's mount.
+//      Both read the band ONCE, at paint time, on a surface loadMe had no
+//      repaint seam for — so a real ADMIN who deep-links before /v1/me answers
+//      takes the CLOSED arm and keeps it for the whole page life. That is
+//      charter D521's stranding shape, reproduced on two new surfaces BY THE
+//      VERY FENCES meant to make this console honest. Both were caught BY HAND
+//      in review, which does not scale: loadMe's success arm now carries eight
+//      such seams and, until this arm, nothing derived the set.
+//
+//      WHAT IS DERIVED, AND OUT OF WHAT. Nothing below is a typed list except
+//      the two named holes, and both of those are checked for staleness.
+//        · THE BANDS — every distinct non-null `predicate` in the PIN that
+//          app.js declares as a function. Not typed here: it grows the day a
+//          row pins a new band, and shrinks when one is retired.
+//        · THE applyRoute-ENTERED SET — read out of applyRoute's OWN DISPATCH
+//          LITERAL: the `if (r.view === "…") …` chain, consequent by
+//          consequent, brace-matched. IT IS NOT A CALL GRAPH, and it must never
+//          become one. Charter D517 refuted that shape BY BUILDING IT: no hop
+//          threshold separated a real fence from operatorRouteAllowed graph
+//          noise, and this console fences by HIDING ELEMENTS, which a call
+//          graph is blind to by category. ZERO hops are walked below.
+//        · THE READERS — the enclosing function of every live call of every
+//          band. The (2i-4) machinery exactly: codeMask so this file's own
+//          prose cannot invent a read site, innermost() for the enclosure.
+//        · THE SEAMS — the calls inside loadMe's SUCCESS arm, brace-matched
+//          from `if (r.ok && r.data) {`. The failed arm answers a different
+//          question (it is terminal) and is not read here.
+//
+//      THE RULE, and why it is over the WHOLE entry list. A view whose
+//      dispatch entry reads a band is decided by that band at paint time. What
+//      it means to PAINT that view is the entry list the literal names for it —
+//      that list IS the definition — so every entry of such a view must be
+//      re-enterable when the answer finally lands: loadMe's success arm calls
+//      it, or calls a NAMED ALTERNATE that re-reads the same band, or the entry
+//      is named in VIEW_SEAM_EXEMPT with a stated reason.
+{
+  const code = codeMask(src);
+  const declsOf = (name) => fns.filter((f) => f.name === name);
+  const esc0 = (n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const KEYWORDS = new Set(["if", "for", "while", "switch", "catch", "return", "function", "typeof", "new", "do", "else"]);
+  const declared = new Set(fns.map((f) => f.name));
+  // Only names app.js DECLARES count as calls: `history.replaceState(` and
+  // `location.assign(` are in these consequents too, and counting them would
+  // demand a loadMe seam for a browser API.
+  const callsIn = (s) => [...new Set(
+    [...s.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)]
+      .map((m) => m[1])
+      .filter((n) => !KEYWORDS.has(n) && declared.has(n)))];
+  const braceSpan = (s, from) => {
+    let d = 0, j = from;
+    for (; j < s.length; j++) {
+      if (s[j] === "{") d++;
+      else if (s[j] === "}") { d--; if (!d) { j++; break; } }
+    }
+    return j;
+  };
+
+  // ── THE BANDS, derived from the PIN's own predicate column ───────────────
+  const BANDS2O = [...new Set(PIN.map((r) => r.predicate).filter((p) => p && declsOf(p).length))].sort();
+  if (!BANDS2O.length) {
+    die2([
+      "FAIL(2o): no PIN row names an authority band app.js declares.",
+      "  This arm derives its band list from the `predicate` column. An empty list would make",
+      "  every check below pass over nothing, which is the one failure mode a fail-closed gate",
+      "  may not have.",
+    ]);
+  }
+
+  // ── THE DISPATCH LITERAL ─────────────────────────────────────────────────
+  const arDecls = declsOf("applyRoute");
+  if (arDecls.length !== 1) {
+    die2([
+      "FAIL(2o): applyRoute is not a single `function applyRoute(` declaration in app.js.",
+      `  Found ${arDecls.length}. The applyRoute-entered set is read out of this function's own`,
+      "  dispatch literal; with no unique declaration there is nothing to read, and this arm",
+      "  refuses rather than guessing. Re-point it — do NOT replace it with a call graph (D517).",
+    ]);
+  }
+  const ar = arDecls[0];
+  const arBody = code.slice(ar.start, ar.end);
+  const DISPATCH = [];
+  {
+    const byView = new Map();
+    const re = /if\s*\(\s*r\.view\s*===\s*"([A-Za-z0-9_-]+)"/g;
+    let m;
+    while ((m = re.exec(arBody))) {
+      const close = arBody.indexOf(")", m.index + m[0].length);
+      if (close < 0) continue;
+      let i = close + 1;
+      while (i < arBody.length && /\s/.test(arBody[i])) i++;
+      const end = arBody[i] === "{" ? braceSpan(arBody, i)
+        : (arBody.indexOf(";", i) < 0 ? arBody.length : arBody.indexOf(";", i) + 1);
+      const row = byView.get(m[1]) || { view: m[1], line: lineOf(ar.start + m.index), entries: [] };
+      row.entries = [...new Set(row.entries.concat(callsIn(arBody.slice(i, end))))];
+      if (!byView.has(m[1])) { byView.set(m[1], row); DISPATCH.push(row); }
+    }
+  }
+  if (!DISPATCH.length) {
+    die2([
+      "FAIL(2o): applyRoute no longer carries an `if (r.view === \"…\")` dispatch literal.",
+      "  The router may have been refactored into a table object or a switch — both are fine",
+      "  shapes, and both need THIS reader re-pointed at the new literal. What is NOT fine is",
+      "  falling back to a call graph to find the view loaders (charter D517).",
+    ]);
+  }
+
+  // ── THE READERS (the (2i-4) machinery, over every derived band) ──────────
+  const readers2O = new Map(); // enclosing fn -> Set(band)
+  for (const band of BANDS2O) {
+    const re = new RegExp("\\b" + esc0(band) + "\\s*\\(", "g");
+    let m;
+    while ((m = re.exec(code))) {
+      if (/\bfunction\s+$/.test(code.slice(Math.max(0, m.index - 40), m.index))) continue;
+      const f = innermost(m.index);
+      const name = f ? f.name : "(top level)";
+      if (!readers2O.has(name)) readers2O.set(name, new Set());
+      readers2O.get(name).add(band);
+    }
+  }
+  const bandsRead = (fn) => readers2O.get(fn) || new Set();
+
+  // ── loadMe's SUCCESS ARM ─────────────────────────────────────────────────
+  const lmDecls = declsOf("loadMe");
+  if (lmDecls.length !== 1) {
+    die2([
+      "FAIL(2o): loadMe is not a single `function loadMe(` declaration in app.js.",
+      `  Found ${lmDecls.length}. Every re-entry seam this arm checks lives in loadMe's success`,
+      "  arm; with no unique declaration the seam set would read EMPTY and this arm would red on",
+      "  every view at once, which is a broken instrument, not a finding.",
+    ]);
+  }
+  const lmBody = code.slice(lmDecls[0].start, lmDecls[0].end);
+  const okAt = lmBody.search(/if\s*\(\s*r\.ok\s*&&\s*r\.data\s*\)\s*\{/);
+  if (okAt < 0) {
+    die2([
+      "FAIL(2o): loadMe no longer opens its success arm with `if (r.ok && r.data) {`.",
+      "  That brace-matched span IS the seam set. Re-point this reader at the new shape; do not",
+      "  widen it to the whole function, because the FAILED arm's re-entries are a different",
+      "  claim (a failed /v1/me is terminal and re-enters to paint the fault, not the grant).",
+    ]);
+  }
+  const successArm = lmBody.slice(lmBody.indexOf("{", okAt), braceSpan(lmBody, lmBody.indexOf("{", okAt)));
+  const SEAMS = new Set(callsIn(successArm));
+
+  // ── THE TWO NAMED HOLES ──────────────────────────────────────────────────
+  //
+  // An ALTERNATE seam: loadMe re-enters something OTHER than the dispatch
+  // entry, on purpose. It is not an exemption — the alternate is still demanded
+  // by name, and it must still READ the band, or it is a repaint that never
+  // re-asks the question and this arm says so.
+  const SEAM_ALIAS = {
+    loadInstance: {
+      seam: "repaintInstanceAuthority",
+      why: "cch-w46-s3/cch-w46-rv decided AGAINST re-entering the loader: reloadInstanceView() hard-returns on the usage and webhooks tabs, so re-entering would fix Overview and leave those two stranded — the exact bug the seam exists to close. repaintInstanceAuthority re-reads instanceAdminAuthority() and re-offers the rail, the header strip and the Updates panel on every tab",
+    },
+  };
+  // A true EXEMPTION: an entry of a band-decided view that needs no seam at
+  // all. Every entry states its reason, and a name here that has stopped being
+  // a dispatch entry of a band-decided view reds below rather than passing.
+  const VIEW_SEAM_EXEMPT = {
+    loadCapabilityMatrix: {
+      why: "READ-ONLY COPY, not an affordance: it paints #provider-matrix from GET /v1/providers/capabilities and offers no control at all — no write, no door, nothing an authority answer could withhold. There is no arm for a late /v1/me to flip, so a seam would re-issue a request to redraw identical bytes",
+    },
+  };
+
+  const decided = DISPATCH.filter((d) => d.entries.some((e) => readers2O.has(e)));
+  const decidedEntries = new Set(decided.flatMap((d) => d.entries));
+
+  const missing = [];
+  const stale = new Set();
+
+  for (const [fn, ex] of Object.entries(VIEW_SEAM_EXEMPT)) {
+    if (!ex.why || ex.why.length < 40) {
+      stale.add(`  VIEW_SEAM_EXEMPT[${fn}] carries no stated reason. A hole nobody named is a lie.`);
+    }
+    if (!decidedEntries.has(fn)) {
+      stale.add(`  VIEW_SEAM_EXEMPT[${fn}] is stale: ${fn} is no longer an entry of any band-decided view in ` +
+        "applyRoute's dispatch literal, so the hole it excuses does not exist any more.");
+    }
+  }
+  for (const [fn, al] of Object.entries(SEAM_ALIAS)) {
+    if (!al.why || al.why.length < 40) {
+      stale.add(`  SEAM_ALIAS[${fn}] carries no stated reason for re-entering ${al.seam} instead of ${fn}.`);
+    }
+    if (!decidedEntries.has(fn)) {
+      stale.add(`  SEAM_ALIAS[${fn}] is stale: ${fn} is no longer an entry of any band-decided view in ` +
+        "applyRoute's dispatch literal.");
+    }
+    if (!declsOf(al.seam).length) {
+      stale.add(`  SEAM_ALIAS[${fn}] names ${al.seam}, which app.js does not declare.`);
+    }
+  }
+
+  for (const d of decided) {
+    const via = d.entries.filter((e) => readers2O.has(e));
+    const viaBands = [...new Set(via.flatMap((e) => [...bandsRead(e)]))];
+    for (const e of d.entries) {
+      if (VIEW_SEAM_EXEMPT[e]) continue;
+      const al = SEAM_ALIAS[e];
+      const need = al ? al.seam : e;
+      if (al && !viaBands.some((b) => bandsRead(al.seam).has(b))) {
+        stale.add(`  SEAM_ALIAS[${e}] names ${al.seam} as the alternate seam for #${d.view}, but ${al.seam} no ` +
+          `longer reads any of that view's bands [${viaBands.join(", ")}] — it repaints without re-asking, so it ` +
+          "cannot heal a surface that was painted on the unknown answer.");
+      }
+      if (!SEAMS.has(need)) {
+        missing.push(`  ${LABEL}:${d.line}  #${d.view} is decided at paint time by ${viaBands.join(", ")} ` +
+          `(read in ${via.join(", ")}); applyRoute enters ${e} to paint it; loadMe's success arm never re-enters ` +
+          (al ? `${need} — ${e}'s pinned alternate seam.` : `${e}.`) +
+          `  STRANDED SURFACE: ${e}. A deep link paints it before /v1/me answers, the fence takes its ` +
+          "closed arm, and nothing re-decides for the rest of the page life.");
+      }
+    }
+  }
+
+  if (missing.length || stale.size) {
+    die2([
+      "FAIL(2o): a view is fenced on an authority band it reads ONCE, at paint time, with no loadMe re-entry.",
+      "  This is charter D521's stranding shape. The band answers /v1/me; a deep link paints the view",
+      "  BEFORE that answer arrives; the fence reads the band once and fails closed; and nothing on the",
+      "  page ever asks again. The user is a real admin looking at the member surface until they reload.",
+      "",
+      "  THE HONEST LIMIT, written here because a gate that overstates its reach is the same lie it is",
+      "  checking for: THIS ARM CLASSIFIES A VIEW ONLY WHEN A DISPATCH ENTRY ITSELF READS A BAND. A view",
+      "  whose band read lives one mount deeper is INVISIBLE to it — loadNotifications paints",
+      "  renderNotifications, which reads notifCanManage; loadMembers paints memberRowHtml, which reads",
+      "  canRemoveMember — and neither view is classified here. That blindness is DELIBERATE: the only",
+      "  way to see through the mount is a call graph, and charter D517 refuted that shape by building",
+      "  it (no hop threshold separates a fence from operatorRouteAllowed noise, and this console fences",
+      "  by HIDING ELEMENTS, which a graph cannot see at all). Note what that costs: loadGithub — one of",
+      "  the two specimens this arm was built for — is caught ONLY because its SIBLING entry loadProviders",
+      "  reads a band and the literal names both under #providers. Had #providers entered loadGithub",
+      "  alone, this arm would have missed the very defect it exists for. It is anti-decay bookkeeping",
+      "  over the entries the literal names, NEVER a discovery instrument for the reads below them.",
+      "",
+      ...missing,
+      ...[...stale],
+      "",
+      "  Fix it by adding the re-entry to loadMe's SUCCESS arm (the eight seams already there are the",
+      "  pattern), or by naming the hole in VIEW_SEAM_EXEMPT with a reason, or — when loadMe deliberately",
+      "  re-enters something else — by pinning that in SEAM_ALIAS. An unexplained exemption is worse",
+      "  than a red.",
+    ]);
+  }
+
+  // The print sits BEHIND the checks, never in front of them.
+  console.log("");
+  console.log(`loadMe re-entry accounting (cch-w48-bl): applyRoute's DISPATCH LITERAL names ${DISPATCH.length} views ` +
+    `(no call graph — D517); ${decided.length} of them are decided at paint time by a band a dispatch entry reads`);
+  console.log(`  bands DERIVED from the PIN's predicate column: ${BANDS2O.join(" · ")}`);
+  console.log("  the literal, verbatim (view -> the functions applyRoute enters to paint it):");
+  for (const d of DISPATCH) {
+    console.log(`    ${LABEL}:${d.line}  ${d.view} -> ${d.entries.join(", ") || "(nothing app.js declares)"}` +
+      (decided.includes(d) ? "   [BAND-DECIDED]" : ""));
+  }
+  for (const d of decided) {
+    const via = d.entries.filter((e) => readers2O.has(e));
+    const viaBands = [...new Set(via.flatMap((e) => [...bandsRead(e)]))];
+    console.log(`  ${d.view}  —  ${viaBands.join(", ")} read in ${via.join(", ")}`);
+    for (const e of d.entries) {
+      const al = SEAM_ALIAS[e];
+      console.log(`    ${e}: ` + (VIEW_SEAM_EXEMPT[e] ? "EXEMPT — " + VIEW_SEAM_EXEMPT[e].why.slice(0, 96) + "…"
+        : al ? `re-entered as ${al.seam} (alias), which re-reads ${[...bandsRead(al.seam)].join(", ")}`
+        : "re-entered by loadMe's success arm"));
+    }
+  }
+  console.log(`  loadMe success-arm seams, DERIVED: ${[...SEAMS].join(", ")}`);
+  console.log("  A view is classified only when a DISPATCH ENTRY reads the band itself. A read one mount");
+  console.log("  deeper (renderNotifications, memberRowHtml) is invisible here, on purpose — D517.");
 }
 
 // (2l) THE NULL-PIN DECAY ARM — PLUMBING DERIVED BY EXECUTION (charter D428).
@@ -2453,8 +3814,8 @@ if (!FIXTURE_MODE) {
 // (2h) THE HEADER'S OWN CLAIM, MADE LOSABLE (cch-w47-rv).
 //
 //      The header at the top of this file asserts, flatly, that NO LINE NUMBER
-//      IS WRITTEN DOWN HERE. Charter D528 made that true of the 79 PIN rows and
-//      of the six printed router lines — and left SEVEN behind in prose that
+//      IS WRITTEN DOWN HERE. Charter D528 made that true of the PIN rows and
+//      of the printed router lines — and left SEVEN behind in prose that
 //      nothing read and nothing could red: five `note:` strings naming
 //      router.ex lines for the inline-cond sites, the excluded local-binding
 //      site, and the two /v1/auth/device routes. Every one of them was already

@@ -88,9 +88,11 @@ func runCloudMembers(out *writer, g globals, args []string) int {
 
 	if out.output == "json" || out.output == "yaml" {
 		// The machine path re-emits the control-plane BYTES (D4), so a parse
-		// failure of OUR row structs does not corrupt it — it stays exit 0.
-		emitMembersRaw(out, members, invitations, ierr)
-		return exitOK
+		// failure of OUR row structs does not corrupt it — the document is
+		// never reshaped. What it DOES carry is the exit status: a value the
+		// contract says is an array and is not one exits non-zero, so a shell
+		// `if bp cloud members -o json > f` stops treating it as a roster.
+		return emitMembersRaw(out, members, invitations, ierr)
 	}
 	renderMembersResult(out, teamID, members, invitations, ierr)
 	if members.DecodeErr != nil {
@@ -121,13 +123,22 @@ func membersFail(out *writer, teamID string, err error) int {
 // the contract. When invitations could not be read (admin-gated 403, or a
 // transport error) the value is JSON null, so a script sees the honest absence
 // rather than an empty list posing as "no invitations".
-func emitMembersRaw(out *writer, m cloudclient.MembersResult, inv cloudclient.InvitationsResult, invErr error) {
-	membersRaw := rawArrayOr(m.Raw)
-	invRaw := "null"
+// It RETURNS the exit code, because the one thing the machine path can say
+// about a contract violation without reshaping the bytes is its exit status. A
+// `members` value that is not a JSON array (the contract says array) still goes
+// to stdout verbatim — reshaping it would make the CLI a second, drifting
+// definition of the contract — and the refusal rides stderr plus a non-zero
+// exit. A script that only reads stdout sees exactly what the control plane
+// sent; a script that checks `$?` no longer counts an object's KEYS as seats.
+func emitMembersRaw(out *writer, m cloudclient.MembersResult, inv cloudclient.InvitationsResult, invErr error) int {
+	membersRaw, membersIsArray := rawArrayOr(m.Raw)
+	invRaw, invIsArray := "null", true
 	if invErr == nil {
-		invRaw = rawArrayOr(inv.Raw)
+		invRaw, invIsArray = rawArrayOr(inv.Raw)
 	}
 	combined := fmt.Sprintf(`{"members":%s,"invitations":%s}`, membersRaw, invRaw)
+	// STDOUT FIRST and UNCONDITIONALLY: the bytes are the contract (D4), in the
+	// refusal case too.
 	switch out.output {
 	case "json":
 		fmt.Fprintln(out.stdout, combined)
@@ -137,17 +148,59 @@ func emitMembersRaw(out *writer, m cloudclient.MembersResult, inv cloudclient.In
 			out.renderYAML(v)
 		}
 	}
+	code := exitOK
+	if !membersIsArray {
+		out.userErr("the control plane sent `members` as a JSON %s, not the array the contract specifies — the document on stdout is verbatim, but it is NOT a roster (a key count is not a seat count)", jsonShapeName(membersRaw))
+		code = exitGeneric
+	}
+	if !invIsArray {
+		out.userErr("the control plane sent `invitations` as a JSON %s, not the array the contract specifies — the document on stdout is verbatim, but the invitation list is not readable as a list", jsonShapeName(invRaw))
+		code = exitGeneric
+	}
+	return code
 }
 
 // rawArrayOr returns the raw JSON array bytes, or "[]" when the envelope omitted
 // the key (a well-formed empty result), so the combined document is always valid
-// JSON.
-func rawArrayOr(raw json.RawMessage) string {
+// JSON — and reports whether what it is handing back actually IS an array.
+//
+// The two absent shapes ("" and null) are a well-formed EMPTY result, not a
+// violation: they normalise to [] and stay ok. Anything whose first non-space
+// byte is not `[` is the contract violation this reports — it is emitted
+// UNCHANGED (the caller owns the refusal, not this function, so the bytes stay
+// the server's).
+func rawArrayOr(raw json.RawMessage) (string, bool) {
 	s := strings.TrimSpace(string(raw))
 	if s == "" || s == "null" {
-		return "[]"
+		return "[]", true
 	}
-	return s
+	return s, s[0] == '['
+}
+
+// jsonShapeName names the JSON shape of a raw value for a diagnostic, so the
+// refusal says WHAT arrived rather than only that it was wrong. Unknown bytes
+// read as "value" — the message must never claim more than it measured.
+func jsonShapeName(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "value"
+	}
+	switch s[0] {
+	case '{':
+		return "object"
+	case '[':
+		return "array"
+	case '"':
+		return "string"
+	case 't', 'f':
+		return "boolean"
+	case 'n':
+		return "null"
+	}
+	if s[0] == '-' || (s[0] >= '0' && s[0] <= '9') {
+		return "number"
+	}
+	return "value"
 }
 
 // renderMembersResult prints the human view: the seat roster, then the pending

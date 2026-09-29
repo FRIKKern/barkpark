@@ -11,7 +11,7 @@ package cli
 //	bp cloud site deploy    <site> [--no-follow] [--wait-for-live <deadline>]   (alias: build)
 //	bp cloud site rollback  <site>
 //	bp cloud site delete    <site> [--yes]         (alias: rm)
-//	bp cloud site status    <site>
+//	bp cloud site status    <site> [--window <attempts>]
 //	bp cloud site open      <site> [--print-only]
 //
 // It is a THIN driver over internal/cloudclient's spawner methods, rendered
@@ -40,9 +40,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -63,11 +65,12 @@ const siteDeployPollMax = 300
 // of `deploy` (both enqueue a build); `sites` is accepted as a plural alias at
 // the dispatcher above.
 func runCloudSite(out *writer, g globals, args []string) int {
-	// `preflight` owns its OWN -h/--help (a dedicated page that disambiguates it
-	// from the box-side --rollback-preflight), so route it before the family-level
-	// help catch below would swallow `preflight -h` into the family usage.
-	isPreflight := len(args) > 0 && args[0] == "preflight"
-	if !isPreflight {
+	// `preflight` and `matrix` own their OWN -h/--help (a dedicated page that
+	// disambiguates preflight from the box-side --rollback-preflight), so route
+	// them before the family-level help catch below would swallow `preflight -h`
+	// into the family usage.
+	own := len(args) > 0 && (args[0] == "preflight" || args[0] == "matrix")
+	if !own {
 		for _, a := range args {
 			if a == "-h" || a == "--help" {
 				printCloudSiteHelp(out)
@@ -82,40 +85,18 @@ func runCloudSite(out *writer, g globals, args []string) int {
 	if len(args) == 0 {
 		return useError(out, "usage", "missing site command (run `bp cloud site -h` for usage)", exitUsage)
 	}
-	verb := args[0]
-	rest := args[1:]
-	switch verb {
-	// THE TWO-NOUN RULING (dr-w14-bl-owner-cannot-list-own-sites): `bp sites`
-	// and `bp cloud site` are BOTH real and deliberately split — `bp sites` is
-	// the team-wide site surface (list/show/create/deployments/env/domains),
-	// `bp cloud site` is the spawner's lifecycle verbs on ONE site
-	// (create/deploy/rollback/delete/status/open/preflight/settings). The
-	// overlap is resolved by ALIASING, not by exclusivity: enumeration lives in
-	// runSitesList and `bp cloud site ls` routes THERE, so an owner standing at
-	// either noun can enumerate their own sites — the wave-14 verifier found
-	// their 13 sites only by curling /v1/sites because THIS noun refused `ls`
-	// while the other noun answered it.
-	case "ls", "list":
-		return runSitesList(out, rest)
-	case "create":
-		return runCloudSiteCreate(out, g, rest)
-	case "deploy", "build":
-		return runCloudSiteDeploy(out, g, rest)
-	case "rollback":
-		return runCloudSiteRollback(out, g, rest)
-	case "delete", "rm":
-		return runCloudSiteDelete(out, g, rest)
-	case "status":
-		return runCloudSiteStatus(out, g, rest)
-	case "open":
-		return runCloudSiteOpen(out, g, rest)
-	case "preflight":
-		return runCloudSitePreflight(out, g, rest)
-	case "settings":
-		return runCloudSiteSettings(out, g, rest)
-	default:
-		return useError(out, "usage", fmt.Sprintf("unknown site command %q (run `bp cloud site -h` for usage; to list your team's sites: `bp sites` or `bp cloud site ls`)", verb), exitUsage)
-	}
+	// THE TWO-NOUN RULING, generalised (site-spawner-backlog-cli-unify). `bp
+	// sites` and `bp cloud site` are two SPELLINGS of one tree, not two trees:
+	// every verb is declared ONCE in siteVerbMatrix (site_verb_matrix.go) and
+	// both dispatchers route through it, so a shared verb reaches the same func
+	// value — same request, same bytes, same exit code — at either noun. The
+	// wave-14 verifier found their 13 sites only by curling /v1/sites because
+	// THIS noun refused `ls` while the other answered it; thirteen more verbs
+	// had the same shape until the matrix landed. `create` stays
+	// spelling-bound because the kind difference is real, and `deploy` at the
+	// fleet noun REFUSES by naming both doors — see the matrix's KindNote
+	// column, or run `bp cloud site matrix`.
+	return dispatchSiteVerb(out, g, siteSpellingSpawner, args[0], args[1:])
 }
 
 // siteCloudConfig loads the config and gates on a Cloud session — the shared
@@ -138,20 +119,42 @@ func siteCloudConfig(out *writer, action string) (*Config, bool) {
 	return cfg, true
 }
 
+// siteDatasetListHint is the tail every --dataset refusal carries. It exists for
+// the same reason siteInstanceRequired names `bp cloud status`: a refusal that
+// only says the input is wrong leaves the operator to GUESS a right one, and the
+// ws/proj/ds triple is the most typo-prone input this command takes. `bp whoami`
+// reports the ONE triple this machine's config points at, which is a workaround,
+// not a route — a caller with two projects cannot discover the second from it.
+//
+// `bp cloud workspace ls` (cloud_workspace_cmd.go) is the route: it walks the
+// membership-scoped switcher reads and prints one row per DATASET whose leading
+// cell is the joined triple, pasteable verbatim into this flag. Naming it turns
+// every arm below from a verdict into a next command.
+//
+// Note the SCOPE of what these arms can catch: they are SHAPE checks, and they
+// run before any network call. There is no `dataset_not_found` refusal anywhere
+// on the plane (`grep -rn 'dataset_not_found' cloud/ internal/` is empty), so a
+// well-formed triple naming a workspace that does not exist is not refused here
+// at all — which is exactly why the hint belongs on the shape arms, where the
+// CLI still has the floor.
+const siteDatasetListHint = " List the triples you can reach with `bp cloud workspace ls` " +
+	"(paste a DATASET cell verbatim into --dataset)."
+
 // parseDatasetTriple splits a `ws/proj/ds` selector into its three parts, with a
 // clear usage error for anything that is not exactly three non-empty segments.
+// Every error names `bp cloud workspace ls` — see siteDatasetListHint.
 func parseDatasetTriple(s string) (ws, proj, ds string, err error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return "", "", "", fmt.Errorf("--dataset is required (want ws/proj/ds)")
+		return "", "", "", fmt.Errorf("--dataset is required (want ws/proj/ds)." + siteDatasetListHint)
 	}
 	parts := strings.Split(s, "/")
 	if len(parts) != 3 {
-		return "", "", "", fmt.Errorf("--dataset wants three slash-separated parts ws/proj/ds, got %q", s)
+		return "", "", "", fmt.Errorf("--dataset wants three slash-separated parts ws/proj/ds, got %q."+siteDatasetListHint, s)
 	}
 	ws, proj, ds = strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
 	if ws == "" || proj == "" || ds == "" {
-		return "", "", "", fmt.Errorf("--dataset ws/proj/ds must have no empty part, got %q", s)
+		return "", "", "", fmt.Errorf("--dataset ws/proj/ds must have no empty part, got %q."+siteDatasetListHint, s)
 	}
 	return ws, proj, ds, nil
 }
@@ -189,8 +192,22 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	// Honor both spellings: the local flag when a future parser change delivers
 	// it, else the global capture. (Live-caught: the verb was unusable end-to-end
 	// while its direct-call unit tests stayed green.)
+	//
+	// The global capture is GATED ON g.datasetSet — the bit that is true only
+	// when -d/--dataset was TYPED IN ARGV (globals.go) — not on g.dataset merely
+	// being non-empty. Reading it unconditionally cannot tell an operator-typed
+	// triple from a value some other layer supplied: the resolved content context
+	// carries an ambient dataset from ~/.config/barkpark/config.json /
+	// BARKPARK_DATASET, and paper_cmd.go's `g.dataset = target.dataset` already REWRITES g.dataset mid-run
+	// from a pasted Paper URL. Either one reaching here would spawn a site — a
+	// durable, tenant-scoped, billable object — against a workspace/project/
+	// dataset the operator never named, with exit 0. Creation is the one place
+	// where an ambient scope must not be inferred, so with nothing typed we fall
+	// through to parseDatasetTriple's honest "--dataset is required" usage error.
+	// Same contract, same discriminator, as exportDatasetScope in
+	// cloud_workspace_cmd.go.
 	rawTriple := a.val("dataset")
-	if rawTriple == "" {
+	if rawTriple == "" && g.datasetSet {
 		rawTriple = g.dataset
 	}
 	ws, proj, ds, derr := parseDatasetTriple(rawTriple)
@@ -385,11 +402,28 @@ func chainSiteDeploy(out *writer, cfg *Config, ref string, site cloudclient.Spaw
 
 // siteInstanceNotLive reports whether a deploy error is the control plane's 422
 // instance_not_live — the box the site lives on is still provisioning and cannot
-// build yet. cloudError renders the wire code (optionally `code: detail`) into the
-// message, so the substring is the honest, decode-independent signal; the create
-// --deploy one-motion degrades to a retry hint on it rather than a bare failure.
+// build yet, so the create --deploy one-motion degrades to a retry hint rather
+// than a bare failure.
+//
+// THE STATUS IS PART OF THE FACT, not decoration. The control plane emits the
+// SAME `instance_not_live` slug at TWO statuses with OPPOSITE remedies
+// (cloud/lib/barkpark_cloud/web/router.ex):
+//
+//   - 422 — the instance hosting this site has no URL yet; wait for it to finish
+//     provisioning. RETRYABLE. This is the one the retry hint is for.
+//   - 409 — the instance backing this site was deprovisioned while the request
+//     was in flight; the box is GONE and retrying never works (maybe_bind_cloudflare
+//     fails closed rather than point DNS at a freed address).
+//
+// A substring match on err.Error() cannot tell them apart, and told the operator
+// to "deploy it in a moment" about a box that no longer exists. It also matched
+// any OTHER refusal that merely quoted the slug in its prose, because cloudError
+// folds detail/reason/required/scope INTO the message. Reading the typed
+// *cloudclient.CloudRefusal — the same errors.As read siteRefusalFail in this
+// file already does — gives both facts as facts.
 func siteInstanceNotLive(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "instance_not_live")
+	var re *cloudclient.CloudRefusal
+	return errors.As(err, &re) && re.HTTPStatus == 422 && re.Code == "instance_not_live"
 }
 
 // runCloudSiteDeploy is `bp cloud site deploy <site>` (alias `build`) — enqueue a
@@ -451,7 +485,12 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 		if waitForLive > 0 {
 			return useError(out, "usage", "--wait-for-live is not wired for the --prebuilt lane: a prebuilt deploy switches on upload rather than riding the box's build queue, so the deferral this flag waits past does not occur there (usage: "+usage+")", exitUsage)
 		}
-		if _, verr := validatePrebuiltDir(prebuilt); verr != nil {
+		// The UNION arm, deliberately: no network has been touched yet, so the
+		// site's runtime target is unknown and a guard that demanded one lane's
+		// root file would refuse the other lane's legitimate tree. Everything
+		// that does not depend on the runtime (exists, non-empty, no symlinks,
+		// no unpackable entries) still refuses here, before any mint.
+		if _, verr := validatePrebuiltDirFor(prebuilt, prebuiltRuntimeUnknown); verr != nil {
 			return useError(out, "usage", verr.Error(), exitUsage)
 		}
 	} else if deploymentID != "" {
@@ -627,7 +666,53 @@ func warnPrebuiltAmbientToken(out *writer, ref, dir string, lookup func(string) 
 // the user just built against and the refusal would repeat forever. So the
 // refusal names the deployment it minted, and the second run passes it back with
 // `--deployment <id>`: no new mint, the same build id, the upload lands.
+//
+// NO `--build` FLAG, AND THE REASON (the one-motion question, decided).
+// A `--build` that ran the user's own build command between the two calls, with
+// BARKPARK_BUILD_ID / BARKPARK_CONTENT_REV / BARKPARK_SITE_BASE exported into it,
+// would collapse mint→build→upload into one command and is the nicer shape. It is
+// NOT shipped, and what it would have bought is already bought:
+//
+//   - The loop it was meant to fix is the mint/rebuild/re-run one, and that loop
+//     could not terminate for a reason `--build` does not address: a prebuilt mint
+//     is nonced, so a plain re-run minted a NEW build id and refused again.
+//     `--deployment <id>` is the resume half, and the refusal above prints the
+//     exact command to re-run. Two runs, both of which converge.
+//   - `--build` would put an arbitrary user command inside bp's process for the
+//     sake of one saved invocation, and it would have to guess the command. The
+//     exports the refusal prints are the whole contract, and a shell already runs
+//     build commands better than a flag can.
+//
+// So the two-run loop stands. `--build` stays FILED rather than rejected: it is a
+// convenience on a path that now terminates, not a fix for one that did not.
 func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deploymentID string, force, follow bool) int {
+	// THE OPT-IN IS READ FIRST, BEFORE ANY WRITE. One GET of the site row, and
+	// it is the SAME read prebuiltSiteBase already did (its result is threaded
+	// down rather than fetched twice), so on the mismatch path this costs no
+	// extra round trip at all.
+	site, siteRead := prebuiltSiteRow(cfg, id)
+	if code := prebuiltOptInRefusal(out, ref, id, site, siteRead); code != exitOK {
+		return code
+	}
+	if code := prebuiltStaticOnlyRefusal(out, ref, site, siteRead); code != exitOK {
+		return code
+	}
+	// THE RUNTIME-SPECIFIC ROOT GUARD, STILL PRE-MINT. The pre-mint arm in
+	// runCloudSiteDeploy could only ask the union question (it had not read the
+	// row yet); this is the same walk's strict half, and it runs here — after the
+	// one site read this lane already makes, and still before resolvePrebuiltDeployment
+	// spends the nonce. A node tree packed from the repo root instead of
+	// .next/standalone is refused here rather than by the box's exit 11.
+	runtime := prebuiltRuntimeFor(site, siteRead, dir)
+	_, metadata, verr := validatePrebuiltDirAdvising(dir, runtime)
+	if verr != nil {
+		return useError(out, "failed", verr.Error(), exitGeneric)
+	}
+	// The macOS-metadata ADVISORY (charter D121) prints here and only here: this
+	// is the last walk before the mint, and the other two discard the list.
+	for _, line := range prebuiltMetadataAdvisory(dir, metadata) {
+		out.progressf("%s", line)
+	}
 	warnPrebuiltAmbientToken(out, ref, dir, os.LookupEnv)
 	dep, code := resolvePrebuiltDeployment(out, cfg, ref, id, deploymentID, force)
 	if code != exitOK {
@@ -638,16 +723,29 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 		return useError(out, "failed", "the control plane minted a prebuilt deployment with no build_id — nothing to stamp the bytes with, so the upload would fail at HEALTH; re-run without --prebuilt to build on the box, or upgrade the control plane", exitGeneric)
 	}
 
-	marker, merr := prebuiltBuildMarker(dir)
-	if merr != nil {
-		return useError(out, "failed", merr.Error(), exitGeneric)
+	// THE BUILD-ID MARKER CHECK IS STATIC-ONLY, AND THAT IS THE RULING OF RECORD,
+	// NOT A SHORTCUT. On a node slot the marker HEALTH asserts is not resident in
+	// the uploaded bytes at all: write_slot_env (deploy/site-deploy-node.sh) puts
+	// BARKPARK_BUILD_ID into the slot EnvironmentFile and D71's force-dynamic makes
+	// the served page echo process.env. There is no index.html in a standalone
+	// release root to read a <meta> out of, and reading one would be asserting a
+	// property of the wrong artifact. What binds the node lane instead is the
+	// artifact digest (100% load-bearing, per the same ruling) and the ABI
+	// declaration packed below.
+	marker := buildID
+	if runtime != prebuiltRuntimeNode {
+		var merr error
+		marker, merr = prebuiltBuildMarker(dir)
+		if merr != nil {
+			return useError(out, "failed", merr.Error(), exitGeneric)
+		}
 	}
 	if marker != buildID {
 		out.progressf("  export BARKPARK_BUILD_ID=%s", buildID)
 		if cr := strings.TrimSpace(dep.ContentRev); cr != "" {
 			out.progressf("  export BARKPARK_CONTENT_REV=%s", cr)
 		}
-		base, exact := prebuiltSiteBase(cfg, id, ref)
+		base, exact := prebuiltSiteBase(site, siteRead, ref)
 		out.progressf("  export BARKPARK_SITE_BASE=%s", base)
 		if !exact {
 			out.progressf(
@@ -663,12 +761,15 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 			dir, have, buildID, ref, dir, dep.ID), exitGeneric)
 	}
 
-	art, perr := packPrebuiltDir(dir)
+	art, perr := packPrebuiltDirFor(dir, runtime)
 	if perr != nil {
 		return useError(out, "failed", perr.Error(), exitGeneric)
 	}
 	defer art.Cleanup()
 	out.progressf("→ packed %s — %d bytes on the wire, sha256 %s", dir, art.WireBytes, art.SHA256)
+	if runtime == prebuiltRuntimeNode {
+		out.progressf("  the artifact carries %s — the box compares it against its own node major before STAGE and refuses a mismatch with nothing staged and no slot booted", nodeABIMarkName)
+	}
 
 	f, oerr := os.Open(art.Path)
 	if oerr != nil {
@@ -682,10 +783,258 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 	if n := up.Bytes; n > 0 && n != art.WireBytes {
 		out.progressf("  control plane recorded %d bytes (client sent %d)", n, art.WireBytes)
 	}
-	out.progressf("→ uploaded — the box verifies the digest, then stages these bytes (BUILD is skipped: no npm runs there)")
+	// THE CONTROL PLANE'S OWN DIGEST, read back. It hashes the bytes it received
+	// and returns them as `artifact_sha256`; a value that differs from what we
+	// declared is a disagreement about WHICH BYTES this deployment is now bound
+	// to, and the box re-verifies against the CP's hash, not ours — so a silent
+	// divergence would make every downstream check agree on the wrong bytes.
+	if cp := strings.TrimSpace(strings.ToLower(up.SHA256)); cp != "" && cp != strings.ToLower(art.SHA256) {
+		out.errf("! the control plane stored sha256 %s for this deployment, but these bytes hash to %s — the box verifies against the control plane's digest, so what goes live is not what was packed here", sanitizeCell(cp), sanitizeCell(art.SHA256))
+	}
+	if up.AlreadyUploaded() {
+		// The 200 retry arm. The bytes were already stored under this deployment
+		// and this request started NO driver — the deploy below is the one an
+		// earlier upload began, so saying "stages these bytes" here would date the
+		// deploy to a request that did not cause it.
+		out.progressf("→ already uploaded — this deployment already carries these exact bytes, so the control plane answered without starting a second deploy; what follows is the run the first upload started")
+	} else {
+		out.progressf("→ uploaded — the box verifies the digest, then stages these bytes (BUILD is skipped: no npm runs there)")
+	}
 
 	streamCode, _ := streamSiteDeploy(out, cfg, ref, id, dep, follow)
 	return streamCode
+}
+
+// prebuiltSiteRow is the ONE read of the site row the `--prebuilt` lane makes.
+// Its result feeds two consumers that both used to fetch it (or fail to): the
+// opt-in preflight below, and prebuiltSiteBase's slug. The second return value is
+// whether the read SUCCEEDED — never merged into the zero value, because a
+// zero-valued SpawnSite is indistinguishable from a real site that builds on its
+// box, and those two states must produce opposite behaviour here.
+func prebuiltSiteRow(cfg *Config, id string) (cloudclient.SpawnSite, bool) {
+	site, err := cfg.CloudClient().GetSpawnSite(cloudCtx(), id)
+	if err != nil {
+		return cloudclient.SpawnSite{}, false
+	}
+	return site, true
+}
+
+// prebuiltOptInRefusal is the preflight for `bp cloud site deploy <site>
+// --prebuilt <dir>` (ssw10-prebuilt-preflight-opt-in).
+//
+// WHY IT EXISTS. Prebuilt is a per-site opt-in (charter D87): the control plane
+// refuses `{"source":"prebuilt"}` with a 422 `prebuilt_not_enabled` until the site
+// says yes. Before this guard `bp` learned that answer from the WIRE — after the
+// ambient-token warning, after the mint, after the pack. And the mint is the
+// expensive half: a prebuilt mint is NONCED on purpose, so the row it burns is not
+// resumable by re-running the same command (it needs `--deployment <id>`), and a
+// user who simply forgot the opt-in was left holding an orphan queued deployment
+// and a command that would never converge.
+//
+// THE WORDING IS THE CONTROL PLANE'S, NOT A SECOND SENTENCE. router.ex's
+// deploy_static_site refuses with "this site builds on its box — enable off-box
+// builds first (PATCH /v1/sites/<id> {"prebuilt_enabled": true})". That sentence is
+// reproduced here with the site handle THE USER TYPED in front of it, so the local
+// refusal and the remote one cannot drift into two different instructions for the
+// same fault. The `bp` equivalent of the PATCH is appended because the user is in
+// a CLI, not a curl.
+//
+// A FAILED READ IS NOT A REFUSAL. The guard fires only on a DEFINITE false. If the
+// site row could not be read at all, this is a saved round trip we did not get —
+// not evidence about the opt-in — so the deploy proceeds and the control plane's
+// own 422 remains the backstop, with the un-run check said out loud rather than
+// implied to have passed.
+func prebuiltOptInRefusal(out *writer, ref, id string, site cloudclient.SpawnSite, siteRead bool) int {
+	if !siteRead {
+		out.errf("could not read %s's prebuilt opt-in before minting — proceeding; if this site has not opted in, the control plane will refuse the mint and the deployment id it prints is the one to re-ship to", hzCell(ref))
+		return exitOK
+	}
+	if site.PrebuiltEnabled {
+		return exitOK
+	}
+	return useError(out, "failed", fmt.Sprintf(
+		"%s builds on its box — enable off-box builds first (PATCH /v1/sites/%s {\"prebuilt_enabled\": true}), or from here: bp cloud site settings %s --prebuilt-enabled true\n\n(nothing was packed and no deployment was minted: a prebuilt mint is nonced, so a burned row could not be re-used by re-running this command.)",
+		hzCell(ref), sanitizeCell(id), hzCell(ref)), exitGeneric)
+}
+
+// prebuiltStaticOnlyRefusal is the second preflight on `bp cloud site deploy
+// <site> --prebuilt <dir>`, and it guards the axis the opt-in one does not: the
+// site's RUNTIME TARGET.
+//
+// WHY IT EXISTS. `--prebuilt` ships a built `dist/` tree and the box stages it
+// and flips a symlink — a STATIC mechanism, and the only one the prebuilt lane
+// has today (charter D96 files node/SSR as a later round). The control plane
+// does not draw that line: its deploy route sends `site.kind in ["static",
+// "node"]` down the SAME `deploy_static_site/2` arm, and `prebuilt_enabled` is
+// per-site with no kind scoping at all. So a node/SSR site that had opted in
+// would mint, pack, and upload a tarball that nothing on the box ever starts a
+// server for — a deploy that burns a nonced mint and ships bytes no visitor can
+// be served.
+//
+// WHY IT IS A PREDICATE AND NOT A LIST (ssw9-bl-node-prebuilt). This guard used
+// to ask `siteIsNode`, i.e. "is this one of the runtimes I know are NOT static?"
+// — an enumeration of the OPEN side. `Barkpark.Registry.Site` today declares
+// `@kinds ~w(container static node)` and the CLI names `node`/`container`, so
+// the list is complete AT THIS COMMIT and completeness is the only thing holding
+// it up. Add a fourth kind server-side (or a runtime target that does not spell
+// "node" — `RuntimeTargetIsNode` matches on that substring) and this guard
+// returns false for it: the site mints a nonced row, packs its tree, and uploads
+// bytes nothing serves, in silence. The STATIC side is the CLOSED one — one kind
+// ("static") and one runtime target (`RuntimeTargetStatic`) — so the question
+// asked below is "did the control plane tell me this is the static
+// symlink-swap?" and everything else it NAMES is refused. An ABSENT kind and an
+// absent runtime target are still waved through: the control plane said nothing,
+// and refusing on no information is not the same as refusing on a fact.
+//
+// THE RULING OF RECORD (ssw9-bl-node-prebuilt, RULED by team-lead 2026-09-02,
+// recorded on the ledger row by lead-triage — written here because a ruling made
+// in a message is invisible to git grep):
+//
+//	HEALTH certifies the injection. Declare a node ABI.
+//
+// What that settles: on a node slot the markers HEALTH asserts are NOT resident
+// in the uploaded bytes. `write_slot_env` (deploy/site-deploy-node.sh) writes
+// BARKPARK_BUILD_ID into the slot EnvironmentFile, the unit loads it, and D71's
+// force-dynamic makes the served page echo `process.env` — so ANY bundle that
+// boots and echoes it passes the by-value marker assertion. HEALTH therefore
+// certifies that the injection arrived, never that these bytes are the ones the
+// deployment minted; the artifact digest is 100% load-bearing for that. The
+// ruling ACCEPTS that split rather than repairing it, and adds the ABI
+// declaration as the second half. Neither half is built: the node engine has no
+// prebuilt arm at all (`grep -c prebuilt deploy/site-deploy-node.sh` = 0, while
+// the static engine's PLAN_MODE=prebuilt path is ~20 sites), so the refusal
+// below remains the whole of the node prebuilt lane and the sentence it prints
+// is where an operator learns why.
+//
+// It refuses BEFORE the mint for the same reason its sibling does: a prebuilt
+// mint is nonced on purpose, so a row burned by learning late cannot be re-used
+// by re-running the command.
+//
+// A FAILED READ IS NOT A REFUSAL. An unreadable row is handled by the opt-in
+// preflight above, which has already said the check did not run.
+func prebuiltStaticOnlyRefusal(out *writer, ref string, site cloudclient.SpawnSite, siteRead bool) int {
+	if !siteRead {
+		return exitOK
+	}
+	clause := prebuiltUnservableClause(site.Kind, site.RuntimeTarget)
+	if clause == "" {
+		return exitOK
+	}
+	why := "the box stages the uploaded tree and flips a symlink, so nothing would start a server for these bytes and nothing would serve them."
+	if siteIsNode(site.Kind, site.RuntimeTarget) {
+		why += " Node prebuilt is not merely unbuilt: a node slot reads bp-build-id out of the env this deploy injects at boot, so HEALTH would certify the injection rather than the uploaded bytes (RULED 2026-09-02: HEALTH certifies the injection; declare a node ABI)."
+	}
+	return useError(out, "failed", fmt.Sprintf(
+		"%s %s, and --prebuilt is static-only: %s Build it on its box instead: bp cloud site deploy %s\n\n(nothing was packed and no deployment was minted: a prebuilt mint is nonced, so a burned row could not be re-used by re-running this command.)",
+		hzCell(ref), clause, why, hzCell(ref)), exitGeneric)
+}
+
+// prebuiltUnservableClause is the predicate behind prebuiltStaticOnlyRefusal: it
+// names, in the refusal's own grammar, the thing the control plane SAID that
+// rules `--prebuilt` out — or "" when nothing it said does.
+//
+// Order matters only for the wording. The node arm is checked first so a node
+// site keeps the sentence it has always had ("runs a long-running node/SSR
+// process"); the two arms under it are the ones that catch a runtime this
+// binary has never heard of, and they quote the unrecognised value back so the
+// operator can see WHICH field refused them rather than reading a generic no.
+func prebuiltUnservableClause(kind, runtimeTarget string) string {
+	// NODE IS RETIRED FROM THIS REFUSAL, and the reason is a fact about the box,
+	// not a change of mind: deploy/site-deploy-node.sh now carries a
+	// PLAN_MODE=prebuilt arm that stages an uploaded standalone tree, records
+	// .bp-prebuilt-sha256, runs no npm, and refuses an ABI mismatch BEFORE STAGE
+	// (exit 17). The engine arm this guard was waiting for exists, so the CLI has
+	// a lane to hand these bytes to. The rest of the guard STAYS: it is still a
+	// closed question about the runtimes this binary has an arm for, and a
+	// runtime nobody has built an engine for is still refused before the nonce.
+	if siteIsNode(kind, runtimeTarget) {
+		return ""
+	}
+	if rt := strings.ToLower(strings.TrimSpace(runtimeTarget)); rt != "" && !prebuiltTargetIsStatic(rt) {
+		return fmt.Sprintf("declares runtime target %q, and this bp knows only two targets the prebuilt lane can serve (%s, %s)", sanitizeCell(rt), cloudclient.RuntimeTargetStatic, cloudclient.RuntimeTargetNode)
+	}
+	if k := strings.ToLower(strings.TrimSpace(kind)); k != "" && k != "static" {
+		return fmt.Sprintf("declares kind %q, and the prebuilt lane serves kinds \"static\" and \"node\"", sanitizeCell(k))
+	}
+	return ""
+}
+
+// prebuiltRuntimeFor decides WHICH lane this deploy packs for.
+//
+// The site row is the truth when it was read. When it was NOT (the opt-in
+// preflight has already said out loud that the read failed and that the control
+// plane's own refusal is the backstop), the tree's root file is the only
+// evidence left — and it is real evidence, because the two lanes have different
+// root files by contract: a static dist/ has index.html, a node standalone
+// release root has server.js. A tree carrying BOTH is read as static, which is
+// the status quo this change must not move.
+func prebuiltRuntimeFor(site cloudclient.SpawnSite, siteRead bool, dir string) prebuiltRuntime {
+	if siteRead {
+		if siteIsNode(site.Kind, site.RuntimeTarget) {
+			return prebuiltRuntimeNode
+		}
+		return prebuiltRuntimeStatic
+	}
+	regular := func(name string) bool {
+		st, err := os.Stat(filepath.Join(dir, name))
+		return err == nil && st.Mode().IsRegular()
+	}
+	if !regular("index.html") && regular("server.js") {
+		return prebuiltRuntimeNode
+	}
+	return prebuiltRuntimeStatic
+}
+
+// prebuiltTargetIsStatic is the CLOSED half of the runtime-target vocabulary:
+// `RuntimeTargetStatic` plus any value CONTAINING "static", mirroring
+// cloudclient.RuntimeTargetIsNode's substring tolerance so a control plane that
+// spells the field differently ("static_symlink_swap") is not refused for its
+// punctuation. Everything else — including every target that has not been
+// invented yet — is NOT static, which is the whole point.
+func prebuiltTargetIsStatic(rt string) bool {
+	return rt == cloudclient.RuntimeTargetStatic || strings.Contains(rt, "static")
+}
+
+// mintedSourceClause is the "no build started on the box" half of the mint
+// receipt, READ BACK from the deployment the control plane returned rather than
+// asserted from the verb the user typed.
+//
+// It used to be printed unconditionally by the `--prebuilt` branch, which made it
+// a claim about the LOCAL flag: a control plane that ignored `source=prebuilt` and
+// queued a real box build returned a row saying so, and this line said the
+// opposite. The resume path already checked `dep.Source`; the mint did not. Same
+// check, same place.
+//
+// Three cases, three sentences, and the empty one matters: a control plane that
+// predates the `source` key sends nothing, and inventing either answer for it
+// would be the same fabrication in the other direction.
+func mintedSourceClause(source string) string {
+	switch strings.TrimSpace(source) {
+	case "prebuilt":
+		return " — no build started on the box"
+	case "":
+		return " (this control plane does not report the deploy's source, so whether a box build started is unknown here)"
+	default:
+		return fmt.Sprintf(" — the control plane made it a %s deploy, NOT a prebuilt one: a build is running on the box and your bytes are not what will serve", sanitizeCell(source))
+	}
+}
+
+// sitePrebuiltWord / sitePrebuiltLine render the off-box-build opt-in. Two shapes
+// because the two surfaces answer different questions: the settings receipt is
+// echoing a field you just set (one word), while `status` is the read verb where a
+// site owner learns the answer for the first time and needs to know what it MEANS.
+func sitePrebuiltWord(enabled bool) string {
+	if enabled {
+		return "enabled"
+	}
+	return "disabled"
+}
+
+func sitePrebuiltLine(enabled bool) string {
+	if enabled {
+		return "enabled — this site accepts `bp cloud site deploy <site> --prebuilt <dir>`"
+	}
+	return "disabled — this site builds on its box; enable off-box builds with `bp cloud site settings <site> --prebuilt-enabled true`"
 }
 
 // prebuiltSiteBase is the value BARKPARK_SITE_BASE must carry: the PATH the site
@@ -717,8 +1066,8 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 // of silent breakage this function was written to end, and which HEALTH cannot see
 // (it asserts bp-build-id/bp-content-rev/bp-doc-id, never bp-site-base). So that
 // case prints a PLACEHOLDER the caller flags rather than a plausible wrong value.
-func prebuiltSiteBase(cfg *Config, id, ref string) (string, bool) {
-	if site, err := cfg.CloudClient().GetSpawnSite(cloudCtx(), id); err == nil {
+func prebuiltSiteBase(site cloudclient.SpawnSite, siteRead bool, ref string) (string, bool) {
+	if siteRead {
 		if slug := strings.TrimSpace(site.Slug); slug != "" {
 			return "/sites/" + slug + "/", true
 		}
@@ -747,7 +1096,7 @@ func resolvePrebuiltDeployment(out *writer, cfg *Config, ref, id, deploymentID s
 		if derr != nil {
 			return dep, siteRefusalFail(out, siteRefusedMint, ref, derr)
 		}
-		out.progressf("→ minted prebuilt deployment %s (build %s) — no build started on the box", sanitizeCell(dep.ID), sanitizeCell(dep.BuildID))
+		out.progressf("→ minted deployment %s (build %s)%s", sanitizeCell(dep.ID), sanitizeCell(dep.BuildID), mintedSourceClause(dep.Source))
 		return dep, exitOK
 	}
 
@@ -931,6 +1280,20 @@ func renderSiteDeployVerdict(out *writer, ref string, d cloudclient.SiteDeployme
 		return siteDeployExit(d)
 	case strings.EqualFold(d.Status, "live"):
 		prov := siteTriggerNarration(d.Trigger)
+		// A PREVIEW names its own surface (gh-6). The deployment's `url` is the
+		// SITE's production URL (`deployment_url/3` on the plane), so printing it
+		// for a preview would point the operator at the page this build did NOT
+		// replace. preview_url is null on every production row, so this arm
+		// cannot fire for one.
+		if pu := strings.TrimSpace(d.PreviewURL); pu != "" {
+			branch := ""
+			if b := strings.TrimSpace(d.Branch); b != "" {
+				branch = " of branch " + sanitizeCell(b)
+			}
+			out.outf("✓ preview live — %s%s%s", sanitizeCell(pu), branch, prov)
+			out.outf("  deployment %s reports live after SWITCH on its preview host; production is untouched. The CLI did not fetch that URL, so this is the control plane's record, not a proof the page serves — confirm with `curl -sI %s`", hzCell(d.ID), sanitizeCell(pu))
+			return exitOK
+		}
 		if u := strings.TrimSpace(d.URL); u != "" {
 			out.outf("✓ site live — %s%s", u, prov)
 			out.outf("  deployment %s reports live after SWITCH; the CLI did not fetch that URL, so this is the control plane's record, not a proof the page serves — confirm with `curl -sI %s`", hzCell(d.ID), u)
@@ -1220,12 +1583,17 @@ func siteAbandonmentText(d cloudclient.SiteDeployment) string {
 // blind to every row older than it rather than degraded by a fraction. Seven
 // live abandoned rows carry NULL columns today and the sentence is all they have.
 //
-// On `main` today the prose arm is the ONLY reachable one — nothing writes the
-// columns on an abandoned row until PR #11209 merges (see
-// `siteAbandonmentBound`). The column-first order is kept anyway because it is
-// the ruled one and because it needs no edit the day #11209 lands, whose
-// `deferral_depth: prior + 1` is by construction the number this regex reads
-// out of the same call's sentence.
+// THE COLUMN ARM IS THE LIVE ONE AND THE PROSE ARM IS THE FLOOR BENEATH IT.
+// The control plane's abandonment branch stamps its own chain columns today —
+// `fail(ctx, abandonment_reason(reason, prior + 1, cause), %{deferral_depth:
+// prior + 1, deferral_bound: max_consecutive_deferrals(cause), deferral_cause:
+// cause, …})` — so the column and the sentence come from ONE expression each
+// and the two arms below cannot disagree: the column's `prior + 1` IS the
+// number this regex reads out of the same call's sentence. The prose arm still
+// stands for any row whose columns are NULL, so column-first costs nothing and
+// loses nothing. Both arms are pinned by tests rather than by a PR citation —
+// TestSiteAbandonmentChainReachesTheJSONEnvelope covers the column arm,
+// TestSiteAbandonmentDepthFallsBackToTheProducersSentence the prose one.
 //
 // A PRESENT-BUT-UNUSABLE COLUMN IS "NO DEPTH", NEVER A PROSE RE-READ: the
 // control plane has answered, and falling through would let a stale sentence
@@ -1257,17 +1625,21 @@ func siteAbandonmentDepth(d cloudclient.SiteDeployment) (int, bool) {
 // NOT. That asymmetry is the coverage signal, honestly rendered: a zero here
 // would read as "abandoned against a budget of nothing".
 //
-// ON `main` TODAY THAT IS EVERY ABANDONED ROW, verified in the producer rather
-// than taken on trust: the abandonment arm is `fail(ctx,
-// abandonment_reason(reason, prior + 1, cause))` and `fail/2` writes only
-// `status` / `failure_reason` / `detail` — the column triple is written on the
-// DEFERRED arm alone. PR #11209 (`dr-w28-s6-abandonment-stamps-its-own-columns`,
-// open, unmerged) is what starts writing them, with `deferral_depth: prior + 1`
-// — the SAME number `abandonment_reason/3` interpolates, pinned there by
-// `assert abandoned.failure_reason =~ "refused #{abandoned.deferral_depth}
-// rebuilds in a row"`. So the two arms below cannot disagree, and this key is
-// simply unreachable until #11209 lands: MERGE THAT FIRST, or ship this knowing
-// `abandonment_bound` is dead until it does.
+// THAT IS NO LONGER EVERY ABANDONED ROW, verified in the producer rather than
+// taken on trust: the abandonment arm hands `fail/3` the chain triple beside
+// the sentence it already writes — `deferral_depth: prior + 1`,
+// `deferral_bound: max_consecutive_deferrals(cause)`, `deferral_cause: cause` —
+// so an abandoned row carries the bound AS DATA and this function returns it.
+// The asymmetry above is what survives for a row whose column is still NULL,
+// and it is why the arm stays rather than being replaced by a hardcoded 12/6.
+//
+// THIS COMMENT CITES TESTS, NOT A PR NUMBER, on purpose: a citation to unlanded
+// work rots the day it lands, and this block previously told its reader to go
+// merge a PR that had already merged. The behaviour is pinned in both
+// directions — TestSiteAbandonmentChainReachesTheJSONEnvelope asserts
+// `abandonment_bound` renders off the column, and
+// TestSiteAbandonmentDepthFallsBackToTheProducersSentence asserts it is
+// ABSENT — never a zero — when the column is NULL.
 func siteAbandonmentBound(d cloudclient.SiteDeployment) (int, bool) {
 	if d.DeferralBound == nil || *d.DeferralBound < 1 {
 		return 0, false
@@ -1379,7 +1751,15 @@ func runCloudSiteRollback(out *writer, g globals, args []string) int {
 	if rerr != nil {
 		return openResolveFail(out, rerr)
 	}
+	// THE STOPWATCH BRACKETS THE POST AND NOTHING ELSE. It opens after the ref is
+	// resolved and closes on the reply, so the span it reports is the flip request
+	// itself — not `bp` starting up, and not the list-ALL read a display-name ref
+	// still pays. That is deliberate: the whole point of the number is to tell an
+	// operator whether the time they waited was spent server-side, and a span that
+	// swallowed client legs could not answer that.
+	started := siteClock()
 	res, rberr := cfg.CloudClient().RollbackSpawnSite(cloudCtx(), id)
+	flip := siteClock().Sub(started)
 	if rberr != nil {
 		return siteRefusalFail(out, siteRefusedRollback, ref, rberr)
 	}
@@ -1393,7 +1773,52 @@ func runCloudSiteRollback(out *writer, g globals, args []string) int {
 		return exitOK
 	}
 	renderSiteRolledBack(out, ref, res)
+	if line := siteRollbackOverBudgetLine(flip); line != "" {
+		out.outf("%s", line)
+	}
 	return exitOK
+}
+
+// siteRollbackBudget is the charter's instant-rollback budget, the same 1000 ms
+// `deploy/site-spawner-live-proof.sh` ships as its default ROLLBACK_BUDGET_MS.
+// It is named here so the CLI and the proof script cannot drift to two different
+// definitions of "instant".
+const siteRollbackBudget = 1000 * time.Millisecond
+
+// siteRollbackOverBudgetLine is the receipt's latency clause, and it is QUIET on
+// a rollback that met the budget — the empty string, not a fast-path brag.
+//
+// WHY IT PRINTS AT ALL. `bp cloud site rollback` used to answer a 3.8 s flip with
+// exactly the same checkmark as a 90 ms one (measured live on guerrilla
+// 2026-09-02: 1840 / 3021 / 3820 ms against a 1000 ms budget, task-b017df2fda0fe600).
+// An operator had no way to see the difference short of wrapping the command in
+// `time`, so the one number the safety property is sold on was invisible at the
+// exact moment it mattered.
+//
+// WHY IT IS SILENT UNDER BUDGET, and this is the failure direction: a duration
+// printed on every run is output that changes on every run, which makes the
+// receipt unstable for anything reading it and buys a reader nothing — "instant
+// was instant" is not news. Printing only the breach means the line's PRESENCE is
+// the finding. The cost of that choice is real and stated: a run at 999 ms leaves
+// no record, so this is a breach alarm, not a telemetry feed.
+//
+// The sentence names WHERE the time is, because that is what the operator cannot
+// work out alone: the span is the POST alone, so a breach is server-side by
+// construction — the control-plane route, the CP->box relay, or the box itself.
+func siteRollbackOverBudgetLine(flip time.Duration) string {
+	if flip <= siteRollbackBudget {
+		return ""
+	}
+	return fmt.Sprintf(
+		"  took %s for the flip request alone — over the %s budget. That span is the request and nothing else, so the wait is server-side: the control-plane route, the CP→box relay, or the box.",
+		siteRollbackSeconds(flip), siteRollbackSeconds(siteRollbackBudget))
+}
+
+// siteRollbackSeconds renders a sub-minute duration in seconds to two decimals.
+// Deliberately NOT siteShortDur, which floors at whole seconds ("3s") and would
+// erase the only digits a 1000 ms budget is decided on.
+func siteRollbackSeconds(d time.Duration) string {
+	return fmt.Sprintf("%.2fs", d.Seconds())
 }
 
 // renderSiteRolledBack writes the rollback receipt from the envelope the control
@@ -1624,6 +2049,38 @@ const (
 	siteRefusedReadDeployment
 	siteRefusedPoll
 	siteRefusedWaitLive
+
+	// The READ plane's kinds (cch-w71 remainder, D866). `bp cloud site settings`,
+	// the two `get site` readers (`status` and `open`) and the ERROR arm of `bp
+	// cloud domain status` were the last four call sites still handing every
+	// refusal to the bare `cloudFail`. Lower stakes than a deploy, the SAME
+	// flatten: a 403 the caller's PAT cannot fix, a 404 that is not their site and
+	// a 500 the plane crashed on all printed "failed" and exited 1, so a script
+	// gating on one of these reads could not tell "not found" from "forbidden"
+	// from "the server is down".
+	//
+	// THE EXIT TABLE IS DERIVED FROM THE LIVE ROUTE ARMS, not invented here
+	// (cloud/lib/barkpark_cloud/web/router.ex, module BarkparkCloud.Web.Router):
+	//
+	//	PATCH /v1/sites/:id ........ 401 (require_user_or_pat/2), 403 forbidden
+	//	    (require_ability/2) plus the body's own deploy_ability_required /
+	//	    rebind_ability_required grants, 404 (with_team_site/3 — teamless caller
+	//	    OR site miss), 422 nothing_to_update / invalid_settings, 500 crash slug
+	//	    and the rebind arm's relayed 502 read_token_mint_failed.
+	//	GET /v1/sites/:id .......... 401, 404, 500. NO 403 arm (require_user/2 asks
+	//	    for no ability) and NO 409 — both INERT here, deliberately not
+	//	    special-cased.
+	//	GET /v1/barkparks/:id/domain-status ... 401, 404 (wrong team / absent /
+	//	    malformed id are deliberately indistinguishable), 500. DomainStatus's
+	//	    probe suite is TOTAL over failure — a stuck domain is a 200 with
+	//	    pending/failed rungs, never a 5xx — so 5xx here is the crash slug only.
+	//
+	// siteRefusedRead covers BOTH `status` and `open`: one client call
+	// (GetSpawnSite), one label, one sentence. Splitting them would be the second
+	// dialect this type exists to prevent.
+	siteRefusedSettings
+	siteRefusedRead
+	siteRefusedDomainStatus
 )
 
 // what is the cloudFail fallthrough label — byte-unchanged from the strings these
@@ -1653,6 +2110,12 @@ func (k siteRefusalKind) what() string {
 		return "poll deployment"
 	case siteRefusedWaitLive:
 		return "poll for a live deployment"
+	case siteRefusedSettings:
+		return "update site settings"
+	case siteRefusedRead:
+		return "get site"
+	case siteRefusedDomainStatus:
+		return "domain status"
 	default:
 		return "roll site back"
 	}
@@ -1677,6 +2140,12 @@ func (k siteRefusalKind) noun() string {
 		return "the deploy poll for"
 	case siteRefusedWaitLive:
 		return "the live-deploy watch on"
+	case siteRefusedSettings:
+		return "the settings update for"
+	case siteRefusedRead:
+		return "the read of site"
+	case siteRefusedDomainStatus:
+		return "the domain-status read for instance"
 	default:
 		return "the rollback of"
 	}
@@ -1698,6 +2167,12 @@ func (k siteRefusalKind) verb() string {
 		return "upload an artifact for"
 	case siteRefusedReadDeployment, siteRefusedPoll, siteRefusedWaitLive:
 		return "read the deploys of"
+	case siteRefusedSettings:
+		return "change the settings of"
+	case siteRefusedRead:
+		return "read"
+	case siteRefusedDomainStatus:
+		return "read the domains of"
 	default:
 		return "roll back"
 	}
@@ -1726,6 +2201,12 @@ func (k siteRefusalKind) nothingClause() string {
 		return "The deploy itself is untouched — this lost sight of a build that is still running on the box."
 	case siteRefusedWaitLive:
 		return "The deploy itself is untouched — the re-queued rebuild is still queued."
+	case siteRefusedSettings:
+		return "No setting was changed — the site still has the values it had before this call."
+	case siteRefusedRead:
+		return "Nothing was changed — this verb only reads."
+	case siteRefusedDomainStatus:
+		return "Nothing was changed — this verb only reads; the domains themselves are untouched."
 	default:
 		return "Nothing was flipped."
 	}
@@ -1748,7 +2229,13 @@ func (k siteRefusalKind) nothingClause() string {
 func (k siteRefusalKind) nothingTail() string {
 	switch k {
 	case siteRefusedDeploy, siteRefusedMint, siteRefusedArtifact,
-		siteRefusedReadDeployment, siteRefusedPoll, siteRefusedWaitLive:
+		siteRefusedReadDeployment, siteRefusedPoll, siteRefusedWaitLive,
+		// The read plane joins for the same reason the deploy plane did: its
+		// routes' codes (nothing_to_update, invalid_settings, a relayed
+		// read_token_mint_failed) have no dedicated arm, so the relay arm is the
+		// COMMON path and without this tail the most frequent refusals would be
+		// exactly the ones that never say what state the site is now in.
+		siteRefusedSettings, siteRefusedRead, siteRefusedDomainStatus:
 		return " " + k.nothingClause()
 	}
 	return ""
@@ -1879,32 +2366,40 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 	case "content_binding_empty":
 		// The create door refused because the site's read token sees nothing at the
 		// bound dataset, and it shipped the STRUCTURED menu of types it CAN read.
-		// The console renders that menu from the array and STRIPS the CLI re-run
-		// line (it is CLI-voiced); the CLI is that line's home, so it keeps it.
 		// When the array survived, compose the receipt from the parts the CLI
 		// controls — the verdict, the menu rendered in the console grammar, and the
 		// re-run incantation the server built with the real dataset triple — so the
 		// menu the user reads is the machine-readable list, not a prose copy that a
 		// terser server might not send. With no usable array, the server's own
 		// sentence is the most specific true thing, so relay it whole.
+		//
+		// cch-w69-bl — THE RE-RUN IS A FIELD NOW, NOT A SENTENCE TO FIND. This
+		// branch used to locate the incantation with
+		// strings.Index(detail, "Re-run naming a type") — a match on the control
+		// plane's PROSE, the terminal twin of the console strip the same row
+		// deleted. A reword on the server made this search miss and the line
+		// vanish from the receipt, with no test on either side failing. The plane
+		// now sends it as `cli_hint` (CloudRefusal.CLIHint), so the CLI reads a
+		// key and the console reads none.
+		hint := strings.TrimSpace(re.CLIHint)
 		if menu := siteReadableTypesMenu(re.ReadableTypes); menu != "" {
 			verdict := detail
 			if i := strings.Index(detail, ". "); i != -1 {
 				verdict = detail[:i+1]
 			}
-			reRun := ""
-			if i := strings.Index(detail, "Re-run naming a type"); i != -1 {
-				reRun = strings.TrimSpace(detail[i:])
-			}
 			msg := fmt.Sprintf("%s It can read: %s.", siteRefusalDetail(verdict, "this site would build from nothing."), menu)
-			if reRun != "" {
-				msg += " " + reRun
+			if hint != "" {
+				msg += " Re-run: " + sanitizeCell(hint)
 			}
 			return msg + " " + kind.nothingClause()
 		}
 		if detail != "" {
-			return fmt.Sprintf("the control plane refused %s %q (%s): %s %s",
-				kind.noun(), ref, sanitizeCell(re.Code), sanitizeCell(detail), kind.nothingClause())
+			msg := fmt.Sprintf("the control plane refused %s %q (%s): %s",
+				kind.noun(), ref, sanitizeCell(re.Code), sanitizeCell(detail))
+			if hint != "" {
+				msg += " Re-run: " + sanitizeCell(hint)
+			}
+			return msg + " " + kind.nothingClause()
 		}
 		return fmt.Sprintf("the control plane refused %s %q (%s) — nothing there is readable by this site's token. %s",
 			kind.noun(), ref, sanitizeCell(re.Code), kind.nothingClause())
@@ -1931,6 +2426,15 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 			// deployment id, so a 404 on them can only be with_team_site/3's — it is
 			// about the site (or the login's team), never a deployment.
 			return fmt.Sprintf("no such site %q (or it is not in your team). %s", ref, kind.nothingClause())
+		case siteRefusedSettings, siteRefusedRead:
+			return fmt.Sprintf("no such site %q (or it is not in your team). %s", ref, kind.nothingClause())
+		case siteRefusedDomainStatus:
+			// The domain-status route answers a wrong-team, an absent and a
+			// malformed id with the SAME bare 404 — deliberately, so no existence
+			// leaks — and it is about the INSTANCE, never a site. A site-voiced
+			// sentence here sends the reader hunting the wrong object.
+			return fmt.Sprintf("no such instance %q (or it is not in your team) — the control plane answers a wrong-team, an absent and a malformed id identically, so this never says which. %s",
+				ref, kind.nothingClause())
 		}
 		return fmt.Sprintf("no such site %q (or it is not in your team)", ref)
 	case "instance_not_live":
@@ -1962,7 +2466,16 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 		// at a site slug they never typed.
 		return fmt.Sprintf("the instance named to host site %q is not in your team (or no longer exists) — list your fleet with `bp cloud status` and re-run with a valid --instance. %s",
 			ref, kind.nothingClause())
-	case "forbidden":
+	case "forbidden", "deploy_ability_required", "rebind_ability_required":
+		// The two named grants are PATCH /v1/sites/:id's own 403 arms: turning
+		// prebuilt on, and repointing the content binding, each MINT authority a
+		// bare `write` PAT must not hold. They land here rather than in the relay
+		// arm so the sentence names the act, and the plane's own detail — which
+		// says exactly which credential does work — is relayed whole.
+		if kind == siteRefusedDomainStatus {
+			return fmt.Sprintf("your Cloud login is not allowed to read the domains of instance %q — %s %s",
+				ref, siteRefusalDetail(detail, "it needs access to the team that owns the instance."), kind.nothingClause())
+		}
 		return fmt.Sprintf("your Cloud login is not allowed to %s site %q — %s %s",
 			kind.verb(), ref, siteRefusalDetail(detail, "it needs the `write` ability on the team that owns the site."), kind.nothingClause())
 	case "server_error":
@@ -1993,6 +2506,18 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
 		case siteRefusedReadDeployment, siteRefusedPoll, siteRefusedWaitLive:
 			return fmt.Sprintf("the control plane errored while reading the deploys of %q: %s %s",
+				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
+		case siteRefusedSettings:
+			// A PATCH that crashed partway is the one read-plane refusal where the
+			// write MAY have landed: update_site_settings/2 runs before the render.
+			// Say so rather than promising nothing changed.
+			return fmt.Sprintf("the control plane errored while updating the settings of %q: %s The update may or may not have landed — re-read it with `bp cloud site status %s` before retrying.",
+				ref, siteRefusalDetail(detail, "it gave no reason."), ref)
+		case siteRefusedRead:
+			return fmt.Sprintf("the control plane errored while reading site %q: %s %s",
+				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
+		case siteRefusedDomainStatus:
+			return fmt.Sprintf("the control plane errored while reading the domains of %q: %s %s",
 				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
 		default:
 			return fmt.Sprintf("the control plane errored while rolling %q back: %s %s",
@@ -2073,7 +2598,7 @@ func runCloudSiteSettings(out *writer, g globals, args []string) int {
 
 	site, serr := cfg.CloudClient().UpdateSpawnSiteSettings(cloudCtx(), id, patch)
 	if serr != nil {
-		return cloudFail(out, "update site settings", serr)
+		return siteRefusalFail(out, siteRefusedSettings, ref, serr)
 	}
 
 	if out.emitStructured(map[string]any{"site": spawnSiteMap(site)}) {
@@ -2101,12 +2626,20 @@ func renderSiteSettingsUpdated(out *writer, ref string, site cloudclient.SpawnSi
 	if site.DocType != "" {
 		out.outf("  content: %s", hzCell(site.DocType))
 	}
+	// W10 (ssw10-bl-prebuilt-enabled-no-read-path): the opt-in `--prebuilt-enabled`
+	// changes, echoed FROM THE STORED ROW. It was the one field this receipt could
+	// set and never show — and because it is a bool it is printed
+	// UNCONDITIONALLY, unlike the three strings above: a guard on "false" would
+	// reprint the exact silence this line exists to end, and a control plane that
+	// stored `false` when you sent `true` has to make this receipt read
+	// differently or the closing sentence below is a claim about a row nobody read.
+	out.outf("  prebuilt: %s", sitePrebuiltWord(site.PrebuiltEnabled))
 	out.outf("  (the values above are the row the control plane stored; they take effect on the next deploy — run `bp cloud site deploy %s`)", ref)
 }
 
 func runCloudSiteStatus(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site status <site>"
-	a, err := parseHzArgs(args, nil, nil, usage)
+	const usage = "bp cloud site status <site> [--window <attempts>]"
+	a, err := parseHzArgs(args, []string{"window"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -2114,6 +2647,13 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 		return useError(out, "usage", fmt.Sprintf("want exactly one <site> (usage: %s)", usage), exitUsage)
 	}
 	ref := a.pos[0]
+	// THE ROUND-TRIP BUDGET IS DECIDED HERE, BEFORE THE FIRST REQUEST. The default
+	// is one page — byte-for-byte the read this verb has always done — and a wider
+	// --window buys more rows at a stated, bounded number of extra round trips.
+	windowRows, werr := siteStatusWindowSize(a)
+	if werr != nil {
+		return useError(out, "usage", werr.Error(), exitUsage)
+	}
 
 	cfg, ok := siteCloudConfig(out, "read a site's status")
 	if !ok {
@@ -2125,7 +2665,7 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 	}
 	site, serr := cfg.CloudClient().GetSpawnSite(cloudCtx(), id)
 	if serr != nil {
-		return cloudFail(out, "get site", serr)
+		return siteRefusalFail(out, siteRefusedRead, ref, serr)
 	}
 
 	// The current deployment: embedded in the site row when present, else fetched
@@ -2156,15 +2696,23 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 	// flattering number available. Erring optimistic is the direction this epic
 	// exists to eliminate. Row [0] is still the newest, so every existing reader of
 	// `newest` is unchanged; the rest of the page feeds the censored bound only.
+	//
+	// W17 (dr-w17-bl-per-site-cost-needs-paging): the single call became a BOUNDED
+	// KEYSET WALK. The route caps a window at 200 rows and hands back a
+	// next_cursor, so a per-site cost figure taken off one page is page-local —
+	// "3.57 attempts per live" measured on a site's newest 200 rows is not that
+	// site's cost, and nothing in the old return value could say so. The walk
+	// carries the bound it stopped on, and every figure rendered below names it.
 	var newest *cloudclient.SiteDeployment
 	var ledger []cloudclient.SiteDeployment
-	page, lerr := cfg.CloudClient().ListSpawnSiteDeployments(cloudCtx(), id, siteStatusLedgerPage, "")
+	var walk cloudclient.SiteDeploymentWalk
+	walk, lerr := cfg.CloudClient().WalkSpawnSiteDeployments(cloudCtx(), id, cloudclient.NewSiteDeploymentWalkBudget(windowRows, 0))
 	switch {
 	case lerr != nil:
 		out.errf("could not read this site's newest deployment (%v) — the header below describes the LIVE build only, and a newer failed deploy would not show here", lerr)
-	case len(page.Deployments) > 0:
-		ledger = page.Deployments
-		n := page.Deployments[0]
+	case len(walk.Deployments) > 0:
+		ledger = walk.Deployments
+		n := walk.Deployments[0]
 		newest = &n
 	}
 
@@ -2184,7 +2732,7 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 		// The window rides as its OWN node, present only when a page was actually
 		// read — an absent `window` means "this status could not read the ledger",
 		// which is the one thing a zeroed census would hide.
-		if w, ok := siteReadWindow(ledger); ok {
+		if w, ok := siteWalkWindow(walk); ok {
 			payload["window"] = siteWindowMap(w)
 		}
 		out.emitStructured(payload)
@@ -2192,8 +2740,15 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 	}
 
 	renderKV(out, spawnSiteStatusMap(site, dep, newest, ledger))
-	if w, ok := siteReadWindow(ledger); ok {
+	if w, ok := siteWalkWindow(walk); ok {
 		renderSiteWindow(out, w)
+		// THE COST, BESIDE THE OUTCOME AND NOT FOLDED INTO IT (D220: this is the
+		// typed table path; `-o json` above stays a passthrough of the rows and the
+		// window census). The census says what happened; these two say what it cost.
+		if c, ok := siteWindowCost(ledger); ok {
+			renderSiteCost(out, w, c)
+		}
+		renderSiteDeferralFraming(out, w, ledger)
 	}
 	if dep == nil {
 		out.outf("")
@@ -2212,8 +2767,35 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 	return exitOK
 }
 
-// runCloudSiteOpen is `bp cloud site open <site>` — print (and, on a tty, open)
-// the live PATH url https://<instance>.barkpark.cloud/sites/<slug>/.
+// siteOpenLaunchNote is the browser half of the `bp cloud site open` receipt,
+// and it says only what the CLI actually read.
+//
+// WHAT THE CODE KNOWS. browserOpener is openInBrowser, which Start()s `open` /
+// `xdg-open` / rundll32 and deliberately never Wait()s, so `bp` returns at once.
+// A nil error therefore means ONE thing: the launcher process was spawned. It is
+// not a window, not a loaded page, not even the browser you use — a handler that
+// exits 1 a millisecond later returns nil here just the same. The previous line,
+// "opening in your browser…", asserted that whole chain on the strength of its
+// first link, which is a success claim about LOCAL state backed by an error
+// return alone (site-spawner W8, ssw8-site-open-and-status-claims).
+//
+// THE FIX IS THE DEPLOY VERDICT'S. renderSiteDeployVerdict does not stop saying
+// "live"; it says live AND names what it did not check ("the CLI did not fetch
+// that URL … confirm with `curl -sI`"). Same shape here: report the launch,
+// state the limit in the same breath, and leave the URL — which is printed
+// unconditionally and IS the deliverable — as the thing that always works.
+//
+// The machine envelope changed with it: the field is `launched`, not `opened`,
+// because a bool named `opened` is the same claim in JSON. No consumer read the
+// old key (the site verb had no tests and no docs quoting it; `bp cloud open`
+// keeps its own envelope and is a separate row).
+func siteOpenLaunchNote() string {
+	return "handed the URL to your browser launcher — it started without error; the CLI never sees the window, so if nothing came up, open the URL above yourself"
+}
+
+// runCloudSiteOpen is `bp cloud site open <site>` — print (and, on a tty, hand to
+// the browser launcher) the live PATH url
+// https://<instance>.barkpark.cloud/sites/<slug>/.
 func runCloudSiteOpen(out *writer, g globals, args []string) int {
 	const usage = "bp cloud site open <site> [--print-only]"
 	a, err := parseHzArgs(args, nil, []string{"print-only"}, usage)
@@ -2235,29 +2817,31 @@ func runCloudSiteOpen(out *writer, g globals, args []string) int {
 	}
 	site, serr := cfg.CloudClient().GetSpawnSite(cloudCtx(), id)
 	if serr != nil {
-		return cloudFail(out, "get site", serr)
+		return siteRefusalFail(out, siteRefusedRead, ref, serr)
 	}
 	url := spawnSiteURL(site)
 	if url == "" {
 		return useError(out, "failed", fmt.Sprintf("site %q has no live URL yet — deploy it first with `bp cloud site deploy %s`", ref, ref), exitGeneric)
 	}
 
-	opened := false
+	// launched, never `opened`: all this bool records is that the launcher
+	// process started. See siteOpenLaunchNote.
+	launched := false
 	if !a.bools["print-only"] && out.isTTY {
 		if berr := browserOpener(url); berr == nil {
-			opened = true
+			launched = true
 		} else {
-			out.errf("could not open a browser (%v) — copy the URL above", berr)
+			out.errf("could not start a browser launcher (%v) — copy the URL above", berr)
 		}
 	}
 
 	if out.machineOut() {
-		out.emitStructured(map[string]any{"ok": true, "site": spawnSiteRef(site), "url": url, "opened": opened})
+		out.emitStructured(map[string]any{"ok": true, "site": spawnSiteRef(site), "url": url, "launched": launched})
 		return exitOK
 	}
 	out.outf("%s", url)
-	if opened {
-		out.info("opening in your browser…")
+	if launched {
+		out.info("%s", siteOpenLaunchNote())
 	}
 	return exitOK
 }
@@ -2480,6 +3064,11 @@ func spawnSiteMap(s cloudclient.SpawnSite) map[string]any {
 		"workspace": s.Workspace,
 		"project":   s.Project,
 		"dataset":   s.Dataset,
+		// W10: the off-box-build opt-in. A bool, so it is ALWAYS emitted — the
+		// guarded-on-empty treatment the string fields above get would make
+		// "this site builds on its box" indistinguishable from "this bp cannot
+		// read the flag", which is the state this key exists to end.
+		"prebuilt_enabled": s.PrebuiltEnabled,
 	}
 	// dr-w11: echoed only when the control plane sent it — an empty string means
 	// a CP that predates the field, and inventing "absent" for it would
@@ -2562,6 +3151,26 @@ func sitePublishTriggerLine(trigger string) string {
 // `ledger` is the rest of that same page (newest first, `newest` included) — it
 // feeds ONE thing: the right-censored "still waiting" bound in the time-to-web
 // line, which must be taken from the OLDEST waiting row, not the newest.
+//
+// WHY `bp cloud site status` IS NOT IN successClaimRegistry, WRITTEN DOWN RATHER
+// THAN LEFT IMPLICIT (site-spawner W8, ssw8-site-open-and-status-claims). The
+// success-claim law binds a verb that CLAIMS A POST-CONDITION IT PRODUCED: it may
+// not report success on an exit code alone. This function produces nothing. It is
+// a pure read view — it relays fields the control plane sent for a site and its
+// deployments and mints no verdict of its own about a change (the one judgement it
+// does make, live-vs-newest-failed above, exists precisely to STOP the relayed
+// "live" from over-claiming). With no post-condition asserted there is nothing for
+// the registry's property — would the printed sentence change if the response said
+// the opposite? — to bite on beyond what the status tests already pin, so the row
+// is deliberately absent, not overlooked.
+//
+// The open verb is the opposite case and was fixed instead of exempted: see
+// siteOpenLaunchNote. It is likewise unenrolled, but for a different reason —
+// its post-condition (a browser launcher started) is LOCAL, so it has no server
+// response to vary, and the registry's site arm (siteResponseTypedRows plus the
+// renderSite prefix) requires probes that internal/cloudclient RETURNS. Enrolling
+// a bool there would need a probe pair the verb cannot honestly supply; the honest
+// closer was to make the sentence itself state what it did not read.
 func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) map[string]any {
 	m := map[string]any{
 		"site":      spawnSiteRef(s),
@@ -2588,6 +3197,12 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 	if line := sitePublishTriggerLine(s.PublishTrigger); line != "" {
 		m["publish trigger"] = line
 	}
+	// W10: THE OFF-BOX-BUILD OPT-IN, on the read verb a site owner actually runs.
+	// Before this row the only way to learn the answer was to attempt a
+	// `--prebuilt` deploy and read the control plane's 422 — a read path whose
+	// price was a nonced, unusable deployment row. Unconditional for the bool
+	// reason stated on spawnSiteMap.
+	m["prebuilt"] = sitePrebuiltLine(s.PrebuiltEnabled)
 	// Runtime target + slot port (charter D62): a node site advertises the node-slot
 	// SSR runtime and the port its live process is bound to, so a user reading
 	// `status` sees it runs a process, not files. Shown for node sites only — a
@@ -3116,6 +3731,17 @@ type siteWindow struct {
 	Newest    string
 	PageFull  bool
 	PageLimit int
+
+	// The WALK's own record (dr-w17-bl-per-site-cost-needs-paging). Zero on a
+	// single-page read, which is exactly what a zero should mean here: no walk was
+	// performed. Truncated is the load-bearing one — it is true when the server
+	// still had a cursor to give when the read stopped, which is the difference
+	// between a count that is this site's history and a count that is a FLOOR.
+	Pages      int
+	PageBudget int
+	PageSize   int
+	Truncated  bool
+	StoppedBy  string
 }
 
 // siteReadWindow measures the page. It reports only what the rows say.
@@ -3194,7 +3820,9 @@ func renderSiteWindow(out *writer, w siteWindow) {
 	if w.Stampless > 0 && w.Oldest != "" {
 		out.outf("  %d of %d rows carried no readable inserted_at and are outside that span", w.Stampless, w.Rows)
 	}
-	if w.PageFull {
+	if w.Truncated || w.Pages > 0 {
+		out.outf("  %s", siteWindowBudgetLine(w))
+	} else if w.PageFull {
 		out.outf("  the page came back full at %d rows, so older attempts exist that this status did not read", w.PageLimit)
 	}
 }
@@ -3227,6 +3855,18 @@ func siteWindowMap(w siteWindow) map[string]any {
 	}
 	if w.Stampless > 0 {
 		m["attempts_without_a_stamp"] = w.Stampless
+	}
+	// The WALK's bound, machine-side. `truncated` is the key a script must read
+	// before quoting `attempts_read` as anything: true means the server still had
+	// a cursor when this read stopped, so the count is a FLOOR. Emitted only when a
+	// walk actually ran, so a single-page envelope is byte-identical to the shape
+	// every existing reader already parses.
+	if w.Pages > 0 {
+		m["pages_read"] = w.Pages
+		m["page_budget"] = w.PageBudget
+		m["page_size"] = w.PageSize
+		m["truncated"] = w.Truncated
+		m["stopped_by"] = w.StoppedBy
 	}
 	return m
 }
@@ -3388,12 +4028,11 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	if d.Trigger != "" {
 		m["trigger"] = d.Trigger
 	}
-	// Node-slot deployment fields (charter D62): the runtime target it ran on and
-	// the slot port its process bound — omitted for a static deployment so the JSON
-	// stays byte-identical there.
-	if d.RuntimeTarget != "" {
-		m["runtime_target"] = d.RuntimeTarget
-	}
+	// Node-slot deployment field (charter D62): the slot port its process bound —
+	// omitted for a static deployment so the JSON stays byte-identical there. No
+	// `runtime_target` is written here: the control plane never put one on a
+	// deployment row (it rides the SITE row), so the key this envelope used to
+	// copy was empty on every real response — see SiteDeployment's doc comment.
 	if d.Port != 0 {
 		m["port"] = d.Port
 	}
@@ -3432,6 +4071,32 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	}
 	if d.FailureReasonRaw != "" {
 		m["failure_reason_raw"] = d.FailureReasonRaw
+	}
+	// deploy-reliability W15 S3 follow-up: WHICH PHASE the box refused in —
+	// "start" (the trigger; no build ever began) or "poll" (a beat of a build
+	// already running, killed mid-flight). The control plane has emitted this key
+	// since the W15 S3 producer slice and `SiteDeployment` declared no tag for it,
+	// so it was dropped at decode and this map could not have emitted it at any
+	// price — the same three-edit gap (struct, decoder, this map) the
+	// failure_class/failure_reason_raw pair above records one wave earlier.
+	//
+	// ABSENT IS ABSENT. The producer sends null on every row that is not a box
+	// refusal and deliberately does NOT coerce it to "start"; a nil pointer here
+	// therefore gets NO KEY, exactly as `health_exit_code` and the deferral pair
+	// do. Writing "start" for a nil would manufacture a refusal that never
+	// happened, on the ~14,000 non-refusal failed rows that carry no phase at all.
+	//
+	// An EMPTY STRING the producer actually sent is not a phase either, so it is
+	// trimmed away for display for the same reason siteRefusalHalf trims: there is
+	// no phase to print. The pointer keeps the two distinguishable in the struct.
+	//
+	// NO TAXONOMY SPLITS ON THIS, and no human line is derived from it. It is a
+	// TRIPWIRE for the first poll refusal — cloud-db-1 holds ZERO poll-phase rows
+	// all-time against 14,848 start-phase ones — not a live discriminator.
+	if d.RefusalPhase != nil {
+		if ph := strings.TrimSpace(*d.RefusalPhase); ph != "" {
+			m["refusal_phase"] = ph
+		}
 	}
 	// The refusal's two halves (task-f156b5e43bfbfe91). Emitted ONLY when the
 	// control plane sent them — a nil half gets no key at all, never an empty
@@ -3493,6 +4158,16 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	if d.Branch != "" {
 		m["branch"] = d.Branch
 	}
+	// gh-6 preview identity (dr-w11-payload-divergence-close): WHERE a preview
+	// deployment lives. Null on every production row, so each key is written only
+	// when the plane sent one — an absent key is "not a preview", and the `url`
+	// above is the site's production URL, which is not where a preview serves.
+	if h := strings.TrimSpace(d.PreviewHost); h != "" {
+		m["preview_host"] = h
+	}
+	if u := strings.TrimSpace(d.PreviewURL); u != "" {
+		m["preview_url"] = u
+	}
 	// deploy-reliability W11: the two clocks the wire has carried all along and
 	// this envelope threw away — it shipped 16 keys and not one timestamp, so a
 	// script reading `-o json` could see WHAT happened and never WHEN.
@@ -3522,10 +4197,26 @@ USAGE
   bp cloud site deploy    <site> [--prebuilt <dir> [--deployment <id>]] [--no-follow] [--force] [--wait-for-live <deadline>]  (alias: build)
   bp cloud site rollback  <site>
   bp cloud site delete    <site> [--yes]                            tear the site down  (alias: rm)
-  bp cloud site status    <site>
+  bp cloud site status    <site> [--window <attempts>]
+  bp cloud site doctor    <site>                                   read every substrate this site occupies and name the repair
   bp cloud site open       <site> [--print-only]
-  bp cloud site preflight [--dir <path>] [--skip-build]
+  bp cloud site preflight [--dir <path>] [--skip-build]            build your LOCAL tree and check that build — it reads NOTHING about the remote site, its content binding, its dataset or its instance
   bp cloud site settings  <site> [--theme <palette>] [--doc-type <type>] [--prebuilt-enabled true|false]
+  bp cloud site show      <site>                                   show one site
+  bp cloud site deployments <site> [--limit N] [--all]             a window of the site's deployments
+  bp cloud site env set   <site> KEY=VAL [KEY=VAL...]              replace the encrypted env blob
+  bp cloud site domain add <site> <domain>                         add a domain
+  bp cloud site github connect <site> --repo owner/repo            link a repo for auto-deploy
+  bp cloud site logs      <site> [<deployment-id>]                 build-log URL, or the recorder's record
+  bp cloud site matrix                                             print the SITE COMMAND MATRIX
+
+  EVERY verb above also answers as 'bp sites <verb>' — the two nouns are two
+  SPELLINGS of one tree, reaching the same implementation, route and output.
+  Two exceptions, both because the KIND really differs: 'create' is
+  spelling-bound (this noun SPAWNS a content-bound site; 'bp sites create' makes
+  a CONTAINER site), and 'bp sites deploy' is refused because a container site
+  deploys with 'bp deploy <site>' while a spawned one deploys here. Run
+  'bp cloud site matrix' for the table.
 
   --instance is REQUIRED: a site is spawned on a specific Barkpark instance (it
   builds and serves on that box). List yours with 'bp cloud status'.
@@ -3561,6 +4252,9 @@ USAGE
   (a prebuilt mint is nonced, so a plain re-run would mint a new id and refuse
   again). Secrets (.env*) and .git are never packed. The site must opt in first:
   bp cloud site settings <site> --prebuilt-enabled true
+  --prebuilt is STATIC-ONLY: staging a tree and flipping a symlink is the whole
+  mechanism, so a node/SSR site (--kind node) is refused before anything is minted
+  and builds on its box instead.
   --force re-runs a build even when content and config are unchanged — it folds a
   fresh nonce so a new release is minted instead of the cached deployment.
   --deploy on create is the one-motion: it chains straight into the deploy stream
@@ -3583,6 +4277,13 @@ WHAT IT DOES
   runs the engine's own --self-test harnesses plus a real npm build + marker scan
   of your site. It is offline and needs no login (see 'bp cloud site preflight -h').
 
+  status --window <attempts> widens the deployment window it reads, and with it the
+  attempts-per-live / minutes-to-live COST figures printed beside the outcome. The
+  route hands out at most 200 rows per request, so the window costs
+  ceil(attempts/200) round trips; the default is 20 attempts in ONE trip and the
+  ceiling is 1000 (5 trips). Every cost figure names the window it was taken over, and the
+  rendered line says whether the ledger ended or the budget did.
+
   <site> is a site name or id; needs 'bp login'.
 
 NOT TO BE CONFUSED WITH
@@ -3597,4 +4298,329 @@ OUTPUT + EXIT
   box refused our credential) · 8 the plane or the box failed · 1 anything else,
   each with the plane's own code in the -o json envelope.`
 	out.outf("%s", help)
+}
+
+// ---------------------------------------------------------------------------
+// The COST half of a site's window — dr-w17-bl-per-site-cost-needs-paging.
+//
+// The census above answers "what happened to the attempts I read". This answers
+// the different question an owner actually pays: WHAT DID GETTING THIS CONTENT
+// LIVE COST — how many attempts per live deploy, and how many minutes from the
+// control plane accepting the work to visitors seeing it.
+//
+// IT IS NEVER FOLDED INTO A RELIABILITY RATE, and that is the whole design.
+// "82% of deploys succeed" and "3.6 attempts per live deploy" are computed from
+// the same rows and say opposite things to a reader: the rate makes a box that
+// refuses four rounds and then lands look FINE, because the landing is what the
+// numerator counts. Cost makes the four refusals visible as what they are —
+// round trips and minutes somebody waited. A site whose deferral rate is falling
+// can still be getting more expensive, and only the cost figure can say so.
+// ---------------------------------------------------------------------------
+
+// siteStatusWindowMax is the hard ceiling on --window: five full server pages.
+// A ceiling exists because `bp sites` already pays extra round trips per site and
+// a cost walk on top of that is an N+1 — one bounded ceiling here means the worst
+// case is stated in the help text instead of discovered on someone's rate limit.
+const siteStatusWindowMax = 5 * cloudclient.SiteDeploymentPageMax
+
+// siteStatusWindowDefault is what `status` reads with no --window: ONE round trip
+// of siteStatusLedgerPage rows — byte-for-byte the read this verb has always
+// done. Widening the default would have made every existing `bp cloud site
+// status` slower to pay for a figure nobody asked for.
+const siteStatusWindowDefault = siteStatusLedgerPage
+
+// siteStatusWindowSize reads --window. Absent is the default; a value must be a
+// positive integer inside the ceiling, and both refusals name the bound rather
+// than silently clamping — a clamp would print a cost figure over a window the
+// caller did not ask for and would never learn about.
+func siteStatusWindowSize(a *hzArgs) (int, error) {
+	raw := strings.TrimSpace(a.val("window"))
+	if raw == "" {
+		return siteStatusWindowDefault, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("--window wants a positive number of attempts to read, got %q", raw)
+	}
+	if n > siteStatusWindowMax {
+		return 0, fmt.Errorf("--window %d exceeds the %d-attempt ceiling (%d server pages of %d) — a wider read is a census job, not a status call", n, siteStatusWindowMax, siteStatusWindowMax/cloudclient.SiteDeploymentPageMax, cloudclient.SiteDeploymentPageMax)
+	}
+	return n, nil
+}
+
+// siteWalkWindow measures a bounded WALK the way siteReadWindow measures a single
+// page, and then overwrites the paging fields with what the walk actually did.
+//
+// The override is the point. siteReadWindow's PageFull/PageLimit describe one
+// page of siteStatusLedgerPage rows; after a walk those two are wrong in the most
+// dangerous direction — a 400-row read would report "page full at 20" and a
+// reader would conclude the site has 20 attempts of history. The walk knows
+// whether the server still had a cursor when it stopped, and that fact replaces
+// the guess.
+func siteWalkWindow(walk cloudclient.SiteDeploymentWalk) (siteWindow, bool) {
+	w, ok := siteReadWindow(walk.Deployments)
+	if !ok {
+		return siteWindow{}, false
+	}
+	w.PageLimit = walk.Budget.Rows
+	w.PageFull = walk.Truncated
+	w.Pages = walk.Pages
+	w.PageBudget = walk.Budget.MaxPages
+	w.PageSize = walk.Budget.PageSize
+	w.Truncated = walk.Truncated
+	w.StoppedBy = walk.StoppedBy
+	return w, true
+}
+
+// siteWindowBudgetLine states the round-trip budget the window was read under —
+// the sentence criterion c0 of dr-w17-bl-per-site-cost-needs-paging is about.
+// A cost figure with no window is a page-local number quoted as a site total, and
+// the only structural defence is that the renderer cannot print the figure
+// without printing this beside it.
+func siteWindowBudgetLine(w siteWindow) string {
+	return fmt.Sprintf("window: %d attempts asked for, read in %d of a budgeted %d round trips at %d rows per request", w.PageLimit, w.Pages, w.PageBudget, w.PageSize) + " — " + siteWindowBoundClause(w)
+}
+
+// siteWindowBoundClause is the half of the budget line that says WHICH BOUND
+// ended the read. It is its own function because the cost block needs exactly
+// this clause and not the round-trip arithmetic above it: a cost figure that
+// repeated the whole budget sentence verbatim, two lines under the census that
+// already printed it, would train a reader to skip the one clause that decides
+// whether the figure beside it is a site total or a floor.
+func siteWindowBoundClause(w siteWindow) string {
+	switch w.StoppedBy {
+	case "exhausted":
+		return "the server had no page behind this one, so this IS the site's whole deployment history"
+	case "pages":
+		return "the ROUND-TRIP BUDGET ended this read, not the ledger; older attempts exist and were not counted"
+	case "rows":
+		return "the ROW TARGET ended this read, not the ledger; older attempts exist and were not counted. Widen it with --window"
+	default:
+		return "this is the window that was read, and nothing is claimed beyond it"
+	}
+}
+
+// siteCost is what the window's attempts cost, with every figure carrying the
+// denominator it was taken over.
+//
+// AttemptsPerLive is a POINTER-shaped refusal (`HaveRatio`), never a zero: a
+// window with no live row at all has no cost per live deploy — it has an
+// UNBOUNDED one, and 0.0 is the most flattering possible lie about a site that
+// has never landed a deploy inside the window you read.
+type siteCost struct {
+	Attempts        int
+	Lives           int
+	AttemptsPerLive float64
+	HaveRatio       bool
+	Measured        int
+	Unmeasured      int
+	MedianToLive    time.Duration
+	P90ToLive       time.Duration
+}
+
+// siteWindowCost computes the cost figures from the rows the walk actually read.
+// Nothing is imputed: a live row whose became_live_at / inserted_at pair will not
+// parse (or that runs backwards) is counted as UNMEASURED and stays out of the
+// duration stats, exactly as siteTimeToWeb refuses it.
+func siteWindowCost(ledger []cloudclient.SiteDeployment) (siteCost, bool) {
+	if len(ledger) == 0 {
+		return siteCost{}, false
+	}
+	c := siteCost{Attempts: len(ledger)}
+	var gaps []time.Duration
+	for _, r := range ledger {
+		if !strings.EqualFold(strings.TrimSpace(r.Status), "live") {
+			continue
+		}
+		c.Lives++
+		if g, ok := siteTimeToWeb(r); ok {
+			gaps = append(gaps, g)
+			c.Measured++
+		} else {
+			c.Unmeasured++
+		}
+	}
+	if c.Lives > 0 {
+		c.AttemptsPerLive = float64(c.Attempts) / float64(c.Lives)
+		c.HaveRatio = true
+	}
+	if len(gaps) > 0 {
+		sort.Slice(gaps, func(i, j int) bool { return gaps[i] < gaps[j] })
+		c.MedianToLive = gaps[(len(gaps)-1)/2]
+		c.P90ToLive = gaps[siteQuantileIndex(len(gaps), 0.90)]
+	}
+	return c, true
+}
+
+// siteQuantileIndex is the nearest-rank index for a quantile over n sorted
+// values. Nearest-rank rather than interpolated because these are wall-clock
+// observations of real deploys: the p90 printed is a duration that ACTUALLY
+// HAPPENED to one of them, not a number between two of them that never occurred.
+func siteQuantileIndex(n int, q float64) int {
+	if n <= 0 {
+		return 0
+	}
+	i := int(math.Ceil(q*float64(n))) - 1
+	if i < 0 {
+		i = 0
+	}
+	if i >= n {
+		i = n - 1
+	}
+	return i
+}
+
+// siteAttemptsPerLiveSeries is the 8-day attempts-per-live series measured over
+// the whole fleet on 2026-08-07 (deploy-reliability wave 17, task row
+// dr-w17-bl-per-site-cost-needs-paging), oldest day first.
+//
+// IT IS QUOTED VERBATIM AND DATED, for one reason: the charter's D252 says "~3.2
+// attempts per live deploy", and 3.2 is not reproduced ANYWHERE in this series —
+// the best day in it is 3.71 and the worst is 8.58. A single headline number
+// invites a reader to treat it as the shape; the series shows the shape is a
+// range that has been more than twice as bad as its own best day, and that the
+// best day was the day it was measured.
+var siteAttemptsPerLiveSeries = []float64{8.58, 7.81, 8.17, 7.66, 6.51, 7.02, 3.90, 3.71}
+
+// siteAttemptsPerLiveSeriesLine renders that series as dated context. It NEVER
+// mixes with the live figures above it — a fleet measurement from 2026-08 is not
+// evidence about the site in front of you, and the sentence says whose number it
+// is and when it was taken.
+func siteAttemptsPerLiveSeriesLine() string {
+	parts := make([]string, 0, len(siteAttemptsPerLiveSeries))
+	for _, v := range siteAttemptsPerLiveSeries {
+		parts = append(parts, fmt.Sprintf("%.2f", v))
+	}
+	return "dated context — FLEET-WIDE, 2026-08-07, not this site: the 8-day attempts-per-live series was " +
+		strings.Join(parts, " / ") +
+		" (oldest day first). The charter's \"~3.2\" is not reproduced anywhere in it; the best day in the series is " +
+		fmt.Sprintf("%.2f", siteAttemptsPerLiveSeries[len(siteAttemptsPerLiveSeries)-1]) +
+		" and it was the day of measurement."
+}
+
+// renderSiteCost prints the cost block. It is TABLE-ONLY on purpose (D220): the
+// `-o json` envelope stays a passthrough of the rows and the window census, so a
+// script cannot pick up a prose-qualified figure and re-quote it bare.
+func renderSiteCost(out *writer, w siteWindow, c siteCost) {
+	out.outf("")
+	out.outf("cost of getting content live (a COST, never a reliability rate — a success rate counts the landing and hides what the refusals before it charged):")
+	span := "this window"
+	if w.Oldest != "" {
+		span = fmt.Sprintf("%s → %s", w.Oldest, w.Newest)
+	}
+	if c.HaveRatio {
+		out.outf("  %.2f attempts per live deploy — %d attempts / %d live, over the %d attempts read (%s)", c.AttemptsPerLive, c.Attempts, c.Lives, c.Attempts, span)
+	} else {
+		out.outf("  attempts per live deploy: NO LIVE ROW in the %d attempts read (%s), so this window has no cost per live deploy — not a zero one", c.Attempts, span)
+	}
+	switch {
+	case c.Measured > 0:
+		out.outf("  minutes to live: median %s · p90 %s, over %d of %d live rows in that window", siteShortDur(c.MedianToLive), siteShortDur(c.P90ToLive), c.Measured, c.Lives)
+		out.outf("    (the clock starts at inserted_at — when the CONTROL PLANE picked the work up — not when a human hit publish)")
+	case c.Lives > 0:
+		out.outf("  minutes to live: unmeasurable — all %d live rows in that window carried no usable became_live_at", c.Lives)
+	}
+	if c.Unmeasured > 0 && c.Measured > 0 {
+		out.outf("  %d of %d live rows carried no usable became_live_at and are outside those durations", c.Unmeasured, c.Lives)
+	}
+	out.outf("  both figures are over THAT window and nothing wider — %s", siteWindowBoundClause(w))
+	out.outf("  %s", siteAttemptsPerLiveSeriesLine())
+}
+
+// ---------------------------------------------------------------------------
+// The deferral framing — criterion c2.
+//
+// TERMINAL FOR THE ROW, TRANSIENT FOR THE SITE, and both halves have to be said
+// in one breath or the reader gets a lie either way. Over 2,124 deferred rows
+// measured on 2026-08-07: ZERO ever set became_live_at (a deferred row is
+// terminal in the control plane's transition table and never becomes anything
+// else), while 1,837 of them — 86.5% — were followed by a same-site live within
+// one hour. Saying only the first makes a re-queued publish read as a lost one;
+// saying only the second is "no site is stranded", which 13.5% of that cohort
+// contradicts.
+// ---------------------------------------------------------------------------
+
+// siteDeferralClearanceWindow is how long after a deferral a same-site live
+// counts as that deferral clearing. One hour is the window the 86.5% was measured
+// over — using any other span here would make the live figure incomparable with
+// the dated one printed beside it.
+const siteDeferralClearanceWindow = time.Hour
+
+// siteDeferralClearance counts, inside the rows actually read, how many deferred
+// rows are followed by a same-site live within the clearance window.
+//
+// CENSORED IS ITS OWN BUCKET, and getting this wrong is the easy mistake. A
+// deferred row less than an hour old at the newest edge of the window has not
+// FAILED to clear — its hour has not elapsed inside the data we hold. Counting it
+// as "not cleared" would manufacture pessimism at exactly the edge where a status
+// call always looks, since the newest rows are the ones an operator runs this for.
+// Rows with an unreadable inserted_at are censored too: they cannot be ordered.
+func siteDeferralClearance(ledger []cloudclient.SiteDeployment) (deferred, cleared, censored int, ok bool) {
+	type stamped struct {
+		t    time.Time
+		live bool
+	}
+	rows := make([]stamped, 0, len(ledger))
+	var newest time.Time
+	for _, r := range ledger {
+		t, parsed := siteParseStamp(r.InsertedAt)
+		if !parsed {
+			continue
+		}
+		if newest.IsZero() || t.After(newest) {
+			newest = t
+		}
+		rows = append(rows, stamped{t: t, live: strings.EqualFold(strings.TrimSpace(r.Status), "live")})
+	}
+	for _, r := range ledger {
+		if !siteDeployDeferred(r.Status) {
+			continue
+		}
+		deferred++
+		t, parsed := siteParseStamp(r.InsertedAt)
+		if !parsed {
+			censored++
+			continue
+		}
+		found := false
+		for _, o := range rows {
+			if !o.live {
+				continue
+			}
+			if o.t.After(t) && o.t.Sub(t) <= siteDeferralClearanceWindow {
+				found = true
+				break
+			}
+		}
+		switch {
+		case found:
+			cleared++
+		case newest.Sub(t) < siteDeferralClearanceWindow:
+			// Its hour has not elapsed inside the rows we hold.
+			censored++
+		}
+	}
+	return deferred, cleared, censored, deferred > 0
+}
+
+// renderSiteDeferralFraming prints both halves of the deferral fact — the live
+// measurement from the window that was just read, and the dated fleet measurement
+// it should be compared against. Printed only when the window actually contains a
+// deferral: framing a fact the reader's own data does not exhibit is noise.
+func renderSiteDeferralFraming(out *writer, w siteWindow, ledger []cloudclient.SiteDeployment) {
+	deferred, cleared, censored, ok := siteDeferralClearance(ledger)
+	if !ok {
+		return
+	}
+	out.outf("")
+	out.outf("what a deferral means here (terminal for the ROW, usually transient for the SITE):")
+	out.outf("  a deferred row is TERMINAL — the control plane's transition table gives it no successor and it never sets became_live_at. The PUBLISH is not lost: a rebuild carrying the same content is re-queued as a NEW row.")
+	unresolved := deferred - cleared - censored
+	span := "this window"
+	if w.Oldest != "" {
+		span = fmt.Sprintf("%s → %s", w.Oldest, w.Newest)
+	}
+	out.outf("  in the %d attempts read (%s): %d of %d deferred rows are followed by a same-site live within %s; %d are not; %d are still inside their first %s and cannot be judged from this window",
+		w.Rows, span, cleared, deferred, siteDeferralClearanceWindow, unresolved, censored, siteDeferralClearanceWindow)
+	out.outf("  dated context — FLEET-WIDE, 2026-08-07, not this site: of 2,124 deferred rows, 0 ever set became_live_at (terminal for the row) while 1,837 (86.5%%) were followed by a same-site live within an hour. So the honest sentence is \"deferral costs attempts and minutes, and 13.5%% of deferrals were not observed to clear within an hour\" — never \"no site is stranded\".")
 }

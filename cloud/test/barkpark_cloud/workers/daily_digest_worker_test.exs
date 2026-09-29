@@ -217,12 +217,12 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     # dr-w25-s6: the rungs are the control plane's MEASURED `commit_ancestry`,
     # not the box's release-tag self-grade, and `unmeasured` is always shown.
     assert DigestEmail.subject(summary) ==
-             "Barkpark fleet digest — 1 current / 2 behind / 0 unmeasured / 1 paused"
+             "Your Barkpark instances — 1 current / 2 behind / 0 unmeasured / 1 paused"
 
     body = DigestEmail.body(summary)
 
     # Header: totals + semver-aware latest (v1.10.0 beats v1.9.0 — a lexical max fails).
-    assert body =~ "Fleet: 3 instances — 1 current, 2 behind, 0 unmeasured, 1 paused."
+    assert body =~ "Your team owns 3 instances — 1 current, 2 behind, 0 unmeasured, 1 paused."
     assert body =~ "Latest available release: v1.10.0"
 
     # Per-instance honest lines: running -> latest, state, flags, last checked.
@@ -242,10 +242,10 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     assert summary.total == 0
 
     assert DigestEmail.subject(summary) ==
-             "Barkpark fleet digest — 0 current / 0 behind / 0 unmeasured / 0 paused"
+             "Your Barkpark instances — 0 current / 0 behind / 0 unmeasured / 0 paused"
 
     body = DigestEmail.body(summary)
-    assert body =~ "Fleet: 0 instances."
+    assert body =~ "Your team owns 0 instances."
     assert body =~ "No instances are registered yet"
     assert body =~ "Latest available release: unknown"
   end
@@ -280,7 +280,7 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     # ...and a real digest actually went to the admin (not a silent empty send).
     assert_email_sent(fn email ->
       assert Enum.any?(email.to, fn {_, a} -> a == admin.email end)
-      assert email.subject =~ "Barkpark fleet digest"
+      assert email.subject =~ "Your Barkpark instances"
       assert email.text_body =~ "- Prod"
     end)
   end
@@ -309,8 +309,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
   ##
   ##    This section used to be titled "a logged no-op", and it asserted exactly
   ##    the no-op: `{:ok, :no_admins}`, no email. Both of those are still true and
-  ##    both are still asserted — but on prod `PLATFORM_ADMIN_EMAILS` is unset, so
-  ##    this is the arm that runs EVERY day, and the pin below said nothing about
+  ##    both are still asserted — but on prod `PLATFORM_ADMIN_EMAILS` was unset
+  ##    (until gr-ops-platform-admin-emails, 2026-09-25), so this was the arm that
+  ##    ran EVERY day, and the pin below said nothing about
   ##    whether anyone could tell. Oban recorded 5 of 5 digest jobs `completed`
   ##    and `notification_deliveries` held zero `fleet_digest` rows across 37
   ##    unpruned days: a push channel succeeding at sending nothing.

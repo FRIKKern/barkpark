@@ -16,6 +16,16 @@ defmodule Barkpark.Plugins.Github.Relations do
        (never errors, never guesses — the wiring retries per D11-retry); past a
        depth cap it CAP-FLATTENs to a body marker instead of a native link.
 
+       A RE-PARENT is a REMOVE-then-ADD, in that order. `content.github.sub_issue_parent`
+       records the parent issue number this module last linked the child under; when the
+       task's parent moves, the OLD native link is deleted BEFORE the new one is posted.
+       Fail-closed: a removal that errors for a reason other than "already absent"
+       aborts the pass WITHOUT adding, so the child is momentarily under its OLD
+       parent only and the level-triggered retry converges — it is never under BOTH.
+       Before that the mirror could only ever ADD (no remove verb existed on the
+       client at all), so every re-parented task showed as a sub-issue of both its
+       old and its new parent, for ever.
+
   ## Directional purity (D5)
 
   Every GitHub read here (`Client.get_issue` for the child's database id) is used
@@ -26,7 +36,8 @@ defmodule Barkpark.Plugins.Github.Relations do
 
   ## The `Client` seam
 
-  The two sub-issue verbs (`get_issue`, `add_sub_issue`) are dispatched through a
+  The sub-issue verbs (`get_issue`, `add_sub_issue`, `remove_sub_issue`) are
+  dispatched through a
   runtime-resolved module so this slice compiles and tests WITHOUT the Client
   transport slice in the tree: tests inject a stub via
 
@@ -43,6 +54,7 @@ defmodule Barkpark.Plugins.Github.Relations do
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
   alias Barkpark.Plugins.Github.{Client, Link}
+  alias Barkpark.Plugins.Github.Errors.NotFound
 
   @task_type "task"
 
@@ -149,22 +161,43 @@ defmodule Barkpark.Plugins.Github.Relations do
       `"parent_marker"` key and the projection renders a `<!-- barkpark:parent -->`
       body marker instead of a native link (graceful degradation, not a second
       linking system).
+    * The child's `content.github.sub_issue_parent` ALREADY equals the parent's
+      issue number → `{:linked, parent_number}` having made NO GitHub call at
+      all. That stamp is this module's record of the link it last made, so a
+      re-run with nothing to do is free.
     * Otherwise: resolve the CHILD issue's database id via `Client.get_issue`
-      (the sub-issues API keys on the child's db id, not its number) and
-      `Client.add_sub_issue(repo, parent_number, child_db_id)`. A `422` is
-      DISAMBIGUATED: an "already exists" body is idempotent → `:ok`; a real
+      (the sub-issues API keys on the child's db id, not its number), REMOVE the
+      link under the PREVIOUSLY stamped parent when there is one
+      (`Client.remove_sub_issue/4`), and only then
+      `Client.add_sub_issue(repo, parent_number, child_db_id)`. On success:
+      `{:linked, parent_number}` — the wiring stamps `sub_issue_parent` and
+      clears any stale `parent_marker`. A `422` on the ADD is DISAMBIGUATED: an
+      "already exists" body is idempotent → `{:linked, parent_number}`; a real
       rejection (any other legible 422 detail) → `{:error, {:sub_issue_rejected,
       parent_num, child_db_id, detail}}` so the wiring RECORDS it. A 422 with no
-      legible detail stays conservatively idempotent → `:ok`.
+      legible detail stays conservatively idempotent → `{:linked, parent_number}`.
+
+  Removal tolerance: a `404` (`%NotFound{}`) or a `422` on the REMOVE means the
+  link is already gone — nothing to retract, carry on to the add. Any other
+  removal error returns `{:error, _}` and the add is SKIPPED, so a failed
+  retraction can never leave the child under two parents.
+
+  A bare `:ok` still comes back from the one degenerate case — the child issue
+  carries no database id, so no link can be formed or retracted at all.
 
   `opts` accepts `:max_parent_depth` (override the depth cap) and is threaded to
   `Content.get_document/4` (scope) and the `Client` verbs (HTTP tuning / test
   seam). This function calls GitHub and reads the DB; it stamps NOTHING — the
-  optional `sub_issue_parent` dedup stamp is the wiring's `source: "github"`
-  write.
+  `sub_issue_parent` dedup stamp is the wiring's `source: "github"` write, and
+  `{:linked, _}` is how this module ASKS for it.
   """
   @spec sync(map(), String.t(), integer() | String.t(), String.t(), keyword()) ::
-          :ok | :noop | {:defer, :parent_unmirrored} | {:flatten, String.t()} | {:error, term()}
+          :ok
+          | :noop
+          | {:linked, integer()}
+          | {:defer, :parent_unmirrored}
+          | {:flatten, String.t()}
+          | {:error, term()}
   def sync(task_doc, repo, issue_number, dataset, opts \\ [])
       when is_map(task_doc) and is_binary(repo) and is_binary(dataset) do
     case parent_id(task_doc) do
@@ -184,11 +217,19 @@ defmodule Barkpark.Plugins.Github.Relations do
         {:defer, :parent_unmirrored}
 
       parent_num ->
-        if depth_exceeded?(task_doc, dataset, opts) or
-             child_count_exceeded?(parent_doc_id, dataset, opts) do
-          {:flatten, parent_doc_id}
-        else
-          link_sub_issue(repo, parent_num, issue_number, opts)
+        cond do
+          depth_exceeded?(task_doc, dataset, opts) or
+              child_count_exceeded?(parent_doc_id, dataset, opts) ->
+            {:flatten, parent_doc_id}
+
+          # The link we would make is the link we last made. Short-circuit
+          # BEFORE any client call so a steady-state reconcile costs zero
+          # GitHub requests (the `sub_issue_parent` dedup stamp, D11).
+          stamped_sub_issue_parent(task_doc) == parent_num ->
+            {:linked, parent_num}
+
+          true ->
+            link_sub_issue(repo, parent_num, issue_number, task_doc, opts)
         end
     end
   end
@@ -206,8 +247,9 @@ defmodule Barkpark.Plugins.Github.Relations do
     end
   end
 
-  # Resolve the child issue's database id, then link it under the parent number.
-  defp link_sub_issue(repo, parent_num, child_number, opts) do
+  # Resolve the child issue's database id, RETRACT the previously stamped link,
+  # then link it under the parent number. Remove-before-add, fail-closed.
+  defp link_sub_issue(repo, parent_num, child_number, task_doc, opts) do
     case client_mod().get_issue(repo, child_number, opts) do
       {:ok, issue} ->
         case child_db_id(issue) do
@@ -223,7 +265,9 @@ defmodule Barkpark.Plugins.Github.Relations do
             :ok
 
           db_id ->
-            add_sub_issue(repo, parent_num, db_id, opts)
+            with :ok <- unlink_previous(repo, task_doc, parent_num, db_id, opts) do
+              add_sub_issue(repo, parent_num, db_id, opts)
+            end
         end
 
       {:error, err} ->
@@ -231,9 +275,56 @@ defmodule Barkpark.Plugins.Github.Relations do
     end
   end
 
+  # Delete the native link under the parent this module LAST linked the child
+  # under, when that is not the parent we are about to link it under. This is
+  # the whole retraction half of a re-parent: without it the child keeps its old
+  # sub-issue edge and reads as a child of BOTH parents.
+  #
+  # `:ok` when there is nothing to retract (no stamp) and when GitHub says the
+  # link is already absent (404 = parent or link gone, 422 = not a sub-issue of
+  # that parent). Any OTHER error propagates so the caller SKIPS the add: the
+  # old parent or the new one, never two.
+  defp unlink_previous(repo, task_doc, parent_num, child_db_id, opts) do
+    case stamped_sub_issue_parent(task_doc) do
+      prior when is_integer(prior) and prior != parent_num ->
+        case client_mod().remove_sub_issue(repo, prior, child_db_id, opts) do
+          {:ok, _} ->
+            :ok
+
+          {:error, %NotFound{}} ->
+            :ok
+
+          {:error, %{reason: {:http, 422}}} ->
+            :ok
+
+          {:error, err} ->
+            Logger.warning(
+              "github relations: could not remove sub-issue #{child_db_id} from ##{prior}; " <>
+                "NOT linking under ##{parent_num} this pass: #{inspect(err)}"
+            )
+
+            {:error, err}
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  # The parent ISSUE NUMBER this module last linked the child under, read off the
+  # child's own `content.github` bookkeeping. Absent on every task mirrored before
+  # this stamp existed — which reads as "nothing to retract", exactly the old
+  # behaviour, so no back-fill is required.
+  defp stamped_sub_issue_parent(task_doc) do
+    case Link.get(task_doc) do
+      gh when is_map(gh) -> issue_num(Map.get(gh, "sub_issue_parent"))
+      _ -> nil
+    end
+  end
+
   defp add_sub_issue(repo, parent_num, child_db_id, opts) do
     case client_mod().add_sub_issue(repo, parent_num, child_db_id, opts) do
-      {:ok, _} -> :ok
+      {:ok, _} -> {:linked, parent_num}
       {:error, %{reason: {:http, 422}} = err} -> classify_422(err, parent_num, child_db_id)
       {:error, err} -> {:error, err}
     end
@@ -244,23 +335,24 @@ defmodule Barkpark.Plugins.Github.Relations do
   # for a genuine rejection (the child can't be a sub-issue of that parent, a
   # cycle, etc.). Distinguish on whatever legible detail the error surfaces:
   #
-  #   * a message/errors body indicating the link already exists → `:ok`
-  #     (idempotent — re-linking is a no-op success);
+  #   * a message/errors body indicating the link already exists →
+  #     `{:linked, parent_num}` (idempotent — re-linking is a no-op success);
   #   * any OTHER legible detail → `{:error, {:sub_issue_rejected, …}}` so the
   #     wiring RECORDS a quarantine row (an operator sees why the tree link never
   #     formed — a real 422 was silently swallowed as success before);
   #   * NO legible detail (the common case — the REST `Client` discards the 422
   #     body, so a `%NetworkError{}` carries only `reason: {:http, 422}`) → stay
-  #     CONSERVATIVE and treat it as idempotent `:ok`, exactly as before. We never
+  #     CONSERVATIVE and treat it as idempotent `{:linked, parent_num}`, exactly
+  #     as before. We never
   #     fabricate a rejection we can't substantiate.
   defp classify_422(err, parent_num, child_db_id) do
     case error_detail_text(err) do
       nil ->
-        :ok
+        {:linked, parent_num}
 
       detail ->
         if already_exists?(detail) do
-          :ok
+          {:linked, parent_num}
         else
           {:error, {:sub_issue_rejected, parent_num, child_db_id, detail}}
         end
@@ -272,7 +364,7 @@ defmodule Barkpark.Plugins.Github.Relations do
   # getter (atom or string), WITHOUT assuming the `NetworkError` struct grows a
   # field it does not have today — a plain-map error (what tests inject, what a
   # richer client might return) is tolerated too. `nil` when nothing legible is
-  # present, so `classify_422` falls to the conservative `:ok`.
+  # present, so `classify_422` falls to the conservative `{:linked, parent_num}`.
   defp error_detail_text(err) when is_map(err) do
     [
       err_get(err, :message),

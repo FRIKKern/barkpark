@@ -394,6 +394,68 @@ defmodule BarkparkWeb.Studio.ClaudeChatTokenRenewalTest do
     end
   end
 
+  # ── the RENEWAL mint's workspace binding (tenancy) ────────────────────────
+
+  # The renewal mint is a SECOND call into `create_claude_session_token/3`, and
+  # a renewal that re-resolved the workspace differently would quietly move a
+  # live session into another tenant. It binds what the spawn mint bound: the
+  # session's own workspace, passed explicitly.
+  describe "the renewal mint's workspace binding" do
+    setup do
+      n = System.unique_integer([:positive])
+      home = create_workspace!("chat-renew-home-#{n}")
+      session_ws = create_workspace!("chat-renew-session-#{n}")
+
+      {:ok, cross_minter} =
+        Auth.create_token(
+          "renew-ws-minter-#{n}",
+          "chat admin",
+          "production",
+          ["read", "write"],
+          home.id
+        )
+
+      {:ok, _seat} =
+        Barkpark.Tenancy.Auth.create_membership(
+          session_ws.id,
+          cross_minter.id,
+          "member",
+          "api_token"
+        )
+
+      %{home: home, session_ws: session_ws, cross_minter: cross_minter}
+    end
+
+    test "the replacement binds the session's workspace, not the minter's home workspace", %{
+      home: home,
+      session_ws: session_ws,
+      cross_minter: cross_minter
+    } do
+      chat_config()
+      sid = Ecto.UUID.generate()
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          session_opts: %{session_id: sid, minter: cross_minter, workspace_id: session_ws.id}
+        })
+
+      on_exit(fn -> stop_chat(session) end)
+
+      assert {:ok, _info} = ClaudeChat.renew_task_token(session)
+
+      # The spawn credential was revoked at renewal, so the ONE live row is the
+      # REPLACEMENT — this reads the renewal mint alone.
+      assert [replacement] = live_session_tokens(sid)
+      bound = replacement.workspace_id
+      assert bound == session_ws.id
+      # Drop `workspace_id:` from mint_replacement's opts and the replacement
+      # lands in the minter's home workspace — this is the line that reds.
+      home_id = home.id
+      refute bound == home_id
+    end
+  end
+
   # ── the pure clock classifier the whole decision reads off ────────────────
 
   describe "token_phase/1" do

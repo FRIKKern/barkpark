@@ -3,7 +3,7 @@ defmodule Barkpark.Auth.PublicRead do
   Helpers for the weekly `public-read` API token rotation.
 
   Raw tokens are 32 random bytes, URL-safe base64 encoded with no padding.
-  Only the SHA256 hash is persisted (via `Barkpark.Auth.create_token/4`);
+  Only the SHA256 hash is persisted (via `Barkpark.Auth.create_token/5`);
   the plaintext is returned once from `create_public_read_token/2` so the
   caller can hand it to the deploy pipeline.
   """
@@ -12,6 +12,7 @@ defmodule Barkpark.Auth.PublicRead do
   alias Barkpark.Auth
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Repo
+  alias Barkpark.Tenancy
 
   @label_prefix "public-read-"
 
@@ -24,7 +25,23 @@ defmodule Barkpark.Auth.PublicRead do
   def create_public_read_token(label, dataset \\ "production") when is_binary(label) do
     raw = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
 
-    case Auth.create_token(raw, label, dataset, ["public-read"]) do
+    # THE INSTANCE DEFAULT IS NAMED HERE, NOT FALLEN INTO (task-e0e6454b8b2045ae).
+    # `Auth.create_token/5` used to resolve `nil -> default_workspace_id()`
+    # itself, which handed EVERY forgetful caller a membership in whatever
+    # workspace holds the default seat. That fallback is gone. This module is
+    # the one caller that genuinely means the instance default — `public-read`
+    # is a SINGLETON INSTANCE credential (see `delete_public_read_tokens/1`
+    # below, an instance-wide sweep with no workspace predicate) — so it
+    # resolves the seat explicitly and passes it. A VACANT seat stays vacant:
+    # `get_default_workspace/0` degrades to `nil` by design, and `nil` here
+    # mints the token workspace-less exactly as before.
+    ws_id =
+      case Tenancy.get_default_workspace() do
+        nil -> nil
+        ws -> ws.id
+      end
+
+    case Auth.create_token(raw, label, dataset, ["public-read"], ws_id) do
       {:ok, row} -> {:ok, raw, row}
       error -> error
     end
@@ -37,8 +54,9 @@ defmodule Barkpark.Auth.PublicRead do
   OPERATOR-ONLY, INSTANCE-WIDE. This is a `delete_all` with no workspace
   predicate — by design: the `public-read` tier is a singleton instance-level
   credential, not a per-tenant one, and `create_public_read_token/2` binds its
-  row to whatever `Auth.create_token/5` defaults to (the seeded Default
-  workspace), so scoping the sweep to a tenant would simply break it. The only
+  row to the seeded Default workspace it resolves and names EXPLICITLY (there
+  is no longer any fallback inside `Auth.create_token/5` to lean on), so
+  scoping the sweep to a tenant would simply break it. The only
   caller is `mix barkpark.rotate_public_read`, driven by the
   `barkpark-rotate-public-token.timer` systemd unit; nothing on the request path
   reaches this function, so it is not an HTTP-reachable mass-delete.

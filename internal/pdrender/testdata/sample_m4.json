@@ -97,7 +97,7 @@
         {
           "id": "tc1",
           "type": "code",
-          "language": "bash",
+          "lang": "bash",
           "code": "make deploy\ncurl -s localhost:4000/api/schemas | head"
         }
       ],

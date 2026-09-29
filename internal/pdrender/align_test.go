@@ -17,30 +17,38 @@ import (
 // This is the alignment complement of the no-overflow lock: overflow catches
 // "too wide", ragged catches "walls don't meet".
 //
-// Deliberately NOT here: the grid WIDGETS (notes/cards/pipeline — sample_m5
-// stacked, sample_m10 side-by-side). Unlike a full-bleed columns/section
-// container, these widgets LEFT-PACK in the TUI: their side-by-side row is exactly
-// N*cellW+(N-1)*gutter (the shared Flex solver's packed width), so the surface's
-// floor-division remainder rides as a ragged right margin rather than being
-// stretched into the cells — and even their vertical stack leaves short prose
-// lines unpadded. A border glyph still sits above a border glyph because each CELL
-// is internally rectangular; their horizontal output is guarded instead by
-// TestNoLineOverflow (overflowFixtures carries sample_m10) + the byte-exact
-// TestGoldenM10.
+// ALSO here, since pd-le-compose-fullbleed-parity: the grid WIDGETS (notes /
+// cards / pipeline — sample_m5 stacked, sample_m10 side-by-side). The doc-note
+// this replaces recorded the OPPOSITE premise — that these widgets "LEFT-PACK in
+// the TUI", their side-by-side row ending at the packed N*cellW+(N-1)*gutter with
+// the floor-division remainder riding as a ragged right margin, and their stack
+// leaving short prose unpadded. That premise was read off web/components/
+// portable-doc.tsx (:881 / :925 / :985), a file that NO LONGER EXISTS. The React
+// reader now emits the same bp-notes / bp-cards / bp-pipe-scroll classes as the
+// Elixir emitter and is skinned by the one shared api/assets/paper-surface/
+// paper-surface.css, so the Tailwind `flex flex-wrap` / `flex flex-col` markup the
+// old verdict rested on is gone.
 //
-// Per-block reader-parity matrix (NOT a blanket "all three left-pack on both
-// surfaces" — that earlier claim was FALSE for cards):
-//   - pipeline: left-packs on BOTH surfaces — TUI packed row; web `flex flex-wrap
-//     items-stretch` from a flex-start origin (portable-doc.tsx:985). Matched.
-//   - notes: content-left on BOTH surfaces — TUI leaves short prose unpadded; web
-//     is a `flex flex-col` label+text stack (portable-doc.tsx:881). Matched.
-//   - cards: left-pack in the TUI, but the web reader STRETCHES them —
-//     `grid gap-3 sm:grid-cols-2` (portable-doc.tsx:925) gives implicit 1fr tracks
-//     with the grid's default justify-items:stretch, so each card fills its column.
-//     TUI-packs vs web-stretches is an ACCEPTED per-surface divergence, ratified by
-//     charter D3 (the gauge-list/dashboard ⊆-projection family) — by design, not a
-//     bug to fix. boxFixtures membership is unaffected either way.
-var boxFixtures = []string{"sample_m4.json", "sample_m6.json", "sample_m7.json", "sample_m8.json", "sample_m9.json"}
+// The replacement premise is a BROWSER MEASUREMENT, not a re-read: headless
+// Chromium over the frozen golden HTML (js/packages/react/tests/fixtures/pd-golden/
+// {notes,cards,pipeline}.golden.json) inside the reader's own container geometry,
+// 18 cases = 3 families x 2 contexts (stream / section-grid cell) x 3 widths
+// (1280/700/390 px). Right gap = containerRight - edge: the widget's outer box read
+// 0.00 px in 18 of 18, and the LAST CHILD read 0.00 px in 15 of 15 measured cases
+// (the 3 excluded are pipeline cases where .bp-pipe deliberately scrolls inside
+// .bp-pipe-scroll, whose own outer gap is still 0.00). The run carried its own
+// controls: SABOTAGE moved the child gap 0 -> 286.19 / 128 / 38.59 px, and the
+// genuinely shrink-to-fit .bp-stat read 450 / 482 / 228 px in the SAME run, so a
+// 0.00 is a stretch and not an instrument stuck at zero.
+//
+// So the canonical reader STRETCHES all three families, identically in the stacked
+// and the horizontal arrangement — and components.ex emits both arrangements from
+// markup that never reads the block's `layout` key, so the orientations CANNOT
+// diverge reader-side. pdrender now matches: the stacked path right-pads to the
+// content width and the horizontal path spends the floor-division remainder inside
+// the tracks (Flex.StretchTracks), which is exactly what makes these two fixtures
+// rectangular here.
+var boxFixtures = []string{"sample_m4.json", "sample_m5.json", "sample_m6.json", "sample_m7.json", "sample_m8.json", "sample_m9.json", "sample_m10.json"}
 
 // raggedLines returns the indices of ANSI-stripped lines whose display width is
 // neither 0 (a blank rhythm line between blocks) nor exactly w. In a box render

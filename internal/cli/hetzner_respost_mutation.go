@@ -68,6 +68,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -332,8 +333,77 @@ func hzResReportObserved(out *writer, action, kind string, id any, name string, 
 func hzResNotReadable(out *writer, action, kind string, id any, name string) int {
 	return useError(out, "failed", fmt.Sprintf(
 		"%s %s %s: the API accepted the %s but %s %s (id %v) is NOT READABLE afterwards — the post-condition is "+
-			"UNMET, so this verb refuses to claim it holds (re-read it with `bp cloud hetzner %s get %s`)",
-		action, kind, name, action, kind, name, id, kind, name), exitGeneric)
+			"UNMET, so this verb refuses to claim it holds (%s)",
+		action, kind, name, action, kind, name, id, hzResReadHint(kind, name)), exitGeneric)
+}
+
+// hzResReadVerb is ONE kind's re-read command: the dispatcher token path that
+// reaches its `get`, and the fmt template for the arguments that verb takes
+// (applied to the resource ref). An entry with no tokens is the honest
+// negative — this CLI has no verb that re-reads that kind.
+type hzResReadVerb struct {
+	tokens  []string
+	argsFmt string
+}
+
+// hzResReadVerbs is THE TABLE the not-readable receipt reads its remediation
+// from, and the reason the receipt stopped composing one (PDS-D447 finding 3).
+//
+// The old hint interpolated the kind into `bp cloud hetzner <kind> get <name>`.
+// That spelling is right ONLY for the kinds that sit directly under `hetzner`.
+// It is a dead end for every kind that sits under a GROUP — `dns zone`,
+// `dns record`, `storage bucket`, `storage object` — and for `backup`, which
+// has no read verb at all. Five of the thirteen kinds that can reach this
+// branch were handed a command that answers `unknown …`, which is the epic's
+// law in miniature: a receipt's REMEDIATION is a claim about the system, and
+// this one was false.
+//
+// The token paths here are not decoration. hzResReadVerbs' entries are driven
+// through the REAL command tree by TestHzResReadVerbsResolve, so renaming or
+// regrouping a hetzner read verb reds that test rather than shipping a receipt
+// pointing at the old path; TestHzResReadVerbsCoverEveryKind pins the key set
+// against the call sites themselves (derived by AST scan, not by hand), so a
+// new mutation kind cannot reach this branch without an entry. The verbs a
+// kind has are decided by the dispatcher switches, which is why an entry is a
+// token PATH: it is checkable against them, unlike a prose sentence.
+var hzResReadVerbs = map[string]hzResReadVerb{
+	// no read verb: a backup key is re-read as the object it is, and this
+	// receipt does not carry the bucket that would take.
+	"backup": {},
+
+	"bucket":          {tokens: []string{"cloud", "hetzner", "storage", "bucket", "get"}, argsFmt: "--name %s"},
+	"certificate":     {tokens: []string{"cloud", "hetzner", "certificate", "get"}, argsFmt: "%s"},
+	"firewall":        {tokens: []string{"cloud", "hetzner", "firewall", "get"}, argsFmt: "%s"},
+	"floating-ip":     {tokens: []string{"cloud", "hetzner", "floating-ip", "get"}, argsFmt: "%s"},
+	"load-balancer":   {tokens: []string{"cloud", "hetzner", "load-balancer", "get"}, argsFmt: "%s"},
+	"network":         {tokens: []string{"cloud", "hetzner", "network", "get"}, argsFmt: "%s"},
+	"object":          {tokens: []string{"cloud", "hetzner", "storage", "object", "get"}, argsFmt: "--bucket <bucket> --key %s"},
+	"placement-group": {tokens: []string{"cloud", "hetzner", "placement-group", "get"}, argsFmt: "%s"},
+	"primary-ip":      {tokens: []string{"cloud", "hetzner", "primary-ip", "get"}, argsFmt: "%s"},
+	"record":          {tokens: []string{"cloud", "hetzner", "dns", "record", "get"}, argsFmt: "--zone <zone> --type <type> --name %s"},
+	"volume":          {tokens: []string{"cloud", "hetzner", "volume", "get"}, argsFmt: "%s"},
+	"zone":            {tokens: []string{"cloud", "hetzner", "dns", "zone", "get"}, argsFmt: "%s"},
+}
+
+// hzResReadHint renders the remediation clause. Three outcomes, and the last
+// two are the point: a kind with no read verb SAYS SO, and a kind the table has
+// never heard of says that rather than inventing a path — an unknown kind is a
+// table that drifted from the call sites, and guessing is what put the false
+// hint there in the first place.
+func hzResReadHint(kind, name string) string {
+	verb, known := hzResReadVerbs[kind]
+	switch {
+	case known && len(verb.tokens) > 0:
+		cmd := "bp " + strings.Join(verb.tokens, " ")
+		if verb.argsFmt != "" {
+			cmd += " " + fmt.Sprintf(verb.argsFmt, name)
+		}
+		return "re-read it with `" + cmd + "`"
+	case known:
+		return "this CLI has no verb that re-reads a " + kind + ", so there is nothing to confirm it with"
+	default:
+		return "this CLI has no recorded re-read verb for kind " + strconv.Quote(kind)
+	}
 }
 
 // hzResUnmet is THE DISAGREEMENT HOOK's output — the third difference from the

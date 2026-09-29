@@ -95,8 +95,12 @@ For each new task id, run this sequence exactly:
    > and end your turn to "wait for it" — a headless worker exits when its turn ends, orphaning
    > the background work and producing NOTHING. This exact failure was observed live (the cipher
    > order). All work happens inline, before you stamp.
-5. **Stamp evidence.** Re-read the current epoch (`bp task get <id>` → `claim.epoch`), then:
-   `bp task stamp <id> <WORKER> <epoch> --criterion 0 --met --evidence "<what you did + artifact path>" --criterion-text "<criterion VERBATIM>" --yes`.
+5. **Stamp evidence.** Re-read the current epoch (`bp task get <id>` → `claim.epoch`), then write
+   the criterion wording to a FILE and hand bp the path — never retype it inline, because criterion
+   wording is markdown and a backticked code span inside a double-quoted shell argument is COMMAND
+   SUBSTITUTION (your shell runs it before bp sees the text):
+   `bp task get <id> -o json | jq -r '.doc.content.acceptance_criteria[0].criterion' > crit.txt`
+   `bp task stamp <id> <WORKER> <epoch> --criterion 0 --met --evidence "<what you did + artifact path>" --criterion-text-file crit.txt --yes`.
 6. **Close.** Re-read the epoch (it may have bumped), then `bp task close <id> <WORKER> <epoch> --yes`.
    If a Barkpark session record is open, log the close: `bp session log <slug> --kind task-closed
    --ref <id>` — a failed log never blocks the close.

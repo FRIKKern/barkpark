@@ -22,6 +22,24 @@
  *   • silent-truncation         → the warning test reds (nothing said)
  *   • unwired-allDocs           → the source test reds (bp.ts kept its
  *                                 single-shot `.limit(500).find()`)
+ *
+ * THE SECOND DEFECT (task-a5b10e7a686e37bb), ported from
+ * `web/__tests__/paginate.test.ts` (PR #13657): the short-page inference is
+ * only sound while the server honours the requested `limit`, and it does not —
+ * it clamps to 1000. Everything below the `THE SECOND DEFECT` banner pins the
+ * clamp, the exact `hasMore`/`nextOffset` termination, and the `no_advance`
+ * state. NAMED MUTANTS those add:
+ *   • no-clamp                  → the clamp test reds (1000 of 2500 rows)
+ *   • ignore-hasMore            → the full-page-hasMore:false test reds (2 calls)
+ *   • ignore-nextOffset         → the cursor test reds ([0, 2] not [0, 7])
+ *   • advance-past-the-clamp    → the no_advance test reds (40 calls, 'cap')
+ *
+ * WHY A LIMIT ABOVE 1000 AT ALL, when `collectCorpus` passes exactly
+ * `CORPUS_PAGE_LIMIT = 1000`: because that coincidence is the ONLY thing that
+ * made this edition safe. The guard is caller-INDEPENDENT, so the test that
+ * proves it must ask for more than the ceiling — a test pinned at 1000 is
+ * vacuous and would stay green through the exact edit (raising the constant)
+ * that reintroduces the defect.
  */
 
 import { test } from 'node:test'
@@ -33,6 +51,8 @@ import {
   collectCorpus,
   CORPUS_PAGE_LIMIT,
   CORPUS_MAX_PAGES,
+  SERVER_MAX_PAGE_LIMIT,
+  __resetPaginateWarnings,
 } from './paginate.ts'
 
 /** A fake corpus served in pages of `limit`, counting the calls. */
@@ -145,4 +165,191 @@ test('bp.ts allDocs() is wired to the walk and no longer single-shots', () => {
     /\.limit\(500\)\.find\(\)/,
     'the single-shot .limit(500).find() must be gone from bp.ts entirely',
   )
+})
+
+/* ── THE SECOND DEFECT: a server-clamped page read as an exhausted one ────── */
+
+/**
+ * A fake corpus behind a server that CLAMPS every page to `serverMax`, exactly
+ * as the query controller does — the shape the old law could not survive.
+ */
+function clampingFetcher(total: number, serverMax: number, calls: Array<[number, number]>) {
+  const rows = Array.from({ length: total }, (_, i) => ({ i }))
+  return async (limit: number, offset: number): Promise<Array<{ i: number }> | null> => {
+    calls.push([limit, offset])
+    return rows.slice(offset, offset + Math.min(limit, serverMax))
+  }
+}
+
+/** The law as this edition shipped it before task-a5b10e7a686e37bb, kept here
+ * so the defect is DEMONSTRATED rather than asserted about. */
+async function preFixLaw<T>(
+  fetchPage: (limit: number, offset: number) => Promise<T[] | null>,
+  { limit, maxPages }: { limit: number; maxPages: number },
+): Promise<{ rows: T[]; truncated?: string }> {
+  const rows: T[] = []
+  let offset = 0
+  for (let page = 0; page < maxPages; page++) {
+    const batch = await fetchPage(limit, offset)
+    if (batch === null) return page === 0 ? { rows } : { rows, truncated: 'failed_page' }
+    rows.push(...batch)
+    if (batch.length < limit) return { rows }
+    offset += batch.length
+  }
+  return { rows, truncated: 'cap' }
+}
+
+test('THE DEFECT: the pre-fix law called a server-clamped page an exhausted one', async () => {
+  const calls: Array<[number, number]> = []
+  const out = await preFixLaw(clampingFetcher(2500, 1000, calls), { limit: 2500, maxPages: 40 })
+  assert.equal(out.rows.length, 1000, 'a silent 60% prefix')
+  assert.equal(out.truncated, undefined, 'and it reported CLEAN exhaustion')
+  assert.equal(calls.length, 1, 'one request, then it stopped')
+})
+
+test('THE ROW: a limit past the ceiling is clamped, the walk warns, and the WHOLE corpus arrives', async () => {
+  __resetPaginateWarnings()
+  const warnings: string[] = []
+  const orig = console.warn
+  console.warn = (msg: string) => warnings.push(String(msg))
+  const calls: Array<[number, number]> = []
+  let out: { rows: unknown[]; truncated?: string }
+  try {
+    // CORPUS_PAGE_LIMIT is 1000 today; 2500 is the edit that used to be fatal.
+    out = await collectAllPages(clampingFetcher(2500, 1000, calls), {
+      limit: 2500,
+      maxPages: 40,
+    })
+  } finally {
+    console.warn = orig
+  }
+  // The no-clamp mutant reds here with 1000 — the silent prefix.
+  assert.equal(out.rows.length, 2500, 'all 2500 docs — not the first 1000')
+  assert.equal(out.truncated, undefined)
+  assert.deepEqual(calls, [
+    [1000, 0],
+    [1000, 1000],
+    [1000, 2000], // short page (500) — genuinely the end now
+  ])
+  assert.equal(warnings.length, 1, 'once per process, not once per page')
+  assert.match(warnings[0], /2500/, 'the warning names what was asked for')
+  assert.match(warnings[0], /1000/, 'and what was substituted')
+})
+
+test('a limit AT the ceiling is silent — the value collectCorpus already passes', async () => {
+  __resetPaginateWarnings()
+  const warnings: string[] = []
+  const orig = console.warn
+  console.warn = (msg: string) => warnings.push(String(msg))
+  try {
+    const out = await collectAllPages(clampingFetcher(2500, 1000, []), {
+      limit: CORPUS_PAGE_LIMIT,
+      maxPages: 40,
+    })
+    assert.equal(out.rows.length, 2500)
+  } finally {
+    console.warn = orig
+  }
+  assert.deepEqual(warnings, [], 'no false alarm on the correct call')
+})
+
+test('the ceiling matches the controller clamp, and the corpus page size rides it', () => {
+  // A ceiling set ABOVE the server's clamp puts the silent-prefix defect back.
+  assert.equal(SERVER_MAX_PAGE_LIMIT, 1000)
+  assert.equal(CORPUS_PAGE_LIMIT, SERVER_MAX_PAGE_LIMIT)
+})
+
+test('hasMore:false ends the walk on a FULL page — no wasted probe request', async () => {
+  let callCount = 0
+  const out = await collectAllPages(
+    async (limit: number) => {
+      callCount++
+      return { rows: Array.from({ length: limit }, (_, i) => ({ i })), hasMore: false }
+    },
+    { limit: 10, maxPages: 5 },
+  )
+  assert.equal(callCount, 1, 'ignore-hasMore reds here with 2')
+  assert.equal(out.rows.length, 10)
+  assert.equal(out.truncated, undefined, 'exhausted, and it KNOWS')
+})
+
+test('a SHORT page carrying hasMore:true keeps walking — length is no longer the oracle', async () => {
+  const calls: Array<[number, number]> = []
+  const out = await collectAllPages(
+    async (limit: number, offset: number) => {
+      calls.push([limit, offset])
+      if (offset === 0) return { rows: [{ i: 0 }, { i: 1 }], hasMore: true, nextOffset: 2 }
+      return { rows: [{ i: 2 }], hasMore: false }
+    },
+    { limit: 10, maxPages: 5 },
+  )
+  assert.equal(out.rows.length, 3, 'terminate-on-length reds here with 2')
+  assert.equal(out.truncated, undefined)
+  assert.equal(calls.length, 2)
+})
+
+test('nextOffset drives the cursor when the server supplies it', async () => {
+  const calls: Array<[number, number]> = []
+  await collectAllPages(
+    async (limit: number, offset: number) => {
+      calls.push([limit, offset])
+      // A cursor that does NOT equal offset + rows.length: only a walk that
+      // honours nextOffset lands on 7.
+      if (offset === 0) return { rows: [{ i: 0 }, { i: 1 }], hasMore: true, nextOffset: 7 }
+      return { rows: [], hasMore: false }
+    },
+    { limit: 10, maxPages: 5 },
+  )
+  assert.deepEqual(
+    calls.map(([, offset]) => offset),
+    [0, 7],
+    'ignore-nextOffset reds with [0, 2]',
+  )
+})
+
+test('hasMore with NO nextOffset stops and says no_advance — it never spins on the clamp', async () => {
+  // The real shape past the 100_000 offset ceiling: the controller withholds
+  // nextOffset because a further read re-serves this same page.
+  let callCount = 0
+  const out = await collectAllPages(
+    async (limit: number) => {
+      callCount++
+      return { rows: Array.from({ length: limit }, (_, i) => ({ i })), hasMore: true }
+    },
+    { limit: 10, maxPages: 5 },
+  )
+  assert.equal(callCount, 1, 'advance-past-the-clamp reds here with 5')
+  assert.equal(out.rows.length, 10, 'and would have collected 50 DUPLICATE rows')
+  assert.equal(out.truncated, 'no_advance', 'partial truth, NAMED')
+})
+
+test('an EMPTY page claiming hasMore cannot loop forever', async () => {
+  let callCount = 0
+  const out = await collectAllPages(
+    async () => {
+      callCount++
+      return { rows: [], hasMore: true, nextOffset: 0 } // a cursor that never moves
+    },
+    { limit: 10, maxPages: 5 },
+  )
+  assert.equal(callCount, 1)
+  assert.deepEqual(out, { rows: [], truncated: 'no_advance' })
+})
+
+test('collectCorpus NAMES no_advance in its build-log notice', async () => {
+  // A truncation state the notice cannot name is a guard that fires
+  // unreportably — the second acceptance criterion of task-a5b10e7a686e37bb.
+  const warnings: string[] = []
+  const out = await collectCorpus(
+    async (limit: number) => ({
+      rows: Array.from({ length: limit }, (_, i) => ({ i })),
+      hasMore: true,
+    }),
+    (m) => warnings.push(m),
+  )
+  assert.equal(out.truncated, 'no_advance')
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /no_advance/, 'the notice names WHICH truncation happened')
+  assert.match(warnings[0], /INCOMPLETE/)
+  assert.ok(CORPUS_MAX_PAGES > 1, 'the cap is not what stopped this walk')
 })

@@ -15,7 +15,7 @@ defmodule BarkparkCloud.Usage do
       documents      datasets      webhooks       — instance-sourced inventory counts
       db_size        disk                          — telemetry-sourced (the agent's health beat)
       cpu            ram                           — telemetry machine meters (0-100 %, 100/70/90 ceiling)
-      req_per_s      p95_ms                        — telemetry load meters (rate/latency, warn+over, no bar)
+      req_per_s      p95_ms                        — telemetry RING meters (rate/latency, warn+over, no bar)
       seats          instances                     — control-plane-sourced (team members / fleet count)
       api_requests   bandwidth                     — FLOW meters, not yet metered (see below)
 
@@ -55,6 +55,34 @@ defmodule BarkparkCloud.Usage do
   The `seats` meter additionally carries `:pending_invitations` (a non-negative
   integer, or absent when unavailable) — a cheap extra detail beside the seat
   count, never a second meter.
+
+  ## The ring's other two numbers ride WITH the rates, and are not meters
+
+  `req_per_s` and `p95_ms` are read off the instance's ONE request-stats ring,
+  and the agent puts two more numbers from that same ring on the beat:
+  `err_5xx_per_s` (the 5xx rate) and `window_s` (the ring's width in seconds).
+  Both reach the console as CONDITIONAL keys on the ring meters — the
+  `:pending_invitations` precedent — never as meters of their own.
+
+  **`window_s`** rides on both ring meters. A rate without its window is a
+  number nobody can bound: 0.22 5xx/s over a 60-second ring and over a
+  1-second one are different facts. It has no threshold, no ceiling and no bar,
+  so a "meter" whose only job is to qualify two others would appear in the
+  vocabulary as a signal an operator is asked to judge.
+
+  **`err_5xx_per_s`** rides on `req_per_s` SPECIFICALLY, and that placement is
+  charter D103 made structural rather than written down. D103: an error rate's
+  severity cannot be read without the volume it came out of — 0.22 5xx/s is
+  14.4% of traffic at the median observed request rate and 2.0% at the max, a
+  7x severity spread from one unchanged number. As its own meter it could be
+  rendered, screenshotted and escalated with its denominator nowhere on screen.
+  Hung on the request-rate meter, it CANNOT be: the volume is the row it sits
+  in.
+
+  Both are omitted entirely when absent or carrying the agent's `-1` sentinel —
+  a width nobody measured is not borrowed from the documented default, and a
+  fabricated 0 5xx/s would read "this box is serving no errors" about a box
+  nobody looked at.
 
   ## Two honesty tiers (D48)
 
@@ -185,41 +213,88 @@ defmodule BarkparkCloud.Usage do
     telemetry = telemetry_or_nil(Map.get(inputs, :telemetry))
     measured_at = telemetry_measured_at(telemetry)
 
-    %{
-      meters: %{
-        documents: instance_meter(Map.get(inputs, :documents), @src_documents),
-        datasets: instance_meter(Map.get(inputs, :datasets), @src_datasets),
-        webhooks: instance_meter(Map.get(inputs, :webhooks), @src_webhooks),
-        db_size: db_size_meter(telemetry, measured_at),
-        disk: disk_meter(telemetry, measured_at),
-        # Machine meters (OC23/OC26) — the host's capacity pressure off the same
-        # health beat. cpu/ram are percents with the physical 100/70/90 ceiling;
-        # req_per_s / p95_ms are rate/latency signals with warn+over thresholds
-        # but no quota bar. An unwired probe (-1) / absent signal → "unmetered",
-        # never a fake 0 (guard n >= 0). req_per_s / p95_ms stay unmetered until
-        # the instance runtime reports them — honest, not a zero.
-        cpu: telemetry_threshold_meter(telemetry, :cpu, @src_cpu, measured_at, 100, 70, 90),
-        ram: telemetry_threshold_meter(telemetry, :mem, @src_ram, measured_at, 100, 70, 90),
-        req_per_s:
-          telemetry_threshold_meter(
-            telemetry,
-            :req_per_s,
-            @src_req_per_s,
-            measured_at,
-            nil,
-            210,
-            270
-          ),
-        p95_ms:
-          telemetry_threshold_meter(telemetry, :p95_ms, @src_p95_ms, measured_at, nil, 500, 1000),
-        seats: seats_meter(Map.get(inputs, :seats), Map.get(inputs, :pending_invitations)),
-        instances: instances_meter(Map.get(inputs, :instances)),
-        # FLOW meters — always unmetered, whatever anyone passes. req/s is a
-        # RATE, not the billing request count — the flow meters stay dark here.
-        api_requests: meter(@unmetered, @src_not_metered, nil),
-        bandwidth: meter(@unmetered, @src_not_metered, nil)
-      }
+    meters = %{
+      documents: instance_meter(Map.get(inputs, :documents), @src_documents),
+      datasets: instance_meter(Map.get(inputs, :datasets), @src_datasets),
+      webhooks: instance_meter(Map.get(inputs, :webhooks), @src_webhooks),
+      db_size: db_size_meter(telemetry, measured_at),
+      disk: disk_meter(telemetry, measured_at),
+      # Machine meters (OC23/OC26) — the host's capacity pressure off the same
+      # health beat. cpu/ram are percents with the physical 100/70/90 ceiling;
+      # req_per_s / p95_ms are rate/latency signals with warn+over thresholds
+      # but no quota bar. An unwired probe (-1) / absent signal → "unmetered",
+      # never a fake 0 (guard n >= 0). req_per_s / p95_ms stay unmetered until
+      # the instance runtime reports them — honest, not a zero.
+      cpu: telemetry_threshold_meter(telemetry, :cpu, @src_cpu, measured_at, 100, 70, 90),
+      ram: telemetry_threshold_meter(telemetry, :mem, @src_ram, measured_at, 100, 70, 90),
+      req_per_s:
+        telemetry_threshold_meter(
+          telemetry,
+          :req_per_s,
+          @src_req_per_s,
+          measured_at,
+          nil,
+          210,
+          270
+        ),
+      p95_ms:
+        telemetry_threshold_meter(telemetry, :p95_ms, @src_p95_ms, measured_at, nil, 500, 1000),
+      seats: seats_meter(Map.get(inputs, :seats), Map.get(inputs, :pending_invitations)),
+      instances: instances_meter(Map.get(inputs, :instances)),
+      # FLOW meters — always unmetered, whatever anyone passes. req/s is a
+      # RATE, not the billing request count — the flow meters stay dark here.
+      api_requests: meter(@unmetered, @src_not_metered, nil),
+      bandwidth: meter(@unmetered, @src_not_metered, nil)
     }
+
+    %{meters: attach_ring_context(meters, telemetry)}
+  end
+
+  # Both ring meters come off ONE instance ring, so the ring's width qualifies
+  # both. Deliberately not a meter of its own — see the moduledoc.
+  @ring_meters [:req_per_s, :p95_ms]
+
+  defp attach_ring_context(meters, telemetry) do
+    meters
+    |> attach_ring_window(telemetry)
+    |> attach_err_5xx(telemetry)
+  end
+
+  defp attach_ring_window(meters, telemetry) do
+    case telemetry && Map.get(telemetry, :window_s) do
+      # A real span only. The agent's `-1` sentinel and a 0 are both "we do not
+      # know how wide this window was" — omit the key rather than publish a
+      # width nobody measured, or (worse) a zero-second window that would make
+      # every rate look infinitely precise.
+      n when is_number(n) and n > 0 ->
+        Enum.reduce(@ring_meters, meters, fn key, acc ->
+          Map.update!(acc, key, &Map.put(&1, :window_s, n))
+        end)
+
+      _ ->
+        meters
+    end
+  end
+
+  # charter D103: the 5xx rate hangs on the REQUEST-RATE meter, so it can never
+  # be read apart from the volume that bounds it. A measured 0.0 lands — that is
+  # the good news the carriage exists to deliver — while a negative sentinel or
+  # an absent key omits it, because "no 5xx" and "nobody looked" are opposite
+  # facts and only one of them is reassuring.
+  #
+  # It is attached even when req_per_s itself is UNMETERED: the box may have a
+  # 5xx rate and no request rate (an older instance exposing one probe and not
+  # the other), and dropping the error rate because its denominator is missing
+  # would hide the more alarming of the two. The surface says so — see app.js's
+  # meter sub-line, which words an unbounded rate as unbounded.
+  defp attach_err_5xx(meters, telemetry) do
+    case telemetry && Map.get(telemetry, :err_5xx_per_s) do
+      n when is_number(n) and n >= 0 ->
+        Map.update!(meters, :req_per_s, &Map.put(&1, :err_5xx_per_s, n))
+
+      _ ->
+        meters
+    end
   end
 
   # ── Meter builders ──────────────────────────────────────────────────────────

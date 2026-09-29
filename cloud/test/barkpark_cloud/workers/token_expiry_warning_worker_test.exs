@@ -219,13 +219,19 @@ defmodule BarkparkCloud.Workers.TokenExpiryWarningWorkerTest do
     test "dispatch_event/3 fans an alert to EVERY member — the hazard, run, not asserted in prose" do
       {team, owner, admin, member} = three_member_team()
 
-      # `:test` is on `@always_send`, so this is the alert path at full strength
-      # with no toggle in the way. It is the shape a `token_expiring` producer
-      # would have taken if anyone had "just dispatched it".
-      :ok = Notifications.dispatch_event(team, :test, %{})
+      # `:trial_expiring` is on `@always_send`, so this is the alert path at full
+      # strength with no toggle in the way. It is the shape a `token_expiring`
+      # producer would have taken if anyone had "just dispatched it".
+      #
+      # cch-w52-bl: was `:test`, deleted from `@always_send` as producerless.
+      # The property under test is the FAN-OUT WIDTH of an allowlisted event, not
+      # the identity of the event, so any `@always_send` member proves it —
+      # `:trial_expiring` is the one with a real producer
+      # (`TrialExpiryWorker.notify/3`) and a real `EventEmail` arm.
+      :ok = Notifications.dispatch_event(team, :trial_expiring, %{days: 3, name: "prod"})
 
       fanned =
-        Repo.all(from(d in Delivery, where: d.event == "test", order_by: d.recipient))
+        Repo.all(from(d in Delivery, where: d.event == "trial_expiring", order_by: d.recipient))
 
       assert length(fanned) == 3
 

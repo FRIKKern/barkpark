@@ -500,6 +500,16 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		token:        live.Secrets.AdminToken,
 		probeTimeout: verifyProbeTimeout,
 		totalBudget:  verifyTotalBudget,
+		// verify.siteplane (jpf-bl-siteplane-verify-probe): required iff the chain
+		// ATTEMPTED step 7c. nil (never attempted — an old control plane) skips the
+		// probe; a measured false FAILS the gate on the same teardown path as any
+		// other red probe. See verifySitePlane.
+		sitePlaneRequired: live.SitePlaneInstalled != nil,
+		sitePlaneComplete: live.SitePlaneInstalled,
+		// Why it failed, when it did: missing components + the installer's tail.
+		sitePlaneMissing:    live.SitePlaneMissing,
+		sitePlaneUnmeasured: live.SitePlaneUnmeasured,
+		sitePlaneLogTail:    live.SitePlaneLogTail,
 	}, report); verr != nil {
 		// Same teardown path as a content failure: nil teardown, no orphan bills.
 		if cerr := wp.CleanupHost(live.Server, spec); cerr != nil {

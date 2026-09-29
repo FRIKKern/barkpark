@@ -13,7 +13,7 @@ defmodule Barkpark.Content.TagRegistryTest do
     * the legacy flat-tag seed: DRAFT tag docs only, never auto-published.
   """
 
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query
 
@@ -24,7 +24,13 @@ defmodule Barkpark.Content.TagRegistryTest do
   @dataset "test"
 
   setup do
-    Barkpark.Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
+    Barkpark.Auth.create_token(
+      "barkpark-dev-token",
+      "dev",
+      "test",
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
 
     {:ok, _} =
       Content.upsert_schema(

@@ -81,12 +81,25 @@ defmodule BarkparkWeb.Plugs.RequireUserSession do
     end
   end
 
+  # The 401 hint is ROUTE-DERIVED (task-57081836b628df35). This gate wants a
+  # LOGIN SESSION; the code-keyed "unauthorized" default used to send the
+  # caller after a dataset-scoped api token, which this route never accepts —
+  # an operator following it concludes their token is bad when it is fine.
+  # The 403 (`csrf_required`) keeps its own code-keyed hint, which is correct
+  # for that code at every emitter.
   defp unauthorized(conn),
-    do: halt_json(conn, 401, "unauthorized", "a valid login session is required")
+    do:
+      halt_json(
+        conn,
+        401,
+        "unauthorized",
+        "a valid login session is required",
+        "Log in via POST /v1/auth/login, then send the returned login session — as the user_session cookie, or as Authorization: Bearer <session token>."
+      )
 
   # One shared emitter → the 401/403 carries request_id (+ code-keyed hint) for
   # log correlation; it was hand-built without request_id before.
-  defp halt_json(conn, status, code, message) do
-    BarkparkWeb.ErrorResponse.emit_custom(conn, status, code, message)
+  defp halt_json(conn, status, code, message, hint \\ nil) do
+    BarkparkWeb.ErrorResponse.emit_custom(conn, status, code, message, %{}, hint)
   end
 end

@@ -357,6 +357,133 @@ function pickRequestId(body: unknown): string | undefined {
 }
 
 /**
+ * Hard ceiling on ONE honoured `retry_after`, in ms.
+ *
+ * A Server Component render is a wall-clock budget: honouring a hostile or
+ * mis-ordered `retry_after: 3600` verbatim would park the render for an hour.
+ * The server's instruction is respected up to this bound; past it the 429 is a
+ * definitive refusal and surfaces as {@link BarkparkRateLimitError} carrying the
+ * server's UNCLAMPED number, so the caller can decide.
+ *
+ * @internal
+ */
+export const MAX_RETRY_AFTER_MS = 20_000
+
+/**
+ * Hard ceiling on the TOTAL time one `barkparkFetch` call may spend asleep
+ * between rate-limit retries, in ms. Bounds the sum, not each nap: three legal
+ * 15s waits are still 45s of a render nobody budgeted for.
+ *
+ * @internal
+ */
+export const MAX_RETRY_SLEEP_TOTAL_MS = 20_000
+
+/**
+ * Attempt cap for the rate-limit retry — TOTAL attempts, not extra ones. Two
+ * retries after the first refusal; a fourth 429 means the bucket is not
+ * draining on this render's timescale.
+ *
+ * @internal
+ */
+export const MAX_RATE_LIMIT_ATTEMPTS = 3
+
+/**
+ * Parse a `retry_after` / `Retry-After` value into ms — BODY FIRST, header
+ * second, UNCLAMPED.
+ *
+ * `body` is the already-parsed JSON of the 429 response; the value read is
+ * `error.details.retry_after`, in SECONDS, the shape Barkpark's rate limiter
+ * emits. Only a finite non-negative number counts: a `Retry-After` HTTP-date
+ * (RFC 9110's other legal form) is NOT parsed, and yields `undefined` — which
+ * means "do not retry", never "retry now", because a hardcoded sleep is exactly
+ * what this path must not invent.
+ *
+ * @internal
+ */
+export function rateLimitRetryAfterMs(body: unknown, header: string | null): number | undefined {
+  const details =
+    body !== null && typeof body === 'object'
+      ? (() => {
+          const err = (body as { error?: unknown }).error
+          return err !== null && typeof err === 'object'
+            ? (err as { details?: unknown }).details
+            : undefined
+        })()
+      : undefined
+  const bodySec =
+    details !== null && typeof details === 'object'
+      ? (details as { retry_after?: unknown })['retry_after']
+      : undefined
+  if (typeof bodySec === 'number' && Number.isFinite(bodySec) && bodySec >= 0) {
+    return bodySec * 1000
+  }
+  if (header === null) return undefined
+  const headerSec = Number(header)
+  if (!Number.isFinite(headerSec) || headerSec < 0) return undefined
+  return headerSec * 1000
+}
+
+/**
+ * Clamp one honoured wait to {@link MAX_RETRY_AFTER_MS}. `undefined` in stays
+ * `undefined` out — the "no retry_after in the response, so no retry" arm.
+ *
+ * @internal
+ */
+export function boundedRetryDelayMs(retryAfterMs: number | undefined): number | undefined {
+  if (retryAfterMs === undefined) return undefined
+  return Math.min(Math.max(0, retryAfterMs), MAX_RETRY_AFTER_MS)
+}
+
+/**
+ * True when sleeping `delayMs` on top of `sleptMs` already spent keeps this call
+ * inside its total sleep budget.
+ *
+ * @internal
+ */
+export function withinSleepBudget(
+  delayMs: number,
+  sleptMs: number,
+  budgetMs: number = MAX_RETRY_SLEEP_TOTAL_MS,
+): boolean {
+  return sleptMs + delayMs <= budgetMs
+}
+
+/**
+ * Sleep, but stay abortable by the request deadline.
+ *
+ * A nap between attempts is inside the ONE deadline `runFetch` arms, so it must
+ * lose to it: without the listener a `timeout: 100` config could still hold the
+ * render for a 20s `retry_after`. Rejecting with the signal's own abort reason
+ * routes through {@link classifyAbort} exactly as an aborted fetch does, so the
+ * caller sees `BarkparkTimeoutError` (ours) or a bare `AbortError` (theirs) —
+ * not a nap that quietly outlived the deadline.
+ */
+function sleepAbortable(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const abortError = (): Error =>
+      signal?.reason instanceof Error
+        ? signal.reason
+        : new DOMException('The operation was aborted.', 'AbortError')
+    if (signal?.aborted === true) {
+      reject(abortError())
+      return
+    }
+    let onAbort: (() => void) | undefined
+    const timer = setTimeout(() => {
+      if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    if (signal !== undefined) {
+      onAbort = (): void => {
+        clearTimeout(timer)
+        reject(abortError())
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+    }
+  })
+}
+
+/**
  * Decode a non-2xx Response into the right {@link BarkparkError} subclass,
  * mirroring core's `decodeErrorAndThrow` (js/packages/core/src/transport.ts):
  * extracts `code`/`message`/`hint`/`request_id` from the canonical
@@ -368,9 +495,23 @@ function pickRequestId(body: unknown): string | undefined {
  * field→message map.
  */
 async function decodeAndThrow(response: Response, url: string): Promise<never> {
+  throwDecodedBody(response, await response.text(), url)
+}
+
+/**
+ * The body of {@link decodeAndThrow}, split out so the 429 retry path can decode
+ * a response whose body it ALREADY read.
+ *
+ * A `Response` body is a one-shot stream: the rate-limit branch in
+ * {@link runRequest} must read the body to find `details.retry_after` BEFORE it
+ * knows whether this 429 is retryable, and once it has, `decodeAndThrow` can no
+ * longer read it (`resp.text()` would reject with "body used already", a raw
+ * TypeError escaping the Barkpark taxonomy). So the read happens once and the
+ * text is handed here.
+ */
+function throwDecodedBody(response: Response, raw: string, url: string): never {
   const status = response.status
   const requestIdHeader = response.headers.get('x-request-id') ?? undefined
-  const raw = await response.text()
 
   let parsed: unknown = undefined
   if (raw.length > 0) {
@@ -437,10 +578,16 @@ async function decodeAndThrow(response: Response, url: string): Promise<never> {
   if (status === 404) throw new BarkparkNotFoundError(message, base)
   if (status === 401 || status === 403) throw new BarkparkAuthError(message, base)
   if (status === 429) {
-    const retryAfter = response.headers.get('retry-after') ?? undefined
     const rlOpts: typeof base & { retryAfterMs?: number } = { ...base }
-    const n = retryAfter !== undefined ? Number(retryAfter) : NaN
-    if (Number.isFinite(n)) rlOpts.retryAfterMs = Math.max(0, n * 1000)
+    // Body-FIRST, then the header — the order core's transport uses and the one
+    // web/lib/bp-fetch.ts was fixed to in #17171. A Barkpark 429 always carries
+    // `{error:{code:"rate_limited",details:{retry_after}}}`; the `Retry-After`
+    // header is the fallback for a proxy-generated throttle that has no
+    // envelope. Reported UNCLAMPED: this number is the server's instruction to
+    // the consumer, not our sleep budget (that clamp lives in
+    // `boundedRetryDelayMs`, applied only where WE sleep).
+    const retryAfterMs = rateLimitRetryAfterMs(parsed, response.headers.get('retry-after'))
+    if (retryAfterMs !== undefined) rlOpts.retryAfterMs = retryAfterMs
     throw new BarkparkRateLimitError(message, rlOpts)
   }
   // 422 / validation_failed — Phoenix `details` is a field->[msg] map.
@@ -624,25 +771,76 @@ async function runRequest<T>(
     }
   }
 
-  const draftToken = input.isDraft ? cfg.serverToken : undefined
-  let resp = await attempt(draftToken)
+  let token = input.isDraft ? cfg.serverToken : undefined
+  let reissued = false
+  // Total time spent asleep honouring `retry_after`, across this ONE call.
+  let sleptMs = 0
+  let attempts = 0
+  let resp: Response
 
-  if (input.isDraft && resp.status === 401) {
-    const fresh = cfg.reissuePreviewToken ? await cfg.reissuePreviewToken() : cfg.serverToken
-    resp = await attempt(fresh)
-    if (resp.status === 401) {
-      const opts: { status: number; body: unknown; url: string; requestId?: string } = {
-        status: 401,
-        body: undefined,
-        url: input.url,
+  // The rate-limit retry loop. `continue` is reached ONLY from the 429 arm
+  // below: every other status falls out of the loop on the first pass, so a 500
+  // / 403 / 404 costs exactly one attempt — the non-retry half of the
+  // invariant, and the reason the loop cannot mask a real fault as a throttle.
+  for (;;) {
+    attempts += 1
+    resp = await attempt(token)
+
+    if (input.isDraft && resp.status === 401) {
+      if (!reissued) {
+        reissued = true
+        token = cfg.reissuePreviewToken ? await cfg.reissuePreviewToken() : cfg.serverToken
+        resp = await attempt(token)
       }
-      const requestId = resp.headers.get('x-request-id') ?? undefined
-      if (requestId !== undefined) opts.requestId = requestId
-      throw new BarkparkAuthError(
-        `barkparkFetch: 401 after preview-token reissue ${input.url}`,
-        opts,
-      )
+      if (resp.status === 401) {
+        const opts: { status: number; body: unknown; url: string; requestId?: string } = {
+          status: 401,
+          body: undefined,
+          url: input.url,
+        }
+        const requestId = resp.headers.get('x-request-id') ?? undefined
+        if (requestId !== undefined) opts.requestId = requestId
+        throw new BarkparkAuthError(
+          `barkparkFetch: 401 after preview-token reissue ${input.url}`,
+          opts,
+        )
+      }
     }
+
+    if (resp.status !== 429) break
+
+    // A 429 is a TIMED refusal, not an outage: the server said when to come
+    // back and the read is expected to succeed then. Deciding that here — BEFORE
+    // `decodeAndThrow` makes the failure definitive — is the whole fix; parsing
+    // `retryAfterMs` onto an error nobody catches (what this file did) is a
+    // number with no consumer.
+    //
+    // Body-one-shot: read the text ONCE and hand it to `throwDecodedBody` on the
+    // bail arm, because `decodeAndThrow` could no longer read it.
+    const raw = await resp.text()
+    let parsed: unknown = undefined
+    try {
+      parsed = raw.length > 0 ? JSON.parse(raw) : undefined
+    } catch {
+      // A non-JSON 429 body (a proxy's HTML throttle page) still has a header.
+      parsed = undefined
+    }
+    const delay = boundedRetryDelayMs(
+      rateLimitRetryAfterMs(parsed, resp.headers.get('retry-after')),
+    )
+    // THREE independent bounds, each of which alone ends the loop:
+    //  - no `retry_after` anywhere in the response → we refuse to invent one;
+    //  - the attempt cap;
+    //  - the total sleep budget.
+    if (
+      delay === undefined ||
+      attempts >= MAX_RATE_LIMIT_ATTEMPTS ||
+      !withinSleepBudget(delay, sleptMs)
+    ) {
+      throwDecodedBody(resp, raw, input.url)
+    }
+    sleptMs += delay
+    await sleepAbortable(delay, deadline.signal)
   }
 
   // 304 Not Modified is a SUCCESS, not an error: it is `ok === false` with an

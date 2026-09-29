@@ -9,7 +9,7 @@
 // Usage:
 //
 //	barkpark-builder \
-//	  --control-url https://cloud.barkpark.dev \
+//	  --control-url https://barkpark.cloud \
 //	  --token-file  /etc/barkpark/builder.token \
 //	  --worker-id   builder-host-1 \
 //	  --cache-dir   /var/lib/barkpark-builder/images \
@@ -27,11 +27,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/builder"
+	"github.com/FRIKKern/barkpark/internal/tokensource"
 )
 
 func main() {
@@ -48,7 +48,7 @@ func run(args []string) int {
 		cacheDir   = fs.String("cache-dir", "/var/lib/barkpark-builder/images",
 			"directory for docker-saved image tarballs (consumed by the box agent)")
 		logDir = fs.String("log-dir", "/var/lib/barkpark-builder/logs",
-			"directory for per-deployment build logs (path → build_log_url file://)")
+			"directory for per-deployment build logs on THIS host (narrated to the build console as a location; not stamped as build_log_url, which only ever carries a URL a reader can fetch)")
 		platform = fs.String("platform", "",
 			"nixpacks --platform value (e.g. linux/arm64); defaults to nixpacks' own default")
 		interval = fs.Duration("interval", builder.DefaultInterval,
@@ -65,17 +65,12 @@ func run(args []string) int {
 		return 2
 	}
 
-	bearer := *token
-	if bearer == "" && *tokenFile != "" {
-		buf, err := os.ReadFile(*tokenFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "barkpark-builder: read --token-file %s: %v\n", *tokenFile, err)
-			return 2
-		}
-		bearer = strings.TrimSpace(string(buf))
-	}
-	if bearer == "" {
-		fmt.Fprintln(os.Stderr, "barkpark-builder: --token or --token-file is required")
+	// The token file is re-read on a 401, not only at start: provisioning
+	// supersede-mints agent.token on claim / stale-reclaim, and a read-once
+	// daemon 401-loops until restarted. --token (literal) behaves as before.
+	tokens, err := tokensource.Resolve(*token, *tokenFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-builder: %v\n", err)
 		return 2
 	}
 
@@ -90,13 +85,13 @@ func run(args []string) int {
 	}
 
 	b := &builder.Builder{
-		ControlURL: *controlURL,
-		Token:      bearer,
-		WorkerID:   worker,
-		Platform:   *platform,
-		CacheDir:   *cacheDir,
-		LogDir:     *logDir,
-		Interval:   *interval,
+		ControlURL:  *controlURL,
+		TokenSource: tokens,
+		WorkerID:    worker,
+		Platform:    *platform,
+		CacheDir:    *cacheDir,
+		LogDir:      *logDir,
+		Interval:    *interval,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

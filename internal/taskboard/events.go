@@ -443,7 +443,17 @@ func (m Model) handleEventsResult(msg eventsResultMsg) (Model, tea.Cmd) {
 	}
 	m.ui.Paused = false
 	m.ui.RetryAt = time.Time{}
-	m.eventCursor = msg.page.Cursor
+	// The cursor advances HERE, on every consumed read — a drain page, a seek
+	// that landed on the tip, or a quiet caught-up poll. Persisting it here (and
+	// not only where a re-list lands, live.go) is the point: the catch-up path
+	// never re-lists, so a board that walked the feed to the tip and then quit
+	// used to save nothing and start the walk over on the next launch. The write
+	// is a ~30-byte atomic rename, guarded on an actual advance so a caught-up
+	// board (the server echoes `since` back) rewrites nothing on every poll.
+	if msg.page.Cursor > m.eventCursor {
+		m.eventCursor = msg.page.Cursor
+		m.persistEventCursor()
+	}
 
 	if msg.page.HasMore {
 		m.drainPages++

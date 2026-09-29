@@ -38,6 +38,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     Airdrop,
     Bulk,
     Delete,
+    DeskSearch,
     Discard,
     Doc,
     FieldBlocks,
@@ -51,7 +52,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
     Schema,
     Scope,
     Secondary,
-    Shares
+    Shares,
+    Views
   }
 
   # The in-Studio paper view + Studio shell function components live in
@@ -226,6 +228,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     socket = Shared.ensure_tenancy_scope(socket)
 
+    # Studio chrome locale (Gyldendal parity E7): process-local, so it rides
+    # every handle_params — the workspace is resolved just above, and a
+    # mid-session scope switch re-stamps it exactly like the log metadata.
+    BarkparkWeb.StudioLocale.put(socket.assigns[:current_workspace])
+
     # Tenant log attribution (both-surfaces parity with the HTTP TenantLogMetadata
     # plug). Logger.metadata is per-process; the connected Studio runs on this
     # long-lived LiveView process, and handle_params re-runs on every navigation /
@@ -346,6 +353,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   @impl true
   def handle_event("select", params, socket), do: Scope.select(params, socket)
   def handle_event("select-group", params, socket), do: Scope.select_group(params, socket)
+  def handle_event("select-view", params, socket), do: Views.select(params, socket)
   def handle_event("select-desk", params, socket), do: Scope.select_desk(params, socket)
   def handle_event("switch-workspace", params, socket), do: Scope.switch_workspace(params, socket)
   def handle_event("switch-project", params, socket), do: Scope.switch_project(params, socket)
@@ -354,6 +362,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("create-workspace", params, socket), do: Scope.create_workspace(params, socket)
   def handle_event("create-project", params, socket), do: Scope.create_project(params, socket)
   def handle_event("expand-pane", params, socket), do: Scope.expand_pane(params, socket)
+
+  def handle_event("desk-search", params, socket), do: DeskSearch.search(params, socket)
+  def handle_event("desk-search-clear", _params, socket), do: DeskSearch.clear(socket)
 
   def handle_event("new-document", params, socket), do: Fields.new_document(params, socket)
   def handle_event("save", params, socket), do: Fields.save(params, socket)
@@ -532,6 +543,21 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("paper-op", %{"op" => _} = op, socket), do: Paper.paper_op(op, socket)
   def handle_event("paper-op", params, socket), do: Paper.paper_op(params, socket)
   def handle_event("paper-ops", params, socket), do: Paper.paper_ops(params, socket)
+
+  # Paper masters (task-3b6e562e916c8ce4): save a block as a master, insert a
+  # detached copy from the slash picker. Both ride this socket (no HTTP route).
+  def handle_event("paper-save-master", params, socket),
+    do: Paper.paper_save_master(params, socket)
+
+  def handle_event("paper-insert-master", params, socket),
+    do: Paper.paper_insert_master(params, socket)
+
+  # Linked master instances (task-59f078a2fd248698): Detach and Pin.
+  def handle_event("paper-detach-master", params, socket),
+    do: Paper.paper_detach_master(params, socket)
+
+  def handle_event("paper-pin-master", params, socket),
+    do: Paper.paper_pin_master(params, socket)
 
   def handle_event("paper-history-step", params, socket),
     do: Paper.paper_history_step(params, socket)

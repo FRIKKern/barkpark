@@ -1,0 +1,15 @@
+{
+  "paper": "eight-minute-erasure",
+  "type": "figure",
+  "blocks": [
+    {
+      "caption": "Every mark is a GitHub API timestamp. The apology and the merge bracket the four description edits; the code rewrite that prompted them landed roughly two hours earlier. The artifact draws this as a labeled SVG timeline with an 8 min 10 s span bracket; this is the honest mermaid degradation.",
+      "child": {
+        "source": "flowchart LR\n  W[\"18:57:42<br/>code rewritten<br/>on his branch\"] --> A[\"20:47:43<br/>apology\"]\n  A --> E[\"20:50:24 … 20:54:36<br/>four rewrites of<br/>his description\"]\n  E --> M[\"20:55:53<br/>merged\"]",
+        "type": "diagram"
+      },
+      "id": "em8-fig-timeline",
+      "type": "figure"
+    }
+  ]
+}

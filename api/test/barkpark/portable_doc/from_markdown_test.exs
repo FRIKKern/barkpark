@@ -243,11 +243,18 @@ defmodule Barkpark.PortableDoc.FromMarkdownTest do
     # test/support/fixtures/pd-parity/code.golden.json, so the article reader's
     # `<pre>` must be identical with and without a lang — adding a label there
     # would be a cross-surface divergence, not a fix.
-    test "the article reader's <pre> is byte-identical with and without a lang" do
-      with_lang = FromMarkdown.blocks("```python\nprint(1)\n```")
-      without = FromMarkdown.blocks("```\nprint(1)\n```")
+    test "the article reader's <pre> differs with and without a lang only by data-lang (plan #27)" do
+      with_lang = FromMarkdown.blocks("```python
+print(1)
+```")
+      without = FromMarkdown.blocks("```
+print(1)
+```")
 
-      assert Render.render_blocks(with_lang, %{style: :article}) ==
+      rendered = Render.render_blocks(with_lang, %{style: :article})
+      assert rendered =~ ~s( data-lang="python")
+
+      assert String.replace(rendered, ~s( data-lang="python"), "") ==
                Render.render_blocks(without, %{style: :article})
     end
   end

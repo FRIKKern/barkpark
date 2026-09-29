@@ -145,7 +145,7 @@ defmodule Barkpark.Connectors.InstallSchemaTest do
       assert Catalog.installs_for_workspace(Ecto.UUID.generate()) == []
     end
 
-    test "a garbage workspace id is [] — never an Ecto.CastError 500" do
+    test "a garbage workspace id is [] — never an Ecto.Query.CastError" do
       assert Catalog.installs_for_workspace("not-a-uuid") == []
       assert Catalog.installs_for_workspace(nil) == []
     end

@@ -29,9 +29,9 @@ import (
 type noteRenderer struct{}
 
 func (noteRenderer) Render(b Block, ctx RenderCtx) []string {
-	label := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "label")))
-	lead := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "lead")))
-	text := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "text")))
+	label := sanitizeText(strings.TrimSpace(noteSlotText(b.Attrs, "label", "label")))
+	lead := sanitizeText(strings.TrimSpace(noteSlotText(b.Attrs, "lead", "lead")))
+	text := sanitizeText(strings.TrimSpace(noteSlotText(b.Attrs, "body", "text")))
 
 	if label == "" && lead == "" && text == "" {
 		return []string{""}
@@ -72,6 +72,28 @@ func (noteRenderer) Render(b Block, ctx RenderCtx) []string {
 		out = append(out, bar+" "+line)
 	}
 	return out
+}
+
+// Match Slots.note_slot_text: a first slot map owns the primary text, even
+// when empty. Empty lists, non-map first elements and malformed slots instead
+// read the flat field. Only an exactly empty body then tries top-level content.
+// The inline/scalar readers share stage's decoded-number convention: Decode
+// cannot distinguish JSON integers from integral floats and may lose precision.
+func noteSlotText(attrs map[string]any, slot, flatKey string) string {
+	primary := stageScalarText(attrs[flatKey])
+	if slots, ok := attrs["slots"].(map[string]any); ok {
+		if elements, ok := slots[slot].([]any); ok && len(elements) > 0 {
+			if first, ok := elements[0].(map[string]any); ok {
+				primary = stageInlineText(first["content"])
+			}
+		}
+	}
+	if primary == "" && slot == "body" {
+		if content, ok := attrs["content"].([]any); ok && len(content) > 0 {
+			return stageInlineText(content)
+		}
+	}
+	return primary
 }
 
 // ── stage ────────────────────────────────────────────────────────────────────

@@ -161,8 +161,6 @@ defmodule Barkpark.Tasks.CompactorTest do
   describe "eligible_query/1 — analyze selection" do
     test "returns only done+big and cancelled+big (lifecycle + size + idempotence filters)",
          %{scope: scope, workspace: ws, project: project} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       # 1. done + big history
       done_big = mk_done_with_history!(uniq("done-big"), scope, 60)
 
@@ -247,8 +245,6 @@ defmodule Barkpark.Tasks.CompactorTest do
 
     test "size threshold triggers eligibility even when history is short",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       # Short history (5 entries) but a HUGE single field — eligible via
       # min_bytes branch. Use random bytes so Postgres TOAST compression
       # can't shrink it below the threshold (a repeating "x" blob
@@ -269,8 +265,6 @@ defmodule Barkpark.Tasks.CompactorTest do
 
     test "configurable lifecycle_statuses widens the net (e.g. include open)",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_task!(uniq("open-big"), scope)
 
       set_content!(task, %{
@@ -297,8 +291,6 @@ defmodule Barkpark.Tasks.CompactorTest do
   describe "compact/0 — worklog tailing (tsk-dossier-worklog-compaction)" do
     test "an oversized worklog is tailed with a visible rollup entry; the snapshot keeps it all",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_done_with_history!(uniq("wl"), scope, 60)
 
       worklog =
@@ -334,8 +326,6 @@ defmodule Barkpark.Tasks.CompactorTest do
     end
 
     test "a worklog at/under the tail is left byte-identical", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_done_with_history!(uniq("wl-small"), scope, 60)
 
       worklog = [
@@ -353,8 +343,6 @@ defmodule Barkpark.Tasks.CompactorTest do
   describe "compact/0 — happy path" do
     test "60-event history → tail+summary+stamp, snapshot revision, event emitted",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_done_with_history!(uniq("happy"), scope, 60)
       pre_history = task.content["history"]
       assert length(pre_history) == 60
@@ -407,8 +395,6 @@ defmodule Barkpark.Tasks.CompactorTest do
     end
 
     test "perform/1 with synthetic Oban.Job runs the compaction", %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_done_with_history!(uniq("perform"), scope, 60)
       assert {:ok, %{compacted: 1, skipped: 0}} = Compactor.perform(%Oban.Job{})
 
@@ -422,8 +408,6 @@ defmodule Barkpark.Tasks.CompactorTest do
   describe "compact/0 — idempotence" do
     test "re-running on the same doc is a no-op (compacted_at gates it out)",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       _task = mk_done_with_history!(uniq("idem"), scope, 60)
 
       assert %{compacted: 1, skipped: 0} = Compactor.compact()
@@ -437,8 +421,6 @@ defmodule Barkpark.Tasks.CompactorTest do
   describe "restore/2 — reversibility proof" do
     test "compact then restore → content.history byte-for-byte equal; doc re-eligible",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_done_with_history!(uniq("rev"), scope, 60)
       # Capture the pre-compaction snapshot (full content map).
       pre_snapshot = Repo.get!(Document, task.id).content
@@ -479,8 +461,6 @@ defmodule Barkpark.Tasks.CompactorTest do
 
     test "restore rejects wrong revision id / wrong action / cross-doc",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_done_with_history!(uniq("rev-bad"), scope, 60)
       _ = Compactor.compact()
       [snap] = snapshot_revisions(task.doc_id)
@@ -501,8 +481,6 @@ defmodule Barkpark.Tasks.CompactorTest do
 
     test "restore guards raw non-UUID ids instead of raising Ecto.Query.CastError",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       task = mk_done_with_history!(uniq("rev-guard"), scope, 60)
       _ = Compactor.compact()
       [snap] = snapshot_revisions(task.doc_id)
@@ -522,8 +500,11 @@ defmodule Barkpark.Tasks.CompactorTest do
   describe "advisory-lock concurrency" do
     test "5 compaction attempts on the same done doc → 1 compacted, 4 skipped",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
+      # The 5 `Task.async_stream/3` children running `Compactor.compact/0`
+      # below need this test's connection. `DataCase.setup_sandbox/1` already
+      # started the owner with `shared: not tags[:async]` and this case is
+      # `async: false`, so shared mode is in force without an explicit
+      # `Sandbox.mode(Repo, {:shared, self()})` call here.
       _task = mk_done_with_history!(uniq("race"), scope, 60)
 
       # 5 concurrent compactors on the SAME doc. The advisory lock
@@ -542,8 +523,11 @@ defmodule Barkpark.Tasks.CompactorTest do
 
     test "compact vs close on a transitioning-to-done doc serializes correctly",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
+      # The two `Task.async_stream/3` children below — the `Compactor.compact/0`
+      # task and the `Tasks.close/3` task — get this test's connection from the
+      # `shared: not tags[:async]` owner `DataCase.setup_sandbox/1` already
+      # started for this `async: false` case.
+      #
       # An in_progress task with a tall history — NOT eligible yet (lifecycle
       # filter excludes it). Close it; the resulting done state IS eligible,
       # but the next compaction cycle picks it up.
@@ -623,8 +607,6 @@ defmodule Barkpark.Tasks.CompactorTest do
   describe "cap" do
     test "250 eligible docs, cap=100 → exactly 100 compacted in one cycle",
          %{scope: scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       # 120 eligible docs (250 is overkill for an inline test loop and
       # keeps the suite under a wall-clock budget; the cap semantics
       # are the same at 120 vs 250).
@@ -647,8 +629,6 @@ defmodule Barkpark.Tasks.CompactorTest do
 
   describe "no-op on empty" do
     test "no eligible docs → {:ok, %{compacted: 0, skipped: 0}}, no events", %{scope: _scope} do
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
       assert %{compacted: 0, skipped: 0} = Compactor.compact()
 
       # No events of either kind.

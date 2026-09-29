@@ -9,7 +9,8 @@ defmodule BarkparkWeb.PublishKeepsTaskClaimHttpTest do
   names `doc patch` in `mutatePerspectiveVerbs` as one of the verbs on "the doc
   mutation path", and `doc publish` as one of the verbs that IS the act moving
   the published lens. `bp task claim <id> <worker>` is
-  `POST /v1/tasks/:doc_id/claim` (plugins/tasks.ex:538).
+  `POST /v1/tasks/:doc_id/claim` (the `"/tasks/:doc_id/claim"` spec in
+  `plugins/tasks.ex:register_routes/1`).
 
   THE THREE DIFFERENCES from the context-level pins in
   `test/barkpark/content/publish_keeps_task_claim_test.exs`, reproduced here
@@ -80,7 +81,15 @@ defmodule BarkparkWeb.PublishKeepsTaskClaimHttpTest do
   @dataset "production"
 
   setup do
-    {:ok, _} = Auth.create_token(@token, "pkc-http", "test", ["read", "write", "admin"])
+    {:ok, _} =
+      Auth.create_token(
+        @token,
+        "pkc-http",
+        "test",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
 
@@ -135,7 +144,11 @@ defmodule BarkparkWeb.PublishKeepsTaskClaimHttpTest do
             "title" => id,
             "content" =>
               LabelFixtures.with_registered_labels(
-                %{"kind" => "task", "lifecycle_status" => "open"},
+                %{
+                  "kind" => "task",
+                  "brief" => Barkpark.TaskBriefFixtures.brief(),
+                  "lifecycle_status" => "open"
+                },
                 @dataset
               )
           }

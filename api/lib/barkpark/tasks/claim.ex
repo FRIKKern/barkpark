@@ -13,7 +13,8 @@ defmodule Barkpark.Tasks.Claim do
       fenced_content_write: 4,
       current_epoch: 1,
       insert_mutation_event!: 5,
-      caller_stamp: 1,
+      caller_stamp: 2,
+      actor_stamp: 2,
       task_broadcast: 4,
       emit_broadcasts: 1
     ]
@@ -24,6 +25,8 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Repo
   alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.CriteriaExemption
+  alias Barkpark.Tasks.FlightRecorder
+  alias Barkpark.Tasks.SessionId
   alias Barkpark.Tasks.TwinResolver
   alias Barkpark.Tasks.{ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
 
@@ -77,6 +80,27 @@ defmodule Barkpark.Tasks.Claim do
     resources = opts |> Keyword.get(:resources, []) |> normalize_resources()
     caller_token_id = Keyword.get(opts, :caller_token_id)
 
+    # THE DISAMBIGUATOR THE REFUSAL ADVERTISES (bp-task-verbs-500-on-cross-dataset-duplicate-slugs).
+    # `AmbiguousTwinError`'s own hint says "name the dataset you mean
+    # (?dataset=<name> on the task route)", and the READ door has honoured it
+    # since the rule landed — but this WRITE door dropped it on the floor, so
+    # the remedy the refusal named did not exist on the verb that most needed
+    # it. Measured live against guerrilla 2026-09-16:
+    # `GET /v1/tasks/akbr-feedback-2026-08-epic?dataset=production` -> 200,
+    # `POST /v1/tasks/akbr-feedback-2026-08-epic/claim?dataset=production` ->
+    # 409 `ambiguous_dataset` (request_id GNW9zm1YCdlVXHsAADNB). One id, one
+    # query string, two answers: a door that refuses and then refuses its own
+    # escape hatch leaves the eleven cross-dataset rows unclaimable — and
+    # because every claim-fenced verb needs a claim first, unstampable and
+    # uncloseable too.
+    #
+    # A NAMED dataset is not a tiebreak (rule 2 forbids those): it is the
+    # caller supplying the fact whose ABSENCE is the whole reason rule 3
+    # refuses. `TwinResolver.choose/3` filters to it BEFORE the rule runs, so
+    # naming a dataset that holds no row is `not_found` — never the other
+    # twin.
+    dataset = Keyword.get(opts, :dataset)
+
     result =
       Repo.transaction(fn ->
         # PRE-RESOLUTION advisory lock (per-doc_id) — serializes concurrent
@@ -99,7 +123,7 @@ defmodule Barkpark.Tasks.Claim do
           _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.resources()])
         end
 
-        case fetch_task_by_doc_id(doc_id, workspace_id, project_id) do
+        case fetch_task_by_doc_id(doc_id, workspace_id, project_id, dataset) do
           {:error, :not_found} = err ->
             err
 
@@ -111,15 +135,15 @@ defmodule Barkpark.Tasks.Claim do
             if renewal?(doc, worker_id) do
               with :ok <- check_executable_for_targeted_claim(doc, worker_id),
                    :ok <- validate_renewal_execution_policy(doc, opts) do
-                do_renew(doc, worker_id, caller_token_id)
+                do_renew(doc, worker_id, caller_token_id, Keyword.get(opts, :session))
               end
             else
               with :ok <- check_executable_for_targeted_claim(doc, worker_id),
                    :ok <- check_ready_for_targeted_claim(doc),
-                   :ok <- check_criteria_stated(doc, opts),
+                   {:ok, override_reason} <- check_criteria_stated(doc, opts),
                    :ok <- check_deps_satisfied(doc),
                    :ok <- check_resources_free(resources, doc.id, workspace_id, project_id) do
-                do_claim(doc, worker_id, resources, opts)
+                do_claim(doc, worker_id, resources, opts, override_reason)
               end
             end
         end
@@ -159,9 +183,9 @@ defmodule Barkpark.Tasks.Claim do
   # a textbook deadlock (claim holds row R and waits for advisory A while a
   # close holds A and waits for R). `FOR UPDATE` is preserved — it is what
   # makes the claim a CAS.
-  defp fetch_task_by_doc_id(doc_id, workspace_id, project_id) do
+  defp fetch_task_by_doc_id(doc_id, workspace_id, project_id, dataset) do
     with {:ok, %Document{id: task_uuid}} <-
-           resolve_task_by_doc_id(doc_id, workspace_id, project_id) do
+           resolve_task_by_doc_id(doc_id, workspace_id, project_id, dataset) do
       _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_uuid)])
 
       # global-read: by-PK row lock inside the per-task advisory lock, on the uuid resolve_task_by_doc_id/3 just returned from a workspace/project-scoped query — the tenancy decision was made there, this re-reads the same row.
@@ -174,8 +198,8 @@ defmodule Barkpark.Tasks.Claim do
   # `Barkpark.Tasks.TwinResolver`. Every claim-fenced verb — pulse, stamp, stage,
   # close, release — resolves through here, so rule 4 ("no task verb writes to a
   # `drafts.<id>` twin while a published row exists") is this one call site.
-  defp resolve_task_by_doc_id(doc_id, workspace_id, project_id) do
-    fetch_task_exact(doc_id, workspace_id, project_id)
+  defp resolve_task_by_doc_id(doc_id, workspace_id, project_id, dataset) do
+    fetch_task_exact(doc_id, workspace_id, project_id, dataset)
   end
 
   defp lock_task_row(task_uuid) do
@@ -223,7 +247,7 @@ defmodule Barkpark.Tasks.Claim do
   # a `drafts.` twin never outranks a published row, and an unnamed cross-dataset
   # tie is REFUSED (409, naming both datasets) rather than picked. A claim is a
   # write; picking a row for the writer is the one thing this door must not do.
-  defp fetch_task_exact(doc_id, workspace_id, project_id) do
+  defp fetch_task_exact(doc_id, workspace_id, project_id, dataset) do
     # Tenancy: route through the ONE shared helper (fail-CLOSED on nil) so the
     # targeted-claim fetch shares the exact workspace/project semantics as the
     # ready-queue path (Queue.ready_query → Scope.scope_to_workspace). A nil
@@ -231,7 +255,8 @@ defmodule Barkpark.Tasks.Claim do
     TwinResolver.resolve(
       doc_id,
       &Scope.scope_to_workspace(&1, workspace_id, project_id),
-      &Repo.all/1
+      &Repo.all/1,
+      dataset: dataset
     )
   end
 
@@ -263,18 +288,42 @@ defmodule Barkpark.Tasks.Claim do
   #
   # The exemptions come from `Tasks.CriteriaExemption`, the same definition the
   # close door reads, so the two cannot drift about what a container is.
+  #
+  # RETURNS THE REASON, NOT JUST `:ok` (task-07c21ec0d1d43e90). The refusal text
+  # and the `--set` flag summary both promise the reason lands "on the record",
+  # and for a while that promise was false: the gate consumed the string and
+  # dropped it, so a criteria-less row claimed WITH a reason read back exactly
+  # like one claimed with none, and every override was unauditable after the
+  # fact. So this door hands the reason back to the writer.
+  #
+  # THE REASON IS RETURNED ONLY WHEN THE GATE PASSED BECAUSE OF IT. An exempt
+  # row (a container, or a row that already states criteria) never needed an
+  # override, so a reason sent alongside one is NOT recorded — otherwise the
+  # stored key would stop meaning "this claim was waved through" and start
+  # meaning "somebody typed a flag", which is not an attestation of anything.
+  # The `cond` order is what makes that true: `exempt?` is tested FIRST.
   defp check_criteria_stated(%Document{} = doc, opts) do
     cond do
-      CriteriaExemption.exempt?(doc) -> :ok
-      override_given?(opts) -> :ok
+      CriteriaExemption.exempt?(doc) -> {:ok, nil}
+      reason = override_reason(opts) -> {:ok, reason}
       true -> {:error, :criteria_unstated}
     end
   end
 
-  defp override_given?(opts) do
+  # The trimmed reason, or nil when none was given. A blank or whitespace-only
+  # string is NOT an override (the flag summary says so verbatim), and what gets
+  # stored is the TRIMMED text, so the record never carries the caller's
+  # incidental whitespace.
+  defp override_reason(opts) do
     case Keyword.get(opts, :criteria_unstated_override) do
-      reason when is_binary(reason) -> String.trim(reason) != ""
-      _ -> false
+      reason when is_binary(reason) ->
+        case String.trim(reason) do
+          "" -> nil
+          trimmed -> trimmed
+        end
+
+      _ ->
+        nil
     end
   end
 
@@ -397,7 +446,7 @@ defmodule Barkpark.Tasks.Claim do
     end
   end
 
-  defp do_claim(%Document{} = doc, worker_id, resources, opts) do
+  defp do_claim(%Document{} = doc, worker_id, resources, opts, override_reason \\ nil) do
     task_policy = Map.get(doc.content || %{}, "execution_policy")
 
     case ExecutionPolicy.resolve(
@@ -412,7 +461,10 @@ defmodule Barkpark.Tasks.Claim do
           worker_id,
           resources,
           Keyword.get(opts, :caller_token_id),
-          snapshot
+          snapshot,
+          override_reason,
+          Keyword.get(opts, :session),
+          Keyword.get(opts, :priming_start)
         )
 
       {:error, errors} ->
@@ -439,7 +491,16 @@ defmodule Barkpark.Tasks.Claim do
     end
   end
 
-  defp do_claim_resolved(%Document{} = doc, worker_id, resources, caller_token_id, snapshot) do
+  defp do_claim_resolved(
+         %Document{} = doc,
+         worker_id,
+         resources,
+         caller_token_id,
+         snapshot,
+         override_reason,
+         session,
+         priming_start
+       ) do
     observed_rev = doc.rev
     new_rev = generate_rev()
     next_epoch = current_epoch(doc) + 1
@@ -467,6 +528,38 @@ defmodule Barkpark.Tasks.Claim do
       |> then(fn claim ->
         if is_nil(snapshot), do: claim, else: Map.put(claim, "execution_policy", snapshot)
       end)
+      # THE ATTESTATION (task-07c21ec0d1d43e90). Present ONLY on a claim that
+      # got through the criteria gate because a reason was given; absent — the
+      # key itself, not an empty string — on every other claim. That asymmetry
+      # is the whole value: `claim.criteria_unstated_override` existing IS the
+      # statement "this row was claimed with zero acceptance criteria, and here
+      # is why". `close` and `pulse` both rewrite `claim` by Map.put-ing onto
+      # the map they read, so the key rides through a lease renewal, a pulse
+      # and a close (done or cancelled) without either of them naming it.
+      |> then(fn claim ->
+        if is_nil(override_reason),
+          do: claim,
+          else: Map.put(claim, "criteria_unstated_override", override_reason)
+      end)
+      # THE SESSION DISCRIMINATOR (task-f79e39f4992749a5). `worker` is
+      # LANE-scoped, so two sessions of one lane write an identical claim.
+      # `session` is a server-derived, one-way id of the key the caller
+      # presented (Barkpark.Tasks.SessionId) — never the key itself, never
+      # replayable from the stored row. `session_origin` freezes the session
+      # that CREATED this lease so a later renew / pulse / close by a
+      # DIFFERENT session of the same lane is visible from the row alone.
+      # ATTRIBUTION, NEVER A FENCE: the CAS below is byte-unchanged and still
+      # fences on `worker + epoch` only. A sessionless caller (every client
+      # that predates this) writes NO key and its claim stays byte-identical.
+      |> SessionId.put_session_origin(session)
+      # THE FLIGHT RECORDER'S OPENING FRAME (task-a42dccec2fe4a406). The schema=1
+      # manifest the CLI already writes locally, now on the LEASE it describes.
+      # Absent stays ABSENT: `FlightRecorder.put_priming_start/2` has no arm that
+      # writes a placeholder, so a claim that carries no manifest produces the
+      # byte-identical map it produced before this line existed. That control is
+      # the criterion, not a nicety — a `{}` or a `null` here would turn "nobody
+      # measured" into a measurement of nothing.
+      |> FlightRecorder.put_priming_start(priming_start)
 
     new_content =
       doc.content
@@ -482,7 +575,16 @@ defmodule Barkpark.Tasks.Claim do
             @event_task_claimed,
             observed_rev,
             "api",
-            caller_stamp(caller_token_id)
+            # tlv-bl-events-actor-attribution: WHO took the lease and on WHICH
+            # epoch, stamped on the event itself. `caller_stamp/1` names the
+            # AUTHENTICATED bearer; this names the worker identity the CAS
+            # fences on — the one a `close` must later cite, and the one an
+            # audit reconstructing "who held this row when" needs. Surfaces on
+            # `bp task events --payload` as `payload.actor` with no reader edit
+            # (Tasks.Events projects `document` minus envelope minus audit).
+            caller_stamp(caller_token_id, session)
+            |> Map.merge(actor_stamp(worker_id, next_epoch))
+            |> Map.merge(SessionId.session_stamp(session))
           )
 
         {:ok, updated, [task_broadcast(updated, @event_task_claimed, ev, observed_rev)]}
@@ -519,7 +621,7 @@ defmodule Barkpark.Tasks.Claim do
   # refresh, digest untouched) and adds the `claim.now` now-line — but as its
   # OWN path, holder-gated with NO re-claim fall-through: a lapsed lease must
   # pulse `:not_holder`, never silently re-claim through do_claim below.
-  defp do_renew(%Document{content: content} = doc, worker_id, caller_token_id) do
+  defp do_renew(%Document{content: content} = doc, worker_id, caller_token_id, session) do
     observed_rev = doc.rev
     new_rev = generate_rev()
     claim = Map.get(content, "claim") || %{}
@@ -530,6 +632,13 @@ defmodule Barkpark.Tasks.Claim do
       claim
       |> Map.put("epoch", next_epoch)
       |> Map.put("ts_iso", ts_iso)
+      # The renewing SESSION overwrites `claim.session`; `session_origin` is
+      # left exactly as the original claim wrote it. `session != session_origin`
+      # on a live row is therefore the reported signal that two sessions of one
+      # lane touched it (scripts/ledger/claim-health.sh). Attribution only —
+      # a renewal by a different session is still allowed, as it must be: the
+      # lane worker id is the fence and it has not changed.
+      |> SessionId.put_session(session)
 
     # Keep worker + assignee (already this caller). Only the claim lease moves.
     new_content =
@@ -545,7 +654,16 @@ defmodule Barkpark.Tasks.Claim do
             @event_task_claimed,
             observed_rev,
             "api",
-            caller_stamp(caller_token_id)
+            # tlv-bl-events-actor-attribution: WHO took the lease and on WHICH
+            # epoch, stamped on the event itself. `caller_stamp/1` names the
+            # AUTHENTICATED bearer; this names the worker identity the CAS
+            # fences on — the one a `close` must later cite, and the one an
+            # audit reconstructing "who held this row when" needs. Surfaces on
+            # `bp task events --payload` as `payload.actor` with no reader edit
+            # (Tasks.Events projects `document` minus envelope minus audit).
+            caller_stamp(caller_token_id, session)
+            |> Map.merge(actor_stamp(worker_id, next_epoch))
+            |> Map.merge(SessionId.session_stamp(session))
           )
 
         {:ok, updated, [task_broadcast(updated, @event_task_claimed, ev, observed_rev)]}

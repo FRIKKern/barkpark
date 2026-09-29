@@ -95,6 +95,109 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       assert html =~ "text-decoration:line-through"
     end
 
+    test "highlight rides inline off-surface (email) — survives with no stylesheet" do
+      node = %{"kind" => "PdText", "highlight" => true, "children" => ["x"]}
+      html = Walk.render_body(node, @width, @email)
+      assert html =~ "background-color:#fff2a8"
+      refute html =~ "<mark"
+    end
+
+    test "article highlight is the semantic <mark class=\"bp-highlight\"> the surface stylesheet paints — no inline property" do
+      node = %{"kind" => "PdText", "highlight" => true, "children" => ["x"]}
+      html = Walk.render_body(node, @width, @article)
+      assert html =~ ~s(<mark class="bp-highlight">x</mark>)
+      refute html =~ "background-color"
+    end
+
+    test "subscript and superscript are the semantic tags on both surfaces, no inline property" do
+      sub = %{"kind" => "PdText", "sub" => true, "children" => ["2"]}
+      sup = %{"kind" => "PdText", "sup" => true, "children" => ["2"]}
+      assert Walk.render_body(sub, @width, @article) =~ "<sub>2</sub>"
+      assert Walk.render_body(sub, @width, @email) =~ "<sub>2</sub>"
+      assert Walk.render_body(sup, @width, @article) =~ "<sup>2</sup>"
+      assert Walk.render_body(sup, @width, @email) =~ "<sup>2</sup>"
+      refute Walk.render_body(sup, @width, @article) =~ "vertical-align"
+    end
+
+    test "a paragraph's author alignment rides inline on both surfaces; left adds nothing" do
+      centred = %{"kind" => "PdParagraph", "align" => "center", "children" => ["x"]}
+      assert Walk.render_body(centred, @width, @article) =~ "text-align:center"
+      assert Walk.render_body(centred, @width, @email) =~ "text-align:center"
+      plain = %{"kind" => "PdParagraph", "children" => ["x"]}
+      refute Walk.render_body(plain, @width, @article) =~ "text-align"
+    end
+
+    test "a heading's author alignment rides inline on both surfaces" do
+      right = %{"kind" => "PdHeading", "level" => 2, "align" => "right", "children" => ["x"]}
+      assert Walk.render_body(right, @width, @article) =~ ~s(<h2 style="text-align:right">x</h2>)
+      assert Walk.render_body(right, @width, @email) =~ "text-align:right"
+    end
+
+    test "a merged table cell renders colspan/rowspan on the origin and no <td> for the covered positions (plan #24)" do
+      table = %{
+        "kind" => "PdTable",
+        "head" => [
+          [%{"kind" => "PdText", "children" => ["A"]}],
+          [%{"kind" => "PdText", "children" => ["B"]}],
+          [%{"kind" => "PdText", "children" => ["C"]}]
+        ],
+        "rows" => [
+          [
+            [%{"kind" => "PdText", "children" => ["ab"]}],
+            [],
+            [%{"kind" => "PdText", "children" => ["c1"]}]
+          ],
+          [
+            [%{"kind" => "PdText", "children" => ["tall"]}],
+            [%{"kind" => "PdText", "children" => ["b2"]}],
+            [%{"kind" => "PdText", "children" => ["c2"]}]
+          ],
+          [
+            [],
+            [%{"kind" => "PdText", "children" => ["b3"]}],
+            [%{"kind" => "PdText", "children" => ["c3"]}]
+          ]
+        ],
+        "spans" => [
+          %{"row" => 0, "col" => 0, "colspan" => 2, "rowspan" => 1},
+          %{"row" => 1, "col" => 0, "colspan" => 1, "rowspan" => 2}
+        ]
+      }
+
+      html = Walk.render_body(table, @width, @article)
+      assert html =~ ~r/<td class="bp-table__td" colspan="2">.*?ab.*?<\/td>/
+      assert html =~ ~r/<td class="bp-table__td" rowspan="2">.*?tall.*?<\/td>/
+
+      # first body row: two cells (the covered one is gone); third row: two cells (covered by the rowspan)
+      rows = Regex.scan(~r/<tr>(.*?)<\/tr>/s, html) |> Enum.map(fn [_, inner] -> inner end)
+      body = Enum.drop(rows, 1)
+      assert Enum.map(body, fn r -> length(Regex.scan(~r/<td/, r)) end) == [2, 3, 2]
+      # the email arm renders every grid cell and no span attributes
+      email = Walk.render_body(table, @width, @email)
+      refute email =~ "colspan"
+      assert length(Regex.scan(~r/<td/, email)) == 9
+    end
+
+    test "column widths render as a <colgroup> on the article table only (plan #25)" do
+      table = %{
+        "kind" => "PdTable",
+        "head" => [
+          [%{"kind" => "PdText", "children" => ["A"]}],
+          [%{"kind" => "PdText", "children" => ["B"]}]
+        ],
+        "rows" => [[[], []]],
+        "widths" => [220, nil]
+      }
+
+      html = Walk.render_body(table, @width, @article)
+
+      assert html =~
+               ~s(<table role="presentation" class="bp-table"><colgroup><col style="width:220px"><col></colgroup><thead>)
+
+      refute Walk.render_body(table, @width, @email) =~ "colgroup"
+      refute Walk.render_body(Map.delete(table, "widths"), @width, @article) =~ "colgroup"
+    end
+
     test "escapes HTML in string children" do
       node = %{"kind" => "PdText", "children" => ["<script>"]}
       html = Walk.render_body(node, @width, @email)

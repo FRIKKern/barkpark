@@ -167,6 +167,11 @@ defmodule Barkpark.LabelFixtures do
   Pass explicit names when a test hand-rolls its own weighted tags. Rows are
   global-scope (nil workspace), so every workspace-scoped registry read
   resolves them (the registry reads workspace-including-global).
+
+  Inside a sandbox the insert rolls back with the test. Called where the insert
+  COMMITS (`Ecto.Adapters.SQL.Sandbox.unboxed_run/2`), the rows would outlive
+  the test in the shared dataset, so this records the ids it inserted and
+  deletes exactly those on exit. See `purge_on_exit_if_committed/1`.
   """
   def register_tags!(dataset, names \\ nil) do
     names = names || for(i <- 1..12, do: "fixture-tag-#{i}")
@@ -187,8 +192,75 @@ defmodule Barkpark.LabelFixtures do
         }
       end)
 
-    Barkpark.Repo.insert_all(Barkpark.Content.Document, rows, on_conflict: :nothing)
+    {_count, inserted} =
+      Barkpark.Repo.insert_all(Barkpark.Content.Document, rows,
+        on_conflict: :nothing,
+        returning: [:id]
+      )
+
+    purge_on_exit_if_committed(Enum.map(inserted, & &1.id))
     :ok
+  end
+
+  # `returning` lists only the rows THIS call inserted: a name that already
+  # existed hit `on_conflict: :nothing` and belongs to someone else.
+  #
+  # Did the insert commit? A sandboxed test runs inside one open transaction
+  # that has written, so it holds a transaction id. An unboxed caller outside
+  # `Repo.transaction` runs each statement as its own transaction, so the insert
+  # has already committed and the next statement starts with no transaction id.
+  # A caller inside an unboxed `Repo.transaction` commits later and reads as
+  # "not committed"; no current caller does that.
+  #
+  # The purge runs after the test process exits, on its own unboxed
+  # connection, and fails the test if any of the rows is still there.
+  defp purge_on_exit_if_committed([]), do: :ok
+
+  defp purge_on_exit_if_committed(ids) do
+    %{rows: [[xid]]} = Barkpark.Repo.query!("SELECT pg_current_xact_id_if_assigned()")
+
+    if xid == nil and not Barkpark.Repo.in_transaction?() do
+      register_on_test_exit!(fn -> purge_committed_tags!(ids) end)
+    end
+
+    :ok
+  end
+
+  # `ExUnit.Callbacks.on_exit/2` accepts only the test process, but committing
+  # callers also run in a `Task` the test spawned (dedup_publish_toctou,
+  # broadcast_savepoint_idle). Register on the nearest process in the `$callers`
+  # chain that ExUnit knows as a test. `OnExitHandler.add/3` is what `on_exit/2`
+  # calls; it answers `:error` for a process that is not a test.
+  defp register_on_test_exit!(fun) do
+    ref = {__MODULE__, make_ref()}
+
+    registered? =
+      Enum.any?([self() | Process.get(:"$callers", [])], fn pid ->
+        ExUnit.OnExitHandler.add(pid, ref, fun) == :ok
+      end)
+
+    registered? ||
+      raise "LabelFixtures committed tag documents outside any test process; " <>
+              "nothing would delete them"
+  end
+
+  defp purge_committed_tags!(ids) do
+    Ecto.Adapters.SQL.Sandbox.unboxed_run(Barkpark.Repo, fn ->
+      Barkpark.Repo.query!(
+        "DELETE FROM documents WHERE id = ANY($1) AND type = 'tag'",
+        [Enum.map(ids, &Ecto.UUID.dump!/1)]
+      )
+
+      %{rows: [[left]]} =
+        Barkpark.Repo.query!("SELECT count(*) FROM documents WHERE id = ANY($1)", [
+          Enum.map(ids, &Ecto.UUID.dump!/1)
+        ])
+
+      if left != 0 do
+        raise "LabelFixtures.register_tags!/2 committed #{length(ids)} tag documents " <>
+                "and #{left} are still there after the on_exit purge"
+      end
+    end)
   end
 
   @doc """

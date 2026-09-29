@@ -251,16 +251,20 @@ func TestListAllBarkparks(t *testing.T) {
 	}
 }
 
-func TestGetCredentials(t *testing.T) {
+// The empty-teamID call is the default fleet path (cloud12_cmd / setup_cloud_login
+// both pass ""), so it gets its own arm: route + bearer + the ABSENCE of the team
+// header. It is the arm that would red if the empty-teamID branch of
+// getCredentials ever started stamping a header.
+func TestGetCredentialsWithoutTeam(t *testing.T) {
 	var gotAuth, gotMethod, gotPath, gotTeam string
 	c := newFake(t, "sess-xyz", func(w http.ResponseWriter, r *http.Request) {
 		gotAuth, gotMethod, gotPath, gotTeam = r.Header.Get("Authorization"), r.Method, r.URL.Path, r.Header.Get("X-Barkpark-Team")
 		_, _ = io.WriteString(w, `{"admin_token":"bp_admin_secret-bearer","url":"https://prod.example.com","host":"203.0.113.7"}`)
 	})
 
-	creds, err := c.GetCredentials(context.Background(), "bp-1")
+	creds, err := c.GetCredentialsForTeam(context.Background(), "bp-1", "")
 	if err != nil {
-		t.Fatalf("GetCredentials: %v", err)
+		t.Fatalf("GetCredentialsForTeam(\"\"): %v", err)
 	}
 	if gotMethod != "GET" || gotPath != "/v1/barkparks/bp-1/credentials" {
 		t.Fatalf("request = %s %s, want GET /v1/barkparks/bp-1/credentials", gotMethod, gotPath)
@@ -269,7 +273,7 @@ func TestGetCredentials(t *testing.T) {
 		t.Fatalf("auth header = %q, want Bearer sess-xyz", gotAuth)
 	}
 	if gotTeam != "" {
-		t.Fatalf("default GetCredentials team header = %q, want absent", gotTeam)
+		t.Fatalf("empty-teamID GetCredentialsForTeam team header = %q, want absent", gotTeam)
 	}
 	if creds.AdminToken != "bp_admin_secret-bearer" || creds.URL != "https://prod.example.com" || creds.Host != "203.0.113.7" {
 		t.Fatalf("credentials decoded wrong: %+v", creds)
@@ -296,9 +300,9 @@ func TestGetCredentials404SurfacesNoAdminToken(t *testing.T) {
 		_, _ = io.WriteString(w, `{"error":"no_admin_token"}`)
 	})
 
-	_, err := c.GetCredentials(context.Background(), "bp-1")
+	_, err := c.GetCredentialsForTeam(context.Background(), "bp-1", "")
 	if err == nil {
-		t.Fatal("GetCredentials on a 404 returned nil, want an error")
+		t.Fatal("GetCredentialsForTeam on a 404 returned nil, want an error")
 	}
 	if !strings.Contains(err.Error(), "no_admin_token") {
 		t.Fatalf("error = %v, want it to surface no_admin_token", err)

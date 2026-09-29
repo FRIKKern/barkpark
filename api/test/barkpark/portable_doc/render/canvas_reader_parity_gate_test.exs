@@ -36,9 +36,14 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
       the saved-block re-render matches the reader by construction.
 
     * VERBATIM-CARRY (sheet, embed) — the canvas shows a read-only CHIP, not the
-      reader render, but carries the WHOLE block on `bpBlock` with ZERO
-      value/content ops (embed-node.js). So the SAVED block reader-renders
-      byte-identically to the original: parity of the persisted bytes. §4 proves
+      reader render, and carries the WHOLE block on `bpBlock`. The only
+      value/content op it can emit is a deliberate retarget: `mountAtomRetarget`
+      (embed-node.js) commits the new target through `setNodeMarkup` and
+      run-convert emits exactly one `patch-block` per retarget — `{ref,
+      snapshot: null}` for a sheet, `{target}` for an embed (proven by the audit
+      suite __sheet_embed_retarget_audit.test.mjs, §5 and §5c). Every OTHER key
+      rides verbatim, so the SAVED block reader-renders byte-identically to the
+      original apart from that one reference: parity of the persisted bytes. §4 proves
       the reader render is deterministic and the canvas JS shows only chip
       markup, never the reader's sheet/embed markup.
 
@@ -156,6 +161,32 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
        "bp-asciicast"},
       {"diagram", %{"type" => "diagram", "source" => "graph TD; A-->B", "caption" => "A graph"},
        &Figures.diagram_html(&1["source"], &1["caption"], :article), "class=\"mermaid\""},
+      # scaffy-backlog-blocks-editable-studio: the TECHNICAL pair. Both are EDITABLE
+      # canvas attr-atoms (bpDiff / bpFiletree, technical-node.js) — like `diagram`,
+      # not like the read-only fleet atoms — but UNLIKE diagram they have NO client
+      # runtime that could produce their markup, so their canvas preview is the
+      # reader's OWN `Components.diff_html/1` / `filetree_html/1`, pushed on
+      # `bp:block-html` (shared/paper.ex @technical_render_types) and painted into the
+      # node-view's hole. Enrolling them here is what makes that the ONLY path: §1
+      # pins render_block to the one emitter, and §3 mechanically forbids `bp-diff` /
+      # `bp-filetree` anywhere in the editor JS — so a future node-view that
+      # hand-mirrors a diff row reds. The fixtures carry a REAL multi-file diff (a
+      # `diff --git` header, a `@@` hunk, +/- rows) and a REAL annotated tree so every
+      # emitter branch is exercised, never a vacuous empty box.
+      {"diff",
+       %{
+         "type" => "diff",
+         "file" => "lib/a.ex",
+         "lang" => "elixir",
+         "diff" =>
+           "diff --git a/lib/a.ex b/lib/a.ex\n--- a/lib/a.ex\n+++ b/lib/a.ex\n@@ -1,3 +1,3 @@\n context\n-old line\n+new line"
+       }, &Components.diff_html/1, "bp-diff"},
+      {"filetree",
+       %{
+         "type" => "filetree",
+         "text" => "lib/\n├── a.ex ● covered\n└── b.ex ✕ missing",
+         "legend" => "● covered  ✕ missing"
+       }, &Components.filetree_html/1, "bp-filetree"},
       # pd-ee-dataviz-editors (charter D3): the 5 DATA-VIZ kinds are server-painted
       # bpFleet atoms (a parallel painted-set — run-convert.js CANVAS_DATAVIZ_TYPES /
       # paper_canvas.ex @canvas_dataviz_types / shared/paper.ex @dataviz_render_types),
@@ -522,8 +553,10 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
   # ── §4 VERBATIM-CARRY parity (sheet, embed) ─────────────────────────────────
   #
   # The chip-carry pair shows a read-only chip, not the reader render. Parity is
-  # carried by the block riding VERBATIM on bpBlock (embed-node.js, zero
-  # value/content ops): the saved block reader-renders identically. Assert the
+  # carried by the block riding VERBATIM on bpBlock: the canvas emits at most one
+  # `patch-block` per deliberate retarget (`mountAtomRetarget` in embed-node.js;
+  # audit suite §5 / §5c) and no other value/content ops, so the saved block
+  # reader-renders identically. Assert the
   # reader render is deterministic + non-empty, and (via §3) that the canvas JS
   # shows only chip markup, never the reader's sheet/embed markup.
 

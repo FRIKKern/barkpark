@@ -83,7 +83,13 @@ defmodule BarkparkWeb.Studio.PdsChatLiveGlobalReadsTest do
     raw = "pds-chat-admin-#{System.unique_integer([:positive])}"
 
     {:ok, token} =
-      Auth.create_token(raw, "pds chat wsb admin", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        raw,
+        "pds chat wsb admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, _} = TenancyAuth.create_membership(ws_b.id, token.id, "admin")
 

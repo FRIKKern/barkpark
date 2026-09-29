@@ -44,6 +44,28 @@
 #                 (HTTP 401 or 403). Never retried, because a rejected token is
 #                 not a blip and pressing re-run cannot clear it. The thing to
 #                 fix is the repo secret BARKPARK_TASK_TOKEN.
+#     4  AMBIGUOUS  — `--extract-task-id` only: two or more DISTINCT `Task:`
+#                 ids at column 0. The gate refuses rather than picking, because
+#                 picking by position is guessing.
+#
+#   Modes (argv), each reusing the SAME ledger classifier as the main path:
+#     --extract-task-id         print the PR body's one trailer id (exit 4 =
+#                               ambiguous). Unchanged.
+#     --resolve-only            EXISTENCE only: TASK_ID resolves on the ledger.
+#                               Exit 0 = it exists; 1 = 404 with a token in hand;
+#                               2/3/5 exactly as below. It deliberately does NOT
+#                               apply the claim predicate — see the landing-trailer
+#                               block for why a LANDED pointer is held to a
+#                               different bar than the PR's own backing row.
+#     --check-landing-trailers  every `Task:` trailer in the commit messages under
+#                               LANDING_COMMITS_DIR (one <nnn>-<sha>.msg file per
+#                               commit) must resolve. This is the text that
+#                               SQUASHES onto main under this repo's
+#                               COMMIT_MESSAGES setting, so it — not the PR body —
+#                               is what `git log` will carry. The refusal names the
+#                               SHA, which is why the sha rides the filename
+#                               rather than the messages being concatenated.
+#
 #     5  MALFORMED ANSWER — the ledger answered 2xx and the body could not be
 #                 read as a task document (not valid JSON, or no document in the
 #                 `result` envelope). The ledger is UP and authenticating; it is
@@ -176,30 +198,34 @@ set -uo pipefail
 # author of an ambiguous body HAS named their task, and telling them to add a
 # trailer they already wrote is the kind of wrong instruction that gets a gate
 # worked around rather than satisfied.
-extract_task_ids() { # every DISTINCT column-0 trailer id, one per line
-  printf '%s' "${PR_BODY:-}" \
-    | grep -ioE '^task:[[:space:]]*`?[a-z0-9][a-z0-9._/-]*`?' \
-    | sed -E 's/^[Tt][Aa][Ss][Kk]:[[:space:]]*//' \
-    | tr -d '`' \
-    | awk 'NF && !seen[$0]++'
-}
+# THE GRAMMAR ITSELF NOW LIVES IN scripts/lib/task-trailers.sh, sourced here and
+# by scripts/landed-mark.sh. Everything described above is its contract; this
+# file keeps only the PR_BODY-shaped wrappers the workflow calls. One grammar
+# was already the rule (landed-mark deliberately owns no second copy) — it is
+# now one FILE, with its own selftest, reachable without running the gate.
+GATE_DIR="$(cd "$(dirname "$0")" && pwd)"
+TRAILER_LIB="${PR_TASK_GATE_TRAILER_LIB:-$GATE_DIR/lib/task-trailers.sh}"
+if [ ! -f "$TRAILER_LIB" ]; then
+  echo "pr-task-gate: the Task: trailer grammar lives in ${TRAILER_LIB} and it is not there. This script deliberately owns no second copy of that regex, so it cannot decide anything without it." >&2
+  exit 1
+fi
+# shellcheck source=scripts/lib/task-trailers.sh
+. "$TRAILER_LIB"
 
-extract_task_id() {
-  ids="$(extract_task_ids)"
-  n="$(printf '%s' "$ids" | grep -c . || true)"
-  case "$n" in
-    ''|0) return 0 ;;
-    1)    printf '%s' "$ids"; return 0 ;;
-  esac
-  printf 'ambiguous task reference — %s distinct `Task:` ids at column 0: %s. Exactly one is required: keep the real trailer at column 0 and indent, fence or reword every example id.\n' \
-    "$n" "$(printf '%s' "$ids" | tr '\n' ' ' | sed 's/ *$//')" >&2
-  return 4
-}
+extract_task_ids() { task_trailer_ids "${PR_BODY:-}"; }
+extract_task_id()  { task_trailer_single "${PR_BODY:-}"; }
 
 if [ "${1:-}" = "--extract-task-id" ]; then
   extract_task_id
   exit $?
 fi
+
+# EXISTENCE-ONLY MODE. Set from argv (never from the ambient environment) so a
+# stray exported RESOLVE_ONLY cannot silently downgrade the real gate run into
+# a presence check — that would be a required gate falling open from a variable
+# nobody in this file assigns.
+RESOLVE_ONLY=0
+[ "${1:-}" = "--resolve-only" ] && RESOLVE_ONLY=1
 
 LEDGER_BASE="${LEDGER_BASE:-https://guerrilla.barkpark.cloud}"
 DATASET="${LEDGER_DATASET:-production}"
@@ -235,6 +261,206 @@ pass()      { echo "pr-task-gate: PASS: $*";        exit 0; }
 # author reads at 2am, so each says what happened AND what clears it.
 credential_rejected() { echo "pr-task-gate: MISCONFIGURED CREDENTIAL: $*" >&2; exit 3; }
 malformed()           { echo "pr-task-gate: MALFORMED LEDGER ANSWER: $*" >&2; exit 5; }
+
+# ── MODE: --check-landing-trailers — the text that actually LANDS ────────────
+#
+# THE HOLE THIS CLOSES (task-ee5b82efaee0fb0b, specimen measured 2026-09-20).
+# This gate reads the PR BODY. The commit message that squashes onto main is a
+# SEPARATE piece of text and nothing read it. PR #19417 merged as 9f931a6f8
+# with a body trailer naming task-f902a5f2f6e3bcb3 (real, done) and a COMMIT
+# trailer reading `Task: task-PENDING-nightly`, which returns not_found. The
+# gate reported success, correctly by its own contract, and main now carries a
+# commit whose only durable ledger pointer is dead. A second lane rebuilt the
+# same fix as #19416 partly because the ledger showed no row owning the landed
+# work. git log is what a future auditor reads.
+#
+# WHY THIS SHAPE IS ORDINARY HERE AND NOT EXOTIC: this repo's squash setting is
+# COMMIT_MESSAGES (measured 2026-09-09, task-6275588f44322ab9). GitHub's DEFAULT
+# would compose the squash body from the PR title and body, and then the two
+# texts could not diverge at all. The setting is the mechanism.
+#
+# ── THE RULE, AND THE ONE IT IS NOT (blast radius measured before promoting) ──
+# Two rules were on the table:
+#
+#   (a) EVERY `Task:` trailer in the commits that will land must RESOLVE.
+#   (b) the landing commits' trailers must INCLUDE the PR body's id.
+#
+# (b) is the stricter, more satisfying-sounding rule and it is the wrong one.
+# Measured over all 52 open PRs on 2026-09-20 (GET
+# "repos/FRIKKern/barkpark/pulls?state=open&per_page=100", then each PR's
+# /commits): 38 of 52 carry NO `Task:` trailer in any branch commit at all —
+# every dependabot PR among them — so (b) would red 38 of 52 open PRs on the
+# day it shipped. A rule that reds three quarters of the fleet does not get
+# obeyed, it gets bypassed, and this is a REQUIRED context.
+#
+# (a) is what shipped. Under (a) the measured blast radius is ZERO: 14 open PRs
+# carry a commit trailer, they name 15 distinct ids, and all 15 resolve on the
+# ledger. A PR whose commits carry no trailer is SILENT, not refused — that is
+# the landed-mark side's problem (it has a PR-body fallback for exactly this)
+# and not a reason to block a merge. What (a) refuses is the one thing that is
+# never defensible: a commit that WILL land asserting a pointer to a row that
+# does not exist.
+#
+# RESOLVE, NOT ACTIVE-CLAIM. The landing trailer is held to EXISTENCE only,
+# while the PR body's id still faces the full claim predicate below. They are
+# different jobs: the body's id answers "is someone working this", the landed
+# id answers "can a future auditor follow this pointer". A landed commit
+# legitimately cites a row that is long since `done`, and reusing the claim
+# predicate here would red that.
+#
+# MORE THAN ONE LANDING TRAILER IS FINE, deliberately unlike the PR body. A
+# stacked or multi-commit branch can honestly land two rows, and there is
+# nothing to disambiguate: every one of them is checked, none is picked.
+# ── INPUT SHAPE: ONE FILE PER COMMIT, NAMED BY ITS SHA ──────────────────────
+# The first cut concatenated every branch commit message into one blob, which
+# resolved the ids correctly and then could not say WHICH COMMIT carried the
+# dead one. On a ten-commit branch that is a refusal the author cannot act on
+# without bisecting their own branch by hand — and this gate's whole thesis is
+# that a verdict which names the wrong thing sends the reader to fix the wrong
+# thing. So the collect step writes LANDING_COMMITS_DIR/<nnn>-<sha>.msg, one
+# message per file, and the sha travels with the text instead of being thrown
+# away before the scan. There is deliberately no blob fallback: a second input
+# shape would be a second answer to "which commit said this".
+if [ "${1:-}" = "--check-landing-trailers" ]; then
+  landing_dir="${LANDING_COMMITS_DIR:-}"
+  [ -n "$landing_dir" ] || fail "the landing-trailer scan was given no LANDING_COMMITS_DIR, so the commit messages that will land were NOT read. This is a gate-plumbing fault, not a finding about the PR: see the 'Collect the trailers that will LAND' step in .github/workflows/pr-task-gate.yml."
+  # A NAMED DIRECTORY THAT IS NOT THERE IS A REFUSAL, never an empty scan. An
+  # unreadable input that reads as "no trailers" is this gate going green
+  # having looked at nothing — the exact failure this whole mode exists to
+  # remove, reintroduced one level up.
+  [ -d "$landing_dir" ] || fail "the landing-trailer scan was pointed at '${landing_dir}' and that directory does not exist, so the commit messages that will land were NOT read. This is a gate-plumbing fault, not a finding about the PR: see the 'Collect the trailers that will LAND' step in .github/workflows/pr-task-gate.yml."
+
+  # THE PAIR TABLE: one line per (sha, subject, trailer id). A file and not an
+  # associative array, because this runs on bash 3.2 too (macOS, where the
+  # harness is written) and `declare -A` is a bash 4 feature — a gate that
+  # silently degrades on the maintainer's own shell is a gate nobody runs
+  # before pushing. TAB-separated, and the subject has its tabs squashed on the
+  # way in so the separator can never be forged from commit-controlled text.
+  landing_pairs="$(mktemp)"
+  landing_commits=0
+  for landing_msg in "$landing_dir"/*.msg; do
+    [ -f "$landing_msg" ] || continue
+    landing_commits=$((landing_commits + 1))
+    # <nnn>-<sha>.msg — the sha is everything after the first dash.
+    landing_sha="$(basename "$landing_msg" .msg)"
+    landing_sha="${landing_sha#*-}"
+    landing_text="$(cat "$landing_msg")"
+    landing_subject="$(printf '%s' "$landing_text" | head -1 | tr '\t' ' ')"
+    while IFS= read -r landing_id; do
+      [ -n "$landing_id" ] || continue
+      printf '%s\t%s\t%s\n' "$landing_sha" "$landing_subject" "$landing_id" >> "$landing_pairs"
+    done <<LANDING_ONE
+$(task_trailer_ids "$landing_text")
+LANDING_ONE
+  done
+
+  # Distinct across the whole branch: the same row legitimately appears in
+  # every commit of a branch, and resolving it once per commit would be N
+  # ledger reads for one answer.
+  landing_ids="$(cut -f3 "$landing_pairs" 2>/dev/null | awk 'NF && !seen[$0]++' || true)"
+  landing_n="$(printf '%s' "$landing_ids" | grep -c . || true)"
+  [ -n "$landing_n" ] || landing_n=0
+  # THE SCAN SIZE IS PRINTED BEFORE THE VERDICT, and it is the line a positive
+  # control must assert on. "every landing trailer resolves" is satisfied
+  # VACUOUSLY by a scan that read zero of them, so a control that only checks
+  # the exit code proves nothing about whether this mode can see.
+  echo "pr-task-gate: LANDING TRAILERS: read ${landing_commits} commit message(s), scanned ${landing_n} distinct Task: trailer id(s) that will land: $(printf '%s' "$landing_ids" | tr '\n' ' ' | sed 's/ *$//')"
+  if [ "$landing_n" = "0" ]; then
+    rm -f "$landing_pairs"
+    pass "the ${landing_commits} commit message(s) that will squash onto main carry no Task: trailer, so there is no landed pointer to resolve (the PR body's own trailer is checked separately, by the step above)"
+  fi
+  # A SCAN BUDGET, spelled as a refusal rather than a truncation. Truncating at
+  # N would mean the ids past N are never read while the gate still prints a
+  # pass — a silent hole with a number on it. Max observed on any open PR on
+  # 2026-09-20: 1.
+  LANDING_TRAILER_MAX="${LANDING_TRAILER_MAX:-25}"
+  if [ "$landing_n" -gt "$LANDING_TRAILER_MAX" ]; then
+    rm -f "$landing_pairs"
+    fail "the commits on this branch name ${landing_n} distinct Task: trailer ids, over the ${LANDING_TRAILER_MAX} this gate will resolve in one run. This is almost always a branch that merged main into itself rather than rebasing, which drags every already-landed trailer into the range. Rebase onto current main and re-push."
+  fi
+  landing_bad=""
+  # THE COUNT IDENTITY (task-f97a161b35aa2041). `landing_n` above is the number
+  # of ids the scan HANDED IN; `landing_reached` is the number this loop
+  # actually took a ledger answer for. They are two different quantities and
+  # the PASS sentence below is written over the first one, so until they are
+  # compared the gate can announce a verdict over work it never did.
+  #
+  # The concrete way they come apart: this loop is fed by a HERE-DOC, so its
+  # input sits on fd 0, and its body runs a CHILD (`bash "$0" --resolve-only`)
+  # that INHERITS fd 0. Any command anywhere in the resolve path that reads
+  # stdin — a future `gh`, a `jq -`, a `python3 -`, a bare `read` — swallows
+  # the rest of the here-doc, the loop ends after ONE iteration with exit 0,
+  # and the gate prints "every one of the 5 ... resolves" having resolved one.
+  #
+  # The guard is a COUNT COMPARISON, not fd discipline, and deliberately so: fd
+  # discipline is a property of every child in the resolve path forever, which
+  # nothing can hold, while the identity is one assertion in one place that
+  # notices no matter WHY the loop came up short. No `</dev/null` is attached
+  # to the child here for exactly that reason — it would silence the symptom
+  # this check exists to catch and leave the check itself unfalsifiable. See
+  # the identity arms in scripts/pr-task-gate.test.sh.
+  landing_reached=0
+  while IFS= read -r landing_id; do
+    [ -n "$landing_id" ] || continue
+    landing_rc=0
+    # RECURSION, NOT A SECOND FETCHER. `--resolve-only` re-enters THIS script
+    # with the same classifier, the same bounded retry, the same 401/404/5xx
+    # discrimination and the same credential handling. A private copy of the
+    # curl here would be a second answer to "is the ledger reachable" and they
+    # would drift.
+    landing_out="$(TASK_ID="$landing_id" bash "$0" --resolve-only 2>&1)" || landing_rc=$?
+    case "$landing_rc" in
+      0) : ;;
+      1)
+        # NOT ANCHORED AT COLUMN 0, deliberately: fail() wraps its sentence in
+        # a `::error title=...::` workflow command, so the verdict does NOT
+        # start the line. The first draft anchored on `^pr-task-gate: FAIL` and
+        # the capture came back EMPTY — a refusal that named the trailer and
+        # then said "the ledger answered: " with nothing after it. The harness
+        # arm that asserts the READ text is what caught it.
+        landing_why="$(printf '%s' "$landing_out" | grep -o 'pr-task-gate: FAIL: .*' | tail -1 | sed 's/^pr-task-gate: FAIL: //' || true)"
+        # EVERY COMMIT THAT NAMES IT, not just the first. A rebase that fixed
+        # one of three commits and missed two must not read as fixed.
+        while IFS=$'\t' read -r bad_sha bad_subject bad_id; do
+          [ "$bad_id" = "$landing_id" ] || continue
+          landing_bad="${landing_bad}${landing_bad:+; }${bad_sha:0:10} \"${bad_subject}\" names ${landing_id} (the ledger answered: ${landing_why})"
+        done < "$landing_pairs"
+        ;;
+      2) rm -f "$landing_pairs"; unchecked "resolving the landing trailer '${landing_id}' could not be completed — ${landing_out}" ;;
+      3) rm -f "$landing_pairs"; credential_rejected "resolving the landing trailer '${landing_id}' — ${landing_out}" ;;
+      5) rm -f "$landing_pairs"; malformed "resolving the landing trailer '${landing_id}' — ${landing_out}" ;;
+      *) rm -f "$landing_pairs"; unchecked "resolving the landing trailer '${landing_id}' exited ${landing_rc}, which is not a code this gate's contract defines — ${landing_out}" ;;
+    esac
+    # COUNTED AFTER THE CASE, not before it: an id is "reached" once a ledger
+    # answer for it has been read and classified. rc 2/3/5 leave the script
+    # from inside the case, so they can never inflate this.
+    landing_reached=$((landing_reached + 1))
+  done <<LANDING_IDS
+$landing_ids
+LANDING_IDS
+  rm -f "$landing_pairs"
+  # THE IDENTITY, CHECKED BEFORE ANY VERDICT — including before the dead-trailer
+  # refusal. A loop that stopped early did not only miss ids, it also produced
+  # an INCOMPLETE offender list, so even its refusal would be a claim over work
+  # it never did. Both numbers are in the sentence because "the loop is broken"
+  # is unactionable and "resolved 1 of the 5 handed in" is not.
+  if [ "$landing_reached" != "$landing_n" ]; then
+    fail "the landing-trailer loop resolved ${landing_reached} of the ${landing_n} Task: trailer id(s) the scan handed it, so this gate CANNOT say anything about the other $((landing_n - landing_reached)). It is not a finding about the PR — it is this gate failing to do its own work, and the near-certain cause is that something in the '--resolve-only' path now READS STDIN: the loop's ids are on fd 0 (a here-doc) and the child 'bash \$0 --resolve-only' inherits fd 0, so one stdin read swallows the remaining ids and the loop ends after ${landing_reached} iteration(s). Find the new stdin reader in the resolve path and give it its own input (for example '</dev/null'), then re-run. Do NOT satisfy this by deleting the count check: the count is the only thing that can see this at all."
+  fi
+  if [ -n "$landing_bad" ]; then
+    # NAME THE COMMIT, NAME WHICH TRAILER, AND QUOTE WHAT WAS READ. There are
+    # two trailers in play and they are routinely different; a refusal that
+    # says only "a task does not exist" sends the author to edit the PR body,
+    # which is the one that is fine. And without the SHA the author of a
+    # ten-commit branch has to bisect their own branch to find the line.
+    fail "a COMMIT MESSAGE that will squash onto main names a task that does not resolve on the ledger: ${landing_bad}. This is NOT the PR body's trailer — the body names '${BODY_TASK_ID:-<none>}', which was checked separately and is not what git log will carry. This repo squashes with COMMIT_MESSAGES, so the branch commits' messages ARE the landed text, and a dead pointer there is the only durable record the work leaves (specimen: 9f931a6f8 landed 'Task: task-PENDING-nightly'). Fix the COMMIT named above, not the body: git rebase -i ${BASE_REF_HINT:-<base>} (or git commit --amend on a single-commit branch), put a real row in its Task: trailer, force-push — this check re-fires on synchronize."
+  fi
+  # THE COUNT IS IN THE PASS SENTENCE TOO. A verdict that does not say how much
+  # work it did cannot be read as anything but a boolean, and the defect this
+  # clause closes was invisible precisely because the green sentence quoted the
+  # number handed in and never the number reached.
+  pass "every one of the ${landing_n} Task: trailer id(s) across the ${landing_commits} commit message(s) that will land resolves on the ledger (resolved ${landing_reached} of the ${landing_n} handed in)"
+fi
 
 [ -n "${TASK_ID:-}" ] || fail "no task reference found on the PR (add a 'Task: <doc_id>' line to the PR description)"
 
@@ -425,6 +651,16 @@ case "$http_code" in
     ;;
   2??)     : ;;  # parse below
 esac
+
+# EXISTENCE-ONLY EXIT. Everything above decided whether the ledger ANSWERED and
+# whether the row is there; everything below decides whether it is actively
+# worked. --check-landing-trailers wants only the first half (see the block
+# above for why a LANDED pointer is held to existence and not to a live claim),
+# so it stops here — sharing the whole classifier and none of the predicate.
+if [ "$RESOLVE_ONLY" = "1" ]; then
+  echo "pr-task-gate: RESOLVED: '${TASK_ID}' exists on the ledger (HTTP ${http_code})"
+  exit 0
+fi
 
 # Parse the flattened doc. doc.get wraps the document under `.result`; a
 # published task carries lifecycle_status and claim at the top level. A 2xx with

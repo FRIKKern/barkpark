@@ -28,41 +28,90 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 ## The loop (per row)
 
 1. **T1 triage — you, cheap, before any worker.** `env -u BARKPARK_TOKEN bp task get <id>`
-   (criteria live under `doc.content`). Then prove the premise on `origin/main`:
-   `git show origin/main:<path>` + grep. Confirm the defect EXISTS, is REACHABLE, and is
+   (criteria live under `doc.content`). Then prove the premise AT THE REF, and fetch first —
+   **`git fetch origin main` and then `git show origin/main:<path>` + grep, from a worktree, never
+   `cat`/`grep`/`git show HEAD:` in the shared checkout.** Both halves are load-bearing: without
+   the fetch, `origin/main` is whatever ref is on disk, which is as old as the last fetch.
+   WHY INSPECTION CANNOT CATCH THIS, and why the rule is worded as a COMMAND and not a caution:
+   a stale checkout is a valid git repo, on `main`, clean, and every read of it SUCCEEDS. `cat`,
+   `grep`, `sed` and `git show HEAD:<path>` return exit 0 and well-formed, internally CONSISTENT
+   content — the file agrees with its own tests, its own comments and its sibling files, because
+   it is a coherent older SNAPSHOT of the tree, not a corruption of the current one. There is no
+   error, no empty read, no malformed byte to notice, so re-reading it more carefully cannot
+   help: the failure is a CONFIRMED ANSWER TO THE WRONG QUESTION. Measured 2026-09-21 — the
+   shared checkout was 581 commits behind and two agents filed two independent false findings off
+   it in one shift, one of them a P1 against an instrument that had already been fixed on main.
+   `held-liveness.sh` now prints that distance at the top of every loop (see the pulse section);
+   when it says `CHECKOUT STALE`, every unfetched read you have made this session is suspect.
+   Confirm the defect EXISTS, is REACHABLE, and is
    NOT ALREADY BUILT (search `gh pr list --search "<id>"` and the ledger for a PR). A
    filed row is a measurement with a timestamp; many are stale within hours. If the
    premise is false, close the row honestly: `bp task close <id> <you> <epoch> cancelled
    "<what you found>"` (cancelled rows are exempt from the criteria gate).
 2. **Claim** with your worker id: `bp task claim <id> lead-<lane> --yes` (prints epoch). Pulse
    while it is held: `bp task pulse <id> lead-<lane> --now "<what is happening>" --yes`.
-3. **Dispatch** an Opus worker: `Agent(subagent_type: "general-purpose", model: "opus",
+3. **Before you dispatch, measure the disk — a full host makes every gate lie.**
+   `bash scripts/scratchpad-reaper.sh --floor 25 "$ORCH"`. Exit 0 dispatches; exit 2 REFUSES
+   and names the floor and the measured free space; exit 3 means it could not measure, which
+   is also not a pass. On a refusal, do NOT dispatch: tell `main`, hold the lane, and say
+   "disk floor". A worker launched onto a full box comes back with a red gate that reads
+   exactly like a real defect, and you spend the round on code that was never broken —
+   measured 2026-08-10, `ENOSPC` killed every Bash call on a wave host (a bare `true`
+   failed) and the digest phase ran ZERO commands. The remedy briefed that day,
+   `rm -rf /private/tmp/claude-501/*/tasks/*.output`, is a PROVED NO-OP: 0 files matched,
+   `rm` rc=1, free unchanged at 117Mi — those files are the fault's victim, not its cause.
+   Do not repeat it to a worker.
+4. **Dispatch** an Opus worker: `Agent(subagent_type: "general-purpose", model: "opus",
    name: "<lane>-w<N>")`. The worker prompt must contain: the task id, "the task row IS
    the spec — do not trust my paraphrase", the worktree command below, the fence, the
-   gate to run, the commit rules, and "report what the filing got WRONG". Five workers
-   at most in flight; parallelise across rows, not inside one.
-4. **Worker builds** in `git worktree add $ORCH/wt/<lane>-<slug> -b <lane>/<slug> origin/main`.
-   Elixir gates run inside that worktree (`cd api && mix test <files>`; never borrow
-   `_build` from another tree). Go: `go build ./... && go test ./internal/cli/...`.
+   gate to run, the commit rules, **"COMMIT AND PUSH BEFORE REPORTING — a pushed branch
+   survives a killed session, an uncommitted worktree does not"**, and "report what the
+   filing got WRONG". Five workers at most in flight; parallelise across rows, not inside
+   one. A HEADLESS builder (`claude -p`) is launched ONLY through
+   `helpers/launch-headless-builder.sh` (SKILL.md §1b), which exports
+   `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`. Without that env var a hand-composed
+   `nohup claude -p … --model opus --dangerously-skip-permissions` terminates its own
+   background tasks at 600 s, mid-Elixir-compile, and exits looking like a calm finish —
+   five builders, five deaths, one cause, measured 2026-09-05. The whole recipe, if you
+   ever need it without the wrapper, is
+   `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 nohup claude -p "$(cat prompt.md)" --model opus --dangerously-skip-permissions > log 2>&1 &`. When one returns, run
+   `launch-headless-builder.sh --check <log> --worktree <wt>` before you believe its report.
+5. **Worker builds** in `git worktree add $ORCH/wt/<lane>-<slug> -b <lane>/<slug> origin/main`.
+   IMMEDIATELY record the base: `git -C <wt> merge-base HEAD origin/main > $ORCH/tmp/<lane>-w<N>/base.sha`.
+   That file is the only reset target the commit rules below allow; `origin/main` moves while the worker works.
+   Elixir gates run inside that worktree, through the STRICT entry point —
+   `cd api && ../scripts/mix-test-strict.sh <files>` (or `cd cloud && ../scripts/…`);
+   never borrow `_build` from another tree. NOT bare `mix test <files>`: mix refuses
+   only when EVERY named path is unmatched, so one real path makes a renamed or
+   mistyped sibling vanish and the run still prints `N tests, 0 failures` and exits 0
+   (task-1d5bf80f8f4de47a). The strict runner refuses first, **exit 64**, naming the
+   offending argument, and forwards every argument unchanged otherwise. READ THE
+   CODE, not the output: 64 = REFUSED, nothing ran (fix the argv); 2 = the suite RAN
+   and tests FAILED (fix the code); 0 = green. Before 2026-09-20 a refusal also exited
+   2, so `… || echo REFUSED` called a red suite a refusal (task-620ea822de73bf5e). Go: `go build ./... && go test ./internal/cli/...`.
+   Beside mix-test-strict.sh, any api/test edit also runs `bash scripts/unreachable-assert-message-check.sh --files <staged api/test files>` (the required Elixir gate's ratchet; the pre-commit hook runs it too, but a `--no-verify` commit skips it).
    `cc` on this Mac is a Claude Code shim: cgo/NIF builds die on a fake "unknown option" — use
    `CGO_ENABLED=0` for Go (as the Makefile does) and `CC=/usr/bin/clang` for mix when a NIF compiles.
    A change with a test proves red-without / green-with (mutation-prove it).
-5. **Commit rules** (worker): `git add <exact paths>`; `git commit -- <exact paths>`;
+6. **Commit rules** (worker): `git add <exact paths>`; `git commit -- <exact paths>`;
    then `git log -1 --stat` and READ the list — a file you did not write means another
-   writer is in your tree; strip it (`git reset --soft`, restage yours only) before pushing.
+   writer is in your tree; strip it (`git reset --soft <the literal base sha you recorded at worktree creation>` — NEVER `origin/main`, which moves; restage yours only) before pushing.
    No `Co-Authored-By` lines. Commit BEFORE reporting — the branch ref outlives the dir.
-6. **PR** (worker): `git push -u origin <lane>/<slug>`; `gh pr create` with a body that
+7. **PR** (worker): `git push -u origin <lane>/<slug>`; `gh pr create` with a body that
    ends in the trailer line `Task: <doc_id>`. Report the PR URL and criteria status.
-7. **Review + merge** (you): read the diff, not the worker's prose. Run the gate once
+8. **Review + merge** (you): read the diff, not the worker's prose. Run the gate once
    yourself if the change is in a shared path. Merge with `gh pr merge <pr> --squash --delete-branch` once
    `bash $ORCH/pr-required.sh <pr> FRIKKern/barkpark` says MERGEABLE — ALWAYS pass the repo as arg 2:
    the cwd-derived default needs no GraphQL outage to go empty, and an empty repo printed `0/4` at
    exit 0 for PRs that were at 3/4. (`scripts/bp-merge.sh` takes NO argument — it derives the PR from the current branch, so
    it only works from inside that PR's worktree). Red required checks: fix or
    hand back; never bypass, never auto-merge.
-8. **Stamp + close** (you): `bp task stamp <id> lead-<lane> <epoch> --criterion N
-   --criterion-text "<exact text>" --met --evidence "PR #… merged <sha>"` per met criterion
-   (index is ZERO-based; a merge-gate criterion needs `--merge-gated`); then
+9. **Stamp + close** (you): take the wording FROM THE ROW into a file — `bp task get <id> -o json |
+   jq -r '.doc.content.acceptance_criteria[N].criterion' > crit.txt` — then `bp task stamp <id>
+   lead-<lane> <epoch> --criterion N --criterion-text-file crit.txt --met --evidence "PR #… merged
+   <sha>"` per met criterion (index is ZERO-based; a merge-gate criterion needs `--merge-gated`).
+   NEVER pass the wording inline: a backticked code span in a double-quoted shell argument is
+   COMMAND SUBSTITUTION, so your shell executes the criterion before bp ever sees it. Then
    `bp task close <id> lead-<lane> <epoch> done "<reason>" --yes` — the lifecycle word
    `done` is a REQUIRED fifth positional; omit it and your reason lands in the lifecycle
    slot and errors `invalid_lifecycle:<your whole sentence>`. A 409 `doc_changed_since_claim`
@@ -131,6 +180,18 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    explains a wide prose fallback at length and reads like a false positive when the key was
    simply true (measured 2026-09-02; a lead stamped a wrong sentence on that misreading).
 
+10. **Round end — reap what the round accrued, AFTER every branch is pushed.** Your workers'
+    worktrees and scratch dirs are the refill engine: ~11 GB/day per project scratchpad,
+    and on 2026-09-13 a single session scratchpad on this box held 7,397,328 entries.
+    `bash scripts/scratchpad-reaper.sh --dry-run --root "$ORCH/tmp" --repo <repo>`, READ every
+    line, then `--reap --yes-delete`. It skips every REGISTERED worktree unconditionally and
+    refuses any other checkout carrying an unpushed commit, an untracked file, a stash, or no
+    remote — 17 registered worktrees were live during the incident and one blind `rm -rf` would
+    have stranded a lane's build. Push first, or your own unmerged branches become
+    SKIP-UNPUSHED lines and nothing is reclaimed. Report the `freed_kb=` figures, which come
+    from `df` before/after. **Never report a `du` figure**: measured 2026-08-10, 36 session
+    directories `du` valued at ~33 GB freed UNDER 0.5 GB, because APFS clones share blocks.
+
 - **Hold the claim until the PR MERGES, not just until it opens.** The lease (~40 min) lapses while a PR
   waits in a deep CI queue and the required task gate then fails "carries no claim" (measured 2026-09-02
   on ten PRs). Pulse each held row every ~18 min until merge; re-claim before re-running a gate; a
@@ -155,20 +216,72 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 - Never edit `.claude/worktrees/*` dirs, never `git stash` (shared stack), never touch
   the main checkout, never push to a branch you did not create.
 
+## Your SESSION — every file you write is yours alone
+
+Your prompt names a SESSION id (`s<N>`). It is not the lane: a relaunched `lead-<lane>-2`
+is a DIFFERENT session of the SAME lane, and on 2026-09-07 two such sessions sharing one
+set of filenames removed a live row from a pulse list and rewrote a `status.md` from 149
+lines to 94. Nothing errored; every write was legitimate. Open your files first and use
+ONLY what this prints:
+
+    bash .claude/skills/orchestrate-tasks/helpers/session-files.sh open $ORCH/lead-<lane> s<N>
+    # STATUS=…/status.s<N>.md  HELD=…/held.s<N>.txt  PULSE_LOG=…  PULSE_PID=…
+
+- **A peer's file is not yours to touch.** Per-session names make a removal from another
+  session's pulse list IMPOSSIBLE BY CONSTRUCTION rather than merely reported — which is the
+  remedy this brief chose, because an audit log of a silent removal is read only by someone
+  who already suspects it happened.
+- **Takeover, FIRST command — when the predecessor's `status.*.md` is older than the last line
+  of its `pulse.*.log`:** `bash .claude/skills/orchestrate-tasks/helpers/lane-state.sh <lane>
+  FRIKKern/barkpark`. A pulse after the status write means the lead kept working after its last
+  snapshot: r10 (2026-09-11) closed five rows and opened six draft PRs it never recorded, and the
+  successor spent ~40 min re-deriving them. It prints LEDGER (in_progress rows claimed by
+  `lead-<lane>*`), PRS (via `lane-open-prs.sh`, each `Task:` trailer checked against LEDGER) and
+  WORKTREES (commits off `origin/main` or uncommitted files, excluding a branch whose PR GitHub
+  says MERGED). Exit 0 = every read succeeded; exit 2 = a `CANNOT READ` line, and that section is
+  INCOMPLETE, not empty. Plan from its output, not from the stale table.
+- **If you believe you INHERITED this lane, APPEND.** `open` prints an `INHERITED:` banner
+  naming every predecessor file. Read them; write your own. NEVER rewrite one — a filename
+  stops a name collision, it does not stop a successor that correctly believes itself the
+  sole owner. **Quiet is not dead:** that inference was wrong three times out of three on the
+  night this rule was written, each relaunch resting on silence, and one "dead" predecessor
+  was alive and mid-work.
+- **Prove you did not clobber one.** `session-files.sh verify $ORCH/lead-<lane> s<N>` re-reads
+  every predecessor's size and digest and REDS when one moved. All three collisions that night
+  were caught by a size that moved — by accident. This makes it a check.
+- **`DECISIONS-FROM-MAIN.md` stays LANE-wide** and append-only: main is its only writer.
+- **The ledger is unchanged.** You still claim, pulse, stamp and close as `lead-<lane>`; the
+  per-session discriminator on a claim is the SERVER's (`claim.session` / `claim.session_origin`,
+  PR #17293), not this filename. A claim taken under the old lane-scoped id keeps renewing,
+  pulsing and closing exactly as before — the CAS fences on `worker + epoch` and never on a
+  session — so nothing held mid-campaign is orphaned by this change.
+
 ## Communication protocol
 
 - **Cadence is a hard rule.** ONE background loop pulses your held rows every 18 min (`sleep 1080`); ONE
   monitor watches your PRs and prints only when `pr-required.sh` changes verdict; message `main` only on
   a merge, a close, or a ruling — never an idle note. A lead whose loop fired every 40 s sent six idle
   notes in three minutes and 39 pulses in ten minutes into a box on a diet (2026-09-02); it was stopped.
+  Do not hand-write that loop: run `.claude/skills/orchestrate-tasks/helpers/pulse-loop.sh lead-<lane> $ORCH/lead-<lane>/held.s<N>.txt $ORCH/lead-<lane>/pulse.s<N>.log`, which drops a closed row from the round instead of striking the whole list for it. The held file and the log are YOUR SESSION's, from `session-files.sh open` — never the lane-wide `held.txt`.
+  And running is not held: at the TOP OF EVERY LOOP, and again after ANY peer stand-down, run
+  `.claude/skills/orchestrate-tasks/helpers/held-liveness.sh $ORCH/lead-<lane> --session s<N> --expect-worker lead-<lane> --pid-file $ORCH/lead-<lane>/pulse.s<N>.pid --log $ORCH/lead-<lane>/pulse.s<N>.log` (`--session` names YOUR list; a named list that is absent is exit 2, never a silent fallback to a peer's)
+  and read its exit code (0 held, 1 a NAMED violation, 2 an empty/missing list, 3 a ledger read refused,
+  4 the ghost scan could not enumerate any pulse-loop process — a failed read, never a clean verdict).
+  Its FIRST line is the checkout-distance banner: `CHECKOUT STALE: <dir> is N COMMIT(S) BEHIND …` when the
+  tree it was read from is behind `origin/main`, `checkout: … is LEVEL …` at zero, and `CHECKOUT DISTANCE
+  UNKNOWN` when it could not measure — which is never a zero. It is ADVISORY: it never changes the exit
+  code, so branch on the codes exactly as before. It does NOT fetch, so the number it prints is a FLOOR. It reads the LEDGER's `claim.worker` and lease-until for every row in your held file and compares your pulse log's age and pid against the cadence — a loop that STOPS RUNNING prints nothing, so nothing else in this campaign can tell you. Quote its last line in your status file.
 
 - **Decisions file — read it at the top of EVERY loop.** The orchestrator writes rulings, approvals and
   routing to `$ORCH/lead-<lane>/DECISIONS-FROM-MAIN.md` (append-only, a table per date). Inbox
   messages can lag behind a long turn; the file never does. A row you marked BLOCKED that appears
   in that file is unblocked — update your table the same loop.
 
-- **Status file** `$ORCH/lead-<lane>/status.md` — rewrite it (whole file) at every
-  milestone. Format, one row per task you have touched:
+- **Status file** `$ORCH/lead-<lane>/status.<session>.md` (the `STATUS=` line from
+  `session-files.sh open`) — rewrite YOUR OWN file (whole file) at every milestone, and never
+  any other session's. Keep its first line, the `<!-- bp-lane-session: … -->` header: it is
+  what makes a peer's `open` refuse the file instead of truncating it. Format, one row per
+  task you have touched:
   ```
   # lead-<lane> — <ISO time>
   workers: <n in flight>/5
@@ -232,7 +345,7 @@ next slice for a successor lead: <ids>
 - **"Release everything else" is safe only when ONE session holds the worker id.** Two sessions behind one id: the stand-down's release silently un-claimed the survivor's row, nothing errored (a release by the id holder is legitimate), and the victim's next stamp would fail `not_holder` an hour later. After any peer hands over or stands down on a shared id, re-read the STATUS of every row you believe you hold; do not trust the epoch you were given. Hand over by naming ids, never by "everything else".
 - **A rerun of a cancelled PR run sticks only once the PR is out of draft.** While the PR is a draft the rerun is cancelled again as attempt 2; undraft, then rerun.
 - **"Touches the same file as your incident" is not a reason to suspect a PR.** Ask whether its defect has the same failure MODE: a false-green (control plane silently does not roll) cannot appear in forty loudly failing runs.
-- **Pulse lists are per-session files, never shared.** A peer rewrote a shared held.txt twice and another lead's live rows fell out both times; a missing line errors nowhere and the claim lapses 40 min later. One file per session, append-only on any legacy shared file, over-pulse rather than tidy.
+- **Pulse lists are per-session files, never shared.** A peer rewrote a shared held.txt twice and another lead's live rows fell out both times; a missing line errors nowhere and the claim lapses 40 min later. One file per session (`held.<session>.txt`, from `session-files.sh open`), append-only on any legacy shared file, over-pulse rather than tidy. The same is true of EVERY session-owned file under `lead-<lane>/`: status, held lists, notes, pulse log and pid. `status.md` was the second instance, not a different bug — a wholesale rewrite, 149 lines to 94, three sections gone.
 - **A mutation harness needs assertions on its FIXTURE, not just its subject.** A first run reported the mutant "losing" the release on all four arms while the fixture deploys had silently failed with exit 14: a textbook vacuous green, caught only by exit-code checks on the setup deploys. Assert the fixture reached the state the mutation is supposed to break.
 - **"shellcheck clean" is unmeetable if main is not clean.** Quote both exit codes (main and head); word the criterion "no new findings vs main" or fix the pre-existing one in the same PR.
 - **Put the budget warning and "commit as soon as anything is coherent" at the TOP of every worker prompt.** A worker killed by the session limit left one WIP commit and a clean tree; the lead pushed the ref and finished verification itself. Without it, two worktrees were lost an hour earlier.
@@ -269,7 +382,7 @@ next slice for a successor lead: <ids>
 - **A catch rate measured across a 35-commit gap proves nothing.** "The fixing diff touched source" is true by construction over that gap; measure catches on the <=2-commit subset.
 - **Grepping for a keyword measures vocabulary, not behaviour.** A grep for `selftest` missed four tripwires whose proving steps are named "Prove the glass can be shown open" and "Prove the watch can lose both ways". Read the step list, not the word list.
 - **An absence claim scoped to one file is not an absence claim.** reland-check.yml has no harness call because its 76-case proof lives in shell-harnesses.yml, which lists reland-check.yml in its paths. Widen the grep to the repo before writing "nothing proves it can fail".
-- **A background loop whose only output is a log file is silent by construction.** Main's five pulse loops omitted `--now`, were refused 15 of 15 times, and three claims lapsed and reddened their task gates. Self-test one iteration in the foreground and read `"ok":true` before backgrounding; one pid file, overwritten; read the log after the first cycle.
+- **A background loop whose only output is a log file is silent by construction.** Main's five pulse loops omitted `--now`, were refused 15 of 15 times, and three claims lapsed and reddened their task gates. Self-test one iteration in the foreground and read `"ok":true` before backgrounding; one pid file, overwritten; read the log after the first cycle. That covers a loop that runs and is refused; for a loop that has STOPPED, `helpers/held-liveness.sh` is the only reader that notices, because a dead loop's log simply stops growing.
 - **A substring guard lets `startup_failure` satisfy `failure`.** A watcher's absence arm tested `status:conclusion` with `grep -E "queued|in_progress|success|failure"`; a startup_failure (the shape of a bad job or missing secret, dying in seconds with no jobs) matched "failure" and silenced the alert. Match whole tokens, report every decided conclusion verbatim, and alert on the class (any non-success terminal conclusion), not the one you happened to see.
 - **A watcher that only tees to a live session is one backgrounding away from silence.** Give every watcher a second channel (a log file another lane can read) and say in its header which channel a criterion was proved against.
 - **On a worker death, commit before you read anything.** Four workers died on account limits with uncommitted trees; committing first and gating second lost nothing. Reading the transcript first is how a peer takes the worktree directory while you read.
@@ -284,9 +397,9 @@ next slice for a successor lead: <ids>
 - **A regenerated baseline is stale on arrival if it was shot before the final rebase.** #15206 re-shot eight rig baselines, honestly reported 8/8, and the squash carried a pre-#15270 measurement onto main; the gate reddened on the merge nobody re-ran. Regenerate AFTER the last rebase; quote the base sha in the PR body; the merger checks it is still the base. (Rebase-first-then-regenerate must bite at MERGE time.)
 - **A red found incidentally gets a fresh fetch and an in-flight-fix search before FILING.** A one-line fix opened three minutes after the same fix merged was cut from a stale base.
 - **Enumerate who is in the fallback set — and who is SUPPOSED to be there.** A rate-limit key moved from the raw bearer to the VERIFIED token id with "unauthenticated callers fall back to the IP bucket"; SCIM bearers are a different credential kind the resolver cannot see, so an identity provider's whole provisioning stream collapsed into one IP bucket (18 tests, all 429). A caller unresolvable by ONE resolver is not an unauthenticated caller. Before shipping a fallback, list every principal kind that lands in it.
-- **A pulse failure is the only warning you get, and it hides among successes.** A lapsed claim showed up as one `not_holder` line in a pulse log; the loop must make refusals loud (stderr + events.log), never just a line in the file.
+- **A pulse failure is the only warning you get, and it hides among successes.** A lapsed claim showed up as one `not_holder` line in a pulse log; the loop must make refusals loud (stderr + events.log), never just a line in the file. Run `helpers/held-liveness.sh` at the top of every loop so a refusal you missed still surfaces as a NAMED row before the lease lapses.
 - **Never edit a running bash script in place.** Bash re-reads a live script by byte offset; patching the file under a running loop corrupts the running process. New file, then a pid swap; kill by pid, never by name.
-- **A running pulse loop is not evidence that claims are held.** Liveness and correctness are different questions; read the log for refusals. A loop that keeps running while claims are not held is worse than no loop, because its liveness gets read as proof. Stopping loudly after three refusals is the honest failure mode.
+- **A running pulse loop is not evidence that claims are held.** Liveness and correctness are different questions; read the log for refusals. A loop that keeps running while claims are not held is worse than no loop, because its liveness gets read as proof. Stopping loudly after three refusals is the honest failure mode. `helpers/held-liveness.sh` is how you ask the correctness question: it reads the ledger's claim.worker and lease-until per row, and exits non-zero naming the row.
 - **A generated file that never conflicts is regenerated at merge time, never hand-merged or split away.** docs/openapi.json is byte-deterministic; its drift step lives inside the required Elixir gate. Splitting it off a PR reds a required context; a conflict in it is fixed by re-running the generator.
 - **Before splitting a PR, run each dropped file's own gate.** Reasoning about which files are "hot" named the wrong blocker (the census, which no workflow runs) and missed the real one (openapi.json, required). Measure EVERY dropped file, not the one you suspect: drop it, run its gate, record blocks-merge yes/no. Checking only the flagged file (the census) would have missed the real blocker (openapi.json).
 - **An ABSENT required check reads "3/4" exactly like a failing one, and needs the opposite remedy.** A cancelled dispatcher leaves the gate with no run; re-fire it (update-branch), do not debug a test that never ran. pr-required.sh names ABSENT contexts before the verdict.

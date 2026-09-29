@@ -34,6 +34,8 @@
 # scaffy/seed/README.md §unknown_tag. Any other non-2xx is fatal.
 
 set -uo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/lib/bp-curl.sh"   # 429 backoff, shared (task-90059c5c680f6665)
 
 fail() {
   echo "::error::$*" >&2
@@ -65,11 +67,15 @@ fi
 # post <body-file>: response body -> $WORK_DIR/resp.json, prints the HTTP
 # status code (empty on transport failure).
 post() {
-  curl -sS -o "$WORK_DIR/resp.json" -w '%{http_code}' \
+  # bp_curl_code prints NOTHING and returns curl's rc on a transport failure
+  # (curl -w alone printed 000 AND failed), so `|| echo 000` is what keeps the
+  # documented "empty on transport failure" contract a readable value instead
+  # of an empty string every arm below would have to special-case.
+  bp_curl_code -sS -o "$WORK_DIR/resp.json" \
     -X POST "$SERVER/v1/data/mutate/production" \
     -H "Authorization: Bearer $BARKPARK_SEED_TOKEN" \
     -H "Content-Type: application/json" \
-    --data @"$1"
+    --data @"$1" || echo 000
 }
 
 seeded=0

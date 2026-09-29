@@ -1,0 +1,79 @@
+{
+  "_what": "The box's site-deploy STATUS payload and DURABLE RECORD payload — the key sets. THE ONE COPY.",
+  "_source_of_truth": "api/lib/barkpark_web/controllers/site_deploy_controller.ex — render_status/1, render_stage/1, render_build_record/1",
+  "_conformance": "api/test/barkpark_web/controllers/site_deploy_status_payload_conformance_test.exs drives the REAL controller to a real 200 on both doors and asserts the EMITTED key sets equal the lists below. A hand-written fixture nobody asserts against is still a mirror.",
+  "_consumers": "cloud/ reads this file through BarkparkCloud.BoxStatusPayloadFixture. cloud/test/barkpark_cloud/sites/box_status_payload_conformance_test.exs asserts BarkparkCloud.Sites.Deploy.normalize_report/1 still consumes every `status.consumed` key and that BarkparkCloud.Sites.BuildLog's @record_keys allowlist equals `record.emitted`. Do not retype these lists anywhere: the guard arm in that file fails on a hand-typed copy.",
+  "_adding_a_key": "ONE LINE in the right list here, kept sorted, plus the producer and (for a record key) the control-plane allowlist. Nothing else in either suite carries these lists.",
+
+  "status": {
+    "_door": "GET /v1/admin/site-deploy — render_status/1",
+    "_classification": "Every key render_status/1 can emit appears in EXACTLY ONE of `consumed` and `producer_only`. consumed = BarkparkCloud.Sites.Deploy.normalize_report/1 reads it; producer_only = it is emitted and deliberately ignored by that consumer. `conditional` is the subset the producer OMITS rather than defaults when the value was never measured. `consumer_only` = keys normalize_report/1 tolerates that this producer never sends (older boxes, the log/console fallbacks) — they are not part of the producer's key set and the api conformance test asserts they are ABSENT from it.",
+    "consumed": [
+      "exit_code",
+      "failure_reason",
+      "health_exit_code",
+      "log",
+      "route_detail",
+      "route_status",
+      "served_port",
+      "served_slot",
+      "stages",
+      "state"
+    ],
+    "producer_only": [
+      "build_id",
+      "content_rev",
+      "finished_at",
+      "mode",
+      "slug",
+      "started_at"
+    ],
+    "conditional": [
+      "health_exit_code"
+    ],
+    "_folded_why": "`folded` is the subset of `consumed` the control plane READS but does not ECHO: `state` becomes an atom, `exit_code` only moves the verdict, `stages`/`log` feed the stage fold. A sentinel-equality assertion on them would be asserting the wrong thing, so each has its own named behavioural assertion in the cloud conformance test — and that test pins this list, so a key moved in here cannot quietly escape the sentinel arm.",
+    "folded": [
+      "exit_code",
+      "log",
+      "stages",
+      "state"
+    ],
+    "consumer_only": [
+      "console",
+      "error",
+      "status",
+      "url"
+    ],
+    "_conditional_why": "health_exit_code is OMITTED, never defaulted, when no HEALTH stage reported — 0 is the SUCCESS code, so a default would certify a gate that never ran. route_status/route_detail take the opposite discipline (present-and-null) because the value a default would invent there is a string, and null reads as 'nobody measured this' on its face. So `conditional` holds exactly one key and the reason is per-key, not stylistic.",
+    "stage": {
+      "_door": "render_stage/1 — one element of `stages`",
+      "emitted": ["at", "build_id", "detail", "name", "status"],
+      "consumed": ["detail", "name", "status"]
+    }
+  },
+
+  "record": {
+    "_door": "GET /v1/admin/site-deploy?record=1 — render_build_record/1",
+    "_lock": "STRICT EQUALITY, both directions: this list is render_build_record/1's key set AND BarkparkCloud.Sites.BuildLog's @record_keys allowlist. A key on one side only means the control-plane route silently DROPS a field the box now sends (which is what had already happened to route_status/route_detail when this lock was built), or renders one it never gets.",
+    "emitted": [
+      "build_id",
+      "evicted_at",
+      "exit_code",
+      "failure_reason",
+      "finished_at",
+      "journal_command",
+      "log_bytes",
+      "log_path",
+      "log_state",
+      "mode",
+      "record",
+      "route_detail",
+      "route_status",
+      "runtime_target",
+      "slug",
+      "stages",
+      "started_at",
+      "unit_name"
+    ]
+  }
+}

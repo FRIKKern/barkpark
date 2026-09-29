@@ -2036,3 +2036,72 @@ func TestCloudFailStillCallsARealDeadSessionAuth(t *testing.T) {
 		t.Fatalf("a dead session must still name the cure:\n%s", stderr.String())
 	}
 }
+
+// TestCloudAndStatusRowsAgreeOnVersionKey is a MIRROR LOCK, not two hand-written
+// expectations: it feeds ONE cloudclient.Barkpark fixture through BOTH projections
+// of that struct — cloudBarkparkRow (this file's `bp barkparks -o json`) and
+// rankedBarkparkRow (cloud_status_cmd.go's `bp cloud status -o json`) — and
+// asserts they agree on the version keys, whatever they decide.
+//
+// The defect it pins: for the whole time both projections existed they made
+// OPPOSITE calls on the same field off the same GET /v1/barkparks row.
+// rankedBarkparkRow WITHHELD it and wrote down why ("The registry `version` field
+// is deliberately NOT here under any name … a number that can never move …
+// would read as freshness"); cloudBarkparkRow shipped it anyway as
+// `"version": b.Version`, so every script over `bp barkparks -o json` read the
+// agent's compile-time `const Version = "0.1.0"` as a per-box version.
+//
+// Two assertions, and they do different jobs. The PARITY arm is the lock: a
+// future edit that adds the key back to either projection alone reds here. The
+// DIRECTION arm holds the written decision: withholding is what the comment
+// decided, so a "fix" that adds `version` to BOTH rows would satisfy parity
+// while re-shipping the same lie, and it reds too.
+func TestCloudAndStatusRowsAgreeOnVersionKey(t *testing.T) {
+	// One fixture, both readers. Version is populated on purpose — an empty
+	// fixture field would let a projection emit the key and still look harmless.
+	fixture := cloudclient.Barkpark{
+		ID:           "bp-mirror-1",
+		Name:         "mirror-box",
+		Slug:         "mirror-box",
+		Host:         "10.0.0.9",
+		HealthStatus: "healthy",
+		AgentStatus:  "online",
+		Version:      "0.1.0",
+		GitCommit:    "e2f4a9c1d3b5768a9012345678901234567890ab",
+		LastSeenAt:   "2026-09-12T00:00:00Z",
+	}
+
+	cloudRow := cloudBarkparkRow(fixture)
+	statusRow := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{fixture})[0])
+
+	for _, key := range []string{"version", "agent_version"} {
+		cloudVal, inCloud := cloudRow[key]
+		statusVal, inStatus := statusRow[key]
+
+		if inCloud != inStatus {
+			t.Errorf(
+				"projections DISAGREE on %q: cloudBarkparkRow present=%v (%v), rankedBarkparkRow present=%v (%v) — "+
+					"two projections of the SAME cloudclient.Barkpark off the SAME GET /v1/barkparks row must make the same call",
+				key, inCloud, cloudVal, inStatus, statusVal,
+			)
+		}
+		if inCloud || inStatus {
+			t.Errorf(
+				"a projection emitted %q — the written decision in rankedBarkparkRow withholds it under ANY name: "+
+					"it is the agent binary's compile-time const (internal/agent/report.go `const Version = \"0.1.0\"`), "+
+					"fleet-constant, and it reads as freshness beside git_commit",
+				key,
+			)
+		}
+	}
+
+	// CONTROL — without this the parity arm passes vacuously on two empty maps.
+	// The fixture really does flow through both projections, and they really do
+	// agree on the honest neighbour key this one was mistaken for.
+	if got := cloudRow["git_commit"]; got != fixture.GitCommit {
+		t.Fatalf("control: cloudBarkparkRow git_commit = %v, want %q", got, fixture.GitCommit)
+	}
+	if got := statusRow["git_commit"]; got != fixture.GitCommit {
+		t.Fatalf("control: rankedBarkparkRow git_commit = %v, want %q", got, fixture.GitCommit)
+	}
+}

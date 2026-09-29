@@ -67,6 +67,7 @@ defmodule Barkpark.Plugins.Github.LinkPutErasureTest do
     content =
       %{
         "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
         "lifecycle_status" => "open",
         "acceptance_criteria" => [
           %{"criterion" => "it works", "met" => false, "evidence" => ""}
@@ -183,7 +184,11 @@ defmodule Barkpark.Plugins.Github.LinkPutErasureTest do
     doc_id = uniq("lp-clean")
 
     content =
-      %{"kind" => "task", "lifecycle_status" => "open"}
+      %{
+        "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
+        "lifecycle_status" => "open"
+      }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
 
     {:ok, _} =

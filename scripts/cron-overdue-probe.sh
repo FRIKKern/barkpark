@@ -83,6 +83,119 @@
 # (c5) — a workflow that has NEVER produced a row is the worst case, and firing
 # one by hand would launder it.
 #
+# ── 2026-09-20: WHAT "WATCHING MAIN" GUARANTEES, AND WHO DELIVERS IT ────────
+# (task-edebe459992b3574, by deploy-w3. The row was filed 2026-09-07 against a
+# 2026-08-09..2026-09-07 population; everything below is a RE-MEASUREMENT taken
+# 2026-09-20T19:40Z from the paginated REST API, `event=` filtered, never
+# `gh run list --limit N` — a row cap is not a time window.)
+#
+# THE GUARANTEE, stated so it can be checked rather than assumed:
+#   EVERY TIP OF main GETS A COMPLETED main-gate-watch VERDICT WITHIN 3x THE
+#   DECLARED INTERVAL, BY A DECLARED MECHANISM. Two mechanisms are declared and
+#   only two: GitHub's `schedule:` trigger, and THIS PROBE's workflow_dispatch
+#   rescue. A push: arm is a third mechanism and it is FORBIDDEN here (below).
+#   The guarantee is about the VERDICT arriving, not about which of the two
+#   delivered it — but WHICH ONE DELIVERED IT IS NOW REPORTED, because a green
+#   that silently means "the rescue carried it" is a different claim from the
+#   one its reader makes.
+#
+# THE MEASUREMENT. Gaps between consecutive event=schedule runs, minutes:
+#
+#   main-gate-watch.yml  (*/30, bound 90m)   647 schedule runs, 87 dispatches
+#     FULL  08-09..09-20   646 gaps  min 19 p50 57  p90 250 max 680  >90m 28%  delivered 647/2055 = 31%
+#     QUIET 08-12..08-19   198 gaps  min 20 p50 47  p90  85 max 137  >90m  6%  delivered 199/336  = 59%
+#     SPIKE 09-05..09-07    20 gaps  min 119 p50 192 p90 304 max 358 >90m 100% delivered 21/144   = 15%
+#     LAST7 09-13..09-20    48 gaps  min 107 p50 217 p90 329 max 415 >90m 100% delivered 49/375   = 13%
+#
+#   stale-verdict-watch.yml (*/30, bound 90m) 601 schedule runs, 2 dispatches
+#     FULL  600 gaps p50 60  >90m 31%  | QUIET 182 gaps p50 53 >90m 10% (54%)
+#     SPIKE  20 gaps p50 194 >90m 100% | LAST7  47 gaps p50 246 >90m 100% (13%)
+#
+#   task-lease-renew.yml   (*/20, bound 60m)  121 schedule runs, 1 dispatch
+#     FULL  120 gaps min 99 p50 192 max 415 — 100% exceed its own 60m bound
+#     LAST7  49 gaps min 106 p50 230 max 415 — 100% exceed it
+#
+#   EVENT SPLIT, last 24 h to 2026-09-20T19:40Z: main-gate-watch 7 schedule +
+#   2 dispatch; stale-verdict-watch 7 + 0; task-lease-renew 7 + 0. THREE
+#   WORKFLOWS AT TWO DECLARED CADENCES ALL RECEIVED EXACTLY SEVEN SCHEDULED
+#   RUNS. The declared interval is not what GitHub delivers on this repo; ~7
+#   beats a day is, whatever you write in the cron expression.
+#
+# THREE THINGS THE FILING GOT WRONG, all in the direction of understatement:
+#   (1) "the bound was never achievable" — in the QUIET window 94% of gaps were
+#       inside the 90m bound. The bound was achievable in August. The platform
+#       degraded; the bound did not become wrong.
+#   (2) "TODAY IS AN OUTLIER, NOT THE NORM" — thirteen days later the outlier IS
+#       the norm: LAST7 p50 is 217m and 100% of gaps exceed 90m, worse than the
+#       09-05..09-07 spike it was contrasted against. The filing's own warning
+#       against over-fitting to a spike now cuts the other way.
+#   (3) the population got worse, not merely longer: 17% of gaps over 90m at
+#       filing, 28% over the same start date measured today.
+#
+# THE DECISION, and it is deliberately NOT a wider bound.
+#   * THE 90m BOUND AND THE 3x FACTOR ARE UNCHANGED. Widening one is how a true
+#     alarm gets silenced (this row's own words), and the QUIET numbers say the
+#     bound describes a cadence this repo really delivered five weeks ago.
+#   * THE DISPATCH RESCUE IS PROMOTED FROM AN EXCEPTION PATH TO A DECLARED
+#     CO-PRIMARY DELIVERY MECHANISM, in writing, here. It is not new code and
+#     nothing about it is loosened; what changes is that it is no longer an
+#     emergent property nobody chose. At 13% schedule delivery it is carrying a
+#     large and growing share of the beats and will keep doing so.
+#   * AND THE PROBE NOW SAYS SO OUT LOUD. See THE CADENCE MEASURE below.
+#   * WHAT IS *NOT* DONE: no push: arm (forbidden, measured harmful — 2 of 2
+#     push runs red on tip 026c5b1d78 while main was in fact green, because
+#     ~15s after a merge GitHub has created no check-run rows on the new tip at
+#     all; scripts/main-gate-watch.test.sh reds if one returns). No re-anchored
+#     interval either: rewriting */30 to */200 to match ~7 beats a day would
+#     make the DECLARED cadence a description of a platform outage, and would
+#     take the bound from 90m to 600m — ten hours of real silence invisible.
+#
+# ── THE CADENCE MEASURE (a second question, asked separately) ───────────────
+# THE AGE CHECK ANSWERS "IS IT LATE RIGHT NOW". IT CANNOT ANSWER "IS THIS
+# CADENCE BEING DELIVERED", and task-lease-renew.yml is the specimen: it
+# violates its own 60m bound on 100% of 120 measured gaps while the probe
+# truthfully reports it INSIDE BOUND every time it happens to have just fired.
+# Both answers are true; they are answers to different questions, and only one
+# of them was ever printed.
+#
+# So for every critical row the probe now ALSO computes, over a trailing window
+# (default 24 h) of that workflow's own run rows:
+#   expected  = span / declared interval
+#   delivered = run rows with event=schedule in that span
+#   rescued   = run rows with event=workflow_dispatch in that span
+# and prints delivered/expected as a percentage, plus the rescue share, plus —
+# when rescues outnumber schedule runs — the sentence THIS PROBE IS THE PRIMARY
+# DELIVERY MECHANISM. That line is the whole point: a reader seeing
+# `Cron overdue probe: success` may now find out which mechanism earned it.
+#
+# WHY THE FLOOR IS 50% AND WHY IT IS A WARNING, NOT A RED. 50% is read off the
+# QUIET window (59% and 54% delivery) and the degraded ones (31%/29% full,
+# 13%/13% last-7d): it separates the August platform from today's, which is the
+# only discrimination a floor can honestly make. It is a WARNING because at 13%
+# delivery, across three workflows with different declared intervals, the
+# condition is a property of GitHub's scheduler on this repo that NO pull
+# request can clear — a red here would be red every day, and a true alarm
+# nobody can act on trains the fleet to ignore the one alarm watching a silent
+# watch, which is this row's own stated failure mode reached from a new side.
+# The escalation lever exists and is named: `--cadence-strict` exits 4, a code
+# DISTINCT from 1 (late right now, or a rescue that failed) and from the
+# no-run-row scream. Nothing in CI passes it today; when GitHub's delivery
+# recovers, turning it on is a one-flag change with a fixture already proving
+# it fires.
+#
+# THE SPAN IS WHAT THE FETCHED PAGE COVERS, not a fixed 24 h, and the rate is
+# computed against THAT span — so a push-armed workflow whose 60 rows only reach
+# back 9 h is scored over 9 h, never over a window it has no rows for. The
+# window flag is a CEILING on the span, never a claim about it. And the line
+# names all three sources (schedule:, this probe's rescue, any other trigger),
+# because "breakglass-watch fired 60 times" and "the scheduler delivered 2 of
+# its 18 promised beats" are both true and only the second is this measure.
+#
+# THE MEASURE IS SILENT RATHER THAN WRONG when it has too little history: fewer
+# than 3 rows in the window, or a span under 4x the interval, prints "not
+# measured" and scores nothing. A cadence verdict computed from two samples is
+# the row-cap trap in miniature.
+#
 # USAGE
 #   bash scripts/cron-overdue-probe.sh                       # live, this repo
 #   bash scripts/cron-overdue-probe.sh --runs-file <ndjson> --now <iso>   # hermetic
@@ -90,6 +203,8 @@
 #   bash scripts/cron-overdue-probe.sh --no-dispatch         # report only, never fire
 #   bash scripts/cron-overdue-probe.sh --config-only         # table-vs-tree only
 #   bash scripts/cron-overdue-probe.sh --selftest            # no network
+#   bash scripts/cron-overdue-probe.sh --cadence-strict      # delivery shortfall reds (exit 4)
+#   bash scripts/cron-overdue-probe.sh --cadence-window <min> --cadence-floor <pct>
 #
 # THE CONFIG QUESTION AND THE LIVE QUESTION ARE ASKED SEPARATELY (2026-09-07,
 # task-16df558f0d748713). "Is every scheduled workflow classified?" is a fact
@@ -115,6 +230,10 @@
 #     report mode this is now reached only when the CRON read itself came back
 #     clean: a drift never masks 1 or 3, and never suppresses the cron verdict.
 #   3 the run list could not be read — UNKNOWN, never reported as fired
+#   4 CADENCE SHORTFALL under --cadence-strict only — a declared schedule is
+#     being delivered below the floor. DISTINCT from 1 on purpose: 1 means a
+#     workflow is late or dark RIGHT NOW; 4 means the beats are arriving but
+#     not at the declared rate. Never returned without the flag.
 #
 # ENV
 #   CRON_PROBE_GH          the gh binary (stubbed by the selftest's dispatch arm)
@@ -123,6 +242,9 @@
 #                          real tree for the table/fallback reads)
 #   CRON_PROBE_POLL_TRIES  how many times to look for the dispatched run (12)
 #   CRON_PROBE_POLL_SLEEP  seconds between those looks (5)
+#   CRON_PROBE_RUNS_PER_PAGE  how many run rows per workflow the live read
+#                          fetches (60). The age check needs one; the cadence
+#                          measure needs a history, and this is that history.
 
 # INTERPRETER GUARD — MEASURED 2026-09-09 by RUNNING it, not by grepping
 # (task-b896488e115d1eed). `sh scripts/cron-overdue-probe.sh` on this Mac's bash 3.2.57 in
@@ -167,6 +289,17 @@ NOW_ISO=""
 MODE=report
 OVERDUE_FACTOR=3
 DISPATCH=1
+# THE CADENCE MEASURE'S TWO KNOBS AND ITS SWITCH. See the 2026-09-20 header
+# section: the floor is read off the QUIET window (59%/54% delivery) against
+# the degraded ones (13%), and the default is a WARNING because no PR can
+# clear a platform-wide delivery shortfall.
+CADENCE_WINDOW_MIN=1440
+CADENCE_FLOOR_PCT=50
+CADENCE_STRICT=0
+# Set by check_overdue when a critical workflow's schedule delivery is under
+# the floor. It is a SECOND verdict and never touches the overdue return code.
+CADENCE_SHORTFALL=0
+CADENCE_MEASURED=0
 # READ AT CALL TIME, never bound here. Binding `gh` at startup made the
 # selftest's stub unreachable — it exports CRON_PROBE_GH after this file has
 # already been sourced — and the first run of the dispatch arm went out over the
@@ -191,23 +324,47 @@ poll_sleep() { printf '%s' "${CRON_PROBE_POLL_SLEEP:-5}"; }
 # `schedule:` trigger on origin/main that day. The task that ordered this work
 # said 14; the tree had 16 (task-lease-renew gained its push arm in #15757 and
 # is counted here as critical-with-fallback).
-DEFAULT_TABLE='absent-context-census.yml|periodic|360|2026-09-03: 6 h absence audit. Its own harness (absent-context-census.test.sh §7) asserts this workflow is SCHEDULE-ONLY, so a push arm is forbidden here by a committed test; a 6 h sweep tolerates a 6 h lag by construction.
+#
+# 2026-09-13 (task-3d58169ded21964a): five rows added, taking the table to 28
+# against the 28 workflows carrying a `schedule:` on origin/main e02933779 —
+# cli-release-cadence, pds-scratch-round-trip, posix-vacuous-green-census,
+# release-curator-draft, seal-reading. They were NOT a hidden drift: main's own
+# push arm reported them on every merge (run 34759749673, 2026-09-13T13:27Z,
+# "REFUSED: scheduled workflow(s) carry no classification line" naming all five,
+# and the same red on every completed push:main run that day). Nobody had
+# classified them, so every workflow-touching PR inherited main's red through
+# the harness job's pull_request arm — the cost of leaving a true refusal
+# standing, not a defect in where it is asked. NONE of the five is critical:
+# each is an audit, a measurement or a digest whose lag costs a sample, and
+# three of them deliberately carry no push: arm (pds-scratch-round-trip and
+# release-curator-draft have none at all), which is exactly the case
+# check_fallbacks would wrongly demand a trigger for if they were critical.
+DEFAULT_TABLE='absent-context-census.yml|periodic|360|2026-09-03: 6 h absence audit; 2026-09-23 (task-a0abaae6f64c0a9c): the cron is now its FLOOR, beside a workflow_run leg on the four required-context producers and a self re-arm, so a fresh run usually exists long before 6 h. Its harness (absent-context-census.test.sh §7) still forbids a pull_request arm, and it has no push arm, so a 6 h tolerance on the floor stays correct.
 breakglass-watch.yml|critical|30|2026-09-03: watches whether branch protection was broken open. Carries push: branches [main] — cron silence cannot hide an unrestored breakglass across a merge.
 chronicle-paper.yml|report|1440|2026-09-03: nightly narrative digest. A late chronicle is a late chronicle.
+cli-release-cadence.yml|periodic|10080|2026-09-13: weekly (cron 14 9 * * 4) check that the shipped `bp` has not moved past the newest installable `cli-v*` release; carries push: branches [main] AND an unfiltered pull_request arm, so a week of cron silence still leaves it running on every merge and every PR. PERIODIC, not critical: its red is cleared by an ACT OF RELEASE (`git tag cli-v<semver>`), never by a change to any PR, and its own header says so and refuses promotion to the required set. Same shape as the pipefail-sigpipe-scan/posix-vacuous-green-census rows.
 codebase-intel.yml|report|10080|2026-09-03: weekly intelligence sweep. Weekly cadence, weekly tolerance.
+core-without-owned-tables.yml|report|10080|2026-09-25 (task-19428fc715804f49): weekly (cron 43 1 * * 0) run of `mix test.core_without_owned_tables`, the ~40-minute differential that runs the api suite with the plugin/fleet tables present and then absent. REPORT, not critical: schedule + workflow_dispatch are the ONLY triggers BY DESIGN — main ruled on #20401 that it must never be a PR gate, and a push arm would buy 40 minutes on every merge. Report class is what leaves check_fallbacks satisfied without inventing that trigger (the landed-open-report.yml argument). Its red files one issue via scripts/file-ci-failure-issue.sh; a week late costs one sample.
 cron-overdue-probe.yml|critical|60|2026-09-03: this probe itself. Hourly, and it carries push: branches [main] — a silence watch delivered only by the mechanism it watches is a smoke detector wired to the fire. It appeared in this table because its own table/tree check REFUSED the first live run that did not classify it.
 crown-reconcile.yml|periodic|360|2026-09-03: 6 h reconciliation sweep; carries push: branches [main] already.
 deploy-harnesses.yml|periodic|1440|2026-09-06: nightly re-run of the deploy harnesses (cron 03:20Z) so a rot in deploy/ is seen within a day; carries push: branches [main]. Added when cron-overdue-probe c1 reddened main on the three schedules landed after the 2026-09-03 table.
+deploy-prod-microblock-staleness.yml|periodic|360|2026-09-20 (task-dd27173ac5b52b0c): 6-hourly (cron 40 2,8,14,20 * * *) read of the prod micro-block 89.167.28.206 status.json commit against origin/main — the reader that is not a person. PERIODIC, not critical: its subject is a SERVER a human deploys by `git pull` on the box, so a lag costs one sample of a gap that has already stood for days, and its scheduled red is the finding, not a hole in a safety net. Carries an unfiltered pull_request arm (the harness job) so cron is not its only way to fire.
 elixir-nightly.yml|report|1440|2026-09-03: the long Elixir suite, nightly. Its reds are found the next morning either way.
 grip-suite.yml|periodic|1440|2026-09-06: nightly Grip suite (cron 03:25Z); carries push: branches [main]. Same 2026-09-06 c1 red as deploy-harnesses.
 landed-open-report.yml|report|1440|2026-09-07: daily ledger digest (cron 06:27Z), wired in #16640. Classified report, not critical: its own header states a red here means THE READ FAILED, findings exit 0 to the step summary, and it deliberately carries no push: arm so it renders no check run anywhere. A day late is a day late — and report class is what leaves check_fallbacks satisfied without inventing a trigger this workflow was designed not to have.
 main-gate-watch.yml|critical|30|2026-09-03: the second scream on main tip verdicts. push-refused:scripts/main-gate-watch.test.sh — a push arm was MEASURED harmful (wave 60 D721: 2 of 2 push runs red on tip 026c5b1d78 while main was green, because ~15 s after a merge no check-run row exists yet) and a committed test reds if one comes back. Its fallback is THIS probe: a workflow that may not carry a trigger fallback must at least be watched for silence.
+main-red-owner.yml|critical|60|2026-09-16 (task-6005859f86872319): hourly. Converts the verdict of scripts/main-red-predicate.sh into ONE deduped GitHub issue, so an ADVISORY workflow red on the tip of main has an owner instead of standing 11 h across 8 consecutive runs with nobody on it, which is exactly what posix-vacuous-green-census did. CRITICAL because its silence IS the defect it exists to abolish: nothing else in this tree notices a red that cannot block a merge. Carries push: branches [main] as its trigger fallback, so cron silence cannot hide a red introduced by a merge.
 paper-readers.yml|report|1440|2026-09-03: daily paper-reader digest; did not run at all on 09-03, which is the tolerated case for a report.
+pds-scratch-round-trip.yml|periodic|1440|2026-09-13: daily (cron 47 4 * * *) boot/verify/teardown of the PDS scratch target. SCHEDULE + workflow_dispatch ONLY and it may stay that way: its own header measures the run at >10 minutes (two full compiles) and calls a per-PR venue a WRONG build, so push/pull_request arms are deliberately absent. PERIODIC, not critical, precisely so check_fallbacks does not demand a trigger this workflow was designed not to have — the same argument landed-open-report.yml carries. A day-late drift report on crown infrastructure costs a day.
 pipefail-sigpipe-scan.yml|periodic|10080|2026-09-09: weekly repo-state scan for pipelines that can return 141 instead of a verdict (cron 41 5 * * 1, wired in #17081). PERIODIC because the whole point is the sweep, not the minute: the class it hunts is latent and static, a week late costs nothing, and it carries push: branches [main] plus a pull_request arm, so a week of cron silence still leaves it running on every merge. Same shape as the twoslash/grip-suite/deploy-harnesses rows.
+posix-vacuous-green-census.yml|periodic|10080|2026-09-13: weekly (cron 23 17 * * 2) census of scripts/*.sh using process substitution without an interpreter guard. PERIODIC for the same reason pipefail-sigpipe-scan.yml is, and it is the file that row already names as its own shape: the class is latent and static, a week late costs nothing, and it carries push: branches [main] plus an unfiltered pull_request arm, so cron is far from its only way to fire.
 pr-meta.yml|periodic|1440|2026-09-09: the nightly venue of the filebase aesthetics critic (cron 17 5 * * *), moved off the PR path in #17079 because it was 573 s of a 615 s run for an advisory that cannot block a merge. PERIODIC, not critical: the critic is an advisory score sweep with its own watcher, it is ADDITIONALLY armed by push: branches [main] (scoped to changes under tooling/aesthetics/ or this workflow), and a skipped night costs a score sample, not a safety net.
+release-curator-draft.yml|report|1440|2026-09-13: daily (cron 10 7 * * *) scan of main that opens or refreshes ONE draft GitHub Release for a human to bless. REPORT, not critical: schedule + workflow_dispatch are the ONLY triggers by design (its header rules out a push arm as noise that would make the draft chase main), and report class is what leaves check_fallbacks satisfied without inventing that trigger — the landed-open-report.yml argument again. A day late is a day late: the draft is a standing invitation, not a safety net.
 renew-mail-cert.yml|report|43200|2026-09-03: monthly certificate renewal. 3x a month is a 90-day bound, which is not a useful alarm — the certificate expiry is the alarm, and it is watched where it lands, not here.
 required-checks-drift.yml|periodic|1440|2026-09-03: daily drift audit of the required set; carries push: branches [main] already.
 scaffy-catalog-drift.yml|report|1440|2026-09-03: daily catalog drift digest; carries push: branches [main].
+seal-reading.yml|periodic|1440|2026-09-13: the one MACHINE-TAKEN seal reading (cron 20 6 * * *), plus push: branches [main] — a reading per merged state, and a daily tick because the rungs of the register can rot without a commit. PERIODIC: it is a MEASUREMENT whose CONTENT never reds it (charter D335 — only a refusal or an infra fault does), it gates no merge, and it deliberately has no pull_request arm because seal-run.sh refuses a reading taken off a tree that is not the tip of origin/main.
+scheduled-arm-health.yml|report|1440|2026-09-15: daily (cron 20 7 * * *) read of every cron-declaring workflow in the tree against its real scheduled-run history (task-c1148783a9ee36e7). REPORT, not critical: schedule + workflow_dispatch are the ONLY triggers BY DESIGN - its subject is the GitHub run history, which no diff changes, so a push or pull_request arm would be ~90 gh api calls of pure noise on every PR. Report class is what leaves check_fallbacks satisfied without inventing a trigger this workflow was designed not to have - the landed-open-report.yml and release-curator-draft.yml argument again. A day late costs a day of a finding that has already sat six weeks; the reading is a standing alarm, not a safety net.
 search-starter-smoke.yml|report|1440|2026-09-03: daily starter smoke; carries push: branches [main].
 stale-verdict-watch.yml|critical|30|2026-09-03: watches PRs asserting a green main has moved past. Carries push: branches [main].
 studio-journey-smoke.yml|report|1440|2026-09-03: daily Studio journey smoke; carries push: branches [main].
@@ -215,7 +372,7 @@ task-lease-renew.yml|critical|20|2026-09-03: the claim sweep. Ran ZERO times in 
 twoslash.yml|periodic|1440|2026-09-06: nightly twoslash type-check of the documentation snippets (cron 03:30Z); carries push: branches [main]. Same 2026-09-06 c1 red as deploy-harnesses.
 weekly-changelog.yml|report|10080|2026-09-03: weekly changelog digest.'
 
-usage() { sed -n '2,126p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,239p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -226,6 +383,12 @@ while [ $# -gt 0 ]; do
     --repo)       REPO="$2"; shift 2 ;;
     --factor)     OVERDUE_FACTOR="$2"; shift 2 ;;
     --no-dispatch) DISPATCH=0; shift ;;
+    --cadence-window) CADENCE_WINDOW_MIN="$2"; shift 2 ;;
+    --cadence-floor)  CADENCE_FLOOR_PCT="$2"; shift 2 ;;
+    # THE ESCALATION LEVER, off by default and not passed anywhere in CI.
+    # It makes a delivery shortfall exit 4 — a code DISTINCT from 1 (late or
+    # dark right now) so the two findings can never be read as each other.
+    --cadence-strict) CADENCE_STRICT=1; shift ;;
     # The CONFIGURATION question on its own: is every scheduled workflow in the
     # tree classified, and does every critical cadence carry a fallback? It
     # touches no network and reads no run list, which is exactly why it can be
@@ -365,8 +528,13 @@ read_runs() {
   local file out grc rc=0
   while IFS='|' read -r file _class _interval _note; do
     [ -n "$file" ] || continue
-    out="$("$(gh_bin)" api "repos/$REPO/actions/workflows/$file/runs?per_page=5" \
-             --jq ".workflow_runs[] | {path: \"$file\", status: .status, created_at: .created_at}" 2>&1)"; grc=$?
+    # per_page 60, and `event` is carried. 5 rows answered the AGE question and
+    # nothing else; the cadence measure needs a HISTORY, and the event field is
+    # what tells a delivered beat (`schedule`) from a rescue this probe itself
+    # fired (`workflow_dispatch`). Same endpoint, same paginated REST shape, one
+    # call per workflow exactly as before — the page is wider, not extra.
+    out="$("$(gh_bin)" api "repos/$REPO/actions/workflows/$file/runs?per_page=${CRON_PROBE_RUNS_PER_PAGE:-60}" \
+             --jq ".workflow_runs[] | {path: \"$file\", status: .status, created_at: .created_at, event: .event}" 2>&1)"; grc=$?
     if [ "$grc" -ne 0 ]; then
       # A 404 IS AN ANSWER, and the opposite of a read fault: GitHub has no such
       # workflow, so it has certainly not fired. Passing that through as zero
@@ -461,6 +629,82 @@ EOF
   return 1
 }
 
+# ── 3c. THE CADENCE MEASURE (task-edebe459992b3574) ─────────────────────────
+# A SECOND QUESTION, AND IT IS NOT THE AGE QUESTION. check_overdue below asks
+# "how old is the newest run", which answers IS IT LATE RIGHT NOW and nothing
+# else. The specimen that proves those are different questions is
+# task-lease-renew.yml: 120 of 120 measured gaps exceed its own 60m bound, and
+# the probe reports it INSIDE BOUND — truthfully — every time it looks a minute
+# after a firing. WHEN IS THE NEXT BEAT DUE beats HOW OLD IS THE LAST BEAT.
+#
+# So this reads the SAME rows check_overdue reads (no extra network call) and
+# counts, over a trailing window, how many of the beats the declared interval
+# promises actually arrived by `schedule:` — and how many firings in that window
+# were this probe's own workflow_dispatch rescues. The rescue count is the half
+# that makes the green legible: since 2026-09-06 a cron-only critical workflow
+# past bound is DISPATCHED and the probe reports ok, so "success" can mean
+# "the scheduler delivered" or "this probe carried it" and nothing said which.
+#
+# IT IS SILENT RATHER THAN WRONG. Fewer than 3 rows in the window, or a span
+# shorter than 4x the interval, and it prints NOT MEASURED and scores nothing.
+# A cadence computed from two samples is the row-cap trap in miniature — and it
+# is also what keeps every pre-existing single-row hermetic fixture untouched:
+# one run row per workflow cannot and must not produce a cadence verdict.
+cadence_verdict() { # <file> <interval> <rows> <now-epoch>
+  local file="$1" interval="$2" rows="$3" now="$4"
+  local m status span nrows expected sched disp other pct firings primary min_span
+  m="$(printf '%s\n' "$rows" | grep -F "\"$file\"" | python3 -c '
+import json, sys, datetime
+now = float(sys.argv[1]); interval = float(sys.argv[2]); win = float(sys.argv[3])
+rows = []
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    try: o = json.loads(line)
+    except json.JSONDecodeError: continue
+    ts = o.get("created_at")
+    try:
+        e = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except (AttributeError, ValueError):
+        continue
+    # THE PHANTOM-QUEUED TRAP, applied here too (c6): a permanently-queued row
+    # is evidence of nothing, and counting it as a delivered beat would inflate
+    # the very number this measure exists to deflate.
+    if o.get("status") == "queued" and (now - e) > 1440 * 60: continue
+    if e > now or e < now - win * 60: continue
+    rows.append((e, o.get("event") or ""))
+if len(rows) < 3:
+    print("INSUFFICIENT|0|%d|0|0|0|0" % len(rows)); raise SystemExit
+span = (now - min(e for e, _ in rows)) / 60.0
+if span < 4 * interval:
+    print("INSUFFICIENT|%d|%d|0|0|0|0" % (round(span), len(rows))); raise SystemExit
+expected = span / interval
+sched = sum(1 for _, ev in rows if ev == "schedule")
+disp  = sum(1 for _, ev in rows if ev == "workflow_dispatch")
+print("MEASURED|%d|%d|%d|%d|%d|%d|%d" % (
+    round(span), len(rows), round(expected), sched, disp,
+    len(rows) - sched - disp, round(100.0 * sched / expected) if expected > 0 else 0))
+' "$now" "$interval" "$CADENCE_WINDOW_MIN" 2>/dev/null)" || true
+  IFS='|' read -r status span nrows expected sched disp other pct <<EOF
+$m
+EOF
+  min_span=$(( interval * 4 ))
+  if [ "${status:-}" != "MEASURED" ]; then
+    echo "  --   $file (cadence): NOT MEASURED — ${nrows:-0} run row(s) spanning ${span:-0}m, under the 3-row / ${min_span}m minimum. Too little history to score a delivery rate; that is silence about this question, not a pass on it."
+    return 0
+  fi
+  CADENCE_MEASURED=$(( CADENCE_MEASURED + 1 ))
+  firings=$(( sched + disp + other ))
+  primary=""
+  [ "$disp" -gt "$sched" ] && primary=" — SO THIS PROBE, NOT THE SCHEDULER, IS THE PRIMARY DELIVERY MECHANISM for it"
+  if [ "$pct" -lt "$CADENCE_FLOOR_PCT" ]; then
+    CADENCE_SHORTFALL=$(( CADENCE_SHORTFALL + 1 ))
+    echo "CADENCE  $file (critical, every ${interval}m): the SCHEDULER delivered $sched of ~$expected expected beats over the last ${span}m — ${pct}% of its declared cadence, under the ${CADENCE_FLOOR_PCT}% floor. It fired $firings times in that window: $sched by schedule:, $disp by THIS PROBE's workflow_dispatch rescue, $other by another trigger (push/pull_request)${primary}. THIS IS A DELIVERY FINDING, NOT 'late right now' — the age line below answers that question on its own, and it may well say inside-bound." >&2
+  else
+    echo "  ok   $file (cadence): $sched of ~$expected expected beats delivered by schedule: over the last ${span}m (${pct}% of the declared ${interval}m cadence, floor ${CADENCE_FLOOR_PCT}%); of $firings firings, $disp were probe dispatches and $other came from another trigger"
+  fi
+}
+
 check_overdue() {
   local now rows rc=0 file class interval note newest age bound runid=""
   now="$(now_epoch)" || { echo "cron-overdue-probe: --now is not an ISO-8601 Z timestamp" >&2; return 2; }
@@ -468,6 +712,10 @@ check_overdue() {
   while IFS='|' read -r file class interval note; do
     [ -n "$file" ] || continue
     [ "$class" = "critical" ] || continue
+    # THE CADENCE QUESTION FIRST, AND ANSWERED ON ITS OWN LINE. It never touches
+    # $rc: a delivery shortfall is a second verdict, not a scream, and it must
+    # not be able to mask or be masked by the age answer that follows it.
+    cadence_verdict "$file" "$interval" "$rows" "$now"
     # The newest run that is EVIDENCE of a firing: any status except a queued
     # row older than 24 h (1440 minutes).
     newest="$(printf '%s\n' "$rows" | grep -F "\"$file\"" | python3 -c '
@@ -636,6 +884,7 @@ EOF
 {"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T11:40:00Z"}
 {"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z"}
 {"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z"}
+{"path": "main-red-owner.yml", "status": "completed", "created_at": "2026-09-03T11:43:00Z"}
 {"path": "task-lease-renew.yml", "status": "in_progress", "created_at": "2026-09-03T11:50:00Z"}
 {"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z"}
 FIX
@@ -657,6 +906,7 @@ FIX
   cat > "$tmp/drift-lag.ndjson" <<'FIX'
 {"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z"}
 {"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z"}
+{"path": "main-red-owner.yml", "status": "completed", "created_at": "2026-09-03T11:43:00Z"}
 {"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T09:00:00Z"}
 {"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z"}
 FIX
@@ -742,6 +992,7 @@ FIX
 {"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T11:40:00Z"}
 {"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z"}
 {"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z"}
+{"path": "main-red-owner.yml", "status": "completed", "created_at": "2026-09-03T11:43:00Z"}
 {"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T11:50:00Z"}
 {"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z"}
 {"path": "weekly-changelog.yml", "status": "completed", "created_at": "2026-08-04T11:40:00Z"}
@@ -788,6 +1039,7 @@ FIX
 {"path": "main-gate-watch.yml", "status": "queued", "created_at": "2026-08-07T09:08:43Z"}
 {"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z"}
 {"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z"}
+{"path": "main-red-owner.yml", "status": "completed", "created_at": "2026-09-03T11:43:00Z"}
 {"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T11:50:00Z"}
 {"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z"}
 FIX
@@ -826,6 +1078,7 @@ FIX
 {"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T10:28:00Z"}
 {"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z"}
 {"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z"}
+{"path": "main-red-owner.yml", "status": "completed", "created_at": "2026-09-03T11:43:00Z"}
 {"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T11:50:00Z"}
 {"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z"}
 FIX
@@ -999,6 +1252,155 @@ STUB
   else
     fail=$((fail+1)); echo "  FAIL c8e --no-dispatch went green without firing anything (rc=$rc)"
   fi
+  # ══ c9 — THE CADENCE MEASURE (task-edebe459992b3574) ══════════════════════
+  # THE SPECIMEN IS THE ROW'S OWN: task-lease-renew.yml (*/20, bound 60m), which
+  # violated its 60m bound on 120 of 120 gaps measured 2026-09-20 and which the
+  # probe reported INSIDE BOUND — truthfully — whenever it looked just after a
+  # firing. This fixture is exactly that shape: newest run 2 MINUTES old, and
+  # every trailing gap far past the bound. The age answer and the cadence answer
+  # must both be printed, must disagree, and must be labelled so a reader cannot
+  # mistake one for the other.
+  cat > "$tmp/chronic-late.ndjson" <<'FIX'
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T11:40:00Z", "event": "schedule"}
+{"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z", "event": "schedule"}
+{"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z", "event": "schedule"}
+{"path": "main-red-owner.yml", "status": "completed", "created_at": "2026-09-03T11:43:00Z", "event": "schedule"}
+{"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z", "event": "schedule"}
+{"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T11:58:00Z", "event": "schedule"}
+{"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T09:30:00Z", "event": "schedule"}
+{"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T06:45:00Z", "event": "schedule"}
+{"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T03:10:00Z", "event": "schedule"}
+{"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-02T23:40:00Z", "event": "schedule"}
+FIX
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$tmp/wf" \
+           --runs-file "$tmp/chronic-late.ndjson" --now "$NOW" --no-dispatch 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] \
+     && grep -q 'CADENCE  task-lease-renew.yml' <<<"$out" \
+     && grep -q 'newest run 2m old, inside the 60m bound' <<<"$out" \
+     && grep -q 'VERDICT  cadence: DEGRADED' <<<"$out" \
+     && grep -q 'VERDICT  cron: every critical-cadence workflow fired' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9a the CHRONICALLY-LATE specimen is caught by the CADENCE measure while the AGE measure says inside-bound, and the two answers are printed separately: $(grep -o 'CADENCE  task-lease-renew.yml.*floor\.' <<<"$out")"
+  else
+    fail=$((fail+1)); echo "  FAIL c9a the chronic-lateness specimen was not split into two answers (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c9a2 — and the AGE measure really did say inside-bound on that same fixture,
+  # asserted as an ABSENCE of the scream as well as a presence of the ok line.
+  # Without this, c9a would pass on a fixture that reddened for the ordinary
+  # reason and printed a cadence line as a bonus.
+  if ! grep -q 'OVERDUE  task-lease-renew.yml' <<<"$out" \
+     && ! grep -q 'VERDICT  cron: SCREAM' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9a2 …and NOTHING about that fixture is overdue — the cadence finding is the ONLY finding, which is the whole point of asking the second question"
+  else
+    fail=$((fail+1)); echo "  FAIL c9a2 the specimen was overdue too, so c9a did not isolate the cadence measure"
+  fi
+
+  # c9b — THE DISTINCT EXIT. A delivery shortfall is a WARNING by default (see
+  # the 2026-09-20 header: no PR can clear a platform-wide shortfall, and a red
+  # nobody can act on is how an alarm gets ignored). --cadence-strict turns the
+  # same finding into exit 4 — never 1, so it can never be read as "late or dark
+  # right now", and never 2, so it can never be read as a config chore.
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$tmp/wf" \
+           --runs-file "$tmp/chronic-late.ndjson" --now "$NOW" --no-dispatch --cadence-strict 2>&1)"; rc=$?
+  if [ "$rc" = "4" ] && grep -q 'VERDICT  cadence: DEGRADED' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9b …and --cadence-strict reds the SAME fixture at exit 4 — a code distinct from 1 (late/dark now), 2 (config drift) and 3 (unreadable)"
+  else
+    fail=$((fail+1)); echo "  FAIL c9b --cadence-strict did not produce the distinct code (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c9c — AND IT CAN LOSE. The same workflow delivering its declared */20 for
+  # five hours is green on BOTH measures. A cadence check that reds on every
+  # history is a cadence check nobody reads.
+  grep -v 'task-lease-renew' "$tmp/chronic-late.ndjson" > "$tmp/healthy-cadence.ndjson"
+  for t in 07:00 07:20 07:40 08:00 08:20 08:40 09:00 09:20 09:40 10:00 10:20 10:40 11:00 11:20 11:40 11:55; do
+    echo "{\"path\": \"task-lease-renew.yml\", \"status\": \"completed\", \"created_at\": \"2026-09-03T$t:00Z\", \"event\": \"schedule\"}" \
+      >> "$tmp/healthy-cadence.ndjson"
+  done
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$tmp/wf" \
+           --runs-file "$tmp/healthy-cadence.ndjson" --now "$NOW" --no-dispatch --cadence-strict 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] \
+     && grep -q 'ok   task-lease-renew.yml (cadence)' <<<"$out" \
+     && ! grep -q 'CADENCE  ' <<<"$out" \
+     && grep -q 'VERDICT  cadence: every measured critical workflow' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9c a workflow actually delivering its */20 is GREEN on both measures even under --cadence-strict: $(grep -o 'ok   task-lease-renew.yml (cadence).*' <<<"$out")"
+  else
+    fail=$((fail+1)); echo "  FAIL c9c a healthy cadence was flagged (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c9d — THE LEGIBILITY HALF, which is the reason the row calls the dispatch
+  # arm's success a problem: 5 of 7 firings in the window are this probe's own
+  # rescues, the scheduler delivered 2, and the verdict must SAY SO. Before this
+  # change the identical history printed `cron: every critical-cadence workflow
+  # fired inside 3x its interval` and nothing else.
+  grep -v 'main-gate-watch' "$tmp/chronic-late.ndjson" > "$tmp/probe-primary.ndjson"
+  cat >> "$tmp/probe-primary.ndjson" <<'FIX'
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-02T13:00:00Z", "event": "schedule"}
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T02:00:00Z", "event": "schedule"}
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T04:00:00Z", "event": "workflow_dispatch"}
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T06:00:00Z", "event": "workflow_dispatch"}
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T08:00:00Z", "event": "workflow_dispatch"}
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T10:00:00Z", "event": "workflow_dispatch"}
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T11:50:00Z", "event": "workflow_dispatch"}
+FIX
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$tmp/wf" \
+           --runs-file "$tmp/probe-primary.ndjson" --now "$NOW" --no-dispatch 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] \
+     && grep -q 'THIS PROBE, NOT THE SCHEDULER, IS THE PRIMARY DELIVERY MECHANISM' <<<"$out" \
+     && grep -q 'It fired 7 times in that window: 2 by schedule:, 5 by THIS PROBE' <<<"$out" \
+     && grep -q 'newest run 10m old, inside the 90m bound' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9d a green built out of 5 probe dispatches and 2 scheduled runs SAYS SO: $(grep -o 'CADENCE  main-gate-watch.yml.*MECHANISM for it' <<<"$out")"
+  else
+    fail=$((fail+1)); echo "  FAIL c9d the probe-as-primary-delivery case was not made legible (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c9e — RED-BEFORE, by a SURGICAL CUT of the cadence DECISION. Not the
+  # counting, not the printing: only the comparison against the floor. If c9a
+  # passes on the mutant, the measure is decorative.
+  sed 's|^  if \[ "$pct" -lt "$CADENCE_FLOOR_PCT" \]; then$|  if false; then|' "$0" > "$tmp/nocadence.sh"
+  if [ "$(grep -c '^  if false; then$' "$tmp/nocadence.sh")" = "1" ] \
+     && ! diff -q "$0" "$tmp/nocadence.sh" >/dev/null; then
+    pass=$((pass+1)); echo "  ok   c9e-mut the cut-the-cadence-decision MUTATION applied — exactly one comparison disabled"
+  else
+    fail=$((fail+1)); echo "  FAIL c9e-mut the mutation did not apply — c9e below would prove nothing"
+  fi
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$tmp/nocadence.sh" --workflows "$tmp/wf" \
+           --runs-file "$tmp/chronic-late.ndjson" --now "$NOW" --no-dispatch --cadence-strict 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] && ! grep -q 'CADENCE  task-lease-renew.yml' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9e …and with that ONE comparison cut, the chronic-lateness specimen goes silent and exits 0 — c9a/c9b are the decision doing the work, not the fixture"
+  else
+    fail=$((fail+1)); echo "  FAIL c9e the mutant still flagged the specimen (rc=$rc) — c9a proves nothing"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+  # c9e2 — AND THE MUTANT MUST NOT MOVE THE OTHER TWO ARMS. A cut that also
+  # broke the dead-workflow scream or the healthy fixture would make c9e a
+  # measurement of something else entirely.
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$tmp/nocadence.sh" --workflows "$tmp/wf" \
+           --runs-file "$tmp/gap6h.ndjson" --now "$NOW" --no-dispatch 2>&1)"; rc=$?
+  if [ "$rc" = "1" ] && grep -q 'OVERDUE  main-gate-watch.yml' <<<"$out" && grep -q '360m old' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9e2 …and the SAME mutant still reds the 6 h dead-workflow fixture (c3's) at exit 1 — the cut touched the cadence decision and nothing else"
+  else
+    fail=$((fail+1)); echo "  FAIL c9e2 the cadence mutation also broke the dead-workflow scream (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$tmp/nocadence.sh" --workflows "$tmp/wf" \
+           --runs-file "$tmp/healthy-cadence.ndjson" --now "$NOW" --no-dispatch --cadence-strict 2>&1)"; rc=$?
+  if [ "$rc" = "0" ]; then
+    pass=$((pass+1)); echo "  ok   c9e3 …and it still passes the healthy-cadence fixture — the mutant differs from this script on exactly the one fixture c9a is about"
+  else
+    fail=$((fail+1)); echo "  FAIL c9e3 the cadence mutation reddened the healthy fixture (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c9f — THE HISTORY-SHAPED INPUT DID NOT BREAK THE ONE-ROW FIXTURES. Every
+  # arm above c9 feeds --runs-file the newest row per workflow and no event
+  # field at all; those must keep meaning exactly what they meant, which is why
+  # the measure refuses to score under 3 rows / 4x the interval rather than
+  # inventing a rate from one sample.
+  out="$(RUNS_FILE="$tmp/fresh.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] && [ "$(grep -c '(cadence): NOT MEASURED' <<<"$out")" = "6" ] \
+     && ! grep -q 'CADENCE  ' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9f the pre-existing one-row-per-workflow fixtures score NO cadence at all — all 6 critical rows print NOT MEASURED, and a rate is never invented from one sample"
+  else
+    fail=$((fail+1)); echo "  FAIL c9f a single run row produced a cadence verdict (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
   unset CRON_PROBE_GH CRON_PROBE_POLL_TRIES CRON_PROBE_POLL_SLEEP
 
   echo
@@ -1057,8 +1459,25 @@ if [ "$DRIFT" -ne 0 ]; then
   echo "VERDICT  config: DRIFT — the classification table and the tree disagree (REFUSED, named above). This is a SEPARATE refusal from the cron verdict above, and it does not change it: classify the workflow in $(basename "$0")."
 fi
 
+# THE CADENCE VERDICT — A THIRD, INDEPENDENT ANSWER (task-edebe459992b3574).
+# It says which mechanism is delivering the beats, which the cron verdict above
+# deliberately does not: since the dispatch arm landed, `cron: every critical-
+# cadence workflow fired inside 3x its interval` is true both when the scheduler
+# delivered and when THIS PROBE carried it, and those are different states.
+if [ "$CADENCE_MEASURED" -eq 0 ]; then
+  echo "VERDICT  cadence: NOT MEASURED — no critical workflow had enough run history in the last ${CADENCE_WINDOW_MIN}m window to score a delivery rate (see the per-workflow lines above)."
+elif [ "$CADENCE_SHORTFALL" -ne 0 ]; then
+  echo "VERDICT  cadence: DEGRADED — $CADENCE_SHORTFALL of $CADENCE_MEASURED measured critical workflow(s) are receiving less than ${CADENCE_FLOOR_PCT}% of their declared schedule: beats (named above). This is a WARNING BY DESIGN and it is not the cron verdict: GitHub's scheduler on this repo delivered ~7 runs a day to each of main-gate-watch, stale-verdict-watch and task-lease-renew in the 24 h to 2026-09-20T19:40Z, whatever their cron expressions say, so no pull request can clear it and a red here would be red every day. Pass --cadence-strict to make it exit 4."
+else
+  echo "VERDICT  cadence: every measured critical workflow received at least ${CADENCE_FLOOR_PCT}% of its declared schedule: beats over the last ${CADENCE_WINDOW_MIN}m"
+fi
+
 # THE CODE IS THE WORST LIVE VERDICT, and the drift only owns it when the cron
 # read came back clean. A drift must never launder a 1 (a silent safety net) or
-# a 3 (an unreadable run list) into a 2 that reads like a config chore.
+# a 3 (an unreadable run list) into a 2 that reads like a config chore. The
+# cadence shortfall sits BELOW both for the same reason in reverse: a delivery
+# warning must never be able to mask a scream or a refusal.
 [ "$RC" -ne 0 ] && exit "$RC"
-exit "$DRIFT"
+[ "$DRIFT" -ne 0 ] && exit "$DRIFT"
+[ "$CADENCE_STRICT" = 1 ] && [ "$CADENCE_SHORTFALL" -ne 0 ] && exit 4
+exit 0

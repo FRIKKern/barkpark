@@ -1,0 +1,5 @@
+_id    title            concept    variant  domain  description
+-----  ---------------  ---------  -------  ------  -----------
+cmd-a  Add a LiveView   liveview   basic    web
+cmd-b  Add a context    context    basic    core
+cmd-c  Add a migration  migration  basic    db

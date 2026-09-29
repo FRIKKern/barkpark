@@ -31,7 +31,39 @@ import (
 // nothing more); the true predicate is server-side (task-eb2b6170e19f1611
 // tracks that half) and this stays purely diagnostic.
 func runTaskClaim(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
+	// THE LOADOUT IS BUILT BEFORE THE POST, ONCE (task-a42dccec2fe4a406). The
+	// ledger and the local directory must carry the SAME record, and two builds
+	// differ in ClaimedAt and therefore in Digest — so this value is what rides
+	// the wire AND what is later written to disk. No priming dir configured
+	// (the default) yields no manifest and no wire key: absent stays ABSENT.
+	preq, _ := claimRequestOf(cmd, tail)
+	built, inject, err := primingWireArgs(out, defaultPrimingEnv(), preq.docID, preq.workerID)
+	if err != nil {
+		out.errf("priming: %v\n", err)
+		return exitGeneric
+	}
+	if len(inject) > 0 {
+		tail = append(append([]string{}, tail...), inject...)
+	}
+
 	rc := runCommand(out, g, ctx, m, cmd, tail)
+	if rc == exitOK {
+		// CLAIMING AND PROTECTING ARE ONE ACT (task-f79e39f4992749a5). The
+		// claim landed; now it has to reach the file the pulse loop reads, and
+		// the append has to be PROVEN by a readback. See recordHeldClaim.
+		if held := recordClaimInHeldFile(out, cmd, tail); held != exitOK {
+			return held
+		}
+		// PRIMING RIDES THE SAME SUCCESS PATH as the held-file append, for the
+		// same reason: what the agent was holding when it claimed is only
+		// recoverable if it is written down AT the claim, not remembered after
+		// it. Opt-in (BARKPARK_PRIMING_DIR); see tasks_priming_manifest.go. A
+		// request whose doc id could not be resolved passes "" through on
+		// purpose — recordPrimingManifest is the one place that decides whether
+		// that is a loud failure (a priming dir IS configured) or a no-op.
+		pr, _ := claimRequestOf(cmd, tail)
+		return recordPrimingManifestOf(out, defaultPrimingEnv(), pr.docID, pr.workerID, built)
+	}
 	if rc != exitConflict {
 		return rc
 	}
@@ -246,4 +278,27 @@ func claimVerdict(requestedWorker, lifecycle string, claim apiclient.ClaimInfo, 
 		return fmt.Sprintf("held live by %s — wait for them to release or close it, or ask them to hand it off", claim.Worker)
 	}
 	return fmt.Sprintf("RELEASED but claim.worker is still stale-set to %s (bp task stage can leave it behind across a lifecycle move) — you are the WRONG WORKER for this stale field; only %s can currently re-enter", claim.Worker, claim.Worker)
+}
+
+// recordClaimInHeldFile appends the just-claimed doc id to BARKPARK_HELD_FILE
+// and reads it back. Returns exitOK when there is no held file configured (the
+// default — no existing invocation changes), and exitGeneric with a loud
+// message when the append could not be PROVEN, because an unprotected claim
+// that reports success is exactly the failure this row was filed for.
+func recordClaimInHeldFile(out *writer, cmd manifest.Command, tail []string) int {
+	path := heldFilePath()
+	if path == "" {
+		return exitOK
+	}
+	req, ok := claimRequestOf(cmd, tail)
+	if !ok || req.docID == "" {
+		out.errf("held-file: could not resolve the claimed doc id from the request; %s NOT updated — this claim may never be pulsed\n", path)
+		return exitGeneric
+	}
+	if err := recordHeldClaim(path, req.docID); err != nil {
+		out.errf("held-file: %v\n", err)
+		return exitGeneric
+	}
+	out.errf("held-file: %s recorded in %s (readback confirmed)\n", req.docID, path)
+	return exitOK
 }

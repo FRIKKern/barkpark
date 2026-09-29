@@ -169,6 +169,59 @@ defmodule Barkpark.TenancyFixtures do
   end
 
   @doc """
+  The id of the workspace currently holding the instance-default seat. RAISES
+  if the seat is vacant — it never returns `nil`.
+
+  THE SUITE'S EXPLICIT NAME FOR A SCOPE IT USED TO GET BY ACCIDENT
+  (task-3a77f0e5bd62c888). `Auth.create_token/5` resolves a `nil` workspace to
+  the instance-default one and seats the mint there, so a bare 4-arity
+  `Auth.create_token(raw, label, dataset, perms)` has been the suite's idiom
+  for "an admin of the default scope" — 551 call sites lean on it, and
+  `Barkpark.DataCase`'s `ensure_default_tenancy/0` takes the seat before any
+  module's `setup` runs, which is why it works. A test that MEANS the default
+  workspace should now say so:
+
+      Barkpark.Auth.create_token(
+        raw,
+        "label",
+        "test",
+        perms,
+        TenancyFixtures.default_workspace_id!()
+      )
+
+  The workspace is `create_token/5`'s FIFTH POSITIONAL argument, a bare
+  `binary()` — not a `workspace_id:` option. Passing a keyword list there casts
+  to `{:error, %Ecto.Changeset{errors: [workspace_id: {"is invalid", ...}]}}`
+  and the caller's `{:ok, _}` match blows up in setup, which is exactly what
+  the first draft of this migration did.
+
+  It refuses rather than returning `nil` on a vacant seat on purpose: a `nil`
+  workspace_id is not an error at the mint, it is a WORKSPACE-LESS token, and
+  every scoped route then answers 403 `not_a_member` far from the fixture that
+  caused it. Need the seat established rather than asserted? Call
+  `ensure_default_scope!/0` first — this reads, it does not write.
+  """
+  @spec default_workspace_id!() :: binary()
+  def default_workspace_id! do
+    case Tenancy.get_default_workspace() do
+      nil ->
+        raise """
+        default_workspace_id!/0: no workspace holds the instance-default seat \
+        (`workspaces.is_default == true`, read via \
+        `Barkpark.Tenancy.get_default_workspace/0`).
+
+        `Barkpark.DataCase`'s `ensure_default_tenancy/0` normally seats it before \
+        your `setup` runs; a test that vacated it (see `vacate_default_seat!/0`) \
+        or that runs outside DataCase must call `ensure_default_scope!/0` to \
+        establish the seat before asking for its id.
+        """
+
+      ws ->
+        ws.id
+    end
+  end
+
+  @doc """
   Ensure the seeded Default Workspace + Project exist for the current test.
   The backfill migration (20260527110200) seeds them in the test DB, so this
   is normally a no-op read; it creates them only when a fresh per-test sandbox

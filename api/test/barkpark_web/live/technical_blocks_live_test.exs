@@ -31,7 +31,13 @@ defmodule BarkparkWeb.TechnicalBlocksLiveTest do
     raw = "technical-writer-#{System.unique_integer([:positive])}"
 
     {:ok, _token} =
-      Auth.create_token(raw, "technical control writer", @dataset, ["read", "write"])
+      Auth.create_token(
+        raw,
+        "technical control writer",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     %{slug: slug, writer: Plug.Test.init_test_session(conn, %{"api_token" => raw})}
   end
@@ -137,6 +143,19 @@ defmodule BarkparkWeb.TechnicalBlocksLiveTest do
     end
 
     test "#{host} technical form edits persist through a fresh mount", ctx do
+      # scaffy-backlog-blocks-editable-studio — this test pins the CLASSIC form
+      # surface, so it pins the CLASSIC flag value. `diff` and `filetree` joined
+      # paper_canvas.ex @canvas_attr_atom_types, which means that with the canvas
+      # ON they are FOLDED INTO A RUN and edited by the bpDiff / bpFiletree
+      # node-views — there is no per-block `#technical-block-form-*` for them any
+      # more, exactly as there is none for `code` or `diagram`. The other two
+      # blocks here (`notes` / `tabs`) are still boundary kinds and their
+      # canvas-ON form coverage is unchanged, held by "technical collection
+      # actions add, reorder, and remove retained rows" in this same file.
+      # The CANVAS half of the round-trip is pinned by
+      # test/barkpark_web/live/studio/technical_blocks_canvas_test.exs.
+      BarkparkWeb.PaperEditorTestHelpers.pin_paper_canvas!("0")
+
       view = mount_editor(ctx, @host)
 
       for id <- ~w(diff tree notes tabs) do
@@ -527,6 +546,19 @@ defmodule BarkparkWeb.TechnicalBlocksLiveTest do
 
   defp mount_editor(ctx, :studio) do
     {:ok, view, _html} = live(ctx.conn, scoped_studio("/d/#{@dataset}/studio/paper/#{ctx.slug}"))
+
+    # Studio has no View<->Edit toggle while the canvas is ON —
+    # studio_live/components.ex
+    # derives `show_editor` from the flag, so the editor renders on open. The
+    # flag-OFF opt-out keeps the LEGACY shape: the read-only View pane plus a
+    # toggle whose `paper_edit_mode` still gates Edit (the `show_editor`
+    # assignment in studio_live/components.ex).
+    # The conditional click is therefore a no-op for every canvas-ON test in
+    # this file and the entry step for the canvas-OFF ones. Same idiom as
+    # shared_typed_leaf_authoring_test.exs.
+    if has_element?(view, ~s([data-test-id="paper-edit-toggle"])),
+      do: view |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
+
     view
   end
 

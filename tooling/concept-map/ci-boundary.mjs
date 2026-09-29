@@ -80,6 +80,9 @@ const AS_JSON = flag("--json");
 const SKIP_BUILD = flag("--skip-build");
 const WRITE_BASELINE = flag("--write-baseline");
 const ALLOW_COLD = flag("--allow-cold-index");
+const FROM_CI = optVal("--from-ci");
+const WANT_HELP = flag("--help") || flag("-h");
+const REPO_OVERRIDE = optVal("--repo");
 
 // ── small helpers ───────────────────────────────────────────────────────────
 
@@ -692,9 +695,261 @@ export function compare(current, baseline, acceptedEntries = []) {
   };
 }
 
+// ── --from-ci: READ CI'S OWN VERDICT FOR A SHA, WITHOUT WARMING A TREE ──────
+//
+// WHY THIS MODE EXISTS. The preflight above is correct and stays: a cold tree
+// cannot produce CI's verdict, so it refuses rather than misstate the debt.
+// But warming a fresh worktree costs `node tooling/blast-radius/build-index.mjs`
+// AND a full `mix deps.get` + `mix compile`/`mix xref` — minutes, a private
+// MIX_TEST_PARTITION, and a whole Elixir toolchain — to answer a one-line
+// reviewer question. So a criterion worded "run ci-boundary.mjs on main" was in
+// practice discharged by OPENING THE GITHUB UI and reading the job's colour:
+// a different measurement, by hand, with no command anyone could paste
+// (task-3b79b6580fe877c6).
+//
+// `--from-ci <sha>` is that reading, made a command. It does not gate anything;
+// it REPORTS the conclusion of the check-run CI already published for that sha,
+// and prints the job URL so the reading is checkable. It compiles nothing,
+// builds nothing and reads no local artefact.
+//
+// THE CONTRACT THAT MAKES IT HONEST — and the only reason it may be cited:
+// a verdict it could not obtain is never byte-identical to a pass.
+//
+//   exit 0  "CI VERDICT PASS"        conclusion=success
+//   exit 1  "CI VERDICT RED"         a completed, non-success conclusion
+//   exit 2  "CANNOT READ CI VERDICT" no such check-run, still queued, still
+//                                    in_progress, a null/neutral/skipped
+//                                    conclusion, a malformed payload, or an
+//                                    API read that failed
+//
+// Absent / queued / in_progress / read-failure ALL land in the third bucket on
+// purpose. Those are the four shapes a reviewer meets in the minutes after a
+// push, and they are exactly the shapes a hopeful reader rounds up to "green".
+export const CI_CHECK_NAME = "Boundary gate";
+
+// A conclusion that is a real published verdict of "no new debt". Everything
+// else that is *completed* is a red; the non-verdicts (null, neutral, skipped)
+// are CANNOT READ, because the gate did not actually say anything about this sha.
+const CI_PASS_CONCLUSION = "success";
+const CI_NON_VERDICT_CONCLUSIONS = new Set(["neutral", "skipped"]);
+
+// The default transport: `gh api`. Deliberately not raw fetch + a token the
+// reviewer has to provision — `gh` is already authenticated on any machine that
+// can open the PR, and where it is not, its failure is a CANNOT READ, which is
+// the correct answer rather than a silent one.
+function ghApiGet(path) {
+  const out = execFileSync("gh", ["api", path], {
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return JSON.parse(out);
+}
+
+// owner/name for the API path. --repo wins, then GITHUB_REPOSITORY (set in every
+// Actions run), then the origin remote of this checkout.
+export function resolveRepo({ override = null, env = process.env, remoteUrl = null } = {}) {
+  if (override) return override;
+  if (env.GITHUB_REPOSITORY) return env.GITHUB_REPOSITORY;
+  let url = remoteUrl;
+  if (url === null) {
+    try {
+      url = execFileSync("git", ["remote", "get-url", "origin"], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    } catch {
+      return null;
+    }
+  }
+  const m = /(?:github\.com[:/])([^/]+\/[^/]+?)(?:\.git)?\s*$/.exec(url || "");
+  return m ? m[1] : null;
+}
+
+// Pick the run to report when a sha carries more than one "Boundary gate"
+// check-run (a re-run publishes a second). The LATEST started_at wins; ties fall
+// back to the last element, which is the API's own order.
+function newestRun(runs) {
+  let best = null;
+  for (const r of runs) {
+    if (!best) { best = r; continue; }
+    const a = Date.parse(r.started_at || "") || 0;
+    const b = Date.parse(best.started_at || "") || 0;
+    if (a >= b) best = r;
+  }
+  return best;
+}
+
+// The whole mode as a pure-ish function over an injected `apiGet`, so
+// ci-boundary.test.mjs drives every one of the four CANNOT-READ shapes with no
+// network and no `gh`. Returns { kind, exitCode, line, url } — never throws.
+export async function ciVerdict(sha, { repo, apiGet, checkName = CI_CHECK_NAME } = {}) {
+  const cannot = (reason, url = null) => ({
+    kind: "cannot-read",
+    exitCode: 2,
+    line: `ci-boundary: CANNOT READ CI VERDICT — ${reason}`,
+    url,
+  });
+
+  if (!sha || !/^[0-9a-f]{7,40}$/i.test(String(sha).trim()))
+    return cannot(`--from-ci needs a commit sha (got ${JSON.stringify(sha ?? null)})`);
+  if (!repo)
+    return cannot(
+      "could not determine owner/repo — pass --repo <owner>/<name> or set GITHUB_REPOSITORY"
+    );
+
+  const ref = String(sha).trim();
+  const path = `repos/${repo}/commits/${ref}/check-runs?check_name=${encodeURIComponent(checkName)}`;
+
+  let payload;
+  try {
+    payload = await apiGet(path);
+  } catch (err) {
+    const detail = (err && (err.stderr || err.message) ? String(err.stderr || err.message) : String(err))
+      .trim()
+      .split("\n")[0]
+      .slice(0, 300);
+    return cannot(`the check-run API read FAILED for ${ref} (${detail || "no detail"})`);
+  }
+
+  const runs = payload && Array.isArray(payload.check_runs) ? payload.check_runs : null;
+  if (!runs)
+    return cannot(`the check-run API returned a payload with no check_runs array for ${ref}`);
+  if (runs.length === 0)
+    return cannot(
+      `no "${checkName}" check-run exists for ${ref} (never scheduled, or the sha is not on this repo)`
+    );
+
+  const run = newestRun(runs);
+  const url = run.html_url || run.details_url || null;
+  const id = run.id === undefined || run.id === null ? "?" : String(run.id);
+
+  if (run.status !== "completed")
+    return cannot(
+      `the "${checkName}" check-run for ${ref} is status=${JSON.stringify(run.status ?? null)}, not completed — ` +
+        `no verdict has been published yet (check-run ${id})`,
+      url
+    );
+
+  const conclusion = run.conclusion;
+  if (!conclusion || CI_NON_VERDICT_CONCLUSIONS.has(conclusion))
+    return cannot(
+      `the "${checkName}" check-run for ${ref} completed with conclusion=${JSON.stringify(conclusion ?? null)} — ` +
+        `that is not a verdict about this repo's debt (check-run ${id})`,
+      url
+    );
+
+  if (conclusion === CI_PASS_CONCLUSION)
+    return {
+      kind: "pass",
+      exitCode: 0,
+      line: `ci-boundary: CI VERDICT PASS — "${checkName}" conclusion=success for ${ref} (check-run ${id})`,
+      url,
+    };
+
+  return {
+    kind: "red",
+    exitCode: 1,
+    line: `ci-boundary: CI VERDICT RED — "${checkName}" conclusion=${conclusion} for ${ref} (check-run ${id})`,
+    url,
+  };
+}
+
+// The one place the verdict reaches a human. Kept separate from ciVerdict so the
+// test can assert the BYTES, which is the criterion: a CANNOT READ must never be
+// byte-identical to a pass.
+export function renderCiVerdict(v) {
+  const lines = [v.line];
+  lines.push(v.url ? `  job: ${v.url}` : "  job: (no job URL — the check-run was never created)");
+  return lines.join("\n");
+}
+
+async function runFromCi() {
+  const repo = resolveRepo({ override: REPO_OVERRIDE });
+  const v = await ciVerdict(FROM_CI, { repo, apiGet: ghApiGet });
+  note(renderCiVerdict(v));
+  if (AS_JSON) {
+    process.stdout.write(
+      JSON.stringify({ mode: "from-ci", sha: FROM_CI, repo, ...v }, null, 2) + "\n"
+    );
+  }
+  return v.exitCode;
+}
+
+// ── --help ──────────────────────────────────────────────────────────────────
+//
+// The warm-tree precondition, stated where a CRITERION AUTHOR meets it. A
+// criterion that says "run ci-boundary.mjs on main" is unrunnable at reviewer
+// cost unless the author knows this, and the place they look is `--help`.
+const HELP = `ci-boundary.mjs — the never-worse architecture gate (cqv8)
+
+USAGE
+  node tooling/concept-map/ci-boundary.mjs [--json] [--skip-build]
+  node tooling/concept-map/ci-boundary.mjs --from-ci <sha> [--repo owner/name] [--json]
+  node tooling/concept-map/ci-boundary.mjs --write-baseline [--out <path>]
+  node tooling/concept-map/ci-boundary.mjs --allow-cold-index
+  node tooling/concept-map/ci-boundary.mjs --help
+
+THE WARM-TREE PRECONDITION — READ THIS BEFORE WORDING A CRITERION
+
+  A local run gates NOTHING in a tree that was never warmed. In a fresh
+  \`git worktree add --detach <dir> origin/main\` it refuses TWICE, by design:
+
+  (each refusal is ONE line, printed verbatim below — deliberately unwrapped so
+  a grep for it matches this help text)
+
+    ci-boundary: REFUSING to gate an unwarmed tree — no blast-radius index at tooling/blast-radius/index.json (this tree was never warmed); build it first: node tooling/blast-radius/build-index.mjs (a cold run compares HEURISTIC edges against an EXACT-edge baseline and silently misstates the debt; pass --allow-cold-index to override)
+
+  and then, after \`node tooling/blast-radius/build-index.mjs\` exits 0 having
+  built the js and go graphs but NOT the Elixir one:
+
+    ci-boundary: REFUSING to gate an unwarmed tree — tooling/blast-radius/index.json carries no elixir.forward graph (mix compile or mix xref did not run); build it first: node tooling/blast-radius/build-index.mjs (a cold run compares HEURISTIC edges against an EXACT-edge baseline and silently misstates the debt; pass --allow-cold-index to override)
+
+  Both refusals are CORRECT and are not going away. The cost they imply is the
+  point: warming elixir.forward needs \`mix deps.get\` plus a full
+  \`mix compile\` / \`mix xref\` in THAT worktree — an Elixir toolchain, a
+  private MIX_TEST_PARTITION and minutes — on top of build-index.mjs itself.
+
+  --allow-cold-index is NOT the cheap path. It is documented to produce a
+  HEURISTIC verdict that may DISAGREE with CI's; never cite it in a criterion.
+
+  THE SUPPORTED CHEAP PATH is --from-ci: read the verdict CI already published.
+
+    node tooling/concept-map/ci-boundary.mjs --from-ci $(git rev-parse origin/main)
+
+  It compiles nothing and reads no local artefact. Exit codes:
+    0  CI VERDICT PASS        the ${CI_CHECK_NAME} check-run concluded success
+    1  CI VERDICT RED         it completed with a non-success conclusion
+    2  CANNOT READ CI VERDICT absent, queued, in_progress, a non-verdict
+                              conclusion, or a failed API read
+  A verdict it could not obtain is NEVER byte-identical to a pass.
+
+  Word criteria against --from-ci <sha>, or against the CI job itself — not
+  against a bare local run, which no reviewer can afford.
+
+FLAGS
+  --json                 emit the machine report on stdout
+  --skip-build           reuse the symbol graph already in the tree
+  --from-ci <sha>        report CI's own ${CI_CHECK_NAME} verdict for <sha> (needs \`gh\`)
+  --repo <owner>/<name>  repo for --from-ci (default: GITHUB_REPOSITORY, else origin)
+  --write-baseline       rewrite boundary-baseline.json from the current graph
+  --allow-cold-index     waive the index preflight (HEURISTIC verdict — see above)
+  --help                 this text
+`;
+
 // ── main ────────────────────────────────────────────────────────────────────
 
 async function main() {
+  if (WANT_HELP) {
+    process.stdout.write(HELP);
+    return 0;
+  }
+
+  // --from-ci short-circuits EVERYTHING below: it reads CI's published verdict
+  // for a sha and compiles nothing, so the warm-tree preflight does not apply.
+  if (FROM_CI !== null) return await runFromCi();
+
   // FIRST, before the graph rebuild and before anything is read: can this tree
   // produce the verdict CI produces? If not, say so in one line and stop.
   const refusal = preflightRefusal({

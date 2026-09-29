@@ -13,9 +13,19 @@ defmodule BarkparkWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  # `:peer_data` + `:x_headers` are what make an IP-keyed budget on a LiveView
+  # mount real. `BarkparkWeb.QuizHostLive` is an ANONYMOUS door that STARTS a
+  # process per visitor-supplied pin; without these two keys its connect_info
+  # carries no address at all, every spawn bills ONE shared fallback bucket,
+  # and `Barkpark.Quiz.SpawnBudget` degrades from a per-visitor brake into a
+  # global one — the exact shape the budget replaced. Declared on BOTH
+  # transports: longpoll is a real fallback, not a curiosity, and a limiter
+  # that only holds on websocket is a limiter with a documented bypass.
+  # The trust boundary is NOT here — both fields go to
+  # `Barkpark.RateLimiter.client_ip/1`, which decides which to believe.
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
-    longpoll: [connect_info: [session: @session_options]]
+    websocket: [connect_info: [:peer_data, :x_headers, session: @session_options]],
+    longpoll: [connect_info: [:peer_data, :x_headers, session: @session_options]]
 
   # Public realtime socket — carries SearchChannel for per-keystroke live search
   # (browser → API direct, one persistent connection, no per-keystroke TLS/Vercel

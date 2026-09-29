@@ -305,3 +305,79 @@ func TestSlotUnitsJSONKeepsTheThreeStatesThree(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The partition is a PREFIX test, not a substring test.
+// ---------------------------------------------------------------------------
+//
+// slotUnitPrefix is declared a prefix — the constant's name says so and its doc
+// comment says "a unit that does not carry it is a spawned SITE unit". The
+// partition in slotUnitMarker matched it with strings.Contains, which is WIDER
+// than the contract it is comparing against: it accepts the token anywhere in
+// the name.
+//
+// WHAT DISTINGUISHES THE TWO FUNCTIONS: a spawned site unit whose INSTANCE name
+// embeds the token — `barkpark-site@barkpark-slot@blue__a.service`. systemd
+// unit names permit a further `@` inside the instance portion (the instance is
+// everything after the FIRST `@`), so this is a name the probe's own
+// `barkpark-site@*` glob would list and the agent would relay verbatim. Under
+// Contains it lands in `slots`, is reported as half of the blue/green pair
+// through slotUnitFailureClause, and vanishes from the site list; under
+// HasPrefix it is a site unit, which is what it is.
+//
+// No site slug on any box today spells its name that way, so this is the
+// tightening of a comparison to the contract it already claims rather than the
+// repair of an observed misreport — and the test exists so it cannot silently
+// widen back: it FAILS under strings.Contains and passes under strings.HasPrefix.
+func TestASiteUnitEmbeddingTheSlotTokenIsStillASiteUnit(t *testing.T) {
+	units := append(blueFailedGreenServing(),
+		slotUnit("barkpark-site@barkpark-slot@blue__a.service", "failed", "failed",
+			"exit-code", 0, 1, "Tue 2026-09-15 08:04:11 UTC"))
+	b := slotBox(units...)
+
+	d := attentionDetail(b, attentionStatus(b))
+
+	// The site half: it is counted and named on the SITE list.
+	if !strings.Contains(d, "1 site unit(s) failed: barkpark-slot@blue__a") {
+		t.Errorf("a site unit that merely EMBEDS %q was not reported as a site unit — "+
+			"the partition is matching it as a prefix would not.\ndetail: %q",
+			slotUnitPrefix, d)
+	}
+	// The slot half: only ONE slot failed on this box (blue), so the failure
+	// clause must name exactly one. Under Contains it names two, and the second
+	// is a site unit wearing the word "slot".
+	if strings.Contains(d, "barkpark-slot@blue__a slot FAILED") {
+		t.Errorf("a site unit was reported through the SLOT failure clause — Contains "+
+			"accepted the token off-prefix.\ndetail: %q", d)
+	}
+
+	// And `-o json` still carries the row itself: the classification decides how
+	// the TABLE tells the story, never whether the unit is reported at all.
+	row := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{b})[0])
+	blob, err := json.Marshal(row["slot_units"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(blob), `"unit":"barkpark-site@barkpark-slot@blue__a.service"`) {
+		t.Errorf("-o json dropped the embedding unit:\n%s", blob)
+	}
+}
+
+// The QUIET direction, and the reason the fix is HasPrefix and not something
+// narrower still: the two units that legitimately carry the prefix must keep
+// being read as the blue/green pair. This test says nothing about Contains —
+// it fails only if the tightening went too far.
+func TestTheRealSlotPairStillMatchesThePrefix(t *testing.T) {
+	b := slotBox(blueFailedGreenServing()...)
+
+	d := attentionDetail(b, attentionStatus(b))
+	if !strings.Contains(d, "serving on green") {
+		t.Errorf("barkpark-slot@green.service stopped being read as a serving slot: %q", d)
+	}
+	if !strings.Contains(d, "blue slot FAILED") {
+		t.Errorf("barkpark-slot@blue.service stopped being read as a failed slot: %q", d)
+	}
+	if strings.Contains(d, "site unit(s) failed") {
+		t.Errorf("a unit carrying the prefix was filed as a SITE unit: %q", d)
+	}
+}
