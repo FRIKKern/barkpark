@@ -55,7 +55,7 @@ try {
   code.dispatchEvent(new window.Event("input", { bubbles: true }));
   field.value = "final field";
   field.dispatchEvent(new window.Event("input", { bubbles: true }));
-  action.value = "Final action";
+  action.textContent = "Final action";
   action.dispatchEvent(new window.Event("input", { bubbles: true }));
 
   assert.equal(batches.length, 0, "all three values remain inside node debounce timers");
