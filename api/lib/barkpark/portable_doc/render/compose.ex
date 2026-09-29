@@ -3266,6 +3266,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
           nonblank(Map.get(ref, "reason")) ||
             nonblank(Map.get(reasons, slug)),
         eyebrow: nonblank(Map.get(ref, "eyebrow")),
+        eyebrow_source: paper_links_form_text(Map.get(ref, "eyebrow")),
         meta: nonblank(Map.get(ref, "meta")),
         featured: Map.get(ref, "featured") == true,
         live: map_size(live) > 0,
@@ -3278,14 +3279,23 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp paper_link_ref(_, _, _, _), do: nil
 
+  defp paper_link_eyebrow_style("chapters"),
+    do:
+      "display:block;margin-bottom:1.05rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--paper-ink-soft, #55635e)"
+
+  defp paper_link_eyebrow_style("timeline"),
+    do:
+      "display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)"
+
   defp paper_link_card_presentation(ref, _style, "chapters") do
     href = "/papers/" <> ref.slug
     featured = if ref.featured, do: "grid-column:1/-1;", else: ""
 
+    eyebrow_style = paper_link_eyebrow_style("chapters")
+
     eyebrow =
       if ref.eyebrow,
-        do:
-          ~s|<span style="display:block;margin-bottom:1.05rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--paper-ink-soft, #55635e)">#{Util.escape_html(ref.eyebrow)}</span>|,
+        do: ~s|<span style="#{eyebrow_style}">#{Util.escape_html(ref.eyebrow)}</span>|,
         else: ""
 
     description = paper_link_description(ref.description)
@@ -3299,6 +3309,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         card_style:
           "#{featured}display:flex;min-height:13rem;flex-direction:column;padding:1.75rem 1.65rem 1.8rem;border-top:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none",
         before_title_html: eyebrow,
+        eyebrow_text: ref.eyebrow,
+        eyebrow_style: eyebrow_style,
         title_style:
           "display:block;max-width:22ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.3rem,2.2vw,1.7rem);font-weight:650;line-height:1.18;letter-spacing:-0.018em;color:var(--paper-ink, #17332d)",
         description_style:
@@ -3323,6 +3335,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp paper_link_card_presentation(ref, _style, "timeline") do
     href = "/papers/" <> ref.slug
     eyebrow = ref.eyebrow || "Edition"
+    eyebrow_style = paper_link_eyebrow_style("timeline")
     description = paper_link_description(ref.description)
 
     status =
@@ -3336,8 +3349,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         href: href,
         card_style:
           "display:flex;min-height:11rem;flex-direction:column;padding:1.35rem 1.15rem 1.45rem;border-right:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none",
-        before_title_html:
-          ~s|<span style="display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(eyebrow)}</span>|,
+        before_title_html: ~s|<span style="#{eyebrow_style}">#{Util.escape_html(eyebrow)}</span>|,
+        eyebrow_text: eyebrow,
+        eyebrow_style: eyebrow_style,
         title_style:
           "display:block;max-width:18ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:1.14rem;font-weight:650;line-height:1.2;color:var(--paper-ink, #17332d)",
         description_style:
@@ -3350,7 +3364,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     html =
       ~s|<a data-paper-link-card data-timeline-stop href="#{Util.escape_attr(href)}" style="#{card.card_style}">| <>
-        ~s|<span style="display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(eyebrow)}</span>| <>
+        ~s|<span style="#{eyebrow_style}">#{Util.escape_html(eyebrow)}</span>| <>
         ~s|<strong style="#{card.title_style}">#{Util.escape_html(ref.title)}</strong>| <>
         description <>
         ~s|<span style="#{card.footer_style}">#{Util.escape_html(status)} &nbsp;→</span>| <>
@@ -3380,6 +3394,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         href: href,
         card_style: card_style,
         before_title_html: "",
+        eyebrow_text: nil,
+        eyebrow_style: nil,
         title_style:
           "display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #1e5347)",
         description_style:
