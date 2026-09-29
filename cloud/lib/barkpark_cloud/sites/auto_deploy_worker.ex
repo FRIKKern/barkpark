@@ -396,7 +396,7 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
       # row with the box's own reason — returning an Oban error would retry a
       # build that just failed for a reason a retry cannot change — but the value
       # travels so the job record says which it was.
-      {:ok, outcome} when outcome in [:live, :failed, :deferred] ->
+      {:ok, outcome} when outcome in [:live, :failed, :deferred, :deferred_unrecorded] ->
         {:ok, outcome}
 
       # The row is already claimed — the site is mid-build. THIS is the publish
