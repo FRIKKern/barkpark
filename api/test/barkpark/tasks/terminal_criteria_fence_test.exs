@@ -136,6 +136,8 @@ defmodule Barkpark.Tasks.TerminalCriteriaFenceTest do
 
   # ── (a) THE WITNESS — the door, reproduced, then refused ─────────────────
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "THE WITNESS (task-2b7cbaf8265f6b4e): a document-door write of a criteria list " <>
          "carrying an UNMET criterion onto an already-done row is REFUSED",
        %{scope: scope} do
@@ -193,6 +195,8 @@ defmodule Barkpark.Tasks.TerminalCriteriaFenceTest do
     end
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "the same refusal on a DIRECT write to the PUBLISHED id (the published-first " <>
          "patch door, task-b9c618482e688500)",
        %{scope: scope} do
@@ -212,6 +216,8 @@ defmodule Barkpark.Tasks.TerminalCriteriaFenceTest do
     assert met_count(published("tcf-published-direct", scope).content) == 1
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "a met criterion cannot be silently UNPROVED on a done row either " <>
          "(the lower, not just the add)",
        %{scope: scope} do

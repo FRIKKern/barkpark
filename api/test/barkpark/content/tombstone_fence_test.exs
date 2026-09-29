@@ -94,6 +94,8 @@ defmodule Barkpark.Content.TombstoneFenceTest do
   # ── REFUSAL ARM ONE: a reason with no close landing ────────────────────────
 
   describe "minting a tombstone on a row this write does not close" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a close_reason patched onto an OPEN row is REFUSED, and nothing is written",
          %{scope: scope} do
       id = uniq("tomb-open")
@@ -124,6 +126,8 @@ defmodule Barkpark.Content.TombstoneFenceTest do
       assert content_of(id, scope)["lifecycle_status"] == "open"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a LIVE CLAIMED row is refused too — cch-w36-s6's exact shape", %{scope: scope} do
       # `open -> in_progress` is illegal for ANY document write (the claim
       # primitive owns it), so the only way to stand where cch-w36-s6 stood is to
@@ -149,6 +153,8 @@ defmodule Barkpark.Content.TombstoneFenceTest do
       refute Map.has_key?(content_of(id, scope), "close_reason")
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a task BORN carrying a tombstone it never earned is refused", %{scope: scope} do
       id = uniq("tomb-birth")
 
@@ -169,6 +175,8 @@ defmodule Barkpark.Content.TombstoneFenceTest do
                )
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a BLANK reason is not a value, in either direction", %{scope: scope} do
       id = uniq("tomb-blank")
       _ = mk_task!(id, scope)

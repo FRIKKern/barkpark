@@ -35,6 +35,8 @@ defmodule Barkpark.StructureMediaTest do
     end)
   end
 
+  # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+  @tag :requires_plugins
   test "build/1 leaves the Media group out of the tree by default (top-menu placement)" do
     dataset = "structure_media_test"
 

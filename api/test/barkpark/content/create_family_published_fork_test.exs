@@ -132,6 +132,8 @@ defmodule Barkpark.Content.CreateFamilyPublishedForkTest do
         {"create", "create"},
         {"createIfNotExists", "createIfNotExists"}
       ] do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "#{label} naming a published task with a LIVE claim is REFUSED and mints no twin", %{
       scope: scope
     } do
@@ -160,6 +162,8 @@ defmodule Barkpark.Content.CreateFamilyPublishedForkTest do
     end
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "the legacy POST /api/documents/task door is fenced by the same predicate", %{
     conn: conn,
     scope: scope
@@ -222,6 +226,8 @@ defmodule Barkpark.Content.CreateFamilyPublishedForkTest do
     {result, Warnings.drain()}
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "an UNCLAIMED published row still lands, and the receipt carries the fork warning", %{
     scope: scope
   } do
@@ -241,6 +247,8 @@ defmodule Barkpark.Content.CreateFamilyPublishedForkTest do
     assert entry.message =~ "bp doc publish task #{id}"
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "a LAPSED lease is not a live claim — the TTL leg of the predicate is consulted", %{
     scope: scope
   } do

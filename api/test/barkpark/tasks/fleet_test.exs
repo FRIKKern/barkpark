@@ -1089,6 +1089,8 @@ defmodule BarkparkWeb.FleetControllerTest do
     assert Map.has_key?(row, "task")
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "GET /v1/capabilities carries fleet.roster (table) and fleet.beat (writes)", %{conn: conn} do
     body =
       conn

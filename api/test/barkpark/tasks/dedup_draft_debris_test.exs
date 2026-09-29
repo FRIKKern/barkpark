@@ -31,6 +31,9 @@ defmodule Barkpark.Tasks.DedupDraftDebrisTest do
   """
   use Barkpark.DataCase, async: false
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @moduletag :requires_plugins
+
   alias Barkpark.{Content, Tasks, TenancyFixtures}
 
   @dataset "production"

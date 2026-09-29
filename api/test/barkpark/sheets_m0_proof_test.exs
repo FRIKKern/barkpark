@@ -280,6 +280,8 @@ defmodule Barkpark.SheetsM0ProofTest do
     assert html =~ ">Q3-lansering utsatt</td>"
   end
 
+  # Plugins-off: the sheets plugin owns the sheet schema and its before_save gate
+  @tag :requires_plugins
   test "a structurally malformed sheet is rejected at the write gate with a 4xx",
        %{conn: conn} do
     # cells as a LIST instead of an A1-keyed map.

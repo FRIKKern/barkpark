@@ -703,6 +703,8 @@ defmodule Barkpark.Content.LifecycleTest do
       %{scope: scope}
     end
 
+    # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+    @tag :requires_plugins
     test "a claim-identical stale draft that would clear a met:true flag is REFUSED, " <>
            "and the stamp survives",
          %{scope: scope} do
@@ -732,6 +734,8 @@ defmodule Barkpark.Content.LifecycleTest do
       assert evidence =~ "gate green"
     end
 
+    # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+    @tag :requires_plugins
     test "a draft that DROPS the proof-bearing row entirely is REFUSED", %{scope: scope} do
       claim_and_stamp!("fence-drop", scope, "fence-worker")
 
@@ -752,6 +756,8 @@ defmodule Barkpark.Content.LifecycleTest do
                true
     end
 
+    # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+    @tag :requires_plugins
     test "a draft that keeps met:true but BLANKS the evidence is REFUSED", %{scope: scope} do
       claim_and_stamp!("fence-blank", scope, "fence-worker")
 

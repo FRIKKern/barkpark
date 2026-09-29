@@ -241,6 +241,8 @@ defmodule Barkpark.Tasks.TwinOneRuleTest do
   # ── THE PRODUCER: no new dataset twins ─────────────────────────────────────
 
   describe "the producer (task-49eef068420df918 C2)" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a task birth into a sibling dataset of an existing id is REFUSED", %{scope: scope} do
       doc_id = uniq("producer-twin")
       _first = mk_draft!(doc_id, @primary, scope)
@@ -341,6 +343,8 @@ defmodule Barkpark.Tasks.TwinOneRuleTest do
                )
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a TASK birth is allowed when a NON-task holds the id elsewhere — " <>
            "`d.type == \"task\"` in sibling_datasets/4 alone carries this",
          %{scope: scope} do

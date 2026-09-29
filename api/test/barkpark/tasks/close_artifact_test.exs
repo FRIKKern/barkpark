@@ -279,6 +279,8 @@ defmodule Barkpark.Tasks.CloseArtifactTest do
     # is what the raw content patch below reproduces. Asserting the refusal at
     # birth first is what keeps this test honest about which door the shape
     # comes through.
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "kind other than task is exempt", %{scope: scope} do
       assert {:error, {:invalid_task_content, %{"kind" => _}}} =
                Content.create_document(

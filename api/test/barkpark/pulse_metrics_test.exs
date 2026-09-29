@@ -37,6 +37,8 @@ defmodule Barkpark.Pulse.MetricsTest do
     Metrics.sample_now()
   end
 
+  # Plugins-off: the pulse plugin supervises Pulse.Metrics and mounts its routes
+  @tag :requires_plugins
   test "bumps flow into per-interval rates and vitals are sane" do
     sample!()
 
@@ -51,6 +53,8 @@ defmodule Barkpark.Pulse.MetricsTest do
     assert snap.mem_mb > 0
   end
 
+  # Plugins-off: the pulse plugin supervises Pulse.Metrics and mounts its routes
+  @tag :requires_plugins
   test "a quiet interval decays the rates back to zero" do
     Metrics.bump(:cursor)
     sample!()
@@ -58,6 +62,8 @@ defmodule Barkpark.Pulse.MetricsTest do
     assert snap.cursor_per_s == 0.0
   end
 
+  # Plugins-off: the pulse plugin supervises Pulse.Metrics and mounts its routes
+  @tag :requires_plugins
   test "every tick broadcasts public vitals on each configured channel topic" do
     Phoenix.PubSub.subscribe(Barkpark.PubSub, "pulse:test-storm")
     sample!()
@@ -70,6 +76,8 @@ defmodule Barkpark.Pulse.MetricsTest do
     assert p.host_eur > 0
   end
 
+  # Plugins-off: the pulse plugin supervises Pulse.Metrics and mounts its routes
+  @tag :requires_plugins
   test "cost accrues into the durable meter and reads back" do
     before = Barkpark.Pulse.cost_nanos()
     :ok = Barkpark.Pulse.add_cost_nanos(12_345)
@@ -77,6 +85,8 @@ defmodule Barkpark.Pulse.MetricsTest do
     assert_in_delta Barkpark.Pulse.cost_so_far(), (before + 12_345) / 1_000_000_000, 1.0e-12
   end
 
+  # Plugins-off: the pulse plugin supervises Pulse.Metrics and mounts its routes
+  @tag :requires_plugins
   test "the snapshot carries a monotonic cost-so-far total" do
     a = sample!().cost_eur_total
     b = sample!().cost_eur_total

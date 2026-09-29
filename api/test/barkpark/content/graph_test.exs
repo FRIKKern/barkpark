@@ -253,6 +253,8 @@ defmodule Barkpark.Content.GraphTest do
 
     # lvw-t12 (wire §7(2)): the drafts traverse folds the plugin
     # resolve_extract_edges chain, not just core extract_edges.
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "a DRAFT paper's plugin-extracted valueref/task edges appear under :drafts and NOT under :published" do
       target = publish!("dp-val-target")
 
@@ -309,6 +311,8 @@ defmodule Barkpark.Content.GraphTest do
              "the published graph must NOT show the draft paper's valueref edge before publish"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "a valueref to a DRAFT-ONLY target traverses (drafts-corpus dangling lens)" do
       # The target exists ONLY as a draft — invisible under the :published lens,
       # but a member of the scoped drafts corpus, so the plugin edge is
@@ -333,6 +337,8 @@ defmodule Barkpark.Content.GraphTest do
       refute Enum.any?(drafts.nodes, fn n -> n[:broken_id] == "dp-draft-target" end)
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "the :sources filter applies to drafts plugin edges (published-path parity)" do
       publish!("dp-flt-target")
 

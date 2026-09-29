@@ -55,6 +55,8 @@ defmodule Barkpark.Tasks.DedupAdviseWarningTest do
   end
 
   describe "an allowed create in the advise band carries a possible_duplicate warning" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "spd-b37's text against spd-b27's is WARNED, not refused, and the row lands",
          %{conn: conn} do
       first = mutate(conn, [task_create(@earlier, "studio-space-priority-desk")])

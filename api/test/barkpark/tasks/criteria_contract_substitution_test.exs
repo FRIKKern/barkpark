@@ -162,6 +162,8 @@ defmodule Barkpark.Tasks.CriteriaContractSubstitutionTest do
   # ── the refusal ──────────────────────────────────────────────────────────
 
   describe "a wholesale substitution under a live claim" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "is refused at the publish seam, and the row is untouched", %{scope: scope} do
       id = "cc-incident-replay"
       mk_published_task!(id, scope, own_criteria())

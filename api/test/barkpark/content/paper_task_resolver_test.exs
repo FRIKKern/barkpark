@@ -97,6 +97,8 @@ defmodule Barkpark.Content.PaperTaskResolverTest do
   defp tasks_off!, do: Barkpark.PluginEnv.with_plugins(["media"], %{test: __MODULE__})
 
   describe "the seam" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the Tasks plugin's resolver is published under the default load order" do
       assert Barkpark.Plugins.Tasks.paper_task_resolver() == Barkpark.Tasks.PaperResolver
       assert PaperTaskResolver.get() == Barkpark.Tasks.PaperResolver
@@ -109,6 +111,8 @@ defmodule Barkpark.Content.PaperTaskResolverTest do
   end
 
   describe "tasks ON (control)" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the chip count, the rows and the aggregate render; no placeholder", ctx do
       {resolved, html} = render(ctx.blocks, ctx.scope, :article)
 
@@ -231,6 +235,8 @@ defmodule Barkpark.Content.PaperTaskResolverTest do
       assert html =~ "Pinned row"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "get/1 answers per workspace; get/0 stays the instance answer", ctx do
       :ok = tasks_disabled!(ctx.ws_b)
 
@@ -240,6 +246,8 @@ defmodule Barkpark.Content.PaperTaskResolverTest do
       assert PaperTaskResolver.get() == Barkpark.Tasks.PaperResolver
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "A (enabled) renders criteria + rows; B (disabled) renders the placeholders", ctx do
       :ok = tasks_disabled!(ctx.ws_b)
 
@@ -249,6 +257,8 @@ defmodule Barkpark.Content.PaperTaskResolverTest do
       assert_placeholders!(render(ctx.b.blocks, ctx.b.scope, :article))
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the caller's default workspace differs from the paper's: the paper's wins", ctx do
       # Reverse direction: the instance Default (A) switches Tasks OFF, the
       # paper's own workspace (B) keeps it ON. B's paper renders live data; a

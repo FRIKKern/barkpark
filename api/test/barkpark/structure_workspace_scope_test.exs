@@ -93,6 +93,8 @@ defmodule Barkpark.StructureWorkspaceScopeTest do
     refute "task" in b_types, "workspace B has no task schema → Tasks desk node dropped"
   end
 
+  # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+  @tag :requires_plugins
   test "a plugin's schema-less nodes are gated by their requires_schema tag", ctx do
     # OnixEdit's Bokbasen contribution (a divider + an admin-page link, neither
     # carrying a schema type) is tagged `requires_schema: "book"`. It must

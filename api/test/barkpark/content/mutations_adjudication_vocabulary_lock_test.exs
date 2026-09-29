@@ -102,6 +102,8 @@ defmodule Barkpark.Content.MutationsAdjudicationVocabularyLockTest do
   # ── 1. The KEY NAMES the door screens and names in its 422 ────────────────
 
   describe "the refusal details are keyed on Stage's key names, not retyped ones" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a raw disposition change is refused under Stage.disposition_key/0", %{scope: scope} do
       doc = born_with("open", scope)
 
@@ -116,6 +118,8 @@ defmodule Barkpark.Content.MutationsAdjudicationVocabularyLockTest do
                "(#{inspect(Stage.disposition_key())}), got #{inspect(result)}"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a raw rerun change is refused under Stage.disposition_rerun_key/0", %{scope: scope} do
       doc = born_with("open", scope)
 
@@ -130,6 +134,8 @@ defmodule Barkpark.Content.MutationsAdjudicationVocabularyLockTest do
                "(#{inspect(Stage.disposition_rerun_key())}), got #{inspect(result)}"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a trigger erasure is refused under Stage.reopen_trigger_key/0", %{scope: scope} do
       term =
         List.first(Stage.trigger_required_dispositions()) ||
@@ -148,6 +154,8 @@ defmodule Barkpark.Content.MutationsAdjudicationVocabularyLockTest do
   # ── 2. The TRIGGER-REQUIRED SET, derived from Stage ───────────────────────
 
   describe "the trigger-erasure guard fires for exactly Stage.trigger_required_dispositions/0" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "EVERY trigger-owing term refuses erasure", %{scope: scope} do
       owing = Stage.trigger_required_dispositions()
 
@@ -207,6 +215,8 @@ defmodule Barkpark.Content.MutationsAdjudicationVocabularyLockTest do
       end
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "CONTROL: a reparent of an UNADJUDICATED row is still refused", %{scope: scope} do
       parent = mk_task!(uniq("vocab-lock-parent-ctl"), scope, %{})
       bare = mk_task!(uniq("vocab-lock-bare"), scope, %{})

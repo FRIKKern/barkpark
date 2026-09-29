@@ -699,6 +699,8 @@ defmodule Barkpark.Tasks.StageTest do
       refute Map.has_key?(row.content, "disposition")
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a same-state no-op on an UNKNOWN status is still refused (legal?/2 still gates)",
          %{scope: scope} do
       # `from == to` alone must NOT be sufficient — the AND with
@@ -1050,6 +1052,8 @@ defmodule Barkpark.Tasks.StageTest do
       assert ev.document["staged"]["disposition_rerun_key"] == "disposition_rerun"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the RAW /v1/data/mutate door refuses content.disposition_rerun and names the verb",
          %{scope: scope} do
       # The sanctioned-writer property is decoration unless the raw door is shut
