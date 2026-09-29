@@ -24,6 +24,7 @@ defmodule BarkparkWeb.DocumentOpsController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
+  alias Barkpark.Content.Errors
   alias BarkparkWeb.ErrorResponse
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -90,6 +91,10 @@ defmodule BarkparkWeb.DocumentOpsController do
       {:error, {:halted, _reason} = reason} ->
         ErrorResponse.emit(conn, {:error, reason})
 
+      # C083: a held instance refuses the write at the door. 503 transient, never an op fault.
+      {:error, {:write_admission, _}} = refused ->
+        write_admission_refused(conn, refused)
+
       {:error, _other} ->
         ErrorResponse.emit_custom(
           conn,
@@ -109,5 +114,15 @@ defmodule BarkparkWeb.DocumentOpsController do
       {:ok, _draft} -> draft_id
       _ -> doc_id
     end
+  end
+
+  # C083: the door's refusal as the canonical transient envelope (503 `storage_unavailable`),
+  # the same answer every other write door gives while the instance is held.
+  defp write_admission_refused(conn, refused) do
+    env = Errors.to_envelope(refused, conn)
+
+    conn
+    |> put_status(env.status)
+    |> json(%{error: Map.delete(env, :status)})
   end
 end
