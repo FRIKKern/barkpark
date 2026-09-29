@@ -646,6 +646,13 @@ export const showcaseContent: Block[] = [
         "status": "in_progress",
         "title": "Ship the board",
         "width": 35
+      },
+      {
+        "draft": true,
+        "left": 75,
+        "status": "ready",
+        "title": "Draft lane",
+        "width": 25
       }
     ],
     "type": "roadmap"
@@ -900,6 +907,11 @@ export const showcaseContent: Block[] = [
         },
         "status": "done",
         "title": "Ship the legend"
+      },
+      {
+        "draft": true,
+        "status": "open",
+        "title": "Draft-only row"
       }
     ],
     "type": "task-board"
@@ -967,6 +979,11 @@ export const showcaseContent: Block[] = [
       {
         "status": "ready",
         "title": "Prove parity"
+      },
+      {
+        "draft": true,
+        "status": "open",
+        "title": "Draft-only row"
       }
     ],
     "type": "tasks"
