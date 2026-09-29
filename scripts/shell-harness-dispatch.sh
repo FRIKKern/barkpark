@@ -402,7 +402,7 @@ merge-gate-bridge scripts/github-webhook-subscription-parity.sh
 merge-gate-bridge scripts/github-webhook-subscription-parity.test.sh
 merge-gate-bridge scripts/merge-gate-autostamp-liveness.sh
 merge-gate-bridge scripts/merge-gate-autostamp-liveness.test.sh
-merge-gate-bridge api/lib/barkpark_web/controllers/github_webhook_controller.ex
+merge-gate-bridge api/lib/barkpark/plugins/github/web/github_webhook_controller.ex
 merge-gate-bridge scripts/github-app-bootstrap.py
 merge-gate-bridge docs/ops/github-sync.md
 fleet-coordination-harnesses scripts/already-fixed.sh

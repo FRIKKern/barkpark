@@ -1507,7 +1507,7 @@ defmodule PDS.Census do
           "wrongly accused for two waves."
     },
     %{
-      key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+      key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "17468236"},
       basis_spans: [{87, 91}],
       basis_token: "always answers 2xx unless intake genuinely",
@@ -1524,7 +1524,7 @@ defmodule PDS.Census do
           "never fires here. A ping ack claims nothing beyond having been reached."
     },
     %{
-      key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+      key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "105570378"},
       basis_spans: [{87, 91}, {100, 100}],
       basis_token: "ignored:",
@@ -2257,16 +2257,16 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_intents_controller.ex",
             "BarkparkWeb.BulldocsIntentsController.mark_processed/2", "120960553", "126280052"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/github_adopt_controller.ex:66
-    %{key: {"api/lib/barkpark_web/controllers/github_adopt_controller.ex",
+    # barkpark/plugins/github/web/github_adopt_controller.ex:66 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_adopt_controller.ex",
             "BarkparkWeb.GithubAdoptController.adopt/2", "109355155", "85172196"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/github_adopt_controller.ex:69
-    %{key: {"api/lib/barkpark_web/controllers/github_adopt_controller.ex",
+    # barkpark/plugins/github/web/github_adopt_controller.ex:69 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_adopt_controller.ex",
             "BarkparkWeb.GithubAdoptController.adopt/2", "109355155", "81072"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/github_status_controller.ex:65
-    %{key: {"api/lib/barkpark_web/controllers/github_status_controller.ex",
+    # barkpark/plugins/github/web/github_status_controller.ex:65 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_status_controller.ex",
             "BarkparkWeb.GithubStatusController.status/2", "63059312", "64996178"},
       stale_ack: %{recorded: {"63059312", "64996178"}, current: {"63059312", "100969891"},
         why:
@@ -2319,33 +2319,33 @@ defmodule PDS.Census do
     #     lose either; the `{:error, :not_found}` race it DOES have is already the
     #     2xx `:ignored` arm, not this one.
     #
-    # barkpark_web/controllers/github_webhook_controller.ex:86
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:86 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "17468236"},
       verdict: "UNJUDGED", basis: :declared_basis},
-    # barkpark_web/controllers/github_webhook_controller.ex:87
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:87 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "105570378"},
       verdict: "UNJUDGED", basis: :declared_basis},
-    # barkpark_web/controllers/github_webhook_controller.ex:111
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:111 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_inbound/2", "26011363", "124460091"},
       verdict: "UNJUDGED", basis: :two_hop_composed, evidence:
         {"api/test/barkpark/plugins/github/inbound_events_test.exs",
          ~S|test "Bot-sender close → :dropped, NO detach (the App's own close echo)",|}},
-    # barkpark_web/controllers/github_webhook_controller.ex:115
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:115 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_inbound/2", "26011363", "96836141"},
       verdict: "UNJUDGED", basis: :two_hop_composed, evidence:
         {"api/test/barkpark/plugins/github/inbound_events_test.exs",
          ~S|test "Bot-sender close → :dropped, NO detach (the App's own close echo)",|}},
-    # barkpark_web/controllers/github_webhook_controller.ex:120
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:120 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_inbound/2", "26011363", "39153928"},
       verdict: "UNJUDGED", basis: :two_hop_composed, evidence:
         {"api/test/barkpark/plugins/github/inbound_events_test.exs",
          ~S|test "a Bot-sender deleted → :dropped, NO detach", %{scope: scope} do|}},
-    # barkpark_web/controllers/github_webhook_controller.ex:165 — RE-KEYED, NOT RE-TYPED
+    # barkpark/plugins/github/web/github_webhook_controller.ex:165 — RE-KEYED, NOT RE-TYPED (lineref-ok: path re-pointed by the plugin move)
     # (task-00dc067ad2931221). expr_fp 38180227 -> 121328124 under an UNMOVED head_hash:
     # the ingest arm now matches the tag it used to discard and renders `outcome: "born"`
     # (a row was created) or `outcome: "exists"` (an idempotent re-delivery) beside the
@@ -2353,19 +2353,19 @@ defmodule PDS.Census do
     # on this tree, never composed by hand. The citation moves with it: the old witness
     # asserted a birth, and the claim this arm now makes is WHICH ingest happened, which
     # only the re-delivery arm of the new test can refute.
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "121328124"},
       verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
          ~S|test "a fresh birth says outcome: born, and its re-delivery says outcome: exists" do|}},
-    # barkpark_web/controllers/github_webhook_controller.ex:150
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:150 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "96836141"},
       verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
          ~S|test "bot-drop result (:dropped) answers 200 — never a retry-storm on a loop cut" do|}},
-    # barkpark_web/controllers/github_webhook_controller.ex:154
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:154 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "39153928"},
       verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
@@ -2378,23 +2378,23 @@ defmodule PDS.Census do
     # verdict earned on a body that answered all three. The three keys below are read off
     # `elixir scripts/pds-elixir-receipt-census.exs --keys` on this tree.
     #
-    # barkpark_web/controllers/github_webhook_controller.ex:186 — the dedup refusal.
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:186 — the dedup refusal. (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "21667326"},
       verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
          ~S|test "a dedup refusal whose dead-letter write LANDS says recorded: true — and the row is there",|}},
-    # barkpark_web/controllers/github_webhook_controller.ex:202 — the lifecycle-gate veto.
+    # barkpark/plugins/github/web/github_webhook_controller.ex:202 — the lifecycle-gate veto. (lineref-ok: path re-pointed by the plugin move)
     # `recorded: false` is the claim, and the cited test reads the store back for BOTH
     # halves of it (no task row, no `dedup_refused` conflict row) rather than asserting
     # the body alone.
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "37628504"},
       verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
          ~S|test "a lifecycle-gate veto says outcome: vetoed — nothing was written, and it says so" do|}},
-    # barkpark_web/controllers/github_webhook_controller.ex:212 — the LEGACY 2-tuple arm.
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:212 — the LEGACY 2-tuple arm. (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "21231715"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
@@ -2409,8 +2409,8 @@ defmodule PDS.Census do
         "`recorded` boolean) precisely because nothing measured one. Judging it would mean " <>
         "authoring a fixture for a shape the shipping code cannot produce; recording that " <>
         "here is the honest disposition until the legacy shape is either exercised or deleted."},
-    # barkpark_web/controllers/github_webhook_controller.ex:189
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:189 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "46526763"},
       verdict: "PROVEN", basis: :end_to_end, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
@@ -2418,14 +2418,14 @@ defmodule PDS.Census do
       attestation:
         "mutation: render stamped: without the merge write — `mix test api/test/barkpark_web/controllers/github_webhook_integration_test.exs` — the test `a signed merged pull_request → the stamped: receipt matches the stored row` — reds on Repo.get!",
     },
-    # barkpark_web/controllers/github_webhook_controller.ex — the unflagged-gate receipt
+    # barkpark/plugins/github/web/github_webhook_controller.ex — the unflagged-gate receipt
     # (task-d1654bf0d20d5009). Its whole claim is that NOTHING was written: the row
     # carries criteria that READ as merge gates but hold no `merge_gate` flag, so the
     # autostamp names them and stamps none of them. The flag stays the permit because a
     # prose-wide permit fabricates dones on the 74 ledger criteria that merely DISCUSS
     # gating. A receipt asserting a non-write is exactly the kind this register exists to
     # bind to a store assertion, so the evidence below asserts the stored row, not the JSON.
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "22543410"},
       verdict: "PROVEN", basis: :end_to_end, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
@@ -2443,8 +2443,8 @@ defmodule PDS.Census do
       attestation:
         "mutation: route BOTH close.ex filters through Criteria.merge_gated?/1 — the remedy the filing asked for — and the receipt becomes `stamped` while the criterion flips met; `mix test api/test/barkpark/tasks/merge_gate_unflagged_test.exs` reds 3 of 6, including `a criterion that merely TALKS about merge gating is NOT flipped on merge`",
     },
-    # barkpark_web/controllers/github_webhook_controller.ex:194
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:194 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "107251666"},
       verdict: "UNJUDGED", basis: :partial_tag_coverage, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
@@ -2461,20 +2461,20 @@ defmodule PDS.Census do
         %{tag: :no_guardable_marker, verdict: "UNJUDGED", basis: :no_observer, evidence: ""},
       ],
     },
-    # barkpark_web/controllers/github_webhook_controller.ex:200
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:200 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "28623217"},
       verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
          ~S|test "opened issue forwards the payload to Intake and answers 200" do|}},
-    # barkpark_web/controllers/github_webhook_controller.ex:205
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:205 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "62383269"},
       verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
          ~S|test "opened issue forwards the payload to Intake and answers 200" do|}},
-    # barkpark_web/controllers/github_webhook_controller.ex:209
-    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+    # barkpark/plugins/github/web/github_webhook_controller.ex:209 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/github/web/github_webhook_controller.ex",
             "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "1432007"},
       verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
@@ -7089,7 +7089,7 @@ defmodule PDS.Census do
   # ship. Both halves are asserted below: the site must be SEEN (precondition — a control
   # over an absent site proves nothing) and it must be in the refused roll, not the fired
   # one.
-  @response_carries_read_tripwire {"barkpark_web/controllers/github_status_controller.ex",
+  @response_carries_read_tripwire {"barkpark/plugins/github/web/github_status_controller.ex",
                                    "BarkparkWeb.GithubStatusController.status/2"}
 
   defp response_carries_read(classified, index) do
@@ -12874,7 +12874,7 @@ defmodule PDS.Census do
         # migrated to CONTENT keys. The expectation is left line-anchored rather than
         # migrated here because the string it matches is the census's OWN PRINTED OUTPUT,
         # where the line is part of the claim being asserted.
-        "barkpark_web/controllers/github_status_controller.ex:92  health: status_fun().()",
+        "barkpark/plugins/github/web/github_status_controller.ex:92  health: status_fun().()",
         "PASS  RESPONSE-CARRIES-READ-REFUSES-CAPTURE",
         "PASS  RESPONSE-CARRIES-THE-READ-PINNED"
       ],

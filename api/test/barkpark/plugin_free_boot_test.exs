@@ -120,9 +120,6 @@ defmodule Barkpark.PluginFreeBootTest do
   # kill switch.
   @coupling_plugin_http [
     {"Barkpark.Plugins.Bulldocs", "lib/barkpark_web/controllers/bulldocs_intents_controller.ex"},
-    {"Barkpark.Plugins.Github", "lib/barkpark_web/controllers/github_adopt_controller.ex"},
-    {"Barkpark.Plugins.Github", "lib/barkpark_web/controllers/github_status_controller.ex"},
-    {"Barkpark.Plugins.Github", "lib/barkpark_web/controllers/github_webhook_controller.ex"},
     {"Barkpark.Plugins.Github", "lib/barkpark_web/plugs/github_webhook_signature.ex"},
     {"Barkpark.Plugins.Tickets", "lib/barkpark_web/plugs/require_ticket_key.ex"}
   ]

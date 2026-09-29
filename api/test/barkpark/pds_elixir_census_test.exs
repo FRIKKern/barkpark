@@ -371,12 +371,12 @@ defmodule Barkpark.PdsElixirCensusTest do
     # scripts/pds-elixir-receipt-census.exs` from the repo root, read off its
     # "THE CAPTURE REFUSALS, NAMED IN FULL" block.
     assert out =~
-             "barkpark_web/controllers/github_status_controller.ex:92  health: status_fun().()",
+             "barkpark/plugins/github/web/github_status_controller.ex:92  health: status_fun().()",
            "the tripwire site was never REACHED by this run, so the refusal above is a control " <>
              "over an absent site and proves nothing. Re-derive the anchor before editing " <>
              "this assertion away.\n#{out}"
 
-    refute out =~ "HYPOTHESIS  barkpark_web/controllers/github_status_controller.ex",
+    refute out =~ "HYPOTHESIS  barkpark/plugins/github/web/github_status_controller.ex",
            "the arm emitted a HYPOTHESIS for the tripwire — the one site it must leave " <>
              "UNJUDGED.\n#{out}"
   end

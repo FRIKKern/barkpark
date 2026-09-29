@@ -25,9 +25,9 @@ bad() { FAIL=$((FAIL+1)); echo "  FAIL $*"; }
 # A minimal tree copy: the three files the check reads.
 mktree() {
   local d="$1"
-  mkdir -p "$d/api/lib/barkpark_web/controllers" "$d/scripts" "$d/docs/ops"
-  cp "$ROOT/api/lib/barkpark_web/controllers/github_webhook_controller.ex" \
-     "$d/api/lib/barkpark_web/controllers/"
+  mkdir -p "$d/api/lib/barkpark/plugins/github/web" "$d/scripts" "$d/docs/ops"
+  cp "$ROOT/api/lib/barkpark/plugins/github/web/github_webhook_controller.ex" \
+     "$d/api/lib/barkpark/plugins/github/web/"
   cp "$ROOT/scripts/github-app-bootstrap.py" "$d/scripts/"
   cp "$ROOT/docs/ops/github-sync.md" "$d/docs/ops/"
 }
@@ -72,7 +72,7 @@ else bad "2.1 expected exit 0, got $rc"; cat "$TMP/out"; cat "$TMP/err"; fi
 mktree "$TMP/future"
 python3 - "$TMP/future" <<'PY'
 import sys
-p = sys.argv[1] + "/api/lib/barkpark_web/controllers/github_webhook_controller.ex"
+p = sys.argv[1] + "/api/lib/barkpark/plugins/github/web/github_webhook_controller.ex"
 s = open(p).read()
 s = s.replace('      "ping" -> json(conn, %{ok: true})',
               '      "release" -> handle_release(conn, params)\n      "ping" -> json(conn, %{ok: true})')
@@ -90,7 +90,7 @@ else bad "3.2 the failure did not name release"; fi
 # demanded `ping` in default_events it would red forever on a correct tree —
 # proving the exclusion is real, not an accident of the current text.
 mktree "$TMP/ping"
-if grep -F '"ping"' "$TMP/ping/api/lib/barkpark_web/controllers/github_webhook_controller.ex" >/dev/null 2>&1; then
+if grep -F '"ping"' "$TMP/ping/api/lib/barkpark/plugins/github/web/github_webhook_controller.ex" >/dev/null 2>&1; then
   rc="$(run "$TMP/ping")"
   if [ "$rc" = "0" ]; then ok "4.1 a controller that handles \`ping\` still passes with ping unsubscribed"
   else bad "4.1 ping was treated as a subscription claim — exit $rc"; cat "$TMP/out"; fi

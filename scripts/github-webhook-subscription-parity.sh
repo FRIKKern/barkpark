@@ -39,7 +39,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-CONTROLLER="$ROOT/api/lib/barkpark_web/controllers/github_webhook_controller.ex"
+CONTROLLER="$ROOT/api/lib/barkpark/plugins/github/web/github_webhook_controller.ex"
 MANIFEST="$ROOT/scripts/github-app-bootstrap.py"
 RUNBOOK="$ROOT/docs/ops/github-sync.md"
 
