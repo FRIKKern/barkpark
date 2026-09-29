@@ -212,10 +212,17 @@ function withAuth(init?: RequestInit): RequestInit {
   };
 }
 
-/** One attempt: timeout-guarded fetch + `res.ok` guard + defensive JSON parse. */
-async function attempt(url: string, init: RequestInit): Promise<unknown> {
+/** One attempt: timeout-guarded fetch + `res.ok` guard + defensive JSON parse.
+ * `timeoutMs` is this attempt's own abort timer. bpFetchJson clamps it to the
+ * time left before the TOTAL_BUDGET_MS wall, so a retry started late cannot run
+ * a full TIMEOUT_MS past it. */
+async function attempt(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number = TIMEOUT_MS,
+): Promise<unknown> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res: Awaited<ReturnType<typeof keepAliveFetch>>;
   try {
     // undici fetch + the shared keep-alive Agent → reuse the TLS connection.
@@ -325,8 +332,16 @@ export async function bpFetchJson(
   const deadline = Date.now() + TOTAL_BUDGET_MS;
   let lastErr: unknown;
   for (let i = 0; i <= RETRIES; i++) {
+    // The wall bounds the ATTEMPT as well as the sleep before it. attempt() runs
+    // its own abort timer, so an unclamped retry started at t=44.9s would run to
+    // t=59.9s and the real ceiling would be TOTAL_BUDGET_MS + TIMEOUT_MS. Clamp
+    // the attempt to the time left, and refuse one when none is left.
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw lastErr ?? new BpUpstreamError(0, "request timed out");
+    }
     try {
-      return await attempt(url, merged);
+      return await attempt(url, merged, Math.min(TIMEOUT_MS, remaining));
     } catch (err) {
       lastErr = err;
       if (i < RETRIES && isTransient(err)) {
