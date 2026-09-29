@@ -886,6 +886,7 @@ func TestCloudWorkspaceExportDatasetSurvivesArgv(t *testing.T) {
 // no --dataset in argv, the request must carry NO dataset param.
 func TestCloudWorkspaceExportUnflaggedIgnoresAmbientDataset(t *testing.T) {
 	workspaceEnvIsolate(t)
+	t.Chdir(t.TempDir()) // the saved config IS the ambient layer — no .barkpark.json above cwd may outrank it
 	var gotQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
