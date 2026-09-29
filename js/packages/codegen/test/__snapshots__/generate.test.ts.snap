@@ -1239,12 +1239,7 @@ export interface Task extends BarkparkSystemFields {
     actual_size?: "l" | "m" | "s" | "xl" | "xs";
     commits?: Array<string>;
     resolution?:
-      | "duplicate"
-      | "fixed"
-      | "partial"
-      | "shipped"
-      | "superseded"
-      | "wont_do";
+      "duplicate" | "fixed" | "partial" | "shipped" | "superseded" | "wont_do";
     summary?: string;
   };
   /** Paper doc-ids (= slugs) linked via POST /v1/tasks/:id/papers {add,remove}. For the primary design doc use design_doc (an expandable reference). */
