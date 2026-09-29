@@ -12,6 +12,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsChangesetTest do
 
   use BarkparkWeb.ConnCase, async: false
 
+  # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+  @moduletag :requires_plugins
+
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth

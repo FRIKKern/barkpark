@@ -85,6 +85,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
       assert msg =~ "not registered"
     end
 
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "renders one group + one input per declared field", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
 
@@ -109,6 +111,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
       end
     end
 
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "masked :string field (client_id) never echoes its stored value into the DOM", %{
       conn: conn
     } do
@@ -133,6 +137,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
       refute render(view) =~ "leaky-client-id"
     end
 
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "renders a Save button", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
 
@@ -144,6 +150,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
   end
 
   describe "save" do
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "stores submitted values flat in the bokbasen row", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
 
@@ -169,6 +177,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
       assert stored["client_role"] == "publisher"
     end
 
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "flashes success after a clean save", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
 
@@ -192,6 +202,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
   end
 
   describe "reveal" do
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "clicking Reveal decrypts and renders the stored value", %{conn: conn} do
       {:ok, _} =
         Settings.put(@row_name, %{
@@ -216,6 +228,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
       assert render(view) =~ "shhh-hidden"
     end
 
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "Hide button takes the revealed value back out of the DOM", %{conn: conn} do
       {:ok, _} =
         Settings.put(@row_name, %{
@@ -244,6 +258,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
       refute render(view) =~ "shhh-hidden"
     end
 
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "Reveal still surfaces a masked :string field (client_id)", %{conn: conn} do
       {:ok, _} =
         Settings.put(@row_name, %{
@@ -270,6 +286,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
   end
 
   describe "validation" do
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "missing required field surfaces inline per-field error", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
 
@@ -294,6 +312,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
       assert {:error, :not_found} = Settings.get(@row_name)
     end
 
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "non-URL value in a :url field surfaces inline error", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
 
@@ -319,6 +339,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
   end
 
   describe "secret retention" do
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "saving with the password input blank preserves the existing value", %{
       conn: conn
     } do
@@ -353,6 +375,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
       assert stored["client_secret"] == "keep-me"
     end
 
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "saving with the masked client_id blank preserves the existing value", %{conn: conn} do
       {:ok, _} =
         Settings.put(@row_name, %{
@@ -415,6 +439,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
       :ok
     end
 
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "a failed encrypted write flashes an error and preserves the form", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
 
@@ -453,6 +479,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
   # FunctionClauseError-crashed the admin session. The trailing catch-alls now
   # no-op both paths.
   describe "dispatch fall-through keeps the session alive" do
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "an unknown/stale phx event does not crash the LiveView", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
 
@@ -465,6 +493,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
       assert is_binary(render(view))
     end
 
+    # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
+    @tag :requires_plugins
     test "a stray/unmatched message does not crash the LiveView", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
 

@@ -52,6 +52,8 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
   end
 
   describe "render" do
+    # Plugins-off: at least one registered plugin (the card and callback rows render per plugin)
+    @tag :requires_plugins
     test "shows plugin card with callback impl/default markers", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
       {:ok, view, html} = live(conn, "/w/default/p/default/d/production/studio/_plugins")
@@ -76,6 +78,8 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
              )
     end
 
+    # Plugins-off: at least one registered plugin (the card and callback rows render per plugin)
+    @tag :requires_plugins
     test "renders one row per callback (8 callbacks excluding manifest)", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
       {:ok, view, _html} = live(conn, "/w/default/p/default/d/production/studio/_plugins")
@@ -92,6 +96,8 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
   end
 
   describe "reload buttons" do
+    # Plugins-off: at least one registered plugin (the card and callback rows render per plugin)
+    @tag :requires_plugins
     test "reload-plugin flashes success and updates the last-bootstrap row", %{conn: conn} do
       RunStatus.reset()
 
