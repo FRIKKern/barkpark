@@ -86,6 +86,27 @@ check("top-level columns still inherit the evidence width and pull", () => {
   }
 });
 
+// task-5d3528ca0c883c6c: every band-taking block (paper-links chapters/timeline,
+// figure, video, diagram, diff, filetree, asciicast, stats, chart) read the page-wide
+// band inside a column cell and painted over the sibling column (measured at 1440:
+// section -171..1009 in a 130..707 cell). The cell is an authored boundary, so it
+// resets the band once — and again on any nested paper surface the editor mounts
+// inside it (those re-derive the band from the default tokens).
+check("a column cell resets the evidence band for every block it holds, nested surfaces included", () => {
+  for (const sheet of columnStyles) {
+    for (const selector of [
+      `${sheet.scope} .bp-cols__c`,
+      `${sheet.scope} .bp-cols__c .bp-paper-surface`,
+      `${sheet.scope} .bp-cols__c .bp-paper-body`,
+    ]) {
+      const resets = sheet.rules.filter((rule) => rule.selector === selector
+        && /--bp-evidence-width:\s*100%;/.test(rule.body)
+        && /--bp-evidence-pull:\s*0px;/.test(rule.body));
+      assert.ok(resets.length, `${sheet.path}: ${selector} must reset --bp-evidence-width/--bp-evidence-pull`);
+    }
+  }
+});
+
 check("nested tables use their column width, not the page evidence band", () => {
   for (const path of ["../../paper-surface/paper-surface.css", "./styles.css"]) {
     const css = readFileSync(new URL(path, import.meta.url), "utf8");

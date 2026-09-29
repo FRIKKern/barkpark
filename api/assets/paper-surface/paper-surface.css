@@ -1676,6 +1676,12 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-cols__c > :first-child { margin-top: 0; }
 /* Nested columns use their section cell, not the page-wide evidence band. */
 .bp-paper-surface .bp-section__cell .bp-cols { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
+/* A column cell is an authored boundary: every band-taking block inside it
+   (paper-links chapters/timeline, figure, video, diagram, diff, filetree,
+   asciicast, stats, chart) uses the cell, not the page-wide evidence band, so it
+   cannot paint over the sibling column. Edit nests paper surfaces inside the
+   cell that re-derive the band from the default tokens, so they reset too. */
+.bp-paper-surface .bp-cols__c, .bp-paper-surface .bp-cols__c .bp-paper-surface, .bp-paper-surface .bp-cols__c .bp-paper-body { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
 
 /* ── section grid — the step-2 layout engine (mode:grid). Shared class so the
    reader AND the canvas node-view paint the SAME grid (parity by construction).
