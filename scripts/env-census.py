@@ -219,6 +219,7 @@ DEFAULTS_OK = {
     "MAIL_FROM_NAME": "non-secret display value (2026-08-08)",
     "TRUSTED_PROXY_PEERS": "must track the pinned subnet's .1 gateway (2026-08-08)",
     "PHX_HOST": "self-host default; S1a converts this to a :? require (2026-08-08)",
+    "BARKPARK_SHAPE": "compose installs a Solo box, so it declares `solo` (2026-09-29)",
     "BARKPARK_SEED_PROFILE": "compose deliberately defaults to `clean` (the app-side "
     "default is `demo`, too heavy for a self-host first boot) — reviewed choice, "
     "S1a (2026-08-08)",

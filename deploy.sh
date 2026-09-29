@@ -257,6 +257,22 @@ if [ -n "${BARKPARK_PLUGINS+x}" ]; then
   fi
 fi
 
+# Declare the shape (docs/contracts/product-era.md): a box this script installs
+# is Solo unless the caller says otherwise. A BARKPARK_SHAPE the caller set is
+# persisted; otherwise an existing line is left alone (the Cloud provisioner
+# writes `cloud` over it at go-live, and a re-run must not undo that), and a
+# missing line gets `solo`. status.json reports it (Barkpark.Shape).
+if [ -n "${BARKPARK_SHAPE:-}" ]; then
+  echo ">> Persisting BARKPARK_SHAPE=$BARKPARK_SHAPE into .env"
+  if grep -q "^BARKPARK_SHAPE=" "$APP_DIR/.env"; then
+    sed -i "s|^BARKPARK_SHAPE=.*|BARKPARK_SHAPE=$BARKPARK_SHAPE|" "$APP_DIR/.env"
+  else
+    echo "BARKPARK_SHAPE=$BARKPARK_SHAPE" >> "$APP_DIR/.env"
+  fi
+elif ! grep -q "^BARKPARK_SHAPE=" "$APP_DIR/.env"; then
+  echo "BARKPARK_SHAPE=solo" >> "$APP_DIR/.env"
+fi
+
 # Persist BARKPARK_CLOUD_URL the same way — set-ness only, ${VAR+x} not
 # ${VAR:-}. This is the control-plane ORIGIN constant (https://barkpark.cloud)
 # that arms the "Log in with Barkpark Cloud" button on /login; runtime.exs reads
