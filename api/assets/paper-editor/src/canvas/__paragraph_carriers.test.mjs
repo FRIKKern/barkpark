@@ -49,5 +49,47 @@ for (const mode of ["canvas", "single"]) {
     }
   } finally { host.remove(); }
 }
+// Reader-accepted inline spellings (inline.ex compose_inline/apply_mark): `strike`/`s`
+// wrappers, a text leaf's flat `marks` array and its legacy `text` key. An UNTOUCHED
+// sibling that also carries a link must stay byte-identical when another block in the
+// run is edited (the Link extension's target/rel/class defaults once made the carrier
+// comparison fail and re-serialize it, dropping the strike — lane B pass-5 census), and a
+// TOUCHED paragraph must keep the formatting the reader paints.
+{
+  const t = (value) => ({ type: "text", value });
+  const aliasParagraph = { id: "alias", type: "paragraph", content: [
+    t("A "), { type: "link", href: "https://x.test/a", children: [t("link")] }, t(" and "),
+    { type: "strike", children: [t("gone")] }, t(", "), { type: "s", children: [t("short")] }, t(", "),
+    { type: "text", value: "bold", marks: [{ type: "bold" }] }, t(", "), { type: "text", text: "legacy" }, t("."),
+  ], audit: { keep: true } };
+  const host = document.createElement("bp-paper-canvas");
+  const ops = [];
+  host.blocks = [{ id: "h", type: "heading", level: 2, text: "Head" }, aliasParagraph];
+  host.addEventListener("bp-canvas-ops", e => ops.push(...e.detail.ops));
+  document.body.appendChild(host);
+  try {
+    const editor = host._editor;
+    assert.equal(editor.getJSON().content[1].content.map(n => n.text).join(""), "A link and gone, short, bold, legacy.",
+      "the canvas shows every run the reader paints, including a legacy text-key leaf");
+    const marksOf = (text) => editor.getJSON().content[1].content.find(n => n.text === text)?.marks?.map(m => m.type) || [];
+    assert.deepEqual(marksOf("gone"), ["strike"]);
+    assert.deepEqual(marksOf("short"), ["strike"]);
+    assert.deepEqual(marksOf("bold"), ["bold"]);
+    editor.commands.setTextSelection(3);
+    editor.commands.insertContent("X");
+    host.flushPendingChanges();
+    assert.equal(ops.filter(op => op.id === "alias").length, 0, "an untouched linked paragraph is never rewritten");
+    const end = editor.state.doc.content.size - 1;
+    editor.commands.setTextSelection(end);
+    editor.commands.insertContent("!");
+    host.flushPendingChanges();
+    const patch = ops.filter(op => op.id === "alias").at(-1)?.patch;
+    assert.ok(patch, "the touched paragraph emits its patch");
+    const struck = patch.content.filter(n => n.type === "strikethrough").map(n => n.children[0].value);
+    assert.deepEqual(struck, ["gone", "short"], "strike and s survive a touch as canonical strikethrough");
+    assert.ok(patch.content.some(n => n.type === "strong" && n.children[0].value === "bold"), "a flat bold mark survives as strong");
+    assert.match(JSON.stringify(patch.content), /legacy/, "a legacy text-key leaf keeps its words");
+  } finally { host.remove(); }
+}
 dom.window.close();
 console.log("mounted paragraph carrier editing and split preservation passed");

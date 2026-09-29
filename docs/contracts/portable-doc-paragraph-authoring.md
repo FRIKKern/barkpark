@@ -11,6 +11,10 @@ Content-backed paragraphs retain their inline representation. Clearing primary
 content also clears a stale string fallback so erased prose cannot reappear.
 Unchanged inline source fields are retained exactly; unrelated block metadata
 and IDs remain outside the emitted field patch.
+The projection reads every inline spelling the reader paints — `strike`/`s`
+wrappers, a text leaf's flat `marks` array, a legacy `text` key — and compares
+links on `href` alone, so an untouched sibling in an edited run is never
+re-serialized.
 
 A paragraph may carry `align: "center" | "right"`; left is the absence of the
 key, never stored. The canvas maps it to Tiptap's `textAlign` and back: setting
