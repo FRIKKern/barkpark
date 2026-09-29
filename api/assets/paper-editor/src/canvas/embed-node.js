@@ -1409,8 +1409,8 @@ export const Fleet = Node.create({
       // query) that is NOT template-locked; other kinds stay purely read-only. An edit
       // writes the mutated block to attrs.bpBlock via setNodeMarkup → run-convert emits
       // ONE patch-block → the server repaints the hole (D8: still 100% server-painted).
-      // The editor is revealed on hover / focus (resting-chrome, editability-gated),
-      // exactly like the code / task-list config islands.
+      // The island sits in a "Configure" disclosure whose toggle is revealed on hover /
+      // focus (resting chrome, opacity only) and opens on click — never in flow on hover.
       const isEditableKind = fleetKindEditable(bpType) && !isBlockLocked(block);
       let fleetEditor = null;
       let nativeConfig = null;
@@ -1431,24 +1431,12 @@ export const Fleet = Node.create({
         getBlock: currentBlock, isEditable: () => editor.isEditable,
         commit: commitBlock, undo: () => editor.commands.undo(), redo: () => editor.commands.redo(),
       }) : null;
-      let hovered = false;
       let focused = false;
       const syncReveal = () => {
         if (!fleetEditor) return;
-        if (nativeConfig) {
-          nativeConfig.style.display = editor.isEditable && !isBlockLocked(currentBlock()) ? "" : "none";
-          return;
-        }
-        fleetEditor.el.style.display =
-          editor.isEditable && (hovered || focused) ? "" : "none";
-      };
-      const onEnter = () => {
-        hovered = true;
-        syncReveal();
-      };
-      const onLeave = () => {
-        hovered = false;
-        syncReveal();
+        // The disclosure itself is hover/focus-revealed by CSS (opacity only — it
+        // never takes flow space); here it only disappears outside editability.
+        nativeConfig.style.display = editor.isEditable && !isBlockLocked(currentBlock()) ? "" : "none";
       };
       const onFocusIn = () => {
         focused = true;
@@ -1483,22 +1471,25 @@ export const Fleet = Node.create({
               .run();
           },
         });
-        if (nativeInline) {
-          dom.classList.add("bp-paper-contextual-editor");
-          if (isStatsType(bpType)) dom.classList.add("bp-canvas-stats-inline");
-          nativeConfig = document.createElement("details");
-          const nativeKind = bpType === "cards" || bpType === "notes" ? bpType : "stats";
-          nativeConfig.className = `bp-paper-contextual-controls bp-paper-${nativeKind}-config`;
-          const summary = document.createElement("summary");
-          summary.className = "bp-paper-contextual-toggle";
-          summary.textContent = { cards: "Configure Cards", notes: "Configure Notes" }[nativeKind] || "Configure Stats";
-          nativeConfig.appendChild(summary);
-          fleetEditor.el.classList.add("bp-paper-contextual-panel");
-          nativeConfig.appendChild(fleetEditor.el);
-          dom.appendChild(nativeConfig);
-        } else dom.appendChild(fleetEditor.el);
-        dom.addEventListener("mouseenter", onEnter);
-        dom.addEventListener("mouseleave", onLeave);
+        // EVERY editable kind's island lives in an out-of-flow "Configure" disclosure.
+        // Hover only reveals the (absolutely placed) toggle; the island takes page
+        // space only once the author OPENS it. An in-flow island shown on hover would
+        // collapse on pointer-leave and slide the next block under the pointer, so a
+        // click aimed at that block's text landed (and saved) in the block below.
+        dom.classList.add("bp-paper-contextual-editor");
+        if (nativeInline && isStatsType(bpType)) dom.classList.add("bp-canvas-stats-inline");
+        nativeConfig = document.createElement("details");
+        const configKind = !nativeInline ? "fleet"
+          : bpType === "cards" || bpType === "notes" ? bpType : "stats";
+        nativeConfig.className = `bp-paper-contextual-controls bp-paper-${configKind}-config`;
+        const summary = document.createElement("summary");
+        summary.className = "bp-paper-contextual-toggle";
+        summary.textContent = { cards: "Configure Cards", notes: "Configure Notes", stats: "Configure Stats" }[configKind]
+          || `Configure ${fleetChipLabel(block)}`;
+        nativeConfig.appendChild(summary);
+        fleetEditor.el.classList.add("bp-paper-contextual-panel");
+        nativeConfig.appendChild(fleetEditor.el);
+        dom.appendChild(nativeConfig);
         dom.addEventListener("focusin", onFocusIn);
         dom.addEventListener("focusout", onFocusOut);
         syncReveal();
@@ -1557,8 +1548,6 @@ export const Fleet = Node.create({
           dom.removeEventListener("bp-flush-node", flushFleetEditor);
           if (fleetEditor) {
             fleetEditor.destroy();
-            dom.removeEventListener("mouseenter", onEnter);
-            dom.removeEventListener("mouseleave", onLeave);
             dom.removeEventListener("focusin", onFocusIn);
             dom.removeEventListener("focusout", onFocusOut);
           }
