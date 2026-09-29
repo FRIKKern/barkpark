@@ -46,8 +46,12 @@ defmodule Barkpark.StudioChat.RecorderTest do
     Application.put_env(:barkpark, :public_demo_studio, false)
 
     on_exit(fn ->
-      Barkpark.StudioChat.RuntimeSupervisor
-      |> DynamicSupervisor.which_children()
+      # Guarded: with studio_chat off there is no RuntimeSupervisor, and a raise
+      # here would skip the env restores below (public_demo_studio leak).
+      if(Process.whereis(Barkpark.StudioChat.RuntimeSupervisor),
+        do: DynamicSupervisor.which_children(Barkpark.StudioChat.RuntimeSupervisor),
+        else: []
+      )
       |> Enum.each(fn
         {_, pid, _, _} when is_pid(pid) ->
           DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)

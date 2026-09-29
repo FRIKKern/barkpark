@@ -35,21 +35,26 @@ defmodule BarkparkWeb.AppTokenControllerTest do
     Application.put_env(:barkpark, :public_demo_studio, false)
 
     on_exit(fn ->
-      Barkpark.StudioChat.RuntimeSupervisor
-      |> DynamicSupervisor.which_children()
-      |> Enum.each(fn
-        {_, pid, _, _} when is_pid(pid) ->
-          DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)
-
-        _ ->
-          :ok
-      end)
-
+      # Restore the node-global env FIRST: with studio_chat off there is no
+      # RuntimeSupervisor, and a raise in the reap below used to skip these
+      # restores, leaving public_demo_studio false for every later Studio test.
       if prev,
         do: Application.put_env(:barkpark, :claude_chat, prev),
         else: Application.delete_env(:barkpark, :claude_chat)
 
       Application.put_env(:barkpark, :public_demo_studio, prev_demo)
+
+      if Process.whereis(Barkpark.StudioChat.RuntimeSupervisor) do
+        Barkpark.StudioChat.RuntimeSupervisor
+        |> DynamicSupervisor.which_children()
+        |> Enum.each(fn
+          {_, pid, _, _} when is_pid(pid) ->
+            DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)
+
+          _ ->
+            :ok
+        end)
+      end
     end)
 
     admin = "app-token-admin-#{System.unique_integer([:positive])}"
@@ -241,6 +246,9 @@ defmodule BarkparkWeb.AppTokenControllerTest do
   end
 
   describe "cross-tenant isolation — minted app tokens cannot reach another tenant (D19a shape)" do
+    # Drives /v1/chat, which the studio_chat capability mounts.
+    @describetag :requires_plugins
+
     setup %{admin: admin} do
       ws_a = create_workspace!()
       ws_b = create_workspace!()
