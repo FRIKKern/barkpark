@@ -10,18 +10,14 @@ defmodule BarkparkCloud.PublishTriggerCoverageTest do
   never folded into a generic "unregistered" count.
 
   c1 — a fixture that PRODUCES an unregistered content-bound site, so the coverage
-  number can LOSE. The production is deliberately not a hand-nulled column: it
-  runs the real Registry API twice —
-
-      Registry.create_site/2       with a content-bound kind and NO dataset
-                                   (`maybe_mint_content_secret/1` mints nothing)
-      Registry.rebind_site_content/3  binds a dataset afterwards
-
-  and `rebind_site_content/3` has no mint step, so the second call produces a
-  LIVE content-bound site with a bound dataset and no content-publish secret.
-  That is the mint gap, reproduced through doors an operator can reach today —
-  the PATCH-rebind arm is a standing producer of the state this census counts,
-  not merely a historical accident of a 2026-07-14 defect window.
+  number can LOSE. Until task-132be3a027100a1d the producer ran two real Registry
+  calls — `create_site/2` with no dataset, then `rebind_site_content/3` — because
+  the rebind had no mint step. The rebind now mints, so that door is CLOSED and
+  the "c1b" test below pins it closed (create datasetless → rebind reads
+  `covered 1 / mint_gap 0`). No API door produces the gap any more, so the
+  producer is now the LEGACY shape: a site whose row predates the fix (the six
+  guerrilla sites dr-w12-bl measured), written by nulling the secret on an
+  otherwise real row — the same shape the mint suite and the doctor suite use.
 
   ## Scope
 
@@ -81,10 +77,17 @@ defmodule BarkparkCloud.PublishTriggerCoverageTest do
     site
   end
 
-  # THE c1 PRODUCER. Two real Registry calls, no hand-written column:
-  # create datasetless (nothing to mint) → rebind onto a dataset (no mint step).
-  # The result is a content-bound site with a bound dataset and NO secret.
+  # THE c1 PRODUCER — the LEGACY shape (see the moduledoc): a real, covered row
+  # whose secret predates any mint, i.e. nulled. No API door produces it now.
   defp unregistered_content_site(bp) do
+    bp
+    |> webhook_site()
+    |> Ecto.Changeset.change(content_webhook_secret_encrypted: nil)
+    |> BarkparkCloud.Repo.update!()
+  end
+
+  # The door task-132be3a027100a1d CLOSED: create datasetless, then rebind.
+  defp rebound_content_site(bp) do
     n = System.unique_integer([:positive])
 
     {:ok, unbound} =
@@ -96,7 +99,7 @@ defmodule BarkparkCloud.PublishTriggerCoverageTest do
         read_token: "bpt_read_#{n}"
       })
 
-    # Nothing was minted, precisely because there was no dataset to bind.
+    # Nothing was minted at create, precisely because there was no dataset.
     assert is_nil(unbound.content_webhook_secret_encrypted)
     assert Registry.publish_trigger(unbound) == :not_applicable
 
@@ -297,11 +300,48 @@ defmodule BarkparkCloud.PublishTriggerCoverageTest do
   ## c1 — the number can LOSE
 
   describe "c1: a fixture produces an unregistered content-bound site" do
-    test "create_site + rebind_site_content yields a bound site with NO secret" do
+    test "c1b: create_site + rebind_site_content now MINTS — the door is closed" do
+      bp = bp_fixture()
+      site = rebound_content_site(bp)
+
+      assert site.bootstrap_dataset == "production"
+      refute is_nil(site.content_webhook_secret_encrypted)
+      assert Registry.publish_trigger(site) == :present
+
+      reloaded = BarkparkCloud.Repo.get!(Site, site.id)
+      refute is_nil(reloaded.content_webhook_secret_encrypted)
+
+      tally = Coverage.coverage(site_ids: [site.id])
+      assert tally.content_bound == 1
+      assert tally.covered == 1
+      assert tally.mint_gap == 0
+    end
+
+    test "a rebind of a site that already has a secret NEVER rotates it" do
+      bp = bp_fixture()
+      site = webhook_site(bp)
+      before = site.content_webhook_secret_encrypted
+
+      {:ok, rebound, :none} =
+        Registry.rebind_site_content(
+          site,
+          %{
+            bootstrap_workspace: "acme",
+            bootstrap_project: "blog",
+            bootstrap_dataset: "staging",
+            read_token: "bpt_read_rebound",
+            content_binding_verdict: "bound"
+          },
+          :absent
+        )
+
+      assert rebound.content_webhook_secret_encrypted == before
+    end
+
+    test "the legacy mint-gap row is a bound site with NO secret" do
       bp = bp_fixture()
       site = unregistered_content_site(bp)
 
-      # Produced through the real API, not by nulling a column.
       assert site.kind == "static"
       assert site.bootstrap_dataset == "production"
       assert is_nil(site.content_webhook_secret_encrypted)
