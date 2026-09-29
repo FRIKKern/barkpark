@@ -2799,7 +2799,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             <% {:ok, state} -> %>
               <% parts = Compose.terminal_article_parts(@block) %>
               <div class="bp-term" data-paper-terminal-editor-frame>
-                <%= raw(parts.bar_html) %>
+                <%!-- The reader's bar and footer, with the authored title and
+                     footer as in-place fields of the terminal form (wave 2 of
+                     task-bbfdcf4c80b8300d). --%>
+                <div class="bp-term__bar"><%= raw(parts.dots_html) %><span class="bp-term__title"><textarea
+                      id={"terminal-title-" <> @id}
+                      form={"terminal-form-" <> @id}
+                      name="title"
+                      rows="1"
+                      class="bp-paper-inline-text bp-paper-inline-copy bp-paper-inline-copy--inline"
+                      aria-label="Terminal title"
+                      placeholder="Terminal title"
+                      phx-debounce="500"
+                      phx-hook="BarkparkPaperAutoSize"
+                    ><%= state.title %></textarea></span><%= raw(parts.live_html) %></div>
                 <div class="bp-term__body" data-test-id="paper-terminal-body">
                   <%= for segment <- terminal_segments(state.children, @canvas_enabled) do %>
                     <%= case segment do %>
@@ -2840,7 +2853,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     <% end %>
                   <% end %>
                 </div>
-                <%= raw(parts.footer_html) %>
+                <div class="bp-term__foot" data-paper-inline-copy-empty={state.footer == "" && "true"}><textarea
+                    id={"terminal-footer-" <> @id}
+                    form={"terminal-form-" <> @id}
+                    name="footer"
+                    rows="1"
+                    class="bp-paper-inline-text bp-paper-inline-copy"
+                    aria-label="Terminal footer"
+                    placeholder="Terminal footer"
+                    phx-debounce="500"
+                    phx-hook="BarkparkPaperAutoSize"
+                  ><%= state.footer %></textarea></div>
               </div>
               <details
                 id={"terminal-controls-" <> @id}
@@ -2858,10 +2881,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     data-test-id="paper-terminal-editor"
                   >
                     <input type="hidden" name="block_id" value={@id} />
-                    <label class="bp-paper-edit-fieldlabel" for={"terminal-title-" <> @id}>Title</label>
-                    <input id={"terminal-title-" <> @id} type="text" name="title" class="bp-paper-edit-text" value={state.title} />
-                    <label class="bp-paper-edit-fieldlabel" for={"terminal-footer-" <> @id}>Footer</label>
-                    <input id={"terminal-footer-" <> @id} type="text" name="footer" class="bp-paper-edit-text" value={state.footer} />
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-sm"
+                      phx-click={contextual_panel_focus("terminal-title-" <> @id)}
+                      aria-controls={"terminal-title-" <> @id}
+                    >Edit title</button>
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-sm"
+                      phx-click={contextual_panel_focus("terminal-footer-" <> @id)}
+                      aria-controls={"terminal-footer-" <> @id}
+                    ><%= if state.footer == "", do: "Add footer", else: "Edit footer" %></button>
                     <label class="bp-paper-edit-check" for={"terminal-live-" <> @id}>
                       <input type="hidden" name="live" value="false" />
                       <input id={"terminal-live-" <> @id} type="checkbox" name="live" value="true" checked={state.live} />
@@ -4248,8 +4279,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             <p class="bp-paper-edit-readonly">Step identities need repair before editing; original content is preserved.</p>
           <% else %>
           <ol class="bp-steps">
-            <li :for={row <- editable_step_rows(@block)} class="bp-steps__step" data-step-row-id={row["id"]}>
-              <div :if={is_binary(row["title"]) and row["title"] != ""} class="bp-steps__title"><%= row["title"] %></div>
+            <li :for={{row, index} <- Enum.with_index(editable_step_rows(@block))} class="bp-steps__step" data-step-row-id={row["id"]}>
+              <%!-- The step title edits where the reader paints it: a field of the
+                   steps form (wave 2 of task-bbfdcf4c80b8300d). An untitled step
+                   paints no title, as in the reader, until the field is focused. --%>
+              <div
+                class="bp-steps__title"
+                data-paper-inline-copy-empty={step_title_text(row) == "" && "true"}
+              ><textarea
+                  id={step_title_dom_id(@id, row["id"])}
+                  form={"steps-form-" <> @id}
+                  name={"step-#{index}-title"}
+                  rows="1"
+                  class="bp-paper-inline-text bp-paper-inline-copy"
+                  aria-label={"Step #{index + 1} title"}
+                  placeholder="Step title"
+                  phx-debounce="500"
+                  phx-hook="BarkparkPaperAutoSize"
+                ><%= step_title_text(row) %></textarea></div>
               <div class="bp-steps__body">
                 <%= for segment <- step_body_segments(row, @canvas_enabled) do %>
                   <%= case segment do %>
@@ -4281,7 +4328,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </div>
             </li>
           </ol>
-          <details id={"paper-steps-controls-" <> @id} class="bp-paper-contextual-controls"
+          <details id={"paper-steps-controls-" <> @id} class="bp-paper-contextual-controls bp-paper-contextual-controls--steps"
                    phx-mounted={JS.ignore_attributes("open")}>
             <summary class="bp-paper-contextual-toggle">Configure steps</summary>
             <div class="bp-paper-contextual-panel">
@@ -4294,10 +4341,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 <fieldset :for={{row, index} <- Enum.with_index(editable_step_rows(@block))}>
                   <legend>Step <%= index + 1 %></legend>
                   <input type="hidden" name={"step-#{index}-id"} value={row["id"]} />
-                  <label>Title
-                    <input type="text" name={"step-#{index}-title"} value={row["title"] || ""}
-                           class="bp-paper-edit-text" />
-                  </label>
+                  <button type="button" class="btn btn-ghost btn-sm"
+                          phx-click={contextual_panel_focus(step_title_dom_id(@id, row["id"]))}
+                          aria-controls={step_title_dom_id(@id, row["id"])}
+                  ><%= if step_title_text(row) == "", do: "Add title", else: "Edit title" %></button>
                   <button type="submit" name="step-action" value={"up:" <> row["id"]}
                           disabled={index == 0} class="btn btn-ghost btn-sm">Move up</button>
                   <button type="submit" name="step-action" value={"down:" <> row["id"]}
@@ -4937,6 +4984,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   end
 
   defp terminal_editor_state(_block, _tree_identity_safe), do: {:error, :unsafe_terminal}
+
+  defp step_title_text(%{"title" => title}) when is_binary(title), do: title
+  defp step_title_text(_row), do: ""
+
+  defp step_title_dom_id(block_id, row_id) do
+    "step-title-" <> Base.url_encode64("#{block_id}\u0000#{row_id}", padding: false)
+  end
 
   defp terminal_segments(children, true),
     do: children |> PaperCanvas.partition_runs() |> PaperCanvas.with_run_ordinals()

@@ -2301,6 +2301,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         else: ""
 
     %{
+      # The editor paints the bar around an in-place title field from these
+      # (task-bbfdcf4c80b8300d wave 2); the reader keeps bar_html/footer_html.
+      dots_html: ~s|<span class="bp-term__dots"><i></i><i></i><i></i></span>|,
+      live_html: live,
       bar_html:
         ~s|<div class="bp-term__bar"><span class="bp-term__dots"><i></i><i></i><i></i></span><span class="bp-term__title">#{title}</span>#{live}</div>|,
       footer_html:
