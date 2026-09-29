@@ -92,6 +92,34 @@ defmodule Barkpark.Tasks.BriefMirrorTest do
                "bold and under and code and *single* stays"
     end
 
+    test "lossy rendering: the statement at @stripped names exactly the dropped set" do
+      # task-d0c4a5061e04fdcc chose to DOCUMENT the lossy derivation. A comment
+      # is a mechanism only if something reds when it goes, or when the list
+      # and the prose drift apart.
+      src = File.read!(Path.expand("../../../lib/barkpark/tasks/brief_mirror.ex", __DIR__))
+      marker = "# THE PURPOSE BLOCK IS A LOSSY RENDERING OF `description`, BY DESIGN."
+
+      assert String.contains?(src, marker),
+             "the lossy-rendering statement is gone from brief_mirror.ex — an undocumented lossy derivation is the defect"
+
+      [_, tail] = String.split(src, marker, parts: 2)
+      [para | _] = String.split(tail, "@stripped", parts: 2)
+      flat = para |> String.replace("#", " ") |> String.split() |> Enum.join(" ")
+      [first | _] = String.split(flat, "nothing else.", parts: 2)
+      named = Regex.scan(~r/every "([^"]+)"/, first, capture: :all_but_first) |> List.flatten()
+
+      assert named == BriefMirror.dropped_sequences(),
+             "the statement names #{inspect(named)} but @stripped is #{inspect(BriefMirror.dropped_sequences())}"
+
+      for phrase <- [
+            "a code span loses its backticks",
+            "`description` is the canonical text and is stored byte-verbatim",
+            "display copy"
+          ] do
+        assert String.contains?(flat, phrase), "the statement no longer says #{inspect(phrase)}"
+      end
+    end
+
     test "re-syncing is idempotent" do
       attrs = task(%{"description" => "settled", "brief" => brief([purpose("stale")])})
       once = BriefMirror.maybe_resync_task_brief(attrs, "task")
@@ -330,6 +358,51 @@ defmodule Barkpark.Tasks.BriefMirrorWiringTest do
     assert Enum.find(updated.content["brief"]["blocks"], &(&1["id"] == "operator-notes")) ==
              hand_authored,
            "the hand-authored block was rewritten by the re-sync"
+  end
+
+  test "lossy rendering, read back from the store: the brief drops the code span, the description round-trips sha-identical" do
+    # task-d0c4a5061e04fdcc criterion 1, in the test database rather than on the
+    # production ledger. Written through the real create door, READ BACK with
+    # get_document, and compared against the bytes that went in.
+    description = "run `bp task ready` first, then $(echo x)\n__init__ is **not** kept"
+    id = "brief-mirror-lossy-#{System.unique_integer([:positive])}"
+
+    {:ok, created} =
+      Content.create_document(
+        "task",
+        %{
+          "doc_id" => id,
+          "title" => "A lossy-rendering probe",
+          "content" => %{
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "title" => "A lossy-rendering probe",
+            "description" => description,
+            "brief" => %{
+              "version" => 1,
+              "blocks" => [
+                %{
+                  "id" => "purpose-copy",
+                  "type" => "paragraph",
+                  "content" => [%{"type" => "text", "value" => "stale"}]
+                }
+              ]
+            }
+          }
+        },
+        @dataset
+      )
+
+    # create_document stores a new task as a draft; read back by the id it
+    # actually stored, not the one we asked for.
+    {:ok, stored} = Content.get_document(created.doc_id, "task", @dataset)
+
+    assert :crypto.hash(:sha256, stored.content["description"]) ==
+             :crypto.hash(:sha256, description),
+           "the stored description is not byte-verbatim — normalising the source to match the brief undoes PR #18404"
+
+    assert stored_purpose(stored) == "run bp task ready first, then $(echo x)\ninit is not kept",
+           "the stored brief is not the documented lossy rendering of the description"
   end
 
   test "the create_document door is wired too" do

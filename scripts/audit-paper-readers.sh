@@ -170,9 +170,18 @@ for inventory_delay in 0 0.25 1 4; do
   fi
   cli_retryable "$inventory_stderr" || break
 done
+# `detail` falls back to the command's STDOUT when stderr is empty. Under
+# `-o json` bp prints its error envelope on stdout, so for 14 nights
+# (2026-09-11..24, runs 34585413992..35984636911) this line read `"detail": ""`
+# while the cause sat unprinted: a clean runner has no token, bp falls to its
+# baked dev floor `barkpark-dev-token`, guerrilla resolves that to auth_tier
+# "none", and bp refuses the read as a present-but-refused credential (exit 3,
+# internal/cli/refused_credential.go, #17681). task-c3b8d7a5e1745a17.
 if [[ "$inventory_ok" != true ]]; then
-  jq -n --arg server "$server" --rawfile detail "$inventory_stderr" \
-    '{ok:false,error:"paper inventory query failed",server:$server,detail:($detail|gsub("[[:space:]]+$"; ""))}'
+  jq -n --arg server "$server" --rawfile detail "$inventory_stderr" --rawfile stdout "$inventory" \
+    '{ok:false,error:"paper inventory query failed",server:$server,
+      detail:(($detail|gsub("[[:space:]]+$"; "")) as $e
+              | if $e != "" then $e else ($stdout|gsub("[[:space:]]+$"; "")|.[0:2000]) end)}'
   exit 2
 fi
 

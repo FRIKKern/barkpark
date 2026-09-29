@@ -1246,50 +1246,153 @@ fi
 # The shape is VALIDATED before writing, because runtime.exs RAISES on a malformed
 # entry — writing an unvalidated value here would not degrade a bucket key, it
 # would refuse to boot the app at the slot restart later in this very run.
-egress_ips_ok() { # $1=comma-separated candidate; true only if EVERY entry is a bare IP literal
-  printf '%s' "$1" | awk -F, '
-    function ipv4(s,   p, i) {
-      if (s !~ /^[0-9]+(\.[0-9]+){3}$/) return 0
-      split(s, p, ".")
-      for (i = 1; i <= 4; i++) if (p[i] + 0 > 255) return 0
-      return 1
-    }
-    function ipv6(s) { return (s ~ /^[0-9a-fA-F:]+$/ && s ~ /:/ && s !~ /:::/) }
-    {
-      for (i = 1; i <= NF; i++) {
-        gsub(/^[ \t]+|[ \t]+$/, "", $i)
-        if ($i == "") continue
-        if (!ipv4($i) && !ipv6($i)) exit 1
-        n++
-      }
-    }
-    END { if (n == 0) exit 1 }
-  '
+#
+# PURE BASH, NO awk (task-0d0f4563784fa12f). This used to be an awk regex whose
+# IPv4 arm needed the ERE interval `(\.[0-9]+){3}`, so its verdict was the HOST
+# AWK's: mawk 1.3.4 20200120 (Ubuntu 22.04, Debian 12), mawk 1.3.4 20240123
+# (Ubuntu 24.04) and original-awk 20180827 REFUSED every IPv4 address while
+# accepting IPv6 (whose regex has no interval) — the list was never written and
+# the refusal looked like a skip. gawk, BSD/one-true-awk 20200816+, busybox and
+# mawk 20250131+ accepted. Character classes below are spelled out (no ranges),
+# so no locale collation can widen them either.
+#
+# THE GRAMMAR IS THE RUNTIME'S (task-74d16d239fff7df7). runtime.exs parses each
+# entry with :inet.parse_address/1, and this validator exists to refuse, before the
+# write, exactly what that call would refuse at boot. It used to check IPv6 by
+# SHAPE (hex digits and colons), so it passed 1:2, 1::2::3 and nine-group
+# addresses that :inet.parse_address refuses: a deploy wrote the line, the slot
+# restart raised on it, and a typo in one env var became a down instance. Its IPv4
+# arm stripped leading zeros, so it passed 1.2.3.08, which the runtime reads as
+# octal and refuses. The rule now:
+#
+#   ACCEPTED here  =>  accepted by :inet.parse_address   (never write a boot failure)
+#
+# and on every canonical form the two agree exactly (the table in
+# deploy/instance-deploy_test.sh, Case 16c, records both verdicts per specimen).
+# The validator is deliberately STRICTER than the runtime on two legacy forms the
+# runtime accepts but silently re-reads as a DIFFERENT address, so writing them
+# would trust a host nobody named:
+#   * BSD inet_aton IPv4 forms: shorthand (127.1 -> 127.0.0.1, 1 -> 0.0.0.1),
+#     octal (010.0.0.1 -> 8.0.0.1, 203.0.113.07) and hex (0x7f.1). Only a
+#     dotted quad of decimal parts with no leading zero is accepted.
+#   * IPv6 zone ids (fe80::1%eth0): the runtime maps an interface NAME to scope 0.
+#
+# egress_ip4_ok: a dotted quad, each part 0 or 1-255 with no leading zero (the
+# grammar of OTP's ipv4strict_address, which is also what the runtime applies to
+# the IPv4 tail of an IPv6 address).
+egress_ip4_ok() {
+  local s="$1" dots o
+  case "$s" in ''|.*|*.|*..*|*[!0123456789.]*) return 1 ;; esac
+  dots="${s//[!.]/}"
+  [ "${#dots}" = 3 ] || return 1
+  local IFS=.
+  # shellcheck disable=SC2086  # $s holds only digits and dots (checked above): no glob can fire
+  set -- $s
+  for o in "$@"; do
+    case "$o" in 0) ;; 0*) return 1 ;; esac      # 010 is octal to the runtime: refuse, never reinterpret
+    [ "${#o}" -le 3 ] || return 1
+    [ "$o" -le 255 ] || return 1
+  done
+  return 0
+}
+# egress_ip6_ok: RFC 4291 text form as OTP's ipv6strict_address reads it — groups
+# of 1-4 hex digits; exactly 8 of them, or at most 7 around exactly ONE '::'; an
+# optional dotted-quad tail counts as two groups. No zone id.
+egress_ip6_ok() {
+  local s="$1" tail head half g rest n=0
+  case "$s" in *:*) ;; *) return 1 ;; esac
+  case "$s" in *[!0123456789abcdefABCDEF:.]*) return 1 ;; esac
+  case "$s" in
+    *.*)                                          # IPv4 tail: only after the LAST colon
+      tail="${s##*:}"; head="${s%"$tail"}"
+      case "$head" in *.*) return 1 ;; esac
+      egress_ip4_ok "$tail" || return 1
+      s="${head}0:0" ;;
+  esac
+  case "$s" in *:::*|*::*::*) return 1 ;; esac
+  case "$s" in
+    *::*) set -- "${s%%::*}" "${s#*::}" ;;
+    *)    set -- "$s" ;;
+  esac
+  for half in "$@"; do
+    [ -n "$half" ] || continue
+    rest="$half"
+    while :; do                                   # manual split: IFS=: would drop a trailing empty group
+      g="${rest%%:*}"
+      [ -n "$g" ] && [ "${#g}" -le 4 ] || return 1
+      n=$((n + 1))
+      case "$rest" in *:*) rest="${rest#*:}" ;; *) break ;; esac
+    done
+  done
+  case "$s" in *::*) [ "$n" -le 7 ] ;; *) [ "$n" = 8 ] ;; esac
+}
+# egress_ip_ok: true only if $1 is an address egress_ip4_ok or egress_ip6_ok accepts.
+egress_ip_ok() {
+  case "$1" in
+    '') return 1 ;;
+    *[!0123456789.]*) egress_ip6_ok "$1" ;;
+    *) egress_ip4_ok "$1" ;;
+  esac
+}
+# egress_ips_check: $1=comma-separated candidate. Entries are trimmed of spaces
+# and tabs; empty entries are skipped. Three outcomes, three exit codes:
+#   0  every entry is a bare IP literal and there is at least one
+#   1  refused — the FIRST offending entry is printed on stdout
+#   2  empty — the value holds no entries at all (only separators/whitespace)
+egress_ips_check() {
+  local rest="$1" entry n=0 more
+  while :; do
+    case "$rest" in
+      *,*) entry="${rest%%,*}"; rest="${rest#*,}"; more=1 ;;
+      *)   entry="$rest"; more=0 ;;
+    esac
+    entry="${entry#"${entry%%[!	 ]*}"}"
+    entry="${entry%"${entry##*[!	 ]}"}"
+    if [ -n "$entry" ]; then
+      if ! egress_ip_ok "$entry"; then printf '%s' "$entry"; return 1; fi
+      n=$((n + 1))
+    fi
+    [ "$more" = 1 ] || break
+  done
+  [ "$n" -gt 0 ] || return 2
+  return 0
 }
 if grep -q '^BARKPARK_TRUSTED_PROXIES=' .env 2>/dev/null; then
   log "BARKPARK_TRUSTED_PROXIES already set in .env — left untouched"
-elif [ -n "${BARKPARK_CLOUD_EGRESS_IPS:-}" ]; then
-  if egress_ips_ok "${BARKPARK_CLOUD_EGRESS_IPS}"; then
+else
+  # Three outcomes, three DIFFERENT log lines, so a deploy log tells "nothing was
+  # supplied" apart from "the validator refused what was supplied" — the second
+  # names the entry it refused.
+  egress_rc=2; egress_bad=""
+  if [ -n "${BARKPARK_CLOUD_EGRESS_IPS:-}" ]; then
+    egress_bad="$(egress_ips_check "${BARKPARK_CLOUD_EGRESS_IPS}")"; egress_rc=$?
+  fi
+  if [ "$egress_rc" = 0 ]; then
     echo "BARKPARK_TRUSTED_PROXIES=${BARKPARK_CLOUD_EGRESS_IPS}" >> .env
     log "added BARKPARK_TRUSTED_PROXIES=${BARKPARK_CLOUD_EGRESS_IPS} to .env (the control plane's relayed caller address is now believed)"
+  elif [ "$egress_rc" = 1 ]; then
+    log "WARN: BARKPARK_CLOUD_EGRESS_IPS REFUSED by the validator: entry '${egress_bad}' is not a bare IP address (CIDR ranges are REFUSED — trusting a range lets any host in it forge every client's bucket key) — the whole list '${BARKPARK_CLOUD_EGRESS_IPS}' was NOT written; runtime.exs would raise at boot on it"
   else
-    log "WARN: BARKPARK_CLOUD_EGRESS_IPS='${BARKPARK_CLOUD_EGRESS_IPS}' is not a comma-separated list of bare IP addresses (CIDR ranges are REFUSED — trusting a range lets any host in it forge every client's bucket key) — NOT written; runtime.exs would raise at boot on it"
+    # The placeholder is written ONCE (guarded on its own commented marker) — an
+    # unguarded append would grow .env by five lines on every single deploy. The WARN
+    # fires either way: the gap must stay visible in every deploy log, not only the
+    # first one.
+    if ! grep -q '^# BARKPARK_TRUSTED_PROXIES=' .env 2>/dev/null; then
+      {
+        echo '# BARKPARK_TRUSTED_PROXIES: individual IPs of every front whose x-forwarded-for'
+        echo '# this box should believe (comma-separated, NO CIDR ranges). On a barkpark.cloud-'
+        echo '# managed instance this is the control plane EGRESS address; unset, proxied'
+        echo '# requests all share ONE rate-limit bucket per team instead of one per caller.'
+        echo '# BARKPARK_TRUSTED_PROXIES=203.0.113.7'
+      } >> .env
+    fi
+    if [ -n "${BARKPARK_CLOUD_EGRESS_IPS:-}" ]; then
+      egress_supplied="BARKPARK_CLOUD_EGRESS_IPS is set but holds no entries ('${BARKPARK_CLOUD_EGRESS_IPS}')"
+    else
+      egress_supplied="BARKPARK_CLOUD_EGRESS_IPS is unset or empty"
+    fi
+    log "WARN: no BARKPARK_CLOUD_EGRESS_IPS supplied (${egress_supplied}; nothing was refused) and no BARKPARK_TRUSTED_PROXIES in .env — see the commented placeholder in .env; proxied requests will key on ONE bucket per team until an operator fills it in (deploy/README.md)"
   fi
-else
-  # The placeholder is written ONCE (guarded on its own commented marker) — an
-  # unguarded append would grow .env by five lines on every single deploy. The WARN
-  # fires either way: the gap must stay visible in every deploy log, not only the
-  # first one.
-  if ! grep -q '^# BARKPARK_TRUSTED_PROXIES=' .env 2>/dev/null; then
-    {
-      echo '# BARKPARK_TRUSTED_PROXIES: individual IPs of every front whose x-forwarded-for'
-      echo '# this box should believe (comma-separated, NO CIDR ranges). On a barkpark.cloud-'
-      echo '# managed instance this is the control plane EGRESS address; unset, proxied'
-      echo '# requests all share ONE rate-limit bucket per team instead of one per caller.'
-      echo '# BARKPARK_TRUSTED_PROXIES=203.0.113.7'
-    } >> .env
-  fi
-  log "WARN: no BARKPARK_CLOUD_EGRESS_IPS in the deploy env and no BARKPARK_TRUSTED_PROXIES in .env — see the commented placeholder in .env; proxied requests will key on ONE bucket per team until an operator fills it in (deploy/README.md)"
 fi
 
 # The Connectors bridge ciphers each install's per-workspace credentials with

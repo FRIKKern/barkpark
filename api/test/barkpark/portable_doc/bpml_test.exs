@@ -106,6 +106,74 @@ defmodule Barkpark.PortableDoc.BpmlTest do
       assert bpml =~ ~s(<a href="/papers/rollout-plan">the rollout paper</a>)
     end
 
+    test "author alignment rides <p> and <h1..3> as align and comes back exactly (plan #21)" do
+      blocks = [
+        %{"id" => "h1", "type" => "heading", "level" => 2, "align" => "right", "text" => "Right"},
+        %{
+          "id" => "p1",
+          "type" => "paragraph",
+          "align" => "center",
+          "content" => [%{"type" => "text", "value" => "Centred."}]
+        },
+        %{
+          "id" => "p2",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Plain."}]
+        }
+      ]
+
+      {bpml, parsed} = roundtrip!(blocks)
+      assert parsed == blocks
+      assert bpml =~ ~s(<h2 id="h1" align="right">Right</h2>)
+      assert bpml =~ ~s(<p id="p1" align="center">Centred.</p>)
+      assert bpml =~ ~s(<p id="p2">Plain.</p>)
+    end
+
+    test "a table with merged cells round-trips exactly and spells the span on the origin <td> (plan #24)" do
+      blocks = [
+        %{
+          "id" => "t1",
+          "type" => "table",
+          "head" => [[%{"type" => "text", "value" => "A"}], [%{"type" => "text", "value" => "B"}]],
+          "rows" => [
+            [[%{"type" => "text", "value" => "ab"}], []],
+            [[%{"type" => "text", "value" => "a2"}], [%{"type" => "text", "value" => "b2"}]]
+          ],
+          "spans" => [%{"row" => 0, "col" => 0, "colspan" => 2, "rowspan" => 1}]
+        }
+      ]
+
+      {bpml, parsed} = roundtrip!(blocks)
+      assert parsed == blocks
+      assert bpml =~ ~s(<td colspan="2">ab</td><td></td>)
+
+      assert {:ok, [table]} =
+               Bpml.parse_blocks(
+                 "<table><tr><td rowspan=\"2\">tall</td><td>b1</td></tr><tr><td></td><td>b2</td></tr></table>"
+               )
+
+      assert table["spans"] == [%{"row" => 0, "col" => 0, "colspan" => 1, "rowspan" => 2}]
+      assert length(table["rows"]) == 2 and Enum.all?(table["rows"], &(length(&1) == 2))
+    end
+
+    test "table columns (type, width) round-trip as <col/> lines (plan #25)" do
+      blocks = [
+        %{
+          "id" => "t1",
+          "type" => "table",
+          "cols" => [%{"width" => 220}, %{"type" => "num"}],
+          "rows" => [
+            [[%{"type" => "text", "value" => "a"}], [%{"type" => "text", "value" => "1"}]]
+          ]
+        }
+      ]
+
+      {bpml, parsed} = roundtrip!(blocks)
+      assert parsed == blocks
+      assert bpml =~ ~s(<col width="220"/>)
+      assert bpml =~ ~s(<col type="num"/>)
+    end
+
     test "hand-written BPML parses to the same blocks (minus ids it omits)" do
       bpml = """
       <eyebrow>OPS · LIVE</eyebrow>
@@ -722,7 +790,7 @@ defmodule Barkpark.PortableDoc.BpmlTest do
           1 ->
             %{
               "type" => "text",
-              "marks" => [Enum.random(~w(strong em code underline strike))],
+              "marks" => [Enum.random(~w(strong em code underline strike highlight sub sup))],
               "value" => gen_text()
             }
 

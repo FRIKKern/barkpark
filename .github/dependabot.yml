@@ -20,7 +20,7 @@
 # package.json. That distinction is the whole judgement call in this file and it
 # is deliberate:
 #
-#   * `js/packages/*` (12 members), `js/docs` and `apps/mobile`
+#   * `js/packages/*`, `js/test-harnesses/*`, `js/docs` and `apps/mobile`
 #     carry a package.json but NO lockfile — they are
 #     workspace MEMBERS resolved by `js/pnpm-lock.yaml` and the root
 #     `pnpm-lock.yaml`. Dependabot updates a workspace from its LOCKFILE root
@@ -131,7 +131,7 @@ updates:
         update-types: ["minor", "patch"]
 
   # js — pnpm-lock.yaml for the SDK workspace (js/pnpm-workspace.yaml globs
-  # packages/* and docs). ONE root, not twelve: the members have no lockfile.
+  # packages/*, test-harnesses/* and docs). ONE root: the members have no lockfile.
   - package-ecosystem: "npm"
     directory: "/js"
     schedule:

@@ -233,6 +233,29 @@ export const CONFORMING = [
     name: "ACCENT ROLE SEPARATION",
     sample: "!! ACCENT ROLE SEPARATION (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.",
   },
+  // bidi-isolation.mjs is the `run:` step of the `bidi-isolation` job
+  // (console-harness.yml, `node cloud/priv/static/__preview__/bidi-isolation.mjs`)
+  // and arrived with #20054/#20071. Its vocabulary is 0 clean / 1 defect / 2 refusal
+  // / 3 broken or blind, and its ONE exit-2 path is the no-usable-Chrome refusal in
+  // main(), which already speaks the shape under the name GUARD (two texts: CHROME
+  // set but not executable, or no Chrome at all). Its exit codes are unchanged here;
+  // nothing named it, so the DERIVED fence test was red on main's tip (2026-09-24).
+  {
+    file: "cloud/priv/static/__preview__/bidi-isolation.mjs",
+    name: "GUARD",
+    sample: "!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.",
+  },
+  // dwb-stopwatch.mjs is the dwb-12 E2E stopwatch (#20288). The Console gate runs
+  // it from the `tier-floor-render` job (its --selftest, plus the two live-guard
+  // refusals) in console-harness.yml. Its ONE exit-2 path is refuse() in main(),
+  // which already speaks the shape under the name DWB STOPWATCH; every refusal
+  // text rides that one helper. #20288 did not name it here, so the DERIVED fence
+  // test was red on main's tip (e8e627906, 2026-09-25).
+  {
+    file: "cloud/priv/static/__preview__/dwb-stopwatch.mjs",
+    name: "DWB STOPWATCH",
+    sample: "!! DWB STOPWATCH (exit 2): REFUSED — live mode needs BOTH --live and --host <url> (owner item 52).",
+  },
 ];
 
 // Files in the fence that exit 2 and publish NO capturable refusal, each with the

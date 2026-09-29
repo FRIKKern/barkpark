@@ -571,7 +571,7 @@ func TestRunCloudSiteCreateNode(t *testing.T) {
 // SpawnSite + spawnSiteMap threaded the fields).
 func TestRunCloudSiteStatusNodeFields(t *testing.T) {
 	cp := newSiteCP(t)
-	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"app","slug":"app","kind":"node","framework":"nextjs","workspace":"acme","project":"app","dataset":"production","runtime_target":"node-slot","port":4301,"port_base":4300,"url":"https://acme.barkpark.cloud/sites/app/","current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","runtime_target":"node-slot","port":4301,"stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"app","slug":"app","kind":"node","framework":"nextjs","workspace":"acme","project":"app","dataset":"production","runtime_target":"node-slot","port":4301,"port_base":4300,"url":"https://acme.barkpark.cloud/sites/app/","current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","port":4301,"stages":[{"name":"PLAN","status":"done"}]}}}`}
 	cp.serve()
 
 	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
@@ -593,10 +593,7 @@ func TestRunCloudSiteStatusNodeFields(t *testing.T) {
 			Port          int    `json:"port"`
 			PortBase      int    `json:"port_base"`
 		} `json:"site"`
-		Deployment struct {
-			RuntimeTarget string `json:"runtime_target"`
-			Port          int    `json:"port"`
-		} `json:"deployment"`
+		Deployment map[string]any `json:"deployment"`
 	}
 	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
 		t.Fatalf("status json not parseable: %v\n%s", err, jstdout)
@@ -604,8 +601,14 @@ func TestRunCloudSiteStatusNodeFields(t *testing.T) {
 	if env.Site.RuntimeTarget != "node-slot" || env.Site.Port != 4301 || env.Site.PortBase != 4300 {
 		t.Fatalf("status -o json dropped the node site fields: %+v\n%s", env.Site, jstdout)
 	}
-	if env.Deployment.RuntimeTarget != "node-slot" || env.Deployment.Port != 4301 {
-		t.Fatalf("status -o json dropped the node deployment fields: %+v\n%s", env.Deployment, jstdout)
+	if port, _ := env.Deployment["port"].(float64); port != 4301 {
+		t.Fatalf("status -o json dropped the node deployment port: %+v\n%s", env.Deployment, jstdout)
+	}
+	// The runtime target is not a DEPLOYMENT fact (dr-w11-payload-divergence-close):
+	// the control plane never emits it on a deployment row, so the deployment
+	// envelope must not grow one.
+	if _, has := env.Deployment["runtime_target"]; has {
+		t.Fatalf("status -o json put runtime_target on the deployment, which the plane never sends: %+v", env.Deployment)
 	}
 }
 
@@ -723,12 +726,16 @@ func TestRunCloudSiteRollbackNode(t *testing.T) {
 }
 
 // TestRunCloudSiteDeployNodeJSON proves the deploy stream's `-o json` surfaces the
-// node runtime_target/port the server stamped on the deployment — they would be
-// silently dropped without SiteDeployment carrying the fields.
+// node slot port the server stamped on the deployment — it would be silently
+// dropped without SiteDeployment carrying the field. The fixture carries NO
+// runtime_target: deployment_json/1 never emits one (it rides only the box's
+// deploy/rollback payloads), and a
+// fixture richer than the producer is what hid that for five weeks
+// (producer_contract_test.go).
 func TestRunCloudSiteDeployNodeJSON(t *testing.T) {
 	cp := newSiteCP(t)
 	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stages":[]}}`}
-	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"live","stage":"RETIRE","build_id":"b-1","runtime_target":"node-slot","port":4301,"url":"https://acme.barkpark.cloud/sites/app/","stages":[` +
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"live","stage":"RETIRE","build_id":"b-1","port":4301,"url":"https://acme.barkpark.cloud/sites/app/","stages":[` +
 		`{"name":"PLAN","status":"done"},{"name":"BUILD","status":"done"},{"name":"STAGE","status":"done"},` +
 		`{"name":"HEALTH","status":"done"},{"name":"SWITCH","status":"done"},{"name":"RETIRE","status":"done"}]}}`}
 	cp.serve()
@@ -738,15 +745,14 @@ func TestRunCloudSiteDeployNodeJSON(t *testing.T) {
 	}
 	var env struct {
 		Deployment struct {
-			RuntimeTarget string `json:"runtime_target"`
-			Port          int    `json:"port"`
+			Port int `json:"port"`
 		} `json:"deployment"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
 		t.Fatalf("json not parseable: %v\n%s", err, stdout)
 	}
-	if env.Deployment.RuntimeTarget != "node-slot" || env.Deployment.Port != 4301 {
-		t.Fatalf("deploy -o json dropped the node fields: %+v\n%s", env.Deployment, stdout)
+	if env.Deployment.Port != 4301 {
+		t.Fatalf("deploy -o json dropped the node port: %+v\n%s", env.Deployment, stdout)
 	}
 }
 

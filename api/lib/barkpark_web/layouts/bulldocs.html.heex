@@ -2752,6 +2752,10 @@
         <head> and NOT blocking (Golden Rule #4) — the engine itself
         (mermaid.min.js) still loads `defer` above. --%>
   <script src="/assets/bp-paper-mermaid.js"></script>
+  <%!-- Code tokens on the reader, from THE tokenizer the canvas uses (paper-editor/src/code-highlight.js,
+        built to this asset): the server emits `<pre data-lang>`; this pass paints hljs-* spans inside it
+        (Barkdown plan #27). Deferred: it reads the DOM once and watches LiveView patches. --%>
+  <script src="/assets/bp-paper-code.js" defer></script>
   <%!-- EDIT-ON-THE-LINK assets are loaded by the boot script below after it can
         inspect the LiveView's static HTML. Root-layout assigns do not include
         the socket's `can_edit?`, so gating tags on that assign omitted every

@@ -294,6 +294,16 @@ export function bpBase(over) {
         slot_units_truncated: null,
         reported_at: null,
       },
+      // dr-w15-s5 — "can this box deploy sites". Always present on the wire:
+      // router.ex merge_capability/2's fallback puts @unmeasured_site_deploy —
+      // THIS all-nil map, key for key. nil is UNMEASURED and never false:
+      // `configured: false` is the box's own refusal, and a box nobody measured
+      // must never read as refusing.
+      site_deploy: {
+        configured: null,
+        runner_alive: null,
+        reported_at: null,
+      },
       // dr-w10-s1 — the per-box deploy vital. Always present on the wire: when
       // a box owns no sites (six of eight prod boxes), router.ex's
       // merge_deploy_rate/2 fallback puts `no_deploy_surface/0` — THIS all-nil
@@ -1680,6 +1690,7 @@ function verifyEnvelope(over) {
       { name: "verify.api", ok: true, reachable: true, status: 200, latency_ms: 44, evidence: "GET /v1/capabilities → 200 (API up)" },
       { name: "verify.login", ok: true, reachable: true, status: 401, latency_ms: 121, evidence: "POST /v1/auth/login → 401 (auth stack answered; bad creds rejected)" },
       { name: "verify.studio", ok: true, reachable: true, status: 200, latency_ms: 316, evidence: "GET /studio → 200 (renders)" },
+      { name: "verify.siteplane", ok: true, reachable: true, status: null, latency_ms: 3, skipped: false, evidence: "site plane complete (docker, buildx, nixpacks, go, git; builder + runtime units active) · beat 41s ago" },
     ],
   };
   return Object.assign(base, over);
@@ -1691,6 +1702,7 @@ const verifyOneFail = verifyEnvelope({
     verifyPass.probes[0],
     verifyPass.probes[1],
     { name: "verify.studio", ok: false, reachable: true, status: 502, latency_ms: 5031, evidence: "502 — <html>upstream not ready</html>" },
+    verifyPass.probes[3],
   ],
 });
 
@@ -2258,7 +2270,8 @@ const THEATER_IDS = {
   ready: "5b2c1e00-0000-4000-8000-0000000000e3",
 };
 // Template envelope ⇐ GET /v1/templates (slug/title/description/what_you_get
-// drive the /new card; deployable gates the GitHub affordance on ready).
+// drive the /new card; deployable gates the GitHub affordance on ready;
+// repo + app_dir make the no-token Vercel fallback a live clone link).
 const theaterTemplate = {
   slug: "astro-blog",
   title: "Astro Blog",
@@ -2269,6 +2282,9 @@ const theaterTemplate = {
     "Instant content updates on your live site",
   ],
   deployable: true,
+  repo: "https://github.com/FRIKKern/barkpark",
+  app_dir: "templates/astro-blog",
+  no_app_dir_reason: null,
 };
 // Catalog envelope ⇐ GET /v1/providers/hetzner/catalog (router.ex: regions[] +
 // server_types[].monthly_price + currency). cx22 is the priced row the theater
@@ -7581,6 +7597,7 @@ export function route(name, method, path, state, body) {
           { name: "verify.api", ok: true, reachable: true, status: 200, latency_ms: 38, evidence: "GET /v1/capabilities → 200 (API up)" },
           { name: "verify.login", ok: true, reachable: true, status: 401, latency_ms: 102, evidence: "POST /v1/auth/login → 401 (auth stack answered; bad creds rejected)" },
           { name: "verify.studio", ok: true, reachable: true, status: 200, latency_ms: 288, evidence: "GET /studio → 200 (renders)" },
+          { name: "verify.siteplane", ok: true, reachable: true, status: null, latency_ms: 2, skipped: true, evidence: "skipped — this box hosts no sites (site plane not required)" },
         ],
       },
     };

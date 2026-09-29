@@ -33,3 +33,4 @@ D617	2026-09-17T01:04:38Z	dr-w24-bl-census-names-the-door-population dw35 — ru
 D618	2026-09-17T02:13:30Z	dr-w10-f1-zombied-run-remediation dw37 — zombied-run remediation policy: who may re-dispatch, dead-head ruling
 D619	2026-09-18T02:38:38Z	task-a312c1496c51209c dw48 — arbiter wiring demonstrated on a charter-only PR (#19223)
 D620	2026-09-18T03:49:47Z	task-fcc819ae8323c377 dw51 — charter adoption census + guard; D616's no-path-filter sentence corrected
+D621	2026-09-25T14:34:29Z	dr-w11-bl-cancelled-rows-count-as-waiting builder(lead-api-r22) — cancelled row at census vs alert level

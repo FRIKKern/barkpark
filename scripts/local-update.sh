@@ -235,7 +235,7 @@ else
 fi
 
 # js/ (SDK monorepo)
-if changed js/pnpm-lock.yaml 'js/*/package.json' 'js/packages/*/package.json'; then
+if changed js/pnpm-lock.yaml 'js/*/package.json' 'js/packages/*/package.json' 'js/test-harnesses/*/package.json'; then
   if (cd js && pnpm install >/dev/null 2>&1); then
     did "js/ SDK deps installed (pnpm)"
   else

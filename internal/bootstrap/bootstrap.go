@@ -62,6 +62,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/FRIKKern/barkpark/internal/apierr"
 	"github.com/FRIKKern/barkpark/internal/template"
 )
 
@@ -403,7 +404,7 @@ func (c Client) mintReadToken(ctx context.Context, scopedBase, dataset string) (
 		return "", err
 	}
 	if status < 200 || status >= 300 {
-		return "", fmt.Errorf("status %d: %s", status, snippet(respBody))
+		return "", fmt.Errorf("status %d: %s", status, mintRefusal(respBody))
 	}
 	var resp struct {
 		Token string `json:"token"`
@@ -718,6 +719,24 @@ func (c Client) doJSON(ctx context.Context, method, u string, body []byte) (int,
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	return resp.StatusCode, data, nil
+}
+
+// mintRefusal renders a token-mint refusal. The instance's 403 (the
+// :scoped_admin gate, RequireWorkspaceRole) is the canonical envelope
+// {"error":{"code":"forbidden","message":…,"hint":…}}, and its hint is the
+// sentence naming the role the gate wanted — so a forbidden refusal renders as
+// "forbidden: <message> — <hint>", read through internal/apierr (the one shared
+// envelope parser). Every other body keeps the raw snippet it always rendered.
+func mintRefusal(body []byte) string {
+	env, ok := apierr.Parse(body)
+	if !ok || env.Code != "forbidden" {
+		return snippet(body)
+	}
+	msg := "forbidden: " + env.Summary()
+	if h := env.HintLine(); h != "" {
+		msg += " — " + h
+	}
+	return msg
 }
 
 // snippet truncates a response body for error messages (and never carries a

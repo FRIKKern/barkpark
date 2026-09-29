@@ -49,3 +49,18 @@
 # which is why this change cannot launder anything today. The mechanism is
 # here for the next #11766, and the healed arm above is what will stop it from
 # being left switched on afterwards.
+#
+# WHAT THE HEALED ARM KEYS ON (task-87f845f92d7884c8). HEALED fires on a LINE
+# of this file whose (number, head) neither arm reports any more — it has no
+# other input, so with no lines it has nothing to fire on, by construction.
+# That is the arm working, not the arm broken: it is proven both ways on every
+# run of scripts/stale-verdict-watch.test.sh (sections n and u) and of
+# `stale-verdict-watch.sh --selftest`. It was NOT made to fire by inventing a
+# line: a pin is a written decision to stop failing on a named pull request,
+# and that decision belongs to whoever owns the PR, not to a gate fix.
+#
+# A LINE NOW COVERS BOTH ARMS. Since the aging bound, a pinned (number, head)
+# is KNOWN whether it asserts a stale green, has sat CONFLICTING past the age
+# bound, or both — and it heals only when NEITHER arm reports it. A pinned PR
+# that stops being stale but still sits CONFLICTING past the bound has not
+# healed, and the watch does not ask you to delete its line.

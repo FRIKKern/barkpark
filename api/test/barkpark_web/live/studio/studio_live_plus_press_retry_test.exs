@@ -66,10 +66,32 @@ defmodule BarkparkWeb.Studio.StudioLivePlusPressRetryTest do
   setup do
     seed_schema!("paper", "Papers")
     seed_schema!("note", "Notes")
+
+    # COUNT ONLY WHAT THIS TEST MADE. "production" is shared with every other
+    # module, and not every row in it is sandboxed: ExactDraftDeleteTest
+    # commits a `note` there through `Sandbox.unboxed_run/2` on purpose and
+    # leaves it as evidence. In a sequential run (CI's `--slowest 50`) that
+    # row is already present when arm 4 counts notes, so a dataset-wide count
+    # read 2 where this test made 1. Snapshot the ids present before the test
+    # and count only the rest.
+    Process.put(
+      {__MODULE__, :preexisting},
+      for(type <- ["paper", "note"], doc <- list(type), into: MapSet.new(), do: doc.id)
+    )
+
     :ok
   end
 
-  defp papers, do: Content.list_documents("paper", @dataset, perspective: :raw)
+  defp list(type), do: Content.list_documents(type, @dataset, perspective: :raw)
+
+  # The documents of `type` this test created — every row in the dataset minus
+  # the ones that existed when setup ran.
+  defp created(type) do
+    preexisting = Process.get({__MODULE__, :preexisting}, MapSet.new())
+    Enum.reject(list(type), &MapSet.member?(preexisting, &1.id))
+  end
+
+  defp papers, do: created("paper")
 
   defp press_plus(view) do
     # SCOPE the selector: the airdrop/access header buttons share
@@ -156,7 +178,7 @@ defmodule BarkparkWeb.Studio.StudioLivePlusPressRetryTest do
       html = render_click(view, "new-document", %{"type" => "note"})
 
       refute html =~ @answer
-      assert length(Content.list_documents("note", @dataset, perspective: :raw)) == 1
+      assert length(created("note")) == 1
     end
   end
 end

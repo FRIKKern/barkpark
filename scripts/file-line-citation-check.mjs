@@ -19,32 +19,63 @@
 // citing line names. The worst measured case drifts by more than two thousand
 // lines, pointing a builder at an unrelated handler.
 //
-// ── THE TEST, AND IT IS DELIBERATELY GENEROUS ─────────────────────────────────
+// ── THE TEST: ONLY THE ADJACENT SUBJECT CREDITS ───────────────────────────────
 //
-// For each citation `F:N` on a charter line L:
-//   IDENTIFIERS  every backticked span on L is split into identifier tokens.
-//                Tokens shorter than MIN_TOKEN, pure JS keywords, and the
-//                cited basename's own words are dropped. What survives is the
-//                citation's ANCHOR SET.
-//   DECIDABLE    a citation with a non-empty anchor set. A citation whose line
-//                names its subject only in prose has nothing to match and is
-//                counted separately, never as a miss.
-//   RESOLVES     any anchor token appears as a whole word within +/-SLACK lines
-//                of N in F.
+// For each unpinned citation `F:N` at position p on a charter line L:
+//   SUBJECT      the backticked span that CONTAINS the citation, if it names
+//                anything; else every candidate in the adjacency window — the
+//                nearest span ending <= 80 chars before, the nearest starting
+//                <= 40 chars after, and each quote (>= 8 chars) ending <= 80
+//                before or starting <= 40 after — ranked by distance; else a
+//                quoted sentence (>= 12 chars) within 140 chars. Directory
+//                components (`cloud/priv/static/`) are never a subject. Tokens
+//                shorter than 4, JS keywords, shas and the cited file's own
+//                words (leading underscores stripped) are dropped. This is
+//                subjectOf(), IMPORTED from scripts/file-line-citation-classify.mjs
+//                — one definition of adjacency, shared, never a second copy here.
+//   DECIDABLE    a citation with a non-empty subject. A citation with no adjacent
+//                subject has nothing to match and is counted separately (prose
+//                only), never as a miss and never as a resolve.
+//   RESOLVES     a subject token appears as a whole word (`-` counts as a word
+//                character, as in a pin) within +/-SLACK lines of N in F, or
+//                inside [N, M] for a range; a quoted subject as a substring.
+//   COMMON WORD  a subject on WEAK_MIN (10) or more lines of F cannot credit by
+//                itself: it lands near almost any N by chance. It stays the
+//                subject (the citation is decidable, and a miss), and --report
+//                / --json name it as `weak` with its line count. WEAK_MIN and
+//                the count, linesHolding(), are the classifier's (its PIN-WEAK
+//                bucket refuses a PIN by the same rule), imported, one
+//                definition. A function F defines is counted by its definition
+//                lines only, never its uses (thingMatcher). Until
+//                task-b3961db653fbbf58 finished, adjacency alone left L898
+//                `app.js:3143` credited by `body` (on 559 lines, a comment
+//                "resurrect sheet body") and L1210 `app.js:12667` by `code`
+//                (on 251, a parameter). --selftest ARMS 32-34; `--weak K`
+//                re-measures at another cut.
 //
-// TWO BIASES, BOTH REAL, BOTH IN THE SAME REPORT:
-//   OVER-CREDIT  the anchor set is scraped from the WHOLE citing line, not from
-//                the citation's own subject. A line naming ~30 tokens resolves
-//                if ANY ONE of them lands in the window. So RESOLVED is an
-//                upper bound on correctness, and UNRESOLVED a lower bound on
-//                drift.
-//   OVER-FLAG    a token can be absent from the window and the citation still
+// ONE CREDITING. SUBJECT + RESOLVES + COMMON WORD together are creditUnpinned()
+// in the classifier, imported; the classifier buckets (R-HEAD) and counts its
+// "unresolved at HEAD" with the same call (task-12d6e8868ef5d88a), so the two
+// tools cannot disagree on which citations resolve. Its selftest ARM 11 diffs
+// the two on one fixture.
+//
+// WHY NOT THE WHOLE LINE. Until task-b3961db653fbbf58 the anchor set was every
+// backticked token ANYWHERE on L, and a citation resolved if any one of them
+// landed in the window. A charter row names 30-60 tokens, so a wrong citation
+// was credited by whichever unrelated word happened to sit near N: a 17-sample
+// hand audit of app.js's resolves (every 6th line of --list at 0db9b0f4a) found
+// 17 of 17 wrong at HEAD. --selftest ARM 21 reds if that whole-line credit
+// returns.
+//
+// ONE BIAS REMAINS, and it is the safe direction:
+//   OVER-FLAG    a subject can be absent from the window and the citation still
 //                be morally right — the line may cite a BLOCK whose name sits
-//                outside +/-SLACK, or name the subject in prose while the
-//                backticks hold something else.
-// Neither bias is removable without a human reading every line. The number is a
-// directional floor on drift, not a census of wrongness, and `--report` prints
-// it with its denominator so nobody quotes it as the latter.
+//                outside +/-SLACK. The classifier's BLOCK-NEAR bucket is where
+//                those go; the repair is a pin, not a looser test. Likewise a
+//                right citation whose only subject is a common word (L833
+//                `app.js:116` by `getItem`, on 13 lines) is a miss; pin it.
+// The number is a directional floor on drift, not a census of wrongness, and
+// `--report` prints it with its denominator so nobody quotes it as the latter.
 //
 // ── WHY IT FAILS IN BOTH DIRECTIONS ───────────────────────────────────────────
 //
@@ -55,56 +86,103 @@
 // A guard proven in one direction is half a guard, so --selftest proves both,
 // plus a green on a hand-repaired specimen, plus the empty-read refusal.
 //
+// ── PINNED AND RANGE CITATIONS ────────────────────────────────────────────────
+//
+// Every citation in a charter sits in a DATED record, so the honest repair for
+// one that has drifted is PROVENANCE, not a new number: pin it to the commit it
+// was true at. The pin form NAMES the thing it cites and the commit:
+//
+//     app.js (renderBadge @ 0db9b0f4a1, L675)        single line
+//     app.js (renderBadge @ 0db9b0f4a1, L675-702)    range
+//     app.css ("Only the team owner" @ 0db9b0f4a1, L12)   a quoted literal
+//
+// It is verified against `git show <sha>:<path>` — THAT commit's copy, never
+// HEAD — so it cannot drift, and it still reds if the named thing is not where
+// it says at that sha (or the sha's copy cannot be read: exit 2, see below).
+// The thing is matched as a whole word (hyphen counts as a word character, so
+// `.detail-grid` does not credit `.detail-grid--instance`); a "quoted" thing is
+// matched as a literal substring. Only the NAMED thing credits a pin — never the
+// rest of the citing line, so a pin carries none of the whole-line over-credit.
+//
+// DEFINITION, NOT USE. When the version being read DEFINES the named thing — a
+// JS `function NAME(`, `NAME = function`, `NAME: function`, `NAME = (...) =>`,
+// a method head `NAME(...) {` or `class NAME`; a CSS selector head `.NAME {` —
+// only a definition line credits it, and comments never count as one. Until
+// task-eb534ada6569c7da any occurrence credited, so charter L677's
+// `app.js (tokenRow @ 55513d908f, L3462)` verified on the call
+// `list.map(tokenRow)` at 3464 (the definition sat at 3472). A thing the
+// version never defines (a variable, an id, a CSS property) keeps whole-name
+// matching. To cite a USE on purpose — a call site, a gate line, a comment —
+// quote it: `app.js ("readFailureCopy" @ <sha>, L8010)` is matched as literal
+// text. The rule is thingMatcher() in the classifier, imported here.
+//
+// WHY THIS SHAPE, AND NOT `app.js:675 (at <sha>)`: E11 in
+// cloud/priv/static/__css_check.mjs bans `app.js` + `[:~ ]+~?` + two or more
+// digits (and `<name>.{js,mjs,sh,css}` + `:` or ` ~` + digits). A form that
+// keeps `app.js:675` still carries the banned shape. Here the filename is
+// followed by ` (`, which neither branch of E11's alternation accepts, and the
+// line number sits behind `L` with no filename before it. So the pin can be
+// quoted into any file E11 scans without redding it; --selftest proves that
+// against E11's own exported function, not against a copy of its regex.
+//
+// RANGES. `F:N-M` (hyphen or en dash) is a range: it credits only if an anchor
+// lies INSIDE [N, M] — no slack, the range is the tolerance. It is never read
+// as `F:N` (the old parser stopped at the dash and gave N +/-slack). A single
+// line keeps +/-slack. The same holds for a pinned range.
+//
+// A pin inside an adjacent span is blanked before its tokens are read (the
+// classifier's subjectOf does this), so a sha, an `L<n>` or a pinned thing
+// never becomes the subject of a sibling citation.
+//
 // ── VACUITY REFUSAL ───────────────────────────────────────────────────────────
 //
 // A run whose parser matches NOTHING exits 2 (UNCHECKED), never 0. Same for a
 // corpus whose citations are all undecidable, and for a cited file that does not
-// exist. A verdict over a corpus that was never read is not a pass.
+// exist. A verdict over a corpus that was never read is not a pass. A PIN whose
+// sha's copy of the file cannot be read (unknown sha, or a shallow clone — CI
+// needs `fetch-depth: 0`) is UNVERIFIABLE and also exits 2: an unread pin is not
+// a pass, and it is not a drift either.
 //
 // ── EXIT CODES ────────────────────────────────────────────────────────────────
 //   0  unresolved count <= --max-unresolved (default 0)
 //   1  unresolved count above the budget; every miss named with file:line
 //   2  UNCHECKED — zero citations parsed, zero decidable, charter missing,
-//      cited file missing, or a bad argument
+//      cited file missing, a pin whose sha copy is unreadable, or a bad argument
 //
 // ── USAGE ─────────────────────────────────────────────────────────────────────
 //   node scripts/file-line-citation-check.mjs --report
 //   node scripts/file-line-citation-check.mjs --list      # resolved + crediting token
 //   node scripts/file-line-citation-check.mjs --charter P --map app.js=path/to/app.js
 //   node scripts/file-line-citation-check.mjs --max-unresolved 120
+//   node scripts/file-line-citation-check.mjs --weak 26    # the common-word cut (default WEAK_MIN)
 //   node scripts/file-line-citation-check.mjs --selftest
 //
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+// THE ADJACENCY RULE — one definition, owned by the classifier (see THE TEST).
+// THE CREDITING — "does an unpinned citation resolve?" — one definition, also
+// owned by the classifier and imported (task-12d6e8868ef5d88a): the classifier
+// buckets and counts with the SAME function, so the two tools cannot disagree
+// on which citations resolve. It lives there, not here, to keep the import
+// arrow one-way (see creditUnpinned() in the classifier).
+import { thingMatcher, WEAK_MIN, creditUnpinned, creditWindow } from "./file-line-citation-classify.mjs";
 
 const SLACK_DEFAULT = 3;
-const MIN_TOKEN = 4;
-
-// Words that carry no location information: JS/DOM vocabulary common enough to
-// land inside ANY +/-3 window, which would manufacture false resolutions.
-const STOP = new Set([
-  "const", "function", "return", "async", "await", "class", "this", "null",
-  "true", "false", "undefined", "typeof", "instanceof", "import", "export",
-  "default", "break", "continue", "throw", "catch", "finally", "else",
-  "case", "switch", "while", "document", "window", "console", "value",
-  "length", "push", "then", "true", "data", "text", "json", "html", "http",
-  "https", "type", "name", "node", "item", "list", "true", "void",
-]);
 
 function usage(msg) {
   process.stderr.write(`UNCHECKED: ${msg}\n`);
   process.stderr.write(
     "usage: node scripts/file-line-citation-check.mjs [--charter P] [--map base=path]...\n" +
-    "       [--slack K] [--max-unresolved N] [--report] [--list] [--json] [--root D] [--selftest]\n");
+    "       [--slack K] [--weak K] [--max-unresolved N] [--report] [--list] [--json] [--root D] [--selftest]\n");
   process.exit(2);
 }
 
 function parseArgs(argv) {
   const o = {
-    charter: null, maps: [], slack: SLACK_DEFAULT, maxUnresolved: 0,
+    charter: null, maps: [], slack: SLACK_DEFAULT, weak: WEAK_MIN, maxUnresolved: 0,
     report: false, json: false, root: null, selftest: false, list: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -114,6 +192,7 @@ function parseArgs(argv) {
       case "--charter": o.charter = need(); break;
       case "--map": o.maps.push(need()); break;
       case "--slack": o.slack = Number(need()); break;
+      case "--weak": o.weak = Number(need()); break;
       case "--max-unresolved": o.maxUnresolved = Number(need()); break;
       case "--root": o.root = need(); break;
       case "--report": o.report = true; break;
@@ -125,6 +204,7 @@ function parseArgs(argv) {
     }
   }
   if (!Number.isInteger(o.slack) || o.slack < 0) usage("--slack must be a non-negative integer");
+  if (!Number.isInteger(o.weak) || o.weak < 1) usage("--weak must be a positive integer");
   if (!Number.isInteger(o.maxUnresolved) || o.maxUnresolved < 0) usage("--max-unresolved must be a non-negative integer");
   return o;
 }
@@ -144,57 +224,115 @@ function repoRoot(explicit) {
   }
 }
 
-// ── the anchor set of a charter line ─────────────────────────────────────────
-function anchorsOf(line, citedBase) {
-  const own = new Set(citedBase.toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean));
-  const out = new Set();
-  for (const m of line.matchAll(/`([^`]+)`/g)) {
-    for (const tok of m[1].split(/[^A-Za-z0-9_$]+/)) {
-      if (tok.length < MIN_TOKEN) continue;
-      if (/^[0-9]+$/.test(tok)) continue;
-      if (STOP.has(tok.toLowerCase())) continue;
-      if (own.has(tok.toLowerCase())) continue;
-      out.add(tok);
-    }
-  }
-  return [...out];
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// ── the pin form: `<base> (<thing> @ <sha>, L<N>[-<M>])` ─────────────────────
+// Exported shape, mirrored by scripts/file-line-citation-classify.mjs (which
+// WRITES it). Any base: stripping must not depend on which targets are mapped.
+const PIN_ANY = /\b[\w.-]+\.[A-Za-z0-9]+ \(([^@()\n]+?) @ ([0-9a-f]{7,40}), L(\d+)(?:[-\u2013]L?(\d+))?\)/g;
+function pinRe(bases) {
+  const alt = bases.map(escRe).join("|");
+  return new RegExp(`(?<![\\w.-])(${alt}) \\(([^@()\\n]+?) @ ([0-9a-f]{7,40}), L(\\d+)(?:[-\u2013]L?(\\d+))?\\)`, "g");
 }
+
+// A pinned thing: "quoted" -> literal substring; otherwise a whole word where
+// `-` is a word character (CSS class names), so a prefix never credits — and,
+// when the file version DEFINES the thing (a function, or a CSS rule), only
+// its definition line credits, never a use. thingMatcher() in the classifier
+// owns that rule (see DEFINITION, NOT USE there); this file never re-derives
+// it. Built per file version, because "is it a function?" is asked of the
+// version being read.
+const thingRe = (thing, base, fileLines) => thingMatcher(thing, base, fileLines);
 
 // ── parse every `<base>:<N>` citation in a charter ───────────────────────────
 function parseCitations(charterText, bases) {
   const alt = bases.map((b) => b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  const re = new RegExp(`\\b(${alt}):(\\d+)\\b`, "g");
+  // `F:N-M` is a RANGE and is captured whole: the old `\b(F):(\d+)\b` stopped
+  // at the dash and silently read every range as its first line.
+  const re = new RegExp(`\\b(${alt}):(\\d+)(?:[-\u2013](\\d+))?\\b`, "g");
+  const pre = pinRe(bases);
   const lines = charterText.split("\n");
   const cites = [];
   lines.forEach((text, idx) => {
     for (const m of text.matchAll(re)) {
-      cites.push({ base: m[1], line: Number(m[2]), charterLine: idx + 1, text });
+      const n = Number(m[2]);
+      const hi = m[3] && Number(m[3]) >= n ? Number(m[3]) : null;
+      cites.push({ base: m[1], line: n, hi, charterLine: idx + 1, text, p: m.index, e: m.index + m[0].length });
+    }
+    for (const m of text.matchAll(pre)) {
+      const n = Number(m[4]);
+      const hi = m[5] && Number(m[5]) >= n ? Number(m[5]) : null;
+      cites.push({ base: m[1], line: n, hi, charterLine: idx + 1, text,
+        pin: { thing: m[2].trim(), sha: m[3] } });
     }
   });
   return cites;
 }
 
-function wordRe(tok) {
-  return new RegExp(`(^|[^A-Za-z0-9_$])${tok.replace(/[.*+?^${}()|[\]\\$]/g, "\\$&")}([^A-Za-z0-9_$]|$)`);
+const citeLabel = (c) => c.pin
+  ? `${c.base} (${c.pin.thing} @ ${c.pin.sha}, L${c.line}${c.hi ? "-" + c.hi : ""})`
+  : `${c.base}:${c.line}${c.hi ? "-" + c.hi : ""}`;
+
+// The window a citation credits in: a range is its own tolerance, a single
+// line gets +/-slack.
+const windowOf = (c, nLines, slack) => creditWindow(c.line, c.hi, nLines, slack);
+
+// THAT commit's copy of the cited file. null = unreadable (unknown sha, or a
+// shallow clone): the caller turns it into UNCHECKED, never a pass or a miss.
+const pinBlobCache = new Map();
+function pinBlob(root, sha, rel) {
+  const k = `${sha}:${rel}`;
+  if (!pinBlobCache.has(k)) {
+    try {
+      pinBlobCache.set(k, execFileSync("git", ["-C", root, "show", k],
+        { encoding: "utf8", maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "ignore"] }).split("\n"));
+    } catch { pinBlobCache.set(k, null); }
+  }
+  return pinBlobCache.get(k);
 }
 
-function evaluate(cites, targets, slack) {
+function evaluatePin(c, tgt, root, slack) {
+  c.decidable = true;
+  c.anchors = [c.pin.thing];
+  const fl = pinBlob(root, c.pin.sha, tgt.rel);
+  if (!fl) { c.unreadable = true; c.resolved = null; return; }
+  c.beyondEof = c.line > fl.length;
+  const re = thingRe(c.pin.thing, c.base, fl);
+  c.pinKind = re.kind();
+  const [lo, hi] = windowOf(c, fl.length, slack);
+  let hit = null;
+  for (let n = lo; n <= hi; n++) if (re.test(fl[n - 1], n - 1)) { hit = { tok: c.pin.thing, at: n }; break; }
+  c.resolved = !!hit;
+  c.hit = hit;
+  if (!hit) {
+    let best = null;
+    for (let n = 1; n <= fl.length; n++) {
+      if (!re.test(fl[n - 1], n - 1)) continue;
+      const d = n < c.line ? c.line - n : (n > (c.hi || c.line) ? n - (c.hi || c.line) : 0);
+      if (best === null || d < best.dist) best = { tok: c.pin.thing, at: n, dist: d };
+    }
+    c.elsewhere = best ? [best] : [];
+  }
+}
+
+
+function evaluate(cites, targets, slack, root, weak) {
   for (const c of cites) {
     const tgt = targets.get(c.base);
-    c.anchors = anchorsOf(c.text, c.base);
-    c.decidable = c.anchors.length > 0;
+    if (c.pin) { evaluatePin(c, tgt, root, slack); continue; }
+    // THE CREDITING, imported: only the ADJACENT subject credits, and a
+    // subject on >= `weak` lines of the file is a common word that cannot
+    // credit by itself (it stays the subject: the citation is decidable, and a
+    // miss). c.weak names every one that LANDED in the window and was refused,
+    // so a reader sees what the old rule would have credited.
+    const cr = creditUnpinned(c, tgt.lines, slack, weak);
+    const subject = cr.subject;
+    c.anchors = subject.map((x) => x.label);
+    c.decidable = cr.decidable;
     c.beyondEof = c.line > tgt.lines.length;
     if (!c.decidable) { c.resolved = null; continue; }
-    const lo = Math.max(1, c.line - slack);
-    const hi = Math.min(tgt.lines.length, c.line + slack);
-    let hit = null;
-    for (const tok of c.anchors) {
-      const re = wordRe(tok);
-      for (let n = lo; n <= hi; n++) {
-        if (re.test(tgt.lines[n - 1])) { hit = { tok, at: n }; break; }
-      }
-      if (hit) break;
-    }
+    const hit = cr.hit;
+    c.weak = cr.weak;
     c.resolved = !!hit;
     c.hit = hit;
     if (!hit) {
@@ -203,12 +341,13 @@ function evaluate(cites, targets, slack) {
       // distance to line ~100 for a symbol that also sits 20 lines from the
       // citation, and would overstate every drift it prints.
       c.elsewhere = [];
-      for (const tok of c.anchors) {
-        const re = wordRe(tok);
+      const refused = new Set(c.weak.map((w) => w.tok));
+      for (const { label: tok, re } of subject) {
+        if (refused.has(tok)) continue; // printed as "weak, refused", not as drift 0
         let best = null;
         for (let n = 1; n <= tgt.lines.length; n++) {
-          if (!re.test(tgt.lines[n - 1])) continue;
-          const d = Math.abs(n - c.line);
+          if (!re.test(tgt.lines[n - 1], n - 1)) continue;
+          const d = n < c.line ? c.line - n : (n > (c.hi || c.line) ? n - (c.hi || c.line) : 0);
           if (best === null || d < best.d) best = { at: n, d };
         }
         if (best) c.elsewhere.push({ tok, at: best.at, dist: best.d });
@@ -238,7 +377,8 @@ function run(o) {
         "A citation cannot be checked against a file that is not there.\n");
       return 2;
     }
-    targets.set(base, { path: p, lines: fs.readFileSync(p, "utf8").split("\n") });
+    targets.set(base, { path: p, rel: path.relative(root, p).split(path.sep).join("/"),
+      lines: fs.readFileSync(p, "utf8").split("\n") });
   }
   if (targets.size === 0) { usage("no --map given: nothing to check citations against"); }
 
@@ -254,7 +394,7 @@ function run(o) {
       "           a silent pass on an empty parse is the exact failure this guard exists to prevent.\n");
     return 2;
   }
-  evaluate(cites, targets, o.slack);
+  evaluate(cites, targets, o.slack, root, o.weak);
 
   const decidable = cites.filter((c) => c.decidable);
   if (decidable.length === 0) {
@@ -263,17 +403,22 @@ function run(o) {
       "           line carries a backticked identifier to anchor on. Nothing was measured.\n");
     return 2;
   }
+  const unreadable = cites.filter((c) => c.unreadable);
   const resolved = decidable.filter((c) => c.resolved);
-  const unresolved = decidable.filter((c) => !c.resolved);
+  const unresolved = decidable.filter((c) => c.resolved === false);
+  const pinned = cites.filter((c) => c.pin);
+  const ranges = cites.filter((c) => c.hi);
   const prose = cites.filter((c) => !c.decidable);
   const beyondEof = cites.filter((c) => c.beyondEof);
   const charterLines = new Set(cites.map((c) => c.charterLine));
+  const weakRefused = unresolved.filter((c) => c.weak && c.weak.length);
 
   if (o.json) {
     process.stdout.write(JSON.stringify({
       charter: path.relative(root, charter),
       targets: [...targets].map(([b, t]) => ({ base: b, path: path.relative(root, t.path), lines: t.lines.length })),
       slack: o.slack,
+      weakMin: o.weak,
       citations: cites.length,
       distinctCharterLines: charterLines.size,
       decidable: decidable.length,
@@ -281,9 +426,16 @@ function run(o) {
       unresolved: unresolved.length,
       proseOnly: prose.length,
       beyondEof: beyondEof.length,
+      pinned: pinned.length,
+      pinnedVerified: pinned.filter((c) => c.resolved).length,
+      pinnedFailed: pinned.filter((c) => c.resolved === false).length,
+      pinnedUnreadable: unreadable.length,
+      ranges: ranges.length,
+      weakRefused: weakRefused.length,
       misses: unresolved.map((c) => ({
-        cite: `${c.base}:${c.line}`, charterLine: c.charterLine,
+        cite: citeLabel(c), charterLine: c.charterLine,
         anchors: c.anchors, elsewhere: c.elsewhere,
+        ...(c.weak && c.weak.length ? { weak: c.weak } : {}),
       })),
     }, null, 2) + "\n");
   } else {
@@ -298,11 +450,17 @@ function run(o) {
     process.stdout.write(`  resolved       : ${resolved.length} / ${decidable.length}\n`);
     process.stdout.write(`  UNRESOLVED     : ${unresolved.length} / ${decidable.length}\n`);
     process.stdout.write(`  beyond EOF     : ${beyondEof.length}   (drift, not truncation, when 0)\n`);
+    process.stdout.write(`  pinned         : ${pinned.length}   (verified ${pinned.filter((c) => c.resolved).length}, ` +
+      `FAILED ${pinned.filter((c) => c.resolved === false).length}, sha copy unreadable ${unreadable.length}) — checked at THEIR sha, not HEAD\n`);
+    process.stdout.write(`  ranges         : ${ranges.length}   (credit only INSIDE [N, M]; never read as N)\n`);
+    process.stdout.write(`  weak refused   : ${weakRefused.length}   (unresolved though a subject landed: it sits on >= ${o.weak} lines of the file, a common word)\n`);
     process.stdout.write(
-      "  BIASES         : anchors are scraped from the WHOLE citing line, so a citation\n" +
-      "                   RESOLVES if any one of them lands in the window (over-credit),\n" +
-      "                   and a line naming its subject in prose has nothing to match\n" +
-      "                   (over-flag, mitigated by excluding the prose-only citations above).\n" +
+      "  CREDIT         : only the citation's ADJACENT subject credits it (the backtick span\n" +
+      "                   holding it, else the nearest span or quoted sentence beside it —\n" +
+      "                   the classifier's subjectOf), never another word on the line.\n" +
+      "  BIAS           : a citation of a BLOCK whose name sits outside the window is\n" +
+      "                   flagged though morally right (over-flag); a line with no adjacent\n" +
+      "                   subject is prose-only above, never a miss.\n" +
       `                   Read ${unresolved.length}/${decidable.length} as a DIRECTIONAL FLOOR on drift, not a census.\n`);
     if (o.list) {
       process.stdout.write(
@@ -311,7 +469,8 @@ function run(o) {
         "  generic word landing in the window credits a citation that is wrong by hand.\n" +
         "  Read this list before quoting the resolved count as a correctness rate.\n");
       for (const c of resolved) {
-        process.stdout.write(`  ${c.base}:${c.line}  charter line ${c.charterLine}  credited by \`${c.hit.tok}\` at ${c.hit.at}\n`);
+        process.stdout.write(`  ${citeLabel(c)}  charter line ${c.charterLine}  credited by \`${c.hit.tok}\` at ${c.hit.at}` +
+          (c.pin ? "" : ` (on ${c.hit.lines} lines)`) + "\n");
       }
     }
     if (o.report) {
@@ -322,19 +481,28 @@ function run(o) {
       }).sort((a, b) => b.drift - a.drift);
       for (const { c, drift } of withDrift.slice(0, 25)) {
         const el = (c.elsewhere || []).map((e) => `${e.tok}@${e.at} (${e.dist} away)`).join(", ") || "(no anchor found anywhere in the file)";
-        process.stdout.write(`  ${c.base}:${c.line}  (charter line ${c.charterLine}, nearest anchor occurrence ${drift < 0 ? "n/a" : drift + " lines away"})\n`);
+        const wk = (c.weak || []).map((w) => `${w.tok}@${w.at} (on ${w.lines} lines)`).join(", ");
+        process.stdout.write(`  ${citeLabel(c)}  (charter line ${c.charterLine}, nearest anchor occurrence ${drift < 0 ? "n/a" : drift + " lines away"})\n`);
         process.stdout.write(`      anchors elsewhere: ${el}\n`);
+        if (wk) process.stdout.write(`      weak, refused  : ${wk}\n`);
       }
       if (withDrift.length > 25) process.stdout.write(`  ... and ${withDrift.length - 25} more\n`);
     }
   }
 
+  if (unreadable.length > 0) {
+    process.stderr.write(
+      `UNCHECKED: ${unreadable.length} pinned citation(s) name a sha whose copy of the cited file cannot be read ` +
+      "(unknown sha, or a shallow clone — fetch full history). An unread pin is neither a pass nor a drift:\n");
+    for (const c of unreadable.slice(0, 10)) process.stderr.write(`  ${citeLabel(c)}  charter line ${c.charterLine}\n`);
+    return 2;
+  }
   if (unresolved.length > o.maxUnresolved) {
     if (!o.json) {
       process.stdout.write(`\nFAIL — ${unresolved.length} unresolved citation(s), budget ${o.maxUnresolved}.\n`);
       if (!o.report) {
         for (const c of unresolved.slice(0, 20)) {
-          process.stdout.write(`  ${c.base}:${c.line}  charter line ${c.charterLine}  anchors: ${c.anchors.slice(0, 8).join(", ")}\n`);
+          process.stdout.write(`  ${citeLabel(c)}  charter line ${c.charterLine}  anchors: ${c.anchors.slice(0, 8).join(", ")}\n`);
         }
         if (unresolved.length > 20) process.stdout.write(`  ... and ${unresolved.length - 20} more (use --report)\n`);
       }
@@ -346,7 +514,7 @@ function run(o) {
 }
 
 // ── SELFTEST: both failure directions, the green, and the empty read ─────────
-function selftest() {
+async function selftest() {
   const t = fs.mkdtempSync(path.join(os.tmpdir(), "flcc-"));
   const self = fileURLToPath(import.meta.url);
   const wdir = path.join(t, "src");
@@ -428,13 +596,227 @@ function selftest() {
   show("ARM 7  cited file missing -> UNCHECKED (exit 2)",
     call(["--map", `widget.js=${path.join(wdir, "gone.js")}`, "--root", t, "--charter", charter]), 2, /does not exist/);
 
+  // ── PINNED + RANGE ARMS ─────────────────────────────────────────────────────
+  // A real git history under the fixture root: commit A has makeWidget at 30;
+  // commit B (HEAD, and the working copy) deletes it and adds paintChip at 20.
+  // A pin must be judged by ITS sha's copy, so each pin arm is chosen so that
+  // reading HEAD instead would give the OPPOSITE verdict.
+  const g = (...a) => execFileSync("git", ["-C", t, "-c", "user.email=selftest@example.invalid",
+    "-c", "user.name=selftest", "-c", "commit.gpgsign=false", ...a], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  g("init", "-q");
+  fs.writeFileSync(widget, body.join("\n"));
+  g("add", "src/widget.js"); g("commit", "-q", "-m", "A");
+  const shaA = g("rev-parse", "--short=10", "HEAD");
+  const bodyB = body.slice();
+  bodyB[29] = "// filler line 30";
+  bodyB[19] = "function paintChip(el) { return el; }"; // line 20
+  fs.writeFileSync(widget, bodyB.join("\n"));
+  g("add", "src/widget.js"); g("commit", "-q", "-m", "B");
+  const shaB = g("rev-parse", "--short=10", "HEAD");
+  const pinArg = ["--map", "widget.js=src/widget.js", "--root", t, "--slack", "3"];
+  const cite = (lineText) => { fs.writeFileSync(charter, `# fixture\n\n${lineText}\n`); return [...pinArg, "--charter", charter, "--report"]; };
+
+  show("ARM 8  PIN present at its sha, ABSENT at HEAD -> GREEN (reads the sha's copy, not HEAD)",
+    call(cite(`\`makeWidget\` builds it — widget.js (makeWidget @ ${shaA}, L30)`)), 0, /pinned         : 1   \(verified 1/);
+  show("ARM 9  PIN absent at its sha (deleted by B) -> RED (exit 1)",
+    call(cite(`\`makeWidget\` builds it — widget.js (makeWidget @ ${shaB}, L30)`)), 1, /no anchor found anywhere/);
+  show("ARM 10 PIN absent at its sha but PRESENT at HEAD line 20 -> RED (HEAD cannot rescue a pin)",
+    call(cite(`\`paintChip\` paints — widget.js (paintChip @ ${shaA}, L20)`)), 1, /FAIL — 1 unresolved/);
+  show("ARM 11 PIN at the right sha, wrong line (thing 10 lines off) -> RED",
+    call(cite(`\`makeWidget\` — widget.js (makeWidget @ ${shaA}, L20)`)), 1, /10 lines away/);
+  show("ARM 12 PINNED RANGE containing the thing -> GREEN",
+    call(cite(`\`makeWidget\` — widget.js (makeWidget @ ${shaA}, L10-31)`)), 0, /PASS — 1\/1/);
+  show("ARM 13 PINNED RANGE whose slack-neighbour holds the thing -> RED (no slack on a range)",
+    call(cite(`\`makeWidget\` — widget.js (makeWidget @ ${shaA}, L31-40)`)), 1, /FAIL/);
+  show("ARM 14 PIN whose sha copy is unreadable -> UNCHECKED (exit 2), never a pass or a miss",
+    call(cite(`\`makeWidget\` — widget.js (makeWidget @ 0000000dead, L30)`)), 2, /cannot be read/);
+
+  // Unpinned ranges, against the working copy (B): paintChip at 20.
+  show("ARM 15 RANGE F:N-M credits a thing deep inside it (read as N +/-3 it would miss) -> GREEN",
+    call(cite("`paintChip` — widget.js:5-24")), 0, /ranges         : 1/);
+  show("ARM 16 RANGE F:N-M whose only hit sits in N's slack, outside [N, M] -> RED",
+    call(cite("`paintChip` — widget.js:22-30")), 1, /widget\.js:22-30/);
+  show("ARM 17 SINGLE F:N keeps +/-slack (control for ARM 16: same file, same thing) -> GREEN",
+    call(cite("`paintChip` — widget.js:22")), 0, /PASS/);
+
+  // ARM 18 — E11: the pin form must be clean under E11's OWN function; the old
+  // `(at <sha>)` form is the positive control and must red it. The banned
+  // string is assembled from parts so this file never types one whole.
+  {
+    process.stdout.write("\n=== ARM 18  pin form vs E11 (cloud/priv/static/__css_check.mjs bannedSourceCitationErrors) ===\n");
+    const e11 = path.resolve(path.dirname(self), "..", "cloud", "priv", "static", "__css_check.mjs");
+    let ok = false;
+    if (!fs.existsSync(e11)) {
+      process.stdout.write(`    E11 source not found at ${e11}\n`);
+    } else {
+      const { bannedSourceCitationErrors } = await import(e11);
+      const forms = ["app.js", "app.css", "__app.test.mjs"].map((b) => `// ${b} (makeWidget @ ${shaA}, L675-702) and ${b} ("Only the owner" @ ${shaA}, L12)`);
+      const clean = forms.map((f) => bannedSourceCitationErrors(f, "fixture.mjs").length);
+      const oldForm = `// ${"app.js"}${":"}${"675"} (at ${shaA})`;
+      const red = bannedSourceCitationErrors(oldForm, "fixture.mjs").length;
+      process.stdout.write(`    pin form E11 hits per base [app.js, app.css, __app.test.mjs]: ${clean.join(", ")} (want 0,0,0)\n`);
+      process.stdout.write(`    control: the (at <sha>) form reds E11 with ${red} hit(s) (want >= 1)\n`);
+      ok = clean.every((n) => n === 0) && red >= 1;
+    }
+    process.stdout.write(`    -> ${ok ? "ok" : "ARM FAILED"}\n`);
+    if (!ok) fails++;
+  }
+
+  // ARM 19 — the own-filename filter must drop a LEADING-UNDERSCORE own word.
+  // The only backticked span names the cited file itself, and the target holds
+  // that word at the cited line: under the old filter `__probe` survived as an
+  // anchor and self-credited the citation (PASS); stripped, nothing is left to
+  // anchor on, so the run is UNCHECKED.
+  {
+    const probe = path.join(wdir, "__probe.test.mjs");
+    const pb = [];
+    for (let i = 1; i <= 10; i++) pb.push(`// filler line ${i}`);
+    pb[4] = "// see __probe.test.mjs for the harness"; // line 5
+    fs.writeFileSync(probe, pb.join("\n"));
+    fs.writeFileSync(charter, "# fixture\n\n| D1 | `__probe.test.mjs` asserts it | __probe.test.mjs:5 |\n");
+    show("ARM 19 own-name filter strips leading underscores: `__probe` is not an anchor for __probe.test.mjs -> UNCHECKED (exit 2), not a self-credit",
+      call(["--map", `__probe.test.mjs=${probe}`, "--root", t, "--charter", charter]), 2, /NONE is machine-decidable/);
+  }
+
+  // ARM 20 — a --json PIPED to a consumer must carry the same bytes as one
+  // redirected to a file. The fixture's --json is well over the 64 KiB pipe
+  // buffer, so a process.exit() with stdout pending truncates the piped copy.
+  {
+    process.stdout.write("\n=== ARM 20  --json piped == --json redirected, on output > 64 KiB ===\n");
+    const many = ["# fixture", ""];
+    for (let i = 0; i < 1500; i++) many.push(`| D${i} | \`missingSymbol${i}\` is cited | widget.js:5 |`);
+    fs.writeFileSync(charter, many.join("\n") + "\n");
+    const args = [self, ...pinArg, "--charter", charter, "--json"];
+    const piped = spawnSync(nodeBin, args, { encoding: "buffer", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "ignore"] });
+    const outFile = path.join(t, "redirected.json");
+    const fd = fs.openSync(outFile, "w");
+    const redir = spawnSync(nodeBin, args, { stdio: ["ignore", fd, "ignore"] });
+    fs.closeSync(fd);
+    const pBytes = piped.stdout.length;
+    const rBytes = fs.statSync(outFile).size;
+    let parses = false;
+    try { parses = JSON.parse(piped.stdout.toString("utf8")).unresolved === 1500; } catch {}
+    process.stdout.write(`    piped ${pBytes} bytes (exit ${piped.status}), redirected ${rBytes} bytes (exit ${redir.status}); piped JSON parses with 1500 unresolved: ${parses}\n`);
+    const ok = rBytes > 65536 && pBytes === rBytes && parses && piped.status === 1 && redir.status === 1;
+    process.stdout.write(`    -> ${ok ? "ok" : "ARM FAILED"}\n`);
+    if (!ok) fails++;
+  }
+
+  // ARM 21 — ADJACENCY: a word elsewhere on the line must not credit a citation
+  // whose own subject is not there. Working copy (B): paintChip at 20, makeWidget
+  // deleted. The citation sits beside `makeWidget`; `paintChip` is named > 80
+  // chars earlier on the same line and DOES land at 20. Whole-line credit (the
+  // pre-task-b3961 test) passes this; adjacency must red it.
+  const pad = "this clause is filler prose that pushes the first span well over eighty characters away";
+  show("ARM 21 a far word on the line (`paintChip` lands at 20) does not credit a citation beside `makeWidget` (absent) -> RED",
+    call(cite(`\`paintChip\` paints the chip; ${pad}. The widget \`makeWidget\` is built at widget.js:20`)), 1, /FAIL — 1 unresolved/);
+  // ARM 22 — control for ARM 21: the SAME line with the citation moved beside
+  // `paintChip` resolves, so ARM 21's red is the adjacency rule, not a parse.
+  show("ARM 22 control for ARM 21: same line, citation beside `paintChip` -> GREEN",
+    call(cite(`\`paintChip\` paints the chip at widget.js:20; ${pad}. The widget \`makeWidget\` is built elsewhere`)), 0, /PASS — 1\/1/);
+
+  // ARM 23 — a directory component is not a subject (task-c99f9579606babbd).
+  // `filler/widget.js:20` names widget.js; `filler` is where it lives. Every
+  // line of the fixture says "filler", so treating the prefix as the subject
+  // credits the citation (PASS); without it nothing adjacent names a thing, the
+  // only citation is prose-only, and the run is UNCHECKED.
+  show("ARM 23 a path prefix is not a subject: `filler/widget.js:20` beside a file full of \"filler\" -> UNCHECKED (exit 2), not a credit",
+    call(cite("The widget lives at `filler/widget.js:20` today")), 2, /NONE is machine-decidable/);
+
+  // ARM 24 — control for ARM 23: a `/` before a bare number is an ARITY, not a
+  // directory. `paintChip/1` names paintChip (at 20), so it credits; blanking
+  // every `<seg>/` would leave only `1` and make the run UNCHECKED.
+  show("ARM 24 control for ARM 23: `paintChip/1` is a name with an arity, not a path -> GREEN",
+    call(cite("The chip is painted by `paintChip/1` at widget.js:20 today")), 0, /PASS — 1\/1/);
+
+  // ── DEFINITION, NOT USE (task-eb534ada6569c7da) ────────────────────────────
+  // Commit C: tokenRow is DEFINED at 30 and CALLED at 22 (charter L677's shape:
+  // `list.map(tokenRow)` 8 lines above `function tokenRow`). pausedGap is a
+  // variable (no definition shape anywhere), used at 12. drawRow is never a
+  // function, but a comment at 40 says "class drawRow"; it is used at 44.
+  // style.css: `.chip {` at 5, and a comment at 12 that names `.chip` and ends
+  // with a comma.
+  {
+    const bodyC = [];
+    for (let i = 1; i <= 50; i++) bodyC.push(`// filler line ${i}`);
+    bodyC[9] = "  var pausedGap = null;";                         // line 10
+    bodyC[11] = "      if (a.paused) { pausedGap = a; }";         // line 12
+    bodyC[21] = "    box.innerHTML = list.map(tokenRow).join(\"\");"; // line 22
+    bodyC[29] = "  function tokenRow(t) {";                      // line 30
+    bodyC[39] = "  // the old class drawRow was removed in the rename";   // line 40
+    bodyC[43] = "    var key = \"drawRow\";";                     // line 44
+    fs.writeFileSync(widget, bodyC.join("\n"));
+    const css = path.join(wdir, "style.css");
+    const cssBody = [];
+    for (let i = 1; i <= 20; i++) cssBody.push(`/* filler ${i} */`);
+    cssBody[4] = ".chip { color: red; }";                             // line 5
+    cssBody[10] = "/* shared base:";                                  // line 11
+    cssBody[11] = "   .chip is reused by the pill,";                  // line 12
+    cssBody[12] = "   and nothing else. */";                          // line 13
+    fs.writeFileSync(css, cssBody.join("\n"));
+    g("add", "src/widget.js", "src/style.css"); g("commit", "-q", "-m", "C");
+    const shaC = g("rev-parse", "--short=10", "HEAD");
+    const cssArg = ["--map", "style.css=src/style.css", "--root", t, "--slack", "3"];
+    const citeCss = (lineText) => { fs.writeFileSync(charter, `# fixture\n\n${lineText}\n`); return [...cssArg, "--charter", charter, "--report"]; };
+    show("ARM 25 a FUNCTION pinned at its CALL site (definition 8 lines off) -> RED (charter L677's `list.map(tokenRow)`)",
+      call(cite(`\`tokenRow\` — widget.js (tokenRow @ ${shaC}, L22)`)), 1, /tokenRow@30 \(8 away\)/);
+    show("ARM 26 control for ARM 25: the same function pinned at its DEFINITION -> GREEN",
+      call(cite(`\`tokenRow\` — widget.js (tokenRow @ ${shaC}, L30)`)), 0, /pinned         : 1   \(verified 1/);
+    show("ARM 27 a QUOTED thing is literal text, so a use site is cited by quoting it -> GREEN at the call",
+      call(cite(`the call — widget.js ("tokenRow" @ ${shaC}, L22)`)), 0, /pinned         : 1   \(verified 1/);
+    show("ARM 28 a name the file never defines (a variable) keeps name matching -> GREEN at its use",
+      call(cite(`\`pausedGap\` — widget.js (pausedGap @ ${shaC}, L12)`)), 0, /pinned         : 1   \(verified 1/);
+    show("ARM 29 a COMMENT is not a definition: `// the old class drawRow` does not make drawRow a class -> its use still credits",
+      call(cite(`the key — widget.js (drawRow @ ${shaC}, L44)`)), 0, /pinned         : 1   \(verified 1/);
+    show("ARM 30 a CSS rule pinned at a comment that names it (rule head 7 lines off) -> RED",
+      call(citeCss(`\`.chip\` — style.css (.chip @ ${shaC}, L12)`)), 1, /\.chip@5 \(7 away\)/);
+    show("ARM 31 control for ARM 30: the same rule pinned at its selector head -> GREEN",
+      call(citeCss(`\`.chip\` — style.css (.chip @ ${shaC}, L5)`)), 0, /pinned         : 1   \(verified 1/);
+  }
+
+  // ── A COMMON WORD CANNOT CREDIT (task-b3961db653fbbf58) ────────────────────
+  // The 17-sample audit's last two wrong credits: L898 `app.js:3143` credited by
+  // `body` (on 559 lines) off a comment "resurrect sheet body", L1210
+  // `app.js:12667` by `code` (on 251 lines) off a parameter. The subject is
+  // right and adjacent; the WORD is common, so it lands near any N by chance.
+  // Working copy D: `sheet` sits on exactly WEAK_MIN lines, one of them line 20
+  // (a comment). drawSheet is DEFINED at 40 and called on WEAK_MIN + 2 lines.
+  {
+    const bodyD = (sheetLines) => {
+      const b = [];
+      for (let i = 1; i <= 60; i++) b.push(`// filler line ${i}`);
+      b[19] = "      // resurrect sheet body";               // line 20
+      for (let k = 1; k < sheetLines; k++) b[44 + k] = `  var s${k} = sheet;`; // lines 46..
+      b[39] = "  function drawSheet(el) {";                  // line 40
+      for (let k = 0; k < WEAK_MIN + 2; k++) b[2 + k] = `  drawSheet(x${k});`; // lines 3..
+      return b.join("\n");
+    };
+    fs.writeFileSync(widget, bodyD(WEAK_MIN));
+    show(`ARM 32 a COMMON word (\`sheet\` on ${WEAK_MIN} lines) lands at the cited line but cannot credit it -> RED, named as weak`,
+      call(cite("the sheet is resurrected in `sheet` at widget.js:20")), 1,
+      new RegExp(`weak refused   : 1[\\s\\S]*weak, refused  : sheet@20 \\(on ${WEAK_MIN} lines\\)[\\s\\S]*FAIL — 1 unresolved`));
+    fs.writeFileSync(widget, bodyD(WEAK_MIN - 1));
+    show(`ARM 33 control for ARM 32: the same line with \`sheet\` on ${WEAK_MIN - 1} lines credits -> GREEN (the cut is WEAK_MIN, shared with the classifier)`,
+      call(cite("the sheet is resurrected in `sheet` at widget.js:20")), 0, /PASS — 1\/1/);
+    show(`ARM 34 a function DEFINED once and called on ${WEAK_MIN + 2} lines is not common: its definition credits -> GREEN (uses are not counted)`,
+      call(cite("`drawSheet` at widget.js:40 draws it")), 0, /PASS — 1\/1/);
+  }
+
+  const ARMS = 34;
   fs.rmSync(t, { recursive: true, force: true });
-  process.stdout.write(`\nSELFTEST ${fails === 0 ? "PASS" : "FAIL"} — ${7 - fails}/7 arms\n`);
+  process.stdout.write(`\nSELFTEST ${fails === 0 ? "PASS" : "FAIL"} — ${ARMS - fails}/${ARMS} arms\n`);
   return fails === 0 ? 0 : 1;
 }
 
+// exitCode, never process.exit(), once output may be pending: stdout to a PIPE
+// is asynchronous, and process.exit() discards whatever has not drained — a
+// piped --json over app.js stopped at exactly 65536 bytes. Setting exitCode and
+// falling off the end lets the event loop flush stdout first (ARM 20).
 const o = parseArgs(process.argv.slice(2));
-if (o.selftest) process.exit(selftest());
-if (!o.charter) o.charter = ".claude/workflows/bp-cloud-console-hardening-charter.md";
-if (o.maps.length === 0) o.maps = ["app.js=cloud/priv/static/app.js"];
-process.exit(run(o));
+if (o.selftest) {
+  process.exitCode = await selftest();
+} else {
+  if (!o.charter) o.charter = ".claude/workflows/bp-cloud-console-hardening-charter.md";
+  if (o.maps.length === 0) o.maps = ["app.js=cloud/priv/static/app.js"];
+  process.exitCode = run(o);
+}

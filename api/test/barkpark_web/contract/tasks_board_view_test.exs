@@ -320,15 +320,21 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
                "taskWire parse did not see #{expected}; got #{inspect(wire_tags)}"
       end
 
-      # `design_doc` is tolerated, not required: the server emits it
-      # (task-cf0395706361aa2e) before the Go consumer decodes it, and the
-      # consumer adopting it must not red the producer.
-      assert Enum.sort(digest_tags -- ["design_doc"]) ==
-               ~w(criteria_marks has_dependencies has_description has_paper),
+      # Go decodes `design_doc` (task-190780ed9852f2de), so it is REQUIRED here.
+      assert Enum.sort(digest_tags) ==
+               ~w(criteria_marks design_doc has_dependencies has_description has_paper),
              "contentDigest parse = #{inspect(digest_tags)}"
 
+      # `criteria_marks` and `design_doc` are omitted when the row has none, so
+      # the row carries both — the key-presence check below measures every tag.
       phase = uniq("board-seam")
-      mk_task!(uniq("board-seam-row"), scope, prose_content(phase))
+
+      mk_task!(
+        uniq("board-seam-row"),
+        scope,
+        Map.put(prose_content(phase), "design_doc", "board-seam-paper")
+      )
+
       assert %{"docs" => [card]} = docs_at(conn, phase, "&view=board")
 
       required = wire_tags -- @deliberately_absent
@@ -355,7 +361,13 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
       wire_tags = go_json_tags(source, "taskWire") -- @deliberately_absent
 
       phase = uniq("board-seam-control")
-      mk_task!(uniq("board-seam-control-row"), scope, prose_content(phase))
+
+      mk_task!(
+        uniq("board-seam-control-row"),
+        scope,
+        Map.put(prose_content(phase), "design_doc", "board-seam-paper")
+      )
+
       assert %{"docs" => [card]} = docs_at(conn, phase, "&view=board")
 
       assert missing_keys(card, wire_tags) == []

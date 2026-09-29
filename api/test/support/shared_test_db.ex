@@ -5,17 +5,21 @@ defmodule Barkpark.SharedTestDb do
 
   ## The disease
 
-  `api/test` runs against ONE Postgres database — `barkpark_test<partition>` —
-  and the partition suffix comes from `MIX_TEST_PARTITION` (`config/test.exs`).
-  With the variable unset, every concurrently running agent shares
-  `barkpark_test`. Four builders in one lead-api session (r21n) each spent part
+  `api/test` runs against ONE Postgres database — `barkpark_test<partition>`.
+  Until task-a0b11b3ae0cf45f0 the suffix came only from `MIX_TEST_PARTITION`, so
+  with the variable unset every concurrently running agent shared
+  `barkpark_test`. Since then an unset variable means a PER-CHECKOUT database
+  (`config/test.exs`, `:test_db_partition`); only CI and an explicit
+  `MIX_TEST_PARTITION=` (empty) still land on the unpartitioned one. The probes
+  below stay: a checkout can still be shared on purpose, and a database can
+  still drift from its checkout (a `git switch` inside one worktree). Four builders in one lead-api session (r21n) each spent part
   of their budget proving, by hand, that a specific and plausible red belonged to
   another agent's rows rather than to their own diff. One whole-directory run
   read `12902 tests, 18 failures`; all 18 were shared-database pollution, and the
   same five files on a fresh partition were `112 tests, 0 failures`.
 
-  `MIX_TEST_PARTITION` is the remedy and it WORKS. The residue is that the
-  unpartitioned path is still reachable, and when taken it produces a CONFIDENT,
+  `MIX_TEST_PARTITION` is the remedy and it WORKS. The residue was that the
+  unpartitioned path was the DEFAULT, and it is still reachable, and when taken it produces a CONFIDENT,
   SPECIFIC, PLAUSIBLE red instead of a visibly absent one. A builder who has not
   been told reads 18 named failures and investigates them.
 
@@ -112,6 +116,7 @@ defmodule Barkpark.SharedTestDb do
   """
 
   @token "BARKPARK-SHARED-TEST-DB"
+  @which_token "BARKPARK-TEST-DB"
 
   @doc "The literal string a builder greps a capture for."
   def token, do: @token
@@ -149,6 +154,7 @@ defmodule Barkpark.SharedTestDb do
     %{
       database: probe(fn -> scalar(repo, "SELECT current_database()") end),
       partition: partition(),
+      partition_source: partition_source(),
       residue: probe(fn -> residue(repo, tables) end),
       tables_inspected: tables,
       applied_versions: probe(fn -> applied_versions(repo) end),
@@ -251,9 +257,57 @@ defmodule Barkpark.SharedTestDb do
   end
 
   defp partition_line(nil),
-    do: "(none — MIX_TEST_PARTITION is unset, so this is the SHARED database)"
+    do: "(none — this is the unpartitioned, SHARED barkpark_test database)"
 
   defp partition_line(p), do: inspect(p)
+
+  @doc """
+  One line naming the database a run used and WHY that one — printed at the top
+  of every run so a capture always says where its reds happened.
+  """
+  def which_line(obs) do
+    "#{@which_token}: database #{inspect(obs[:database])}, " <>
+      "partition #{partition_line(obs[:partition])}, " <>
+      "chosen by #{source_text(obs[:partition_source])}"
+  end
+
+  defp source_text(:explicit), do: "MIX_TEST_PARTITION (set explicitly)"
+  defp source_text(:ci), do: "CI (CI is set and MIX_TEST_PARTITION is not)"
+
+  defp source_text(:worktree_default),
+    do: "the per-checkout default (MIX_TEST_PARTITION unset; derived from the checkout path)"
+
+  defp source_text(other), do: "unknown source #{inspect(other)}"
+
+  @doc """
+  The migration-drift findings of an observation as ONE sentence that names
+  every offending version AND the database/partition it was measured in, or
+  `nil` when there is no drift. A drift red must read "migration X from another
+  branch in database Y", never a bare list of integers.
+  """
+  def drift_report(obs) do
+    {:ok, findings} = assess(obs)
+
+    case for({:migration_drift, _, _} = f <- findings, do: f) do
+      [] ->
+        nil
+
+      drift ->
+        "database #{inspect(obs[:database])} (partition #{partition_line(obs[:partition])}, " <>
+          "chosen by #{source_text(obs[:partition_source])}): " <>
+          Enum.map_join(drift, "; ", &drift_sentence/1)
+    end
+  end
+
+  defp drift_sentence({:migration_drift, :db_ahead_of_checkout, versions}),
+    do:
+      "has applied migration(s) #{Enum.join(versions, ", ")} that this checkout " <>
+        "(priv/repo/migrations) does not have — another branch migrated this database"
+
+  defp drift_sentence({:migration_drift, :db_behind_checkout, versions}),
+    do:
+      "is missing migration(s) #{Enum.join(versions, ", ")} that this checkout has — " <>
+        "run `mix ecto.migrate`, or another suite is mid-way through an up/down test here"
 
   defp explain({:residue, table, count}),
     do:
@@ -303,6 +357,8 @@ defmodule Barkpark.SharedTestDb do
   def report!(repo, opts \\ []) do
     obs = observe(repo, opts)
 
+    IO.puts(:stderr, which_line(obs))
+
     case banner(obs) do
       nil -> :ok
       text -> IO.puts(:stderr, text)
@@ -326,11 +382,27 @@ defmodule Barkpark.SharedTestDb do
     _, _ -> :unavailable
   end
 
+  # The suffix config/test.exs actually chose (`:test_db_partition`), NOT the
+  # raw env var: with the per-checkout default an unset MIX_TEST_PARTITION is a
+  # partitioned run. Falls back to the env var for a config that predates it.
   defp partition do
-    case System.get_env("MIX_TEST_PARTITION") do
+    suffix =
+      case Application.get_env(:barkpark, :test_db_partition) do
+        %{suffix: s} -> s
+        _ -> System.get_env("MIX_TEST_PARTITION")
+      end
+
+    case suffix do
       nil -> nil
       "" -> nil
       p -> p
+    end
+  end
+
+  defp partition_source do
+    case Application.get_env(:barkpark, :test_db_partition) do
+      %{source: source} -> source
+      _ -> :unknown
     end
   end
 

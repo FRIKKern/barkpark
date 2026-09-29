@@ -3533,13 +3533,13 @@ GUARDED_COLUMNS="title icon visibility owner_scoped fields cors_origins desk_gro
 # ── ONE EDIT SITE, NOT TWO (PDS-D129) ────────────────────────────────────────
 #
 # The roster used to live here as a typed-in `NOT IN ('tag','metric')` AND again
-# as prose in scripts/pds-schema-row-census.md, and a third time in step 6's
+# as prose in docs/ledgers/pds-schema-row-census.md, and a third time in step 6's
 # scope banner. Three copies of a hand-maintained list is the drift shape the
 # census file was written to warn about, reproduced by the pair that wrote it.
 #
 # Now the census declares it once, machine-readably, and this harness DERIVES:
 #
-#   scripts/pds-schema-row-census.md   `PDS_SENTINEL_EXCLUSION = tag metric`
+#   docs/ledgers/pds-schema-row-census.md   `PDS_SENTINEL_EXCLUSION = tag metric`
 #
 # The literal below is a FALLBACK for the one case where that file is not
 # readable, never a second authority. When both are readable and they disagree,
@@ -3548,7 +3548,7 @@ GUARDED_COLUMNS="title icon visibility owner_scoped fields cors_origins desk_gro
 # census is unreadable the run says so and proceeds on the fallback, UNCHECKED.
 # Same shape as step 2's @e3_dataset_keyed derivation.
 SENTINEL_EXCLUSION_FALLBACK="tag metric"
-SENTINEL_EXCLUSION_SOURCE_REL="scripts/pds-schema-row-census.md"
+SENTINEL_EXCLUSION_SOURCE_REL="docs/ledgers/pds-schema-row-census.md"
 # The resolved roster, space separated. Seeded with the fallback so every reader
 # has a defined value; sentinel_roster_resolve below replaces it from the census
 # (or leaves it, loudly) before step 6 touches a row.
@@ -4584,7 +4584,7 @@ cmd_selftest_citations() {
 # ═════════════════════════════════════════════════════════════════════════════
 #
 # What this measures, in one sentence: that the roster this harness scopes its
-# rung-6 sentinel with is the roster scripts/pds-schema-row-census.md declares,
+# rung-6 sentinel with is the roster docs/ledgers/pds-schema-row-census.md declares,
 # and that a disagreement between them is LOUD rather than silent.
 #
 # The old failure was not a wrong list. It was TWO lists — a `NOT IN` literal

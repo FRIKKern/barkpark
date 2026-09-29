@@ -34,6 +34,14 @@ defmodule Barkpark.Plugins.Bulldocs do
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/bulldocs/plugin.json"
 
+  @doc """
+  The paper-masters implementation (task-3b6e562e916c8ce4). Host Studio code
+  reaches masters ONLY through this function, resolved via the plugin registry
+  (`BarkparkWeb.Studio.StudioLive.PaperMastersSeam`), so with Bulldocs off the
+  masters affordances are absent instead of reaching into a disabled plugin.
+  """
+  def paper_masters, do: Barkpark.Plugins.Bulldocs.Masters
+
   # Papers is core content — surfaced in the MAIN tier of the Desk Structure.
   @impl Barkpark.Plugin
   def structure_placement, do: :main
@@ -78,9 +86,36 @@ defmodule Barkpark.Plugins.Bulldocs do
         &reject_hollow_published_save/1,
         &reject_unreadable_paper_body/1
       ],
-      before_publish: [&reject_hollow_paper_publish/1]
+      before_publish: [&reject_hollow_paper_publish/1],
+      before_delete: [&refuse_master_with_live_instances/1]
     }
   end
+
+  # Linked masters (task-59f078a2fd248698): deleting a paper master that live
+  # linked instances still resolve is refused — the lifecycle wall maps the halt
+  # to 409 `halted`, the message listing the instance papers' ids so the author
+  # can detach them first. Every document delete (`Content.delete_document/4`:
+  # mutate `delete`, Studio, the CLI) fires :before_delete, so this is the one
+  # door. The ids come from `Masters.live_instances/1`, which searches only the
+  # master's own workspace, project and dataset — a paper in another tenant can
+  # never resolve this master, so its id is never listed.
+  defp refuse_master_with_live_instances(%{doc: %Barkpark.Content.Document{} = doc}) do
+    if doc.type == Barkpark.Plugins.Bulldocs.Masters.type_name() do
+      case Barkpark.Plugins.Bulldocs.Masters.live_instances(doc) do
+        [] ->
+          :ok
+
+        ids ->
+          {:halt,
+           "paper master is used by #{length(ids)} linked instance(s): " <>
+             Enum.join(ids, ", ") <> " — detach or remove them before deleting the master"}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp refuse_master_with_live_instances(_payload), do: :ok
 
   # Doctrine gate (pdd-t3, paper portabledoc-doctrine): a paper that carries
   # template-locked blocks must keep the template shape — the locked title
@@ -174,7 +209,7 @@ defmodule Barkpark.Plugins.Bulldocs do
   end
 
   @impl Barkpark.Plugin
-  # Reachability: the only path read is `schemas_dir()` joined with one of three
+  # Reachability: the only path read is `schemas_dir()` joined with one of four
   # compile-time literal filenames — no runtime input reaches `File.read!/1`.
   # sobelow_skip ["Traversal.FileModule"]
   def register_schemas(_opts) do
@@ -186,8 +221,11 @@ defmodule Barkpark.Plugins.Bulldocs do
     # transcript ref, so it must never be anonymously readable. Sessions are
     # deliberately NOT in `AuthoringWall`'s `@walled_types`: they are
     # machine-generated lifecycle records, and being private already removes
-    # the exposure the wall's curation exists to gate).
-    for file <- ["paper.json", "form_response.json", "session.json"] do
+    # the exposure the wall's curation exists to gate) +
+    # paper_master (paper_master.json — PRIVATE: a saved, reusable node an author
+    # inserts as a detached copy; a library record, never a reader artifact.
+    # `Barkpark.Plugins.Bulldocs.Masters`, docs/decisions/0010-paper-masters.md).
+    for file <- ["paper.json", "form_response.json", "session.json", "paper_master.json"] do
       raw =
         schemas_dir()
         |> Path.join(file)
@@ -258,6 +296,8 @@ defmodule Barkpark.Plugins.Bulldocs do
       {:get, "/d/:dataset/papers/:slug/email", BarkparkWeb.BulldocsEmailController, :show,
        auth: :public_root},
       {:post, "/bulldocs/papers", BarkparkWeb.BulldocsIngestController, :ingest, auth: :ingest},
+      {:post, "/bulldocs/papers/:slug/create", BarkparkWeb.BulldocsIngestController, :create,
+       auth: :ingest},
       # Validate-all dry-run (BPML masterplan W0): same body shapes as ingest,
       # every violation (BPML parse, wall gates, structure) in one reply,
       # nothing persisted. Registered BEFORE the :slug routes conceptually but
@@ -325,8 +365,10 @@ defmodule Barkpark.Plugins.Bulldocs do
   `/v1/plugins/bulldocs/…` prefix). Every ingest route maps to `auth_tier: "ingest"`,
   the route's highway bucket.
 
-  Six verbs over five routes:
+  Six paper verbs over six routes:
 
+    * `create` — `POST /v1/plugins/bulldocs/papers/:slug/create`; native
+      blocks only, refusing an occupied published slug or draft twin.
     * `publish` — `POST /v1/plugins/bulldocs/papers` (the ingest endpoint;
       `blocks` or `body_html` payload from a file/stdin). WRITES, MINIMAL receipt.
     * `patch` — `POST /v1/plugins/bulldocs/papers/:slug/ops` (the batch ops
@@ -367,6 +409,34 @@ defmodule Barkpark.Plugins.Bulldocs do
   @impl Barkpark.Plugin
   def cli_commands do
     [
+      %{
+        id: "bulldocs.create",
+        noun: "bulldocs",
+        verb: "create",
+        summary:
+          "Create a paper from native blocks without replacing an existing paper or draft. " <>
+            "Returns 201 on creation; an occupied slug refuses with 409 paper_exists. " <>
+            "Use bulldocs patch --if-rev to edit an existing paper.",
+        http: %{method: "POST", path_template: "/v1/plugins/bulldocs/papers/:slug/create"},
+        auth_tier: "ingest",
+        args: [
+          %{name: "slug", required: true, type: "slug", summary: "New paper slug (not drafts.*)."}
+        ],
+        flags: [
+          %{
+            name: "file",
+            type: "file",
+            summary:
+              "Native blocks payload from a file or - for stdin; includes title, description and weighted tags."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
       %{
         id: "bulldocs.publish",
         noun: "bulldocs",

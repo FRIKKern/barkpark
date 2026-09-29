@@ -16,7 +16,7 @@ const here = import.meta.dirname
 
 // DERIVE THE PACKAGE PROJECTS; DO NOT COMPOSE A WRAPPER AS ONE PROJECT.
 //
-// `packages/*/vitest.config.ts` is USUALLY a leaf project. It is not always.
+// `packages/*/vitest.config.ts` (and `test-harnesses/*/…`) is USUALLY a leaf project. It is not always.
 // A package may use that file as a WRAPPER that declares its own
 // `test.projects` split — several configs, each with its own `environment`
 // and `include` — because one environment cannot serve all of its tests.
@@ -41,7 +41,11 @@ const here = import.meta.dirname
 // names a package; a package that adopts (or drops) a split is handled on its
 // next run, and nothing here needs editing.
 const packageProjects: string[] = []
-for (const rel of globSync('packages/*/vitest.config.ts', { cwd: here }).sort()) {
+// test-harnesses/* holds the private, never-published parity packages (moved out
+// of packages/ by task-ef46f3da4aec1918); they are projects exactly like packages/*.
+for (const rel of globSync(['packages/*/vitest.config.ts', 'test-harnesses/*/vitest.config.ts'], {
+  cwd: here,
+}).sort()) {
   const abs = resolve(here, rel)
   const mod = await import(pathToFileURL(abs).href)
   const nested = mod?.default?.test?.projects

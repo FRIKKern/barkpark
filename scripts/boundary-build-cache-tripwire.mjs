@@ -36,7 +36,11 @@
 // Usage: node scripts/boundary-build-cache-tripwire.mjs [indexPath]
 //        node scripts/boundary-build-cache-tripwire.mjs --selftest
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Run 33438876591 reported 657 elixir files with dependents and 754 with
 // dependencies. The floor is far below both: it is a vacuity guard, not a
@@ -152,12 +156,42 @@ function selftest() {
     ok(!!r2.fault, "an index with no elixir graph must fault");
   });
 
+  // THE VERDICT WIRING (task-92a213f01ca30817). Every case above grades
+  // auditGraphPaths() IN PROCESS; none executes realMain()'s line that turns a
+  // non-empty `missing` into the process exit code, so `process.exit(1)` →
+  // `process.exit(0)` kept this selftest green while CI certified a ghost.
+  // Same idiom as PR #13405 / #20180: RE-EXEC THE WHOLE PROGRAM on a fixture
+  // root and assert the PROCESS exit code. existsSync() resolves against cwd,
+  // so the child runs with cwd = the fixture root; no override is added.
+  t("E2E: the whole program exits 1 on a ghost, 0 once it exists", () => {
+    const root = mkdtempSync(join(tmpdir(), "bbct-e2e-"));
+    try {
+      const idx = bigGraph(400, { "api/lib/ghost.ex": [] });
+      mkdirSync(join(root, "api/lib"), { recursive: true });
+      for (let i = 0; i < 400; i++) writeFileSync(join(root, "api/lib/m" + i + ".ex"), "");
+      writeFileSync(join(root, "index.json"), JSON.stringify(idx));
+      const exec = () =>
+        spawnSync(process.execPath, [fileURLToPath(import.meta.url), "index.json"], { cwd: root, encoding: "utf8" });
+      const planted = exec();
+      ok(planted.status === 1 && /ghost: api\/lib\/ghost\.ex/.test(planted.stderr),
+        "planted ghost must exit 1 naming it, got " + planted.status + "\n" + planted.stdout + planted.stderr);
+      writeFileSync(join(root, "api/lib/ghost.ex"), "");
+      const removed = exec();
+      ok(removed.status === 0, "ghost removed must exit 0, got " + removed.status + "\n" + removed.stdout + removed.stderr);
+      writeFileSync(join(root, "index.json"), JSON.stringify({ elixir: { forward: {} } }));
+      const empty = exec();
+      ok(empty.status === 2, "an empty graph must exit 2 (never green), got " + empty.status);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   if (fails.length) {
     console.error("SELFTEST FAILED (" + fails.length + "):");
     for (const f of fails) console.error("  " + f);
     process.exit(2);
   }
-  console.log("boundary-build-cache-tripwire selftest: 5 cases passed");
+  console.log("boundary-build-cache-tripwire selftest: 6 cases passed");
 }
 
 const argv = process.argv.slice(2);

@@ -55,9 +55,12 @@ type Model struct {
 	// ctxid is the full context identity the launch screen paints (context.go):
 	// which LOCAL host and repo root this process runs in, and which server,
 	// workspace, project and dataset the wire client is actually pointed at.
-	// Resolved ONCE in newModel — the connection is asked what it dials, and the
-	// local probes run one exec between them — so the paint stays pure and the
-	// answer cannot drift mid-session. The zero value renders NO band at all
+	// Resolved in newModel, then RE-RESOLVED after every stream reconnect and
+	// every session open (create or resume) — the two moments the connection
+	// can have moved under a running `bp chat`. The re-read runs as a command
+	// (refreshContextCmd), never inside the paint, so View stays pure and a slow
+	// git probe never blocks the update loop. Between those moments the value
+	// is held, not re-probed per frame. The zero value renders NO band at all
 	// (a bare Model literal in a unit test has resolved nothing); every path
 	// that reaches a terminal goes through newModel.
 	ctxid ContextIdentity
@@ -274,6 +277,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (charter D5: resume by turn boundary). The stream restarts cleanly if
 		// one was already running for another session.
 		m.stream.start(m.st.SessionID, m.st.LastSeq)
+		// A resume (or a create) re-reads the context band: the band painted
+		// at launch describes the connection as it was THEN, and the session
+		// just opened is served by the connection as it is NOW.
+		return m, m.refreshContextCmd()
+	case streamReconnectedMsg:
+		// The transport dropped and is re-dialling. Whatever the band showed
+		// before the drop is pre-drop truth; re-read it off the live
+		// connection and the local probes rather than keep the old values.
+		return m, m.refreshContextCmd()
+	case contextResolvedMsg:
+		m.ctxid = msg.id
 		return m, nil
 	case streamFrameMsg:
 		return m.apply(FrameEvent{Name: msg.name, Data: msg.data})
@@ -760,6 +774,27 @@ type streamFrameMsg struct {
 
 // streamErrMsg is the stream goroutine's terminal give-up.
 type streamErrMsg struct{ err error }
+
+// streamReconnectedMsg is the stream goroutine reporting a reconnect attempt
+// after a drop (apiclient's onReconnect). It carries nothing: its only job is
+// to trigger a context re-read.
+type streamReconnectedMsg struct{}
+
+// contextResolvedMsg carries a freshly resolved context identity back into
+// the update loop, where it REPLACES the band's held values wholesale.
+type contextResolvedMsg struct{ id ContextIdentity }
+
+// refreshContextCmd re-resolves the context identity off the update loop:
+// the live transport is asked what it dials NOW and the local probes run
+// again (hostname, git repo root). The same resolver newModel uses — one
+// resolution path, so a re-read can never disagree with the launch read about
+// how a field is reconciled.
+func (m Model) refreshContextCmd() tea.Cmd {
+	cfg, tr, probe := m.cfg, m.tr, localProbe
+	return func() tea.Msg {
+		return contextResolvedMsg{id: ResolveContextIdentity(cfg, connectionOf(tr), probe)}
+	}
+}
 
 // fleetFrameMsg is one herd fleet frame (snapshot/state/heartbeat) pushed from
 // the life-of-process fleet goroutine (charter D54h).

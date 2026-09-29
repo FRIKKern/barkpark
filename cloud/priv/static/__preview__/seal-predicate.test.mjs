@@ -25,7 +25,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -141,7 +141,7 @@ const NO_OBJECT_DATABASE = 3;
 // Returns the refusal message, or null when the root is readable. A pure function
 // of a directory, so the controls below can drive it at BOTH polarities instead of
 // asserting that the file "would have" refused.
-export function objectDatabaseRefusal(root) {
+export function objectDatabaseRefusal(root, originMain = 'origin/main') {
   const how = 'run it from a real checkout or worktree: `git worktree add <dir> <rev> && cd <dir> && node --test cloud/priv/static/__preview__/seal-predicate.test.mjs`';
   const top = spawnSync('git', ['-C', root, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
   if (top.status !== 0 || !top.stdout.trim())
@@ -177,7 +177,11 @@ export function objectDatabaseRefusal(root) {
   // does: a tree with no `origin/main` ref (a fresh clone of a fork, an offline
   // box) must still be able to run this suite. Only a SUCCESSFUL count greater
   // than zero refuses.
-  const behind = spawnSync('git', ['-C', root, 'rev-list', '--count', 'HEAD..origin/main'], { encoding: 'utf8' });
+  //
+  // `originMain` is the rev to compare against: the live ref by default, and the sha this
+  // suite RESOLVED ONCE at load when it has one (see ORIGIN_MAIN_AT_LOAD below), so the
+  // precondition and every spawn after it read the same commit.
+  const behind = spawnSync('git', ['-C', root, 'rev-list', '--count', `HEAD..${originMain}`], { encoding: 'utf8' });
   const behindN = behind.status === 0 && /^[0-9]+$/.test(behind.stdout.trim()) ? Number(behind.stdout.trim()) : 0;
   if (behindN > 0)
     return `seal-predicate.test.mjs: ${root} is ${behindN} commit(s) BEHIND origin/main (\`git rev-list --count HEAD..origin/main\` = ${behindN}); seal-predicate.mjs refuses this tree with Infra \`--repo … is ${behindN} commit(s) BEHIND origin/main\`, so every live-path test here would measure THAT refusal instead of the subject and report it as an assertion failure (measured 2026-09-22: 1 behind -> 39 reds, at origin/main -> 5, roster intact at 131 both ways); bring the tree to origin/main (\`git fetch origin main && git merge --ff-only origin/main\`) and re-run; ${how}`;
@@ -211,7 +215,37 @@ export function objectDatabaseRefusal(root) {
 // exit CODE is the payload here, not the stdout — `NO_OBJECT_DATABASE` is a
 // contract the suite's own control asserts by spawning this file (search this
 // file for `the suite must refuse, not run`).
-const OBJECT_DB_REFUSAL = objectDatabaseRefusal(REPO);
+// ONE WORLD PER RUN (task-76866f421d2b91c9). The block above refuses a tree that STARTS
+// behind. It could not stop a tree FALLING behind: this suite runs 100-600 s, another
+// lane's merge moves `refs/remotes/origin/main` inside that window, and the predicate
+// re-read the live ref on every spawn, so each later live-path arm refused with
+// `Infra: --repo … is 1 commit(s) BEHIND origin/main` and reported it as an ASSERTION
+// FAILURE. MEASURED 2026-09-25 in a private clone (its ref moved 25 s in, never the real
+// origin): behind 0 -> 1, # tests 152, # fail 46, the behind-refusal quoted 12 times.
+// The same clone with the ref held still, and the same move with this block in place,
+// are recorded in the PR that added it.
+//
+// SO origin/main IS RESOLVED ONCE, HERE, AND HELD. The sha is used for the behind
+// precondition just below and exported as SEAL_ORIGIN_MAIN_PIN (scoped by
+// SEAL_ORIGIN_MAIN_PIN_REPO to THIS root) to every predicate spawn, each of which reads
+// the pin instead of the live ref — see ORIGIN_MAIN in seal-predicate.mjs. A move after
+// this line changes nothing the run measures, which is what makes it reproducible.
+// Chosen over "classify a mid-run move as a refusal" because that would still END the
+// run on someone else's merge; holding the sha lets it finish, against the world it began in.
+//
+// Unresolvable (no origin/main at all — actions/checkout@v4's depth-1 pull_request shape)
+// leaves both variables UNSET and the predicate on its own live read, exactly as before:
+// there is no ref there to move.
+const ORIGIN_MAIN_AT_LOAD = (() => {
+  const r = spawnSync('git', ['-C', REPO, 'rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main^{commit}'], { encoding: 'utf8' });
+  const sha = (r.stdout || '').trim();
+  return r.status === 0 && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+})();
+const OBJECT_DB_REFUSAL = objectDatabaseRefusal(REPO, ORIGIN_MAIN_AT_LOAD || 'origin/main');
+if (!OBJECT_DB_REFUSAL && ORIGIN_MAIN_AT_LOAD) {
+  process.env.SEAL_ORIGIN_MAIN_PIN = ORIGIN_MAIN_AT_LOAD;
+  process.env.SEAL_ORIGIN_MAIN_PIN_REPO = REPO;
+}
 if (OBJECT_DB_REFUSAL) {
   writeSync(2, `${OBJECT_DB_REFUSAL}\n`);
   process.exit(NO_OBJECT_DATABASE); // pipe-exit-ok: aborts before any test registers, so no stdout payload exists to truncate; writeSync has already drained the refusal, and the exit CODE is the contract a control below asserts
@@ -3879,6 +3913,83 @@ test('wave 69: 0 behind PROCEEDS, and an UNREADABLE comparison is not a stale tr
   assert.doesNotMatch(fixtured.out, /REPO-BEHIND-ORIGIN-MAIN/, 'a ledger fixture reads no tree date');
 });
 
+// ONE WORLD PER RUN — the pin, driven at both polarities (task-76866f421d2b91c9).
+//
+// The mid-run move, compressed into one spawn: a synthetic repo starts AT origin/main,
+// the caller records that sha, then origin/main moves one commit ahead — another lane's
+// merge. Unpinned, the predicate re-reads the live ref and refuses (the 46-red shape).
+// Pinned to the sha recorded before the move, it measures the world it started in.
+test('ONE WORLD: an origin/main PINNED before a mid-run move is the one read; unpinned, the move refuses', () => {
+  const root = synthRepoBehind(0);
+  const g = (...a) => {
+    const r = spawnSync('git', ['-C', root, ...a], { encoding: 'utf8' });
+    assert.equal(r.status, 0, `git ${a.join(' ')} failed, so this case measured nothing: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  const atStart = g('rev-parse', 'refs/remotes/origin/main');
+  const merged = g('commit-tree', 'HEAD^{tree}', '-p', atStart, '-m', 'another lane merged mid-run');
+  g('update-ref', 'refs/remotes/origin/main', merged);
+  assert.equal(g('rev-list', '--count', 'HEAD..origin/main'), '1', 'the precondition: the live ref really moved one ahead');
+
+  const base = { ...process.env };
+  delete base.SEAL_ORIGIN_MAIN_PIN;
+  delete base.SEAL_ORIGIN_MAIN_PIN_REPO;
+  const spawnWith = (extra, path = PREDICATE) => {
+    const r = spawnSync('node', [path, '--ladder-only', '--repo', root],
+      { encoding: 'utf8', timeout: 120000, env: { ...base, ...extra } });
+    assert.notEqual(r.status, null, `the predicate produced no exit status (signal ${r.signal})`);
+    return { status: r.status, out: `${r.stdout}${r.stderr}` };
+  };
+  const pinned = { SEAL_ORIGIN_MAIN_PIN: atStart, SEAL_ORIGIN_MAIN_PIN_REPO: root };
+
+  // RED WITHOUT THE PIN — the live read sees the move and refuses. This is the arm-by-arm
+  // red the suite used to print N times over one merge.
+  const live = spawnWith({});
+  assert.equal(live.status, INFRA);
+  assert.match(token(live.out), /code=REPO-BEHIND-ORIGIN-MAIN/);
+
+  // GREEN WITH IT — same tree, same move, measured against the sha the caller held.
+  const held = spawnWith(pinned);
+  assert.notEqual(held.status, INFRA, `a pinned run is not refused for a move after its start: ${token(held.out)}`);
+  assert.doesNotMatch(held.out, /REPO-BEHIND-ORIGIN-MAIN/);
+  assert.match(token(held.out), /LADDER-ONLY b-rungs=/, 'and it reaches the reading');
+
+  // SCOPED — a pin for ANOTHER repository binds nothing here, so the live move refuses again.
+  const elsewhere = spawnWith({ ...pinned, SEAL_ORIGIN_MAIN_PIN_REPO: tmp('seal-pred-pin-elsewhere-') });
+  assert.equal(elsewhere.status, INFRA);
+  assert.match(token(elsewhere.out), /code=REPO-BEHIND-ORIGIN-MAIN/);
+
+  // A BAD PIN IS REFUSED BY NAME, never silently replaced by the live ref.
+  for (const [why, env] of [
+    ['half-set', { SEAL_ORIGIN_MAIN_PIN: atStart }],
+    ['not a sha', { ...pinned, SEAL_ORIGIN_MAIN_PIN: 'origin/main' }],
+    ['absent from the store', { ...pinned, SEAL_ORIGIN_MAIN_PIN: 'f'.repeat(40) }],
+  ]) {
+    const bad = spawnWith(env);
+    assert.equal(bad.status, INFRA, `${why}: an unreadable pin is an infra fault`);
+    assert.match(token(bad.out), /code=ORIGIN-MAIN-PIN-UNREADABLE/, `${why}: named by its own code`);
+  }
+
+  // MUTATION CONTROL — ignore the pin and the pinned run refuses on the move again, so the
+  // green above is the pin's doing and not the fixture's.
+  const src = readFileSync(PREDICATE, 'utf8');
+  const blind = replaceUnique(src, "const ORIGIN_MAIN = ORIGIN_MAIN_PIN || 'origin/main';", "const ORIGIN_MAIN = 'origin/main';");
+  const blindPath = join(tmp('seal-pred-pin-blind-'), 'blind.mjs');
+  writeFileSync(blindPath, blind);
+  const unheld = spawnWith(pinned, blindPath);
+  assert.equal(unheld.status, INFRA, 'with the pin ignored, the move refuses the pinned run too');
+  assert.match(token(unheld.out), /code=REPO-BEHIND-ORIGIN-MAIN/);
+
+  // AND THIS SUITE EXPORTED ITS OWN PIN — resolved once at load, scoped to REPO — whenever
+  // origin/main resolved then. Without that every other arm is back on the live ref.
+  if (ORIGIN_MAIN_AT_LOAD) {
+    assert.equal(process.env.SEAL_ORIGIN_MAIN_PIN, ORIGIN_MAIN_AT_LOAD);
+    assert.equal(process.env.SEAL_ORIGIN_MAIN_PIN_REPO, REPO);
+  } else {
+    assert.equal(process.env.SEAL_ORIGIN_MAIN_PIN, undefined, 'no ref at load, no pin: the depth-1 runner keeps its live read');
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // WAVE 36 — THE FORWARDED BUCKET WAS STRUCTURALLY UNREACHABLE
 //
@@ -4295,6 +4406,7 @@ test("w37: THE RUNNER'S SHAPE — the ambient `node` IS the declaration, and not
     CONSOLE_HARNESS_FNM_DIR: "/nonexistent-fnm",
     CONSOLE_HARNESS_VOLTA_HOME: "/nonexistent-volta",
     CONSOLE_HARNESS_ASDF_DIR: "/nonexistent-asdf",
+    CONSOLE_HARNESS_TOOL_CACHE: "/nonexistent-tool-cache",
   };
   delete env.NVM_DIR; delete env.FNM_DIR; delete env.VOLTA_HOME; delete env.ASDF_DATA_DIR;
   const { status, out } = ladderWithPlantedGuard(planted.rel, env);
@@ -4326,4 +4438,131 @@ test("w37: the live ladder states the runtime it resolved for every guard it spa
     "no registered guard may be refused for a runtime reason on a host that has Node 20:\n" + out);
   assert.equal(launderedLines(out).length, 0,
     "and no registered guard reads as still-measurable once it runs on its declared runtime:\n" + out);
+});
+
+// ── task-88edd0348e6f703d · THE RUNNER TOOL CACHE IS A CANDIDATE ROOT ────────
+//
+// actions/setup-node installs into `$RUNNER_TOOL_CACHE/node/<version>/<arch>/bin/node`,
+// and a runner image may pre-cache majors there. Neither resolver searched it. This
+// arm puts a binary reporting a major nothing else on this host has (77) ONLY under a
+// fake tool cache laid out that way, with every other root pointed at nothing. The
+// stub answers `--version` itself and hands every other invocation to this process's
+// node, so the guard really runs. The same planted guard is then read again with the
+// tool-cache root pointed at nothing too: that control must refuse it, or the green
+// half was reached through some other door and measured nothing about this root.
+test("w88: a Node of the declared major found ONLY under RUNNER_TOOL_CACHE resolves; without that root it is refused", () => {
+  const cache = tmp("seal-pred-toolcache-");
+  const stub = join(cache, "node", "77.1.0", "x64", "bin", "node");
+  mkdirSync(dirname(stub), { recursive: true });
+  writeFileSync(stub, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo v77.1.0; exit 0; fi\nexec " +
+    JSON.stringify(process.execPath) + " \"$@\"\n");
+  chmodSync(stub, 0o755);
+  const planted = plantGuard({ exitWith: 0, declares: "77" });
+  const base = {
+    ...process.env,
+    CONSOLE_HARNESS_NVM_DIR: "/nonexistent-nvm",
+    CONSOLE_HARNESS_FNM_DIR: "/nonexistent-fnm",
+    CONSOLE_HARNESS_VOLTA_HOME: "/nonexistent-volta",
+    CONSOLE_HARNESS_ASDF_DIR: "/nonexistent-asdf",
+  };
+  delete base.NVM_DIR; delete base.FNM_DIR; delete base.VOLTA_HOME; delete base.ASDF_DATA_DIR;
+  delete base.RUNNER_TOOL_CACHE;
+
+  // Control first: no tool-cache root reachable -> refused, and the guard never ran.
+  const off = ladderWithPlantedGuard(planted.rel, { ...base, CONSOLE_HARNESS_TOOL_CACHE: "/nonexistent-tool-cache" });
+  assert.equal(off.status, 0, off.out);
+  assert.match(off.out, /RUNTIME-UNAVAILABLE: guard .*planted-guard\.mjs declares Node major 77/,
+    "CONTROL: with the tool cache pointed at nothing, major 77 must be unobtainable here:\n" + off.out);
+  assert.match(off.out, /\$RUNNER_TOOL_CACHE\/node\/77\.\*/, "…and the refusal must say it looked in the tool cache:\n" + off.out);
+  assert.equal(guardRan(planted.ran), false, "CONTROL: the guard must not have run:\n" + off.out);
+
+  // Through RUNNER_TOOL_CACHE itself (the variable the runner sets), not the override.
+  const on = ladderWithPlantedGuard(planted.rel, { ...base, RUNNER_TOOL_CACHE: cache });
+  assert.equal(on.status, 0, on.out);
+  assert.equal(runtimeUnavailableLines(on.out).length, 0,
+    "a Node 77 under $RUNNER_TOOL_CACHE/node/77.*/x64/bin/node was not found:\n" + on.out);
+  assert.ok(on.out.includes("planted-guard.mjs declares Node 77 (__node-version beside it); ran v77.1.0 from " + stub),
+    "…it must resolve to the tool-cache binary by its exact path:\n" + on.out);
+  assert.equal(guardRan(planted.ran), true, "…and the guard really ran on it:\n" + on.out);
+});
+
+// ── THE TWO RESOLVERS SEARCH THE SAME ROOTS, and a test says so ─────────────
+//
+// seal-predicate.mjs's guardRuntimeCandidates and scripts/console-harness.sh's
+// candidates() answer the same question, and both carry a comment saying their lists
+// must match. Until now nothing checked it. This arm derives each list FROM ITS
+// SOURCE (never retyped here) as a set of canonical keys:
+//   versioned root -> `<override var>|<env var>|<default>|<subpath>/<want>.*/<tail>`
+//   fixed path     -> the path with the major written `<want>`
+//   PATH lookups   -> `PATH:node`, `PATH:node<want>`
+// and reds on any key one side has and the other lacks, naming it. It also requires
+// every versioned root's env var to appear in BOTH "looked in" messages, so a refusal
+// never omits a place the resolver actually searched.
+function predicateRoots(src) {
+  const body = src.slice(src.indexOf("function guardRuntimeCandidates("), src.indexOf("const GUARD_RUNTIME_LOOKED_IN"));
+  assert.ok(body.length > 0, "could not find guardRuntimeCandidates in the predicate source");
+  const vars = {};
+  for (const m of body.matchAll(/const (\w+) = E\('(\w+)', E\('(\w+)', (?:`\$\{home\}([^`]*)`|'([^']*)')\)\);/g))
+    vars[m[1]] = `${m[2]}|${m[3]}|${m[4] !== undefined ? "$HOME" + m[4] : m[5]}`;
+  const keys = new Set();
+  for (const m of body.matchAll(/versionedInstalls\(`\$\{(\w+)\}\/([^`]*)`, want, '([^']+)'\)/g)) {
+    assert.ok(vars[m[1]], `versionedInstalls uses \${${m[1]}}, which no E(...) declaration defines`);
+    keys.add(`${vars[m[1]]}|${m[2]}/<want>.*/${m[3]}`);
+  }
+  for (const m of body.matchAll(/`(\/[^`$]*)\$\{want\}([^`]*)`/g)) keys.add(`${m[1]}<want>${m[2]}`);
+  const pathM = body.match(/for \(const n of \[([^\]]*)\]\)/);
+  assert.ok(pathM, "could not find the PATH lookup in guardRuntimeCandidates");
+  for (const n of pathM[1].split(",").map((x) => x.trim())) {
+    if (n === "'node'") keys.add("PATH:node");
+    else if (n === "`node${want}`") keys.add("PATH:node<want>");
+    else assert.fail(`unrecognised PATH lookup ${n} — teach predicateRoots()`);
+  }
+  return keys;
+}
+function harnessRoots(src) {
+  const body = src.slice(src.indexOf("\ncandidates() {"), src.indexOf("\nlooked_in() {"));
+  assert.ok(body.length > 0, "could not find candidates() in console-harness.sh");
+  const vars = {};
+  for (const m of body.matchAll(/^\s*(\w+)="\$\{(\w+):-\$\{(\w+):-([^}]*)\}\}"$/gm)) vars[m[1]] = `${m[2]}|${m[3]}|${m[4]}`;
+  const keys = new Set();
+  for (const m of body.matchAll(/^\s*for c in (.+); do$/gm)) {
+    for (const tok of m[1].trim().split(/\s+/)) {
+      const t = tok.replace(/"/g, "");
+      const v = /^\$(\w+)\/(.+?)\/v?\$want\.\*\/(.+)$/.exec(t);
+      if (v) {
+        assert.ok(vars[v[1]], `candidates() uses $${v[1]}, which no \${A:-\${B:-default}} assignment defines`);
+        keys.add(`${vars[v[1]]}|${v[2]}/<want>.*/${v[3]}`);
+      } else if (t.startsWith("/")) keys.add(t.replace(/\$want/g, "<want>"));
+      else assert.fail(`unrecognised candidates() token ${tok} — teach harnessRoots()`);
+    }
+  }
+  if (/command -v node 2>/.test(body)) keys.add("PATH:node");
+  if (/command -v "node\$want"/.test(body)) keys.add("PATH:node<want>");
+  return keys;
+}
+
+test("w88: LOCK — seal-predicate's and console-harness.sh's Node search roots are the SAME set, and both refusals name them", () => {
+  const pSrc = readFileSync(PREDICATE, "utf8");
+  const hSrc = readFileSync(join(REPO, "scripts", "console-harness.sh"), "utf8");
+  const p = predicateRoots(pSrc);
+  const h = harnessRoots(hSrc);
+  const onlyP = [...p].filter((k) => !h.has(k));
+  const onlyH = [...h].filter((k) => !p.has(k));
+  assert.deepEqual({ onlyInPredicate: onlyP, onlyInHarness: onlyH }, { onlyInPredicate: [], onlyInHarness: [] },
+    "the two resolvers search DIFFERENT roots — change both in the same PR");
+  // A parser that went blind would make both sets empty and "equal", so the
+  // comparison above is followed by a floor: what both files have carried since the
+  // resolver shipped, plus the tool cache. It comes SECOND so that a real divergence
+  // is reported as one (onlyInPredicate / onlyInHarness), not as a parser fault.
+  for (const must of ["PATH:node", "PATH:node<want>", "CONSOLE_HARNESS_TOOL_CACHE|RUNNER_TOOL_CACHE|/opt/hostedtoolcache|node/<want>.*/x64/bin/node"])
+    assert.ok(p.has(must) && h.has(must), `PARSER CONTROL: ${must} must be derived from BOTH sources. predicate=${[...p]} harness=${[...h]}`);
+  assert.ok(p.size >= 10, `PARSER CONTROL: only ${p.size} predicate roots derived: ${[...p]}`);
+  const pLooked = pSrc.slice(pSrc.indexOf("const GUARD_RUNTIME_LOOKED_IN"), pSrc.indexOf("function resolveGuardRuntime("));
+  const hLooked = hSrc.slice(hSrc.indexOf("\nlooked_in() {"), hSrc.indexOf("\nresolve_node() {"));
+  for (const k of p) {
+    const env = k.split("|")[1];
+    if (!env || k.startsWith("PATH:") || k.startsWith("/")) continue;
+    assert.ok(pLooked.includes("$" + env), `the predicate's "looked in" text omits $${env}, a root it searches`);
+    assert.ok(hLooked.includes("\\$" + env), `console-harness.sh's "looked in" text omits $${env}, a root it searches`);
+  }
 });

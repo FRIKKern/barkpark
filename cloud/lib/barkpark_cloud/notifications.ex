@@ -503,8 +503,9 @@ defmodule BarkparkCloud.Notifications do
   ## dr-w19-s5 — THE ADDRESS, not just the count
 
   This used to resolve `platform_admin_emails/0`, whose only source is the
-  `:platform_admin_emails` config allowlist. `PLATFORM_ADMIN_EMAILS` is unset on
-  prod, `config.exs` hard-defaults the key to `[]`, no User field carries
+  `:platform_admin_emails` config allowlist. `PLATFORM_ADMIN_EMAILS` was unset on
+  prod then (gr-ops-platform-admin-emails provisioned it on the live control plane
+  2026-09-25), `config.exs` hard-defaults the key to `[]`, no User field carries
   operator-ness and no route, console action or mix task writes it — so the
   population was EMPTY BY CONSTRUCTION and the only push channel for fleet
   health had been succeeding at sending nothing for its whole recorded life.
@@ -1915,9 +1916,13 @@ defmodule BarkparkCloud.Notifications do
   # that looks exactly like "you were never emailed". Comparing on
   # `lower(recipient)` is the only version of this filter that cannot lie.
   #
-  # It is a filter, not a scan risk: the `(team_id, inserted_at)` index still
-  # bounds the read to one team and carries the ORDER BY; `lower(?)` is applied
-  # to the rows that survive the team fence, never to the whole table.
+  # The comparison is on the EXPRESSION `lower(recipient)` so that it can be an
+  # Index Cond on `(team_id, lower(recipient), inserted_at)` (migration
+  # 20260925120000). Without that index this was a Filter over the team's rows
+  # and a member with few deliveries read the team's WHOLE log to fill (or fail
+  # to fill) the LIMIT — measured in the route comment above
+  # `GET /v1/notifications/deliveries`. Change this fragment and the index stops
+  # matching it.
   defp maybe_delivery_recipient(query, email) when is_binary(email) and email != "" do
     needle = String.downcase(email)
     where(query, [d], fragment("lower(?)", d.recipient) == ^needle)

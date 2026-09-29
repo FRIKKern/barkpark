@@ -404,7 +404,13 @@ defmodule Barkpark.Auth do
   # revoke fail. The DB row is the source of truth for every other consumer,
   # and a revoke that rolled back because a socket could not be notified would
   # be strictly worse than one whose notification was missed.
-  defp broadcast_socket_teardown(%ApiToken{id: id}) when is_binary(id) do
+  #
+  # Public so a caller that revokes inside a transaction
+  # (`Barkpark.Accounts.Privacy.erase_subject/1`) can re-send the teardown
+  # after commit, when the revoke is visible to a reconnecting socket.
+  @doc false
+  @spec broadcast_socket_teardown(ApiToken.t()) :: :ok
+  def broadcast_socket_teardown(%ApiToken{id: id}) when is_binary(id) do
     BarkparkWeb.Endpoint.broadcast(BarkparkWeb.UserSocket.disconnect_topic(id), "disconnect", %{})
     :ok
   rescue
@@ -413,7 +419,7 @@ defmodule Barkpark.Auth do
     _, _ -> :ok
   end
 
-  defp broadcast_socket_teardown(_token), do: :ok
+  def broadcast_socket_teardown(_token), do: :ok
 
   # ── Token rotation (task-e78edcc2145ed3df) ──────────────────────────────
 

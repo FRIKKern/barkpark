@@ -212,6 +212,14 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	if key := sessionKey(); key != "" {
 		headers[sessionHeader] = key
 	}
+	// THE SESSION-DOC POINTER (task-9002f2b301329f1f). A SEPARATE header from
+	// the secret key above and never a replacement for it: that one identifies
+	// the claim session, this one names the type:session DOCUMENT the server
+	// appends a task-closed / paper-published event to. Only the two doors the
+	// server arms carry it (session_doc_header.go says why).
+	if slug := sessionDocFor(g, ctx, cmd); slug != "" {
+		headers[sessionDocHeader] = slug
+	}
 	if needsPerspectiveAuth || needsDraftIDAuth {
 		// doc get/ls/query are public at their default published perspective,
 		// so their manifest tier must remain `none`. Drafts and raw are
@@ -2743,7 +2751,10 @@ func commandFlagBelongsInBody(cmd manifest.Command, name string) bool {
 	// key is pinned by a test rather than trusted.
 	if cmd.ID == "task.stamp" {
 		switch name {
-		case "evidence", "note", "criterion-text":
+		// `amended-criterion` is criterion wording too — the --amend
+		// replacement (task-f65368969b1a2471) — and rides the body under the
+		// snake_case key for the same reason criterion-text does.
+		case "evidence", "note", "criterion-text", "amended-criterion":
 			return true
 		}
 	}
@@ -2812,8 +2823,13 @@ func commandHasSetBodyFlags(cmd manifest.Command, flags map[string][]string) boo
 // "criterionText". Kept as a named seam rather than an if buried inside
 // bodyFlagKey so the exception is visible from either function.
 func stampBodyKey(name string) string {
-	if name == "criterion-text" {
+	switch name {
+	case "criterion-text":
 		return "criterion_text"
+	case "amended-criterion":
+		// Params.stamp_amended_criterion/1 reads "amended_criterion" or
+		// "amended-criterion"; the camelCase "amendedCriterion" is NO key.
+		return "amended_criterion"
 	}
 	return bodyFlagKey(name)
 }

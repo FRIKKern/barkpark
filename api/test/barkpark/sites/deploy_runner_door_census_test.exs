@@ -152,6 +152,50 @@ defmodule Barkpark.Sites.DeployRunnerDoorCensusTest do
     end
   end
 
+  # ── the staleness BOUND: census_interval_ms rides beside measured_at ──────
+  #
+  # `measured_at` states how old a reading is; nothing said how old it is
+  # ALLOWED to be. In systemd mode a transient unit can end without a message,
+  # so `observed_in_flight: 1` may outlive its build by up to one backstop tick
+  # (dr-w22-s2-followup-census-staleness-systemd). The payload now carries that
+  # tick's period. Each test here is shaped to lose to a hard-coded value.
+  describe "door_census/0 census_interval_ms" do
+    test "renders the CONFIGURED interval, and moves when the config moves" do
+      put_cfg(census_interval_ms: 4_321)
+      assert DeployRunner.door_census().census_interval_ms == 4_321
+
+      # A literal `10_000` (or any constant) passes neither line of this pair —
+      # the second read differs from the first only because the config did.
+      put_cfg(census_interval_ms: 1_234)
+      assert DeployRunner.door_census().census_interval_ms == 1_234
+    end
+
+    # Proves the renderer reads through the TICKER'S OWN accessor, not a second
+    # `Keyword.get`: an unusable value falls back to the default the ticker
+    # would arm with, so the payload can never state a period the ticker cannot
+    # run at. A hand-rolled `Keyword.get(config(), :census_interval_ms, 10_000)`
+    # renders 0 here and fails.
+    test "a non-positive config renders the default the ticker falls back to" do
+      put_cfg(census_interval_ms: 0)
+      assert DeployRunner.door_census().census_interval_ms == 10_000
+
+      put_cfg(census_interval_ms: "fast")
+      assert DeployRunner.door_census().census_interval_ms == 10_000
+    end
+
+    # Configuration, like `capacity`, not a reading — so it survives the
+    # no-table arm where every MEASUREMENT is nil.
+    test "renders even when nothing was read" do
+      put_cfg(census_interval_ms: 777)
+      absent = :"bp_census_never_created_#{System.unique_integer([:positive])}"
+      assert :ets.whereis(absent) == :undefined
+
+      census = DeployRunner.door_census(absent)
+      assert census.measured_at == nil
+      assert census.census_interval_ms == 777
+    end
+  end
+
   # ── the refusal counter: it must be able to NOT rise ─────────────────────
 
   describe "door_census/0 refusals" do

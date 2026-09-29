@@ -54,8 +54,11 @@ defmodule BarkparkWeb.BulldocsReaderRenderSurfaceTest do
       attrs = if style, do: Map.put(attrs, "style", style), else: attrs
       {:ok, doc} = Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(attrs))
       {:ok, _view, html} = live(conn, "/papers/#{slug}")
-      palette = if style, do: "article", else: "legacy"
-      assert html =~ ~s(data-paper-palette="#{palette}")
+      # onb-residue-onb16 (main's ruling 2026-09-23): a style-less paper is an
+      # ARTICLE on the web reader, so all three declare the article palette. The
+      # legacy palette survives only for an explicit non-article marker, pinned
+      # in bulldocs_reader_style_default_test.exs.
+      assert html =~ ~s(data-paper-palette="article")
       assert html =~ Render.render_block(block, %{style: :article})
       assert doc.content["style"] == style
       if is_nil(style), do: refute(Map.has_key?(doc.content, "style"))

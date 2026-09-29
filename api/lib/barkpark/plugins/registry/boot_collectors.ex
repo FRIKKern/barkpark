@@ -194,9 +194,17 @@ defmodule Barkpark.Plugins.Registry.BootCollectors do
   defp plugin_modules_sync do
     case Application.fetch_env(:barkpark, :plugins) do
       {:ok, configured} when is_list(configured) ->
-        configured
-        |> Enum.map(&module_of_configured_entry/1)
-        |> Enum.reject(&is_nil/1)
+        # Entries are interpreted by `Barkpark.Content.PluginLoadOrder.modules/3`
+        # (task-3fbd48182b1d35ea) against the manifests on disk (the Registry
+        # does not exist yet at boot): a MODULE-dispatch reader, so a loadable
+        # module that is not a plugin still contributes (the RoutesFake* /
+        # crontab fakes rely on it), and every skipped entry — an unknown name,
+        # an unloadable module, a malformed entry — is logged by name.
+        Barkpark.Content.PluginLoadOrder.modules(
+          configured,
+          &Discovery.manifest_index/0,
+          Barkpark.Plugins.Registry.BootCollectors
+        )
 
       _ ->
         # Unset → walk disk synchronously. Matches `discover_and_register/0`
@@ -208,33 +216,6 @@ defmodule Barkpark.Plugins.Registry.BootCollectors do
         |> Enum.flat_map(&module_from_plugin_dir/1)
     end
   end
-
-  defp module_of_configured_entry(module) when is_atom(module), do: module
-
-  defp module_of_configured_entry({_name, module}) when is_atom(module), do: module
-
-  # `File.read/1` reads `plugin.json` under a directory enumerated by
-  # `Discovery.plugin_dirs_in/1` from `Discovery.default_paths/0`; `name` is only
-  # COMPARED against the decoded manifest, never joined into the path.
-  # Inline rather than a line-pinned `.sobelow-skips` row (fingerprints shift).
-  # sobelow_skip ["Traversal.FileModule"]
-  defp module_of_configured_entry(name) when is_binary(name) do
-    # Resolve a string plugin_name by reading the manifest off disk.
-    Discovery.default_paths()
-    |> Enum.flat_map(&Discovery.plugin_dirs_in/1)
-    |> Enum.find_value(fn dir ->
-      with {:ok, raw} <- File.read(Path.join(dir, "plugin.json")),
-           {:ok, manifest} <- Jason.decode(raw),
-           true <- manifest["plugin_name"] == name,
-           {:ok, module} <- Discovery.resolve_module(manifest) do
-        module
-      else
-        _ -> nil
-      end
-    end)
-  end
-
-  defp module_of_configured_entry(_), do: nil
 
   # `File.read/1` reads `plugin.json` under `dir`, which the caller obtained from
   # `Discovery.plugin_dirs_in/1` — a boot-time disk enumeration, not user input.

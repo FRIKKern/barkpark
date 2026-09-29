@@ -42,9 +42,19 @@
 #                        with opposite remedies. GitHub publishes no reason for
 #                        a startup failure, so this class names the conclusion
 #                        and the remedy and never a cause.
+#        CANCELLED_CURRENT the NEWEST producing run on this head COMPLETED
+#                        with conclusion `cancelled` and rendered no check run
+#                        under this name — typically evicted, still pending, as
+#                        the pending run of its concurrency group. Terminal on
+#                        THIS head. Re-dispatch: `gh pr update-branch <n>`, or
+#                        push a new sha. Measured on PR #16709 (run
+#                        35890853900): filed NAME_NOT_IN_RUN, told "never
+#                        re-dispatch", and update-branch is what cleared it.
+#                        A cancelled run that was SUPERSEDED never reaches this
+#                        class: only the newest run on the head is classified.
 #        NAME_NOT_IN_RUN the producing run COMPLETED on its first attempt, on a
-#                        conclusion that is NOT `startup_failure`, and
-#                        rendered no check run under this name — a head
+#                        conclusion that is NEITHER `startup_failure` NOR
+#                        `cancelled`, and rendered no check run under this name — a head
 #                        predating the context, a renamed job, a pruned
 #                        aggregator. Rebase, or edit the spec. Never
 #                        re-dispatch; there is nothing to dispatch.
@@ -425,11 +435,13 @@ read_check_runs() { # <sha>
 # Workflow runs on a head: NDJSON of
 # {id, path, status, run_attempt, created_at, conclusion}.
 #
-# `conclusion` is carried for ONE reason: `startup_failure` is a terminal
-# conclusion that publishes ZERO jobs and ZERO check runs, so without it a run
-# that never compiled is indistinguishable, in this projection, from a run that
-# executed and simply carried no job of that name. Those are opposite
-# diagnoses. See classify_completed_run() for the whole-token match.
+# `conclusion` is carried for TWO questions, both about which REMEDY to print
+# and neither about whether anything passed: `startup_failure` (a run refused
+# at creation — ZERO jobs, ZERO check runs) and `cancelled` (a run stopped
+# before it rendered — the concurrency-group eviction). Without it either is
+# indistinguishable, in this projection, from a run that executed and simply
+# carried no job of that name, and those are opposite diagnoses. See
+# is_startup_failure() and is_cancelled() for the whole-token matches.
 read_head_runs() { # <sha>
   local sha="$1" f
   if [ -n "$FIXTURES" ]; then
@@ -614,6 +626,33 @@ is_startup_failure() { # <conclusion>
   esac
 }
 
+# ── cancelled, matched as a WHOLE TOKEN (task-faadd040f770153f) ──────────────
+#
+# GitHub's `status: completed` covers success, failure AND cancelled. A run
+# cancelled while still pending — evicted when the next push entered its
+# concurrency group, the dominant way runs die here — is `completed` with no
+# check run rendered under the gate's name, and it used to land in
+# NAME_NOT_IN_RUN, whose remedy is "NEVER re-dispatch". THE SPECIMEN: PR
+# #16709, head ebc4fb514; its only pr-task-gate run 35890853900 (created
+# 2026-09-23T16:44:38Z) concluded cancelled with ZERO jobs because a
+# same-second run for the OLD head evicted it. Census run 35892264098 said
+# NAME_NOT_IN_RUN / never re-dispatch; `update-branch` re-dispatched it and the
+# context rendered on the new head (check run 107438093928, success).
+#
+# THE SUPERSEDED HALF IS ALREADY CORRECT, BY CONSTRUCTION: `newest` is chosen
+# with `sort_by(.created_at, .id) | last`, so an evicted OLDER run beside a
+# newer one is never the run examined. Only cancelled-AND-CURRENT reaches this
+# test — the narrow population the class is for.
+#
+# Reading the conclusion here picks a REMEDY; it never decides pass or fail.
+# The row screams (exit 1, context named) whichever class it lands in.
+is_cancelled() { # <conclusion>
+  case "$1" in
+    cancelled) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # The remedy a class implies, printed beside it. The class name alone is not a
 # diagnosis at 3am: STARTUP_FAILURE and NAME_NOT_IN_RUN are both "a completed
 # run rendered nothing under this name", and only the remedy line tells them
@@ -622,6 +661,8 @@ class_remedy() { # <class>
   case "$1" in
     STARTUP_FAILURE)
       echo "re-arm this head NOW — \`gh pr update-branch <n>\`, or push a new sha. The run was refused at creation, published no jobs and no check runs, and is TERMINAL: this context will stay pending forever on THIS head. GitHub publishes no reason for it, so none is guessed here." ;;
+    CANCELLED_CURRENT)
+      echo "re-dispatch — \`gh pr update-branch <n>\`, or push a new sha. The newest producing run on this head was CANCELLED before it rendered this context (typically evicted as the pending run of its concurrency group); a cancelled run never self-heals on THIS head." ;;
     ZOMBIED)
       echo "re-dispatch — GitHub created the run and never dispatched it." ;;
     RERUN_DELETED)
@@ -774,12 +815,20 @@ census_head() { # <sha> <label> <pr-updated-at> <mergeable>
           # is_startup_failure() above for why a substring test loses this.
           if is_startup_failure "$conclusion"; then
             class="STARTUP_FAILURE"
+          # Same order, same reason: a CANCELLED run — first attempt or re-run —
+          # rendered nothing because it was stopped, not because the name is
+          # absent from the spec or a check run was deleted. Its remedy is a
+          # re-dispatch, the one remedy NAME_NOT_IN_RUN forbids. See
+          # is_cancelled() above; superseded cancels never reach here.
+          elif is_cancelled "$conclusion"; then
+            class="CANCELLED_CURRENT"
           # A re-run that finished and still rendered nothing is a DELETED
           # check run; a first attempt that did the same never had one. The
           # remedies differ, so the names must.
           elif [ "$attempt" -ge 2 ] 2>/dev/null; then
             class="RERUN_DELETED"
           else
+            # success, failure, or no conclusion at all: the run EXECUTED.
             class="NAME_NOT_IN_RUN"
           fi
           ;;

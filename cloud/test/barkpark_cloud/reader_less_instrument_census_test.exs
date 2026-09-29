@@ -1987,6 +1987,8 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       "the send-once claim for PAT expiry mail: accounts.ex:1251 stamps it inside `UPDATE … WHERE expiry_warned_at IS NULL`, and accounts.ex:1235 documents that the update's own row count is what decides who won. A field whose entire meaning is that exactly one writer wins has nothing to say to a reader.",
     "failed_attempts" =>
       "the wrong-code lockout counter on a login token (accounts.ex:1918 increments it, accounts.ex:109 calls it a hard cap rather than a rate limiter). It is withheld deliberately: telling a caller how many guesses remain is a gift to the party doing the guessing.",
+    "forms_enabled" =>
+      "the N-08 deploy switch for the template's contact form: sites/deploy.ex maybe_put_forms_url/3 reads it to decide whether the build env carries BARKPARK_FORMS_URL, and registry.ex set_site_forms_enabled/2 is its only writer (after the box accepted the form_endpoint write). The console sees it RENAMED, as `forms.enabled` on GET /v1/sites/:id/forms (web/router.ex forms_json/3), which is why no consumer tree names the column.",
     "grace_ends_at" =>
       "the past-due grace anchor. billing.ex:909 states it is written here and nowhere else, and entitlement is computed FROM it server-side; billing.ex:900 records that anchoring on it rather than on current_period_end was itself the fix. The customer is shown the entitlement decision, not the clock behind it.",
     "graced_poll_refusals" =>

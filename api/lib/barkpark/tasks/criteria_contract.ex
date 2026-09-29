@@ -21,7 +21,7 @@ defmodule Barkpark.Tasks.CriteriaContract do
   #     work-field digests to `claim.work_field_digests` and 409s
   #     `doc_changed_since_claim`. That fires at CLOSE — i.e. AFTER the
   #     substitution has already landed and been published.
-  #   * `Content.Lifecycle.criteria_fence/2` refuses a publish that REGRESSES a
+  #   * `Tasks.PublishGuards.criteria_fence/2` refuses a publish that REGRESSES a
   #     proof-bearing criterion. It matches the published row's criterion by
   #     TEXT first and then FALLS BACK TO THE POSITIONAL SLOT — deliberately, so
   #     a legitimate reword of an already-met criterion is not read as a drop.

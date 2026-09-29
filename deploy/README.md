@@ -108,7 +108,7 @@ while the status-scoped form answers **404** — with two controls (an existing
 file → 200, the proxied path → 503) identical under both arms, so the difference
 is the status list and nothing else. Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
-script: `bash deploy/instance-deploy_test.sh` — 544 checks: slot selection,
+script: `bash deploy/instance-deploy_test.sh` — 566 checks: slot selection,
 flip, failure semantics, channel seam, coalesce, rollback happy flip-back +
 typed refusals + unhealthy fail-closed, /mcp + /connectors route idempotence
 and their install guards, and the on-box-compile ruling below. EVERY `<engine> …
@@ -690,7 +690,17 @@ shape before writing** (bare IPs, no ranges): the Elixir side raises on a
 malformed entry, so an unvalidated write would not degrade a bucket key, it would
 refuse to boot the box. Value absent on both paths → the script appends a
 commented placeholder and logs the gap (`WARN: no BARKPARK_CLOUD_EGRESS_IPS …`),
-the worker logs it at startup, and the deploy still succeeds.
+the worker logs it at startup, and the deploy still succeeds. A value that IS
+supplied but fails validation logs a different line that names the refused
+entry (`WARN: BARKPARK_CLOUD_EGRESS_IPS REFUSED by the validator: entry '…'`), so
+a deploy log never confuses "nothing supplied" with "supplied and refused". The
+validator is plain bash, not awk: the awk regex it replaced refused every IPv4
+address under mawk 1.3.4 20200120/20240123 (stock Ubuntu 22.04/24.04, Debian 12). Its
+grammar is the runtime's: anything it accepts, `:inet.parse_address` (what
+runtime.exs calls) accepts too — the IPv6 arm once checked shape only and passed
+`1:2`. It is stricter on legacy forms the runtime re-reads as another address
+(`010.0.0.1` is octal 8.0.0.1, `127.1`, zone ids). Both verdicts per specimen:
+Case 16c of the harness.
 
 Check a box: `grep BARKPARK_TRUSTED_PROXIES /opt/barkpark/.env`.
 
@@ -782,6 +792,11 @@ It is **two calls**, and the order is forced by build identity:
    those wire bytes. The box re-verifies that digest, extracts, and runs
    STAGE → HEALTH → SWITCH → RETIRE with **BUILD reported `skipped`** — no npm
    runs there.
+
+A symlink anywhere in the directory is refused as well, by design (charter D120,
+ruled 2026-09-25): an on-box build keeps a contained symlink (`cp -a`) and serves it,
+so the same `dist` can deploy from the box yet be refused as `--prebuilt` — the lane
+does not promise parity there; replace each link with the file it points to first.
 
 What it refuses, all before the upload: a directory that is empty, one with no
 root `index.html` (that is the project dir, not the output dir), and — after the

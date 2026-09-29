@@ -152,13 +152,13 @@ defmodule Barkpark.PortableDoc.Render.CardsEmail do
     block
     |> Slots.slot_elements("media")
     |> Enum.map(&normalize_media_element/1)
-    |> Compose.render_children(:email)
+    |> Compose.render_children(:email, Compose.render_opts(block))
   end
 
   defp card_slot_html(block, name) do
     block
     |> Slots.slot_elements(name)
-    |> Compose.render_children(:email)
+    |> Compose.render_children(:email, Compose.render_opts(block))
   end
 
   defp normalize_media_element(%{"type" => _} = el), do: el

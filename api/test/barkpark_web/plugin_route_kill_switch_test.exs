@@ -67,16 +67,13 @@ defmodule BarkparkWeb.PluginRouteKillSwitchTest do
   # the production default) and is restored as unset — not as `[]`, which is a
   # different branch of `plugin_modules_sync/0` entirely.
   defp set_plugins!(value) do
-    previous = Application.fetch_env(:barkpark, :plugins)
+    previous = Barkpark.PluginEnv.capture()
 
     on_exit(fn ->
-      case previous do
-        :error -> Application.delete_env(:barkpark, :plugins)
-        {:ok, prev} -> Application.put_env(:barkpark, :plugins, prev)
-      end
+      Barkpark.PluginEnv.restore(previous)
     end)
 
-    Application.put_env(:barkpark, :plugins, value)
+    Barkpark.PluginEnv.put!(value)
   end
 
   defp post_event(conn, body) do

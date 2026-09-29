@@ -375,8 +375,15 @@
   // append), so nothing that relied on the override loses anything: an override
   // only ever mattered where the field was empty, and there it still applies.
   var MODAL_DRIVERS = {
-    // openAccountModal — the original seam, unchanged in behaviour.
-    account: function () { openAccountModalThen(null); },
+    // openAccountModal, then freezeShotSurface — the one modal driver that used
+    // to skip the freeze every other driver here applies (task-72461a1551fb00f2).
+    // The card opens through the 150ms `modal-in` keyframe (opacity 0 -> 1 plus
+    // a translate, app.css) and openModal() focuses the card's first control, so
+    // the frame depended on when capture landed relative to the animation.
+    // Freezing right after the opener returns snaps the card to its final
+    // keyframe. This also makes the plain shot a sound twin for badcode-freeze
+    // .test.mjs: the badcode shot is frozen, and so is this one.
+    account: function () { openAccountModalThen(freezeShotSurface); },
     // Same opener, then the REAL enrollment through to the 422. This was ALSO a
     // name convention (`if (scen === "account-modal-2fa-badcode")`) and it is
     // now the scenario's own declared driver, so a renamed scenario keeps its

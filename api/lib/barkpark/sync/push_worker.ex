@@ -31,6 +31,7 @@ defmodule Barkpark.Sync.PushWorker do
 
   require Logger
 
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Sync
   alias Barkpark.Sync.{Outbox, PushCursor, Pusher}
 
@@ -64,7 +65,10 @@ defmodule Barkpark.Sync.PushWorker do
       tick_fun: Keyword.get(opts, :tick_fun, &default_tick/2),
       backoff_fun: Keyword.get(opts, :backoff_fun, &backoff_ms/1),
       attempt: 0,
-      draining?: false
+      draining?: false,
+      # C083: the cursor bootstrap is a write; a held instance defers it to the
+      # first admitted tick instead of skipping it for the process lifetime.
+      bootstrapped?: false
     }
 
     {:ok, state, {:continue, :schedule}}
@@ -72,8 +76,7 @@ defmodule Barkpark.Sync.PushWorker do
 
   @impl true
   def handle_continue(:schedule, state) do
-    %{source: source, dataset: dataset} = state.ctx
-    PushCursor.bootstrap_if_absent(Map.get(state.ctx, :workspace_id), source, dataset)
+    state = bootstrap(state)
     schedule(state, 0)
     {:noreply, state}
   end
@@ -87,16 +90,28 @@ defmodule Barkpark.Sync.PushWorker do
     state = %{state | draining?: true}
     %{source: source, dataset: dataset} = state.ctx
 
-    since = PushCursor.get(source, dataset)
-    events = Outbox.fetch(dataset, since, state.settings.push_batch_size)
-
     funs = %{
       push_fun: state.push_fun,
       claim_fun: state.claim_fun,
       close_fun: state.close_fun
     }
 
-    {results, cursor} = Pusher.drain(events, state.ctx, funs)
+    # C083: the drain's bookkeeping rows (push cursor, doc revs, conflicts) are
+    # admitted as one write. A held instance halts the tick with the cursor
+    # frozen, exactly like a transient remote failure, and backs off.
+    {state, {results, cursor}} =
+      case Door.admit(fn ->
+             state = bootstrap(state)
+             since = PushCursor.get(source, dataset)
+             events = Outbox.fetch(dataset, since, state.settings.push_batch_size)
+             {state, Pusher.drain(events, state.ctx, funs)}
+           end) do
+        {:error, {:write_admission, _reason}} ->
+          {state, {[{:hold, {:error, :transient}}], PushCursor.get(source, dataset)}}
+
+        drained ->
+          drained
+      end
 
     {attempt, delay} =
       if halted?(results) do
@@ -115,6 +130,22 @@ defmodule Barkpark.Sync.PushWorker do
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  defp bootstrap(%{bootstrapped?: true} = state), do: state
+
+  defp bootstrap(state) do
+    %{source: source, dataset: dataset} = state.ctx
+
+    case Door.admit_or_skip(
+           fn ->
+             PushCursor.bootstrap_if_absent(Map.get(state.ctx, :workspace_id), source, dataset)
+           end,
+           :skipped
+         ) do
+      :skipped -> state
+      _ -> %{state | bootstrapped?: true}
+    end
+  end
 
   defp halted?(results) do
     Enum.any?(results, &match?({_id, {:error, :transient}}, &1))

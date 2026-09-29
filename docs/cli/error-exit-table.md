@@ -15,9 +15,7 @@ Every coded error from the Barkpark API arrives in the v1 envelope shape:
 { "error": { "code": "<string>", "message": "<string>", "details": { … }, "request_id": "…" } }
 ```
 
-The CLI reads `error.code` and looks it up in the table below to pick its exit
-code. The HTTP status is recorded here for reference — **it is NOT the lookup
-key.** Two reasons that is load-bearing:
+The CLI maps `error.code` to an exit code. HTTP status is reference only:
 
 1. One HTTP status maps to many distinct `code`s (409 covers `rev_mismatch` and
    `conflict`; 422 covers `validation_failed`, `invalid_paper`, `invalid_op` and
@@ -97,6 +95,7 @@ the API actually returns for that code.
 | `invalid_path` | 422 | `5` | Blob push rejected: the relative path failed the server-blob allowlist (traversal / absolute / malformed segment), before any disk write. | `invalid blob path: <path>` — the sidecar path must be the server-generated `YYYY/MM/<slug>-<hex8>.<ext>` shape. |
 | `empty_body` | 422 | `5` | Blob push rejected: zero-byte body (usually a mislabeled content-type `Plug.Parsers` consumed). | `empty blob body` — send raw bytes as `application/octet-stream`. |
 | `rev_mismatch` | 409 | `6` | Optimistic-concurrency revision mismatch. | `conflict: document changed; re-fetch and retry`. |
+| `paper_exists` | 409 | `6` | Create-only slug is occupied. | Choose a new slug; existing content is preserved. |
 | `precondition_failed` | 412 | `6` | `ifRev` precondition failed (carries `expected`/`actual`). | `precondition failed: expected rev <e>, got <a>`. |
 | `conflict` | 409 | `6` | Generic write conflict. | `conflict: <message>` — retry or re-fetch. |
 | `halted` | 409 | `6` | Plugin lifecycle veto (canonical envelope). | `halted: <message>` — the plugin's reason. The bare-string shape is handled too (below); both bucket to `6`. |

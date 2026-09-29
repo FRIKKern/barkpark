@@ -202,7 +202,7 @@
 # `pgid == pid` and `STAT` starting `Ss` is the session leader; `ppid=1` is the
 # reparenting. Anything else (a pgid equal to the launching shell's) is the
 # `& disown` shape and IS reaped by a pane close. The same recipe, with the same
-# `ps -p` proof, is recorded live at scripts/pds-w15-fire-record.md.
+# `ps -p` proof, is recorded live at docs/ledgers/pds-w15-fire-record.md.
 #
 # SELFTEST — three arms, no host touched
 #

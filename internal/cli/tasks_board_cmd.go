@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 	"github.com/FRIKKern/barkpark/internal/taskboard"
 )
@@ -41,6 +42,10 @@ func runTasksBoard(out *writer, g globals, ctx manifest.Context, args []string) 
 		Project:   ctx.Project,
 		Dataset:   ctx.Dataset,
 	}
+	// The board closes through apiclient (DoClose / DoCloseRev), so it carries
+	// the same session headers `bp task close` sends (task-e4cbf4cd9f672c33).
+	sess := apiSessionConfig(apiclient.Config{}, g, ctx)
+	cfg.SessionKey, cfg.SessionDoc = sess.SessionKey, sess.SessionDoc
 	// The first-paint snapshot cache lives in the bp config dir
 	// (${XDG_CONFIG_HOME:-~/.config}/barkpark) — reuse the exact resolution the
 	// rest of bp uses rather than hardcoding a path. A resolve failure just

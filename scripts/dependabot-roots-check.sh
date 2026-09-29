@@ -25,7 +25,7 @@
 # usual half-built version of this gate only checks one.
 #
 # A ROOT IS A DIRECTORY THAT HOLDS A LOCKFILE, not one that holds a
-# package.json. Workspace MEMBERS (js/packages/*, apps/mobile,
+# package.json. Workspace MEMBERS (js/packages/*, js/test-harnesses/*, apps/mobile,
 # js/docs) carry a package.json and no lockfile; Dependabot resolves them from
 # their workspace root, so an entry per member would be a duplicate or an error.
 # The rationale, and the list of package.json trees this consciously does NOT

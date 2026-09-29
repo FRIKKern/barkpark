@@ -488,9 +488,24 @@ const ORACLE_CI_SCOPE =
 // refuse a name this file has no plan for — before Chrome, like everything
 // else in it.
 //
-// The `account-modal*` prefix is NOT a loophole: the fallback plan IS the
-// account family's plan (`&modal=account`, MODAL_OPEN_PROBE, no contract), so
-// every member of that family is genuinely planned for.
+// THE ACCOUNT FAMILY IS A FIELD, NOT A NAME (task-31d8058ed865a3bd). The
+// fallback plan IS the account family's plan (`&modal=account`,
+// MODAL_OPEN_PROBE, no contract), and a scenario belongs to that family when its
+// DECLARED `modal` driver opens the account sheet — mock.js MODAL_DRIVERS
+// `account` and `account-2fa-badcode`, both `openAccountModalThen(...)`. This
+// used to be `/^account-modal/` on the NAME, the last site holding the retired
+// shoot.sh convention in place after #19677 moved the seam to the field: a
+// scenario declaring `modal: "account"` under any other name was refused
+// UNPLANNED, and — the other direction — an `account-modal*` name that declared
+// NO driver was waved through to a plan whose open probe then waited on a
+// dialog nothing drives. `&modal=account` in the suffix is a no-op for both
+// members (mock.js resolves the scenario's own field first), so the badcode
+// member keeps its specific drive.
+//
+// A new account-opening driver added to MODAL_DRIVERS is refused here UNPLANNED
+// (exit 2, before Chrome) until it is named in this set: loud, never a false
+// green. modal-oracle.test.mjs holds the renamed-scenario proof.
+const ACCOUNT_DRIVERS = new Set(["account", "account-2fa-badcode"]);
 const PLANNED_SCENS = new Set([
   TOKEN_REVEAL_SCEN,
   ME_UNREADABLE_SCEN,
@@ -500,8 +515,14 @@ const PLANNED_SCENS = new Set([
   PIN_FORM_SCEN,
   UPDATE_CONFLICT_SCEN,
 ]);
-const ACCOUNT_FAMILY_RE = /^account-modal/;
-const hasPlan = (s) => PLANNED_SCENS.has(s) || ACCOUNT_FAMILY_RE.test(s);
+// `scenarios` defaults to the shipped corpus; the test hands in a renamed one.
+export const hasPlan = (s, scenarios = SCENARIOS) =>
+  PLANNED_SCENS.has(s) ||
+  (Object.prototype.hasOwnProperty.call(scenarios, s) &&
+    ACCOUNT_DRIVERS.has(scenarios[s] && scenarios[s].modal));
+export const plannedRoster = (scenarios = SCENARIOS) =>
+  Object.keys(scenarios).filter((s) => hasPlan(s, scenarios)).sort();
+export { DEFAULT_SCEN };
 
 // Viewport. 900px tall on purpose: it is shorter than the 9-session account
 // card, which is what makes assertion 3 meaningful.
@@ -543,7 +564,8 @@ function rosterGuard() {
           `plan for it, so planFor() would fall through to the account plan and ` +
           `&modal=account would paint the ACCOUNT modal over that scenario's screen. ` +
           `The run would print "${s}" and measure the account dialog. Planned: ` +
-          `${[...PLANNED_SCENS].join(", ")}, plus any account-modal* name. Add a ` +
+          `${[...PLANNED_SCENS].join(", ")}, plus any scenario whose declared \`modal\` ` +
+          `driver is one of ${[...ACCOUNT_DRIVERS].join(", ")}. Add a ` +
           `planFor() branch (suffix/land/drive/open/cells/cfg) before naming it here.`,
       );
     }
@@ -1592,4 +1614,14 @@ async function main() {
   process.exit(0);
 }
 
-main();
+// Run only as a program. Importing this file (modal-oracle.test.mjs does, for
+// hasPlan) must not boot Chrome or call process.exit.
+const invokedAsProgram = (() => {
+  try {
+    return !!process.argv[1] &&
+      fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+if (invokedAsProgram) main();

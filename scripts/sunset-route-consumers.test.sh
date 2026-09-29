@@ -202,8 +202,8 @@ probe "bin/barkpark (wait_server — the boot gate barkpark up dies on)" \
 probe "bin/barkpark (server_answering PRIMARY — stop/status identity probe)" \
   "$(extract_path 'bin/barkpark server_answering' bin/barkpark 's|^  curl -sf "http://\$PHX_HOST:\$PORT\(/[^"]*\)" >/dev/null 2>&1 && return 0$|\1|p')"
 
-probe "run.sh (api_answers — the dev bring-up 'is Phoenix already up?' test)" \
-  "$(extract_path 'run.sh api_answers' run.sh 's|.*bp_curl_code -s -o /dev/null "\$API_URL\(/[^"]*\)".*|\1|p')"
+probe "scripts/dev/run.sh (api_answers — the dev bring-up 'is Phoenix already up?' test)" \
+  "$(extract_path 'scripts/dev/run.sh api_answers' scripts/dev/run.sh 's|.*bp_curl_code -s -o /dev/null "\$API_URL\(/[^"]*\)".*|\1|p')"
 
 probe "scripts/setup-windows.ps1 (Start-Server boot wait)" \
   "$(extract_path 'setup-windows Start-Server' scripts/setup-windows.ps1 's|^      \$r = Invoke-WebRequest "http://localhost:\$Port\(/[^"]*\)" -UseBasicParsing -TimeoutSec 3$|\1|p')"
@@ -286,7 +286,13 @@ ADJUDICATED='bin/barkpark'
 # the lane that owns the file. Shrink-only.
 #   scripts/pds-pull-proof.sh:3109  reboot_target()'s post-reboot health wait,
 #                 inside the pds loan fence (scripts/pds-*).
-API_LEDGER='scripts/pds-pull-proof.sh'
+#   scripts/cp-ops.sh  the box-migrate arm's post-migrate health curl, inside
+#                 the remote ssh body. It was the same probe in cp-ops.yml's
+#                 run: block, which this census does not scan; task-2ea65cb8f1c71a2a
+#                 moved the arms into scripts/ byte-for-byte, so it surfaced
+#                 here unchanged. It prints HEALTH-FAIL, it does not gate an exit.
+API_LEDGER='scripts/pds-pull-proof.sh
+scripts/cp-ops.sh'
 API_LEFT="$(printf '%s\n' "$CENSUS" | grep -vE '^internal/(cli|provisioner)/' | cut -d: -f1 | sort -u | grep -v '^$' || true)"
 ADJ_ALL="$(printf '%s\n%s\n' "$ADJUDICATED" "$API_LEDGER" | grep -v '^$' | sort -u)"
 UNLEDGERED="$(comm -23 <(printf '%s\n' "$API_LEFT") <(printf '%s\n' "$ADJ_ALL"))"

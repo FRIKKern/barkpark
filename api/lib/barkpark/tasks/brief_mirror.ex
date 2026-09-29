@@ -93,7 +93,23 @@ defmodule Barkpark.Tasks.BriefMirror do
   # of those reduced the whole description to "" and so replaced the author's
   # prose with the auto-stub. The asymmetry names the mechanism: `_**_` diverged
   # and its mirror image `*__*` did not, because `**` was reduced FIRST.
+  #
+  # THE PURPOSE BLOCK IS A LOSSY RENDERING OF `description`, BY DESIGN. It drops
+  # every "**", every "__" and every "`" and trims the ends; nothing else. So a
+  # code span loses its backticks (`bp task ready` renders as bp task ready), and
+  # an identifier containing "__" loses those underscores (__init__ renders as
+  # init). This module is what writes the STORED brief — it re-derives on every
+  # write — so this is the text a reader of the row sees. `description` is the
+  # canonical text and is stored byte-verbatim; the brief is a display copy and
+  # must never be used to reconstruct or quote it. Preserving code spans was
+  # declined (task-d0c4a5061e04fdcc): see briefPurposeDroppedSequences in
+  # internal/cli/tasks_brief_mirror_warn.go for the reasons. Pinned by the
+  # "lossy rendering" tests in test/barkpark/tasks/brief_mirror_test.exs.
   @stripped ["**", "__", "`"]
+
+  @doc false
+  # The dropped set, exposed ONLY so the test can hold the statement above to it.
+  def dropped_sequences, do: @stripped
 
   @doc """
   Re-derives a task brief's mirrored blocks from the fields they mirror.

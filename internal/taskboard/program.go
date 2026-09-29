@@ -43,6 +43,11 @@ type Config struct {
 	// / SaveCachedSnapshot both no-op on ""), so a board with no resolvable config
 	// dir degrades to a plain cold start rather than erroring.
 	CacheDir string
+	// SessionKey / SessionDoc ride the board's task closes as
+	// X-Barkpark-Session / X-Barkpark-Session-Doc (apiclient.Config carries the
+	// contract). Resolved by the CLI; empty sends no header.
+	SessionKey string
+	SessionDoc string
 }
 
 // default live-loop timings. Fields on Model so tests can shrink them.
@@ -1991,14 +1996,23 @@ func (m Model) readingSubjectTask() (Task, bool) {
 // the honest "syncing…" state; the fetched board swaps in when it lands, and a
 // failed fetch degrades to ConnOffline. A blank screen is never acceptable
 // (charter decision #9).
+// clientConfig maps the board Config onto the apiclient it acts through,
+// including the session headers its closes carry. Split out so a test can pin
+// the mapping without a terminal.
+func clientConfig(cfg Config) apiclient.Config {
+	return apiclient.Config{
+		BaseURL:    cfg.BaseURL,
+		Token:      cfg.Token,
+		Workspace:  cfg.Workspace,
+		Project:    cfg.Project,
+		Dataset:    cfg.Dataset,
+		SessionKey: cfg.SessionKey,
+		SessionDoc: cfg.SessionDoc,
+	}
+}
+
 func Run(cfg Config) error {
-	client := apiclient.New(apiclient.Config{
-		BaseURL:   cfg.BaseURL,
-		Token:     cfg.Token,
-		Workspace: cfg.Workspace,
-		Project:   cfg.Project,
-		Dataset:   cfg.Dataset,
-	})
+	client := apiclient.New(clientConfig(cfg))
 
 	m := newModel(client, cfg.Token, cfg)
 

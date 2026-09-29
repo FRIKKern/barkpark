@@ -365,8 +365,8 @@ function collectText(node: unknown, out: string[]): void {
  * paper block tree (or a string body / description), collapses whitespace, and
  * caps the length so the client can window a snippet around a match without
  * bloating the payload. */
-/** The ONE prose budget: the cap  applies AND the 
- * bound  asks the API for, so the server stops shipping block
+/** The ONE prose budget: the cap deriveBody applies AND the bodyChars
+ * bound find-search.ts asks the API for, so the server stops shipping block
  * trees this function is about to throw away (a limit=100 browse seed was
  * 14.65 MB for ~100 KB of usable prose). */
 export const BODY_CHARS = 1000;

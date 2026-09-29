@@ -211,6 +211,9 @@ type scriptedRunner struct {
 	calls      []runCall
 	failOnName string
 	failErr    error
+	// onRun, when set, observes each call WHILE it runs — the only moment a
+	// clone workdir is guaranteed to exist (build() removes it on return).
+	onRun func(name string, args []string)
 }
 
 type runCall struct {
@@ -221,6 +224,9 @@ type runCall struct {
 func (r *scriptedRunner) Run(ctx context.Context, w io.Writer, name string, args ...string) error {
 	r.calls = append(r.calls, runCall{name: name, args: append([]string(nil), args...)})
 	fmt.Fprintf(w, "[fake] %s %s\n", name, strings.Join(args, " "))
+	if r.onRun != nil {
+		r.onRun(name, args)
+	}
 	if r.failOnName != "" && name == r.failOnName {
 		return r.failErr
 	}
@@ -584,7 +590,15 @@ func TestRunOnce_GitSource_ShaFirstCloneFeedsNixpacks(t *testing.T) {
 	_, restore := swapInMemoryLogs()
 	defer restore()
 
-	runner := &scriptedRunner{t: t}
+	// The checkout is removed when build() returns, so marker.txt is read
+	// WHILE nixpacks "runs" — the moment nixpacks itself would read it.
+	var marker []byte
+	var markerErr error
+	runner := &scriptedRunner{t: t, onRun: func(name string, args []string) {
+		if len(args) >= 5 && args[2] == "nixpacks" {
+			marker, markerErr = os.ReadFile(filepath.Join(args[4], "marker.txt"))
+		}
+	}}
 	b := &Builder{
 		ControlURL: srv.URL,
 		Token:      "test-token",
@@ -617,9 +631,8 @@ func TestRunOnce_GitSource_ShaFirstCloneFeedsNixpacks(t *testing.T) {
 		t.Fatalf("first call is not a nixpacks build: %v", args)
 	}
 	dir := args[4]
-	marker, err := os.ReadFile(filepath.Join(dir, "marker.txt"))
-	if err != nil {
-		t.Fatalf("checkout dir %s unreadable: %v", dir, err)
+	if markerErr != nil {
+		t.Fatalf("checkout dir %s unreadable during the build: %v", dir, markerErr)
 	}
 	// "v1\n" proves the working tree is AT THE PARENT SHA, not the branch tip —
 	// the fetch really was by sha, not tip-then-hope.
@@ -791,7 +804,8 @@ func TestResolveSource_Ladder(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := b.resolveSource(context.Background(), c.d, con)
+			got, release, err := b.resolveSource(context.Background(), c.d, con)
+			release()
 			if c.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), c.wantErr) {
 					t.Fatalf("resolveSource err = %v, want to contain %q", err, c.wantErr)
@@ -1516,5 +1530,153 @@ func TestConsoleTerminalLineWithoutLatchHasNoMarker(t *testing.T) {
 		if strings.Contains(l, "TRUNCATED") {
 			t.Fatalf("a never-latched console must not claim truncation: %q", got)
 		}
+	}
+}
+
+// --- clone-workdir hygiene (jpf-bl-builder-clone-hygiene) --------------------
+
+// cloneWorkdirs lists the clone-lane temp workdirs under dir.
+func cloneWorkdirs(t *testing.T, dir string) []string {
+	t.Helper()
+	m, err := filepath.Glob(filepath.Join(dir, "bp-builder-git-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// isolateTempDir points os.TempDir() at a fresh per-test directory, so the
+// clone lane's MkdirTemp lands somewhere this test can census exactly.
+func isolateTempDir(t *testing.T) string {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	if got := os.TempDir(); got != tmp {
+		t.Fatalf("precondition: os.TempDir() = %q, want %q", got, tmp)
+	}
+	return tmp
+}
+
+// runGitBuild drives one claimed git deployment through RunOnce and records,
+// from INSIDE the nixpacks call, which clone workdirs existed at that moment —
+// the control that the clone really landed in tmp (else "none left" is vacuous).
+func runGitBuild(t *testing.T, tmp string, src *BuildSource, failOn string) (cp *scriptedCP, during []string) {
+	t.Helper()
+	cp = newScriptedCP(t)
+	cp.claims = []claimReply{gitClaim(src)}
+	srv := httptest.NewServer(cp.handler())
+	t.Cleanup(srv.Close)
+
+	_, restore := swapInMemoryLogs()
+	t.Cleanup(restore)
+
+	runner := &scriptedRunner{t: t, failOnName: failOn, failErr: fmt.Errorf("exit status 1"),
+		onRun: func(name string, args []string) {
+			if len(args) >= 3 && args[2] == "nixpacks" {
+				during = cloneWorkdirs(t, tmp)
+			}
+		}}
+	b := &Builder{
+		ControlURL: srv.URL,
+		Token:      "test-token",
+		WorkerID:   "w-1",
+		LogDir:     "/tmp/p2-logs",
+		HTTPClient: srv.Client(),
+		Runner:     runner,
+	}
+	had, err := b.RunOnce(context.Background())
+	if err != nil || !had {
+		t.Fatalf("RunOnce = (%v, %v), want (true, nil)", had, err)
+	}
+	return cp, during
+}
+
+// Happy path: the clone exists while nixpacks runs, and is GONE once the build
+// hands off to release — a long-lived builder no longer keeps one checkout per
+// claimed git deployment.
+func TestRunOnce_GitSource_Success_RemovesCloneWorkdir(t *testing.T) {
+	url, _, parentSHA := makeBareRepoFixture(t)
+	tmp := isolateTempDir(t)
+
+	cp, during := runGitBuild(t, tmp, &BuildSource{Kind: "git", URL: url, Ref: parentSHA}, "")
+
+	if len(cp.transitions) != 1 || cp.transitions[0]["status"] != "pushing" {
+		t.Fatalf("expected one pushing transition, got %+v", cp.transitions)
+	}
+	if len(during) != 1 {
+		t.Fatalf("control: want exactly 1 clone workdir under %s while nixpacks ran, saw %v", tmp, during)
+	}
+	if left := cloneWorkdirs(t, tmp); len(left) != 0 {
+		t.Fatalf("clone workdir orphaned after a successful build: %v", left)
+	}
+}
+
+// Failure AFTER a good clone (nixpacks exits non-zero): the deployment fails
+// and the checkout is still removed.
+func TestRunOnce_GitSource_BuildFailure_RemovesCloneWorkdir(t *testing.T) {
+	url, _, parentSHA := makeBareRepoFixture(t)
+	tmp := isolateTempDir(t)
+
+	cp, during := runGitBuild(t, tmp, &BuildSource{Kind: "git", URL: url, Ref: parentSHA}, "nice")
+
+	if len(cp.transitions) != 1 || cp.transitions[0]["status"] != "failed" {
+		t.Fatalf("expected one failed transition, got %+v", cp.transitions)
+	}
+	if len(during) != 1 {
+		t.Fatalf("control: want exactly 1 clone workdir under %s while nixpacks ran, saw %v", tmp, during)
+	}
+	if left := cloneWorkdirs(t, tmp); len(left) != 0 {
+		t.Fatalf("clone workdir orphaned after a failed build: %v", left)
+	}
+}
+
+// Failure DURING the clone (unreachable sha — the fetch step fails after
+// MkdirTemp): the partial workdir is removed by cloneGitSource itself.
+func TestRunOnce_GitSource_CloneFailure_RemovesPartialWorkdir(t *testing.T) {
+	url, _, _ := makeBareRepoFixture(t)
+	tmp := isolateTempDir(t)
+
+	cp, _ := runGitBuild(t, tmp, &BuildSource{Kind: "git", URL: url, Ref: "0000000000000000000000000000000000000001"}, "")
+
+	if len(cp.transitions) != 1 || cp.transitions[0]["status"] != "failed" {
+		t.Fatalf("expected one failed transition, got %+v", cp.transitions)
+	}
+	if reason, _ := cp.transitions[0]["failure_reason"].(string); !strings.Contains(reason, "no longer reachable") {
+		t.Fatalf("control: the failure must come from the git fetch step (after MkdirTemp), got %q", reason)
+	}
+	if left := cloneWorkdirs(t, tmp); len(left) != 0 {
+		t.Fatalf("partial clone workdir orphaned after a failed clone: %v", left)
+	}
+}
+
+// The artifact lane's dir is NOT the builder's: a promote/redeploy re-queues
+// the same artifact_url, so the build must leave it exactly where it was.
+func TestRunOnce_Artifact_SourceDirIsNotRemoved(t *testing.T) {
+	art := t.TempDir()
+	if err := os.WriteFile(filepath.Join(art, "package.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cp := newScriptedCP(t)
+	cp.claims = []claimReply{{
+		deployment: Deployment{ID: "d-art12345678", SiteID: "s-art87654321", Status: "building",
+			GitRef: "main", ArtifactURL: "file://" + art},
+		epoch: 1,
+	}}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+	_, restore := swapInMemoryLogs()
+	defer restore()
+
+	b := &Builder{ControlURL: srv.URL, Token: "test-token", WorkerID: "w-1", LogDir: "/tmp/p2-logs",
+		HTTPClient: srv.Client(), Runner: &scriptedRunner{t: t}}
+	if had, err := b.RunOnce(context.Background()); err != nil || !had {
+		t.Fatalf("RunOnce = (%v, %v), want (true, nil)", had, err)
+	}
+	if len(cp.transitions) != 1 || cp.transitions[0]["status"] != "pushing" {
+		t.Fatalf("expected one pushing transition, got %+v", cp.transitions)
+	}
+	if _, err := os.Stat(filepath.Join(art, "package.json")); err != nil {
+		t.Fatalf("artifact dir was touched by the build (it belongs to the upload path): %v", err)
 	}
 }

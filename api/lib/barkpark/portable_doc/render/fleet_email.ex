@@ -81,6 +81,19 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
 
   def tasks_email_html(_, theme), do: empty_email("tasks", "No tasks yet.", theme)
 
+  @doc """
+  The email twin of `Components.task_unavailable_html/1`: a query-carrying
+  task block with no task resolver loaded (task-9c59aa555e1e015e) renders the
+  named "tasks unavailable" note in the same dashed frame as the empty states.
+  """
+  def task_unavailable_email_html(block, theme \\ :evergreen) do
+    empty_email(
+      Components.task_unavailable_kind(block),
+      Components.task_unavailable_note(),
+      theme
+    )
+  end
+
   # ── task-detail ──────────────────────────────────────────────────────────────
 
   @doc "Email-safe task detail: a single-column stack of conditional sections."

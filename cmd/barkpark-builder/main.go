@@ -27,11 +27,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/builder"
+	"github.com/FRIKKern/barkpark/internal/tokensource"
 )
 
 func main() {
@@ -65,17 +65,12 @@ func run(args []string) int {
 		return 2
 	}
 
-	bearer := *token
-	if bearer == "" && *tokenFile != "" {
-		buf, err := os.ReadFile(*tokenFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "barkpark-builder: read --token-file %s: %v\n", *tokenFile, err)
-			return 2
-		}
-		bearer = strings.TrimSpace(string(buf))
-	}
-	if bearer == "" {
-		fmt.Fprintln(os.Stderr, "barkpark-builder: --token or --token-file is required")
+	// The token file is re-read on a 401, not only at start: provisioning
+	// supersede-mints agent.token on claim / stale-reclaim, and a read-once
+	// daemon 401-loops until restarted. --token (literal) behaves as before.
+	tokens, err := tokensource.Resolve(*token, *tokenFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-builder: %v\n", err)
 		return 2
 	}
 
@@ -90,13 +85,13 @@ func run(args []string) int {
 	}
 
 	b := &builder.Builder{
-		ControlURL: *controlURL,
-		Token:      bearer,
-		WorkerID:   worker,
-		Platform:   *platform,
-		CacheDir:   *cacheDir,
-		LogDir:     *logDir,
-		Interval:   *interval,
+		ControlURL:  *controlURL,
+		TokenSource: tokens,
+		WorkerID:    worker,
+		Platform:    *platform,
+		CacheDir:    *cacheDir,
+		LogDir:      *logDir,
+		Interval:    *interval,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

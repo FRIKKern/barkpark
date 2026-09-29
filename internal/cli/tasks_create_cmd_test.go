@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -989,5 +990,107 @@ func TestAutoStubRulingIsRecordedAtTheStubSite(t *testing.T) {
 				"the ruling is the deliverable of task-23c70e97c90809c6 and deleting it "+
 				"re-opens the row", want)
 		}
+	}
+}
+
+// ── task-d0c4a5061e04fdcc: the purpose block is a LOSSY rendering ────────────
+//
+// REPRODUCE. A description carrying a backticked code span and a shell
+// substitution: the composed purpose-copy loses the backticks, while
+// body["description"] — the canonical field, stored verbatim since PR #18404 —
+// is byte-identical (sha256) before and after the composer runs. If a future
+// change "fixes" the disagreement by normalising the description to match the
+// brief, the sha arm reds: that is the wrong direction.
+func TestBriefPurposeIsALossyRenderingOfAVerbatimDescription(t *testing.T) {
+	description := "run `bp task ready` first, then $(echo x)\n__init__ is **not** kept"
+	body := map[string]any{"title": "lossy probe", "description": description}
+	before := sha256.Sum256([]byte(body["description"].(string)))
+
+	ensureTaskPortableBrief(body)
+
+	after := sha256.Sum256([]byte(body["description"].(string)))
+	if before != after {
+		t.Fatalf("ensureTaskPortableBrief rewrote body[\"description\"]: sha256 %x -> %x; the canonical field must stay byte-verbatim (PR #18404)", before, after)
+	}
+	got := purposeCopyText(t, body)
+	want := "run bp task ready first, then $(echo x)\ninit is not kept"
+	if got != want {
+		t.Fatalf("purpose-copy = %q, want the documented lossy rendering %q", got, want)
+	}
+	if strings.Contains(got, "`") {
+		t.Fatalf("purpose-copy kept a backtick: %q — the documented rendering drops them; update the statement beside briefPurposeDroppedSequences if this is intended", got)
+	}
+}
+
+// THE STATEMENT IS THE FIX, so something must red when it goes. The paragraph
+// beside briefPurposeDroppedSequences must exist, must call the rendering
+// lossy, must name `description` as canonical and verbatim, and its first
+// sentence must quote EXACTLY the sequences the code drops — so changing the
+// list without the prose (or the prose without the list) reds here.
+func TestBriefPurposeLossyRenderingIsDocumented(t *testing.T) {
+	src, err := os.ReadFile("tasks_brief_mirror_warn.go")
+	if err != nil {
+		t.Fatalf("read tasks_brief_mirror_warn.go: %v", err)
+	}
+	const marker = "// THE PURPOSE BLOCK IS A LOSSY RENDERING OF `description`, BY DESIGN."
+	text := string(src)
+	start := strings.Index(text, marker)
+	if start < 0 {
+		t.Fatalf("the lossy-rendering statement is gone from tasks_brief_mirror_warn.go (want a line %q); "+
+			"task-d0c4a5061e04fdcc chose to DOCUMENT the lossy derivation, and an undocumented lossy derivation is the defect", marker)
+	}
+	para := text[start:]
+	if end := strings.Index(para, "\n//\n"); end >= 0 {
+		para = para[:end]
+	}
+	flat := strings.Join(strings.Fields(strings.ReplaceAll(para, "//", " ")), " ")
+	for _, want := range []string{
+		"a code span loses its backticks",
+		"`description` is the canonical text and is stored byte-verbatim",
+		"display copy",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("the lossy-rendering statement no longer says %q", want)
+		}
+	}
+	first := flat
+	if i := strings.Index(flat, "nothing else."); i >= 0 {
+		first = flat[:i]
+	} else {
+		t.Fatalf("the statement no longer closes its dropped-set sentence with \"nothing else.\": %q", flat)
+	}
+	var named []string
+	for rest := first; ; {
+		i := strings.Index(rest, "every \"")
+		if i < 0 {
+			break
+		}
+		rest = rest[i+len("every \""):]
+		j := strings.Index(rest, "\"")
+		if j < 0 {
+			break
+		}
+		named = append(named, rest[:j])
+		rest = rest[j+1:]
+	}
+	if !reflect.DeepEqual(named, briefPurposeDroppedSequences) {
+		t.Fatalf("the statement names dropped sequences %q but briefPurposeDroppedSequences is %q — the prose and the code disagree", named, briefPurposeDroppedSequences)
+	}
+	for _, seq := range briefPurposeDroppedSequences {
+		if got := briefPurposeStripOnePass("a" + seq + "b"); got != "ab" {
+			t.Errorf("briefPurposeStripOnePass(%q) = %q; the documented set says %q is dropped", "a"+seq+"b", got, seq)
+		}
+	}
+	for _, kept := range []string{"*", "_", "~", "#", "[x](y)", "$(echo x)", "'", "\""} {
+		if got := briefPurposeStripOnePass("a" + kept + "b"); got != "a"+kept+"b" {
+			t.Errorf("briefPurposeStripOnePass dropped %q, which the statement says is kept (\"nothing else\"): got %q", kept, got)
+		}
+	}
+	cmd, err := os.ReadFile("tasks_create_cmd.go")
+	if err != nil {
+		t.Fatalf("read tasks_create_cmd.go: %v", err)
+	}
+	if !strings.Contains(string(cmd), "LOSSY, ON PURPOSE") {
+		t.Errorf("the composer call site (ensureTaskPortableBrief) no longer carries its LOSSY, ON PURPOSE note")
 	}
 }

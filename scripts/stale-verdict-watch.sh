@@ -173,10 +173,16 @@
 #                 opposite of 1's: 1 says "go fix a pull request", 8 says
 #                 "delete a line from scripts/stale-verdict-watch.baseline".
 #                 A shared code would have made the ratchet's own maintenance
-#                 indistinguishable from the thing it watches. See the yml note
-#                 at the bottom of this header: until the workflow grows an
-#                 arm for 8 it lands in the `*)` catch-all, which still FAILS
-#                 the run — safe, and less specific than it should be.
+#                 indistinguishable from the thing it watches.
+#            10 = AGED CONFLICT: no novel stale green, and at least one
+#                 CONFLICTING, non-draft pull request that no pin covers has
+#                 gone unrebased past the --max-conflict-age-hours bound
+#                 (default 6), OR its age could not be read. See THE AGING
+#                 BOUND below for exactly what the age measures. Its own code
+#                 because its claim is not 1's: 1 says "this PR asserts a green
+#                 main has moved past", 10 says "this PR has sat CONFLICTING too
+#                 long", which is true of a PR with no green at all. Same remedy
+#                 (rebase or close it), different fact.
 #
 # USAGE
 #   scripts/stale-verdict-watch.sh
@@ -202,14 +208,47 @@
 # head-blind> (honoured only inside a selftest child) breaks one arm of the
 # partition, and `--selftest` must then exit non-zero. test.sh proves that.
 #
-# THE ONE THING THIS FILE CANNOT DO ALONE
-#   .github/workflows/stale-verdict-watch.yml is owned elsewhere. Two hunks
-#   there would make this better and neither is required for correctness:
-#   (1) a `8)` arm in the rc case, so BASELINE DRIFT gets its own sentence
-#       instead of the "not a verdict it defines" catch-all;
-#   (2) `scripts/stale-verdict-watch.baseline` added to the `pull_request:`
-#       paths filter, so a PR that edits ONLY the baseline still runs the
-#       harness that governs it.
+# THE AGING BOUND (task-87f845f92d7884c8)
+#
+# The criterion this replaces asked for an EMPTY MOMENT ("no CONFLICTING open
+# PR right now"), which no repository can hold: lanes refill the population by
+# the hour. A bound on AGE is a rule instead of a snapshot. Every CONFLICTING
+# row is printed with its age; a non-draft row past --max-conflict-age-hours
+# (default 6) that no pin covers FAILS the run (rc 10); a younger one is
+# printed and does not fail.
+#
+# WHAT THE AGE ACTUALLY MEASURES, because GitHub does not expose the moment a
+# pull request BECAME conflicting — there is no event and no field for it. What
+# IS measurable is when the CURRENT HEAD came to exist, and a head cannot start
+# conflicting before it exists. So:
+#
+#   anchor = the EARLIER of  (a) the head commit's committedDate, and
+#                            (b) the earliest completedAt among the head's own
+#                                status-rollup entries (server time: a check
+#                                cannot finish on a head GitHub has not got)
+#   age    = now - anchor
+#
+# That is an UPPER BOUND on how long this head has been conflicting: a red can
+# overstate (a head pushed clean two days ago and conflicted by a merge an hour
+# ago reads as two days), a green never understates. (b) is there to cap a
+# committer clock set in the future, which (a) alone would believe.
+# `updatedAt` is deliberately NOT used: a comment, a label or a bot edit resets
+# it, which would make a PR younger by being talked about — the fail-OPEN
+# direction.
+#
+# AN UNREADABLE AGE FAILS CLOSED, never as age 0: no anchor at all, an anchor
+# that does not parse, or one more than 5 minutes in the future marks the row
+# AGED with age UNREADABLE, and it reds exactly as an over-age row does.
+#
+# DRAFTS are printed with their age and not failed, for the reason the draft
+# block above gives. A PIN covers BOTH arms: a pinned (number, head) row is
+# KNOWN whether it is stale, aged or both, and a pinned row heals (rc 8) only
+# when NEITHER arm reports it — a pinned PR that is merely no longer stale but
+# still sitting CONFLICTING past the bound has not healed.
+#
+# THE TRIGGER IS THE CLOCK, NOT AN EVENT: a PR ages while nothing happens, so
+# the */30 schedule leg of .github/workflows/stale-verdict-watch.yml is what
+# enforces this bound; the push-to-main leg only adds a read when main moves.
 
 set -uo pipefail
 
@@ -298,6 +337,10 @@ PAGE_SLEEPS="${SVW_PAGE_SLEEP:-3 8 20 0}"
 # replaces could see at all — and exhausting it is SAID, never silent.
 MAX_PAGES="${SVW_MAX_PAGES:-40}"
 MIN_COMMITS=1
+# THE AGING BOUND, in whole hours (see the header). SVW_NOW pins the clock for
+# the hermetic harness; a live run reads the wall clock.
+MAX_CONFLICT_AGE_H="${SVW_MAX_CONFLICT_AGE_H:-6}"
+NOW_ISO="${SVW_NOW:-}"
 # The TREND state (dr-w29): a line-oriented file the workflow persists between
 # runs. Two verbs only. `START <iso>` is appended the moment a run knows its
 # arguments — BEFORE any network call — so a run that is cancelled mid-read, or
@@ -541,7 +584,7 @@ query($owner:String!,$name:String!,$number:Int!){
     pullRequest(number:$number){
       number
       mergeStateStatus
-      commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){ nodes{
+      commits(last:1){ nodes{ commit{ committedDate statusCheckRollup{ contexts(first:100){ nodes{
         __typename
         ... on CheckRun { name conclusion completedAt status }
         ... on StatusContext { context state createdAt }
@@ -690,7 +733,7 @@ fetch_pr_pages() { # <repo> -> JSON array | error body
 #      look. An unreadable population must be distinguishable from an empty one
 #      AT THE POINT OF THE READ, not three functions later.
 enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
-  local repo="$1" rows="$2" nums cnt n out roll map mss st owner name
+  local repo="$1" rows="$2" nums cnt n out roll map mss st owner name cd cds
   nums="$(jq -r '[ .[] | select(.mergeable == "CONFLICTING") | .number ] | .[]' <<<"$rows" 2>/dev/null)" || {
     red "  the population could not be scanned for CONFLICTING rows"; return 2; }
   cnt="$(printf '%s\n' "$nums" | grep -c . || true)"
@@ -706,7 +749,7 @@ enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
   fi
 
   owner="${repo%%/*}"; name="${repo##*/}"
-  map='{}'; mss='{}'
+  map='{}'; mss='{}'; cds='{}'
   for n in $nums; do
     if [ -n "$ROLLUP_FIXTURE" ]; then
       out="$(jq -c --argjson n "$n" '.[$n | tostring] // empty' < "$ROLLUP_FIXTURE" 2>/dev/null)"
@@ -724,6 +767,11 @@ enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
       # a miss here is never a failed read.
       st="$(printf '%s' "$out" | jq -r '.data.repository.pullRequest.mergeStateStatus // empty' 2>/dev/null)"
       [ -z "${st:-}" ] || mss="$(jq -c --argjson n "$n" --arg s "$st" '. + {($n|tostring): $s}' <<<"$mss" 2>/dev/null || printf '%s' "$mss")"
+      # The head's committedDate is one half of the AGE anchor. A miss here is
+      # NOT defaulted: the row keeps no headCommittedDate and the verdict falls
+      # back to the rollup's own server times, or to UNREADABLE (fail closed).
+      cd="$(printf '%s' "$out" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.committedDate // empty' 2>/dev/null)"
+      [ -z "${cd:-}" ] || cds="$(jq -c --argjson n "$n" --arg c "$cd" '. + {($n|tostring): $c}' <<<"$cds" 2>/dev/null || printf '%s' "$cds")"
     fi
     map="$(jq -c --argjson n "$n" --argjson r "$roll" '. + {($n | tostring): $r}' <<<"$map" 2>/dev/null)" || {
       red "  the rollup for #$n could not be added to the map"; return 2; }
@@ -732,10 +780,11 @@ enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
   # EVERY conflicting row must come back carrying its rollup. A row that asked
   # for one and did not get one is a failed read, and it fails here rather than
   # being handed to the verdict as an empty list.
-  out="$(jq -c --argjson m "$map" --argjson s "$mss" '
+  out="$(jq -c --argjson m "$map" --argjson s "$mss" --argjson c "$cds" '
       [ .[] | if .mergeable == "CONFLICTING"
               then . + { statusCheckRollup: ($m[(.number|tostring)] // null),
-                         mergeStateStatus: ($s[(.number|tostring)] // .mergeStateStatus) }
+                         mergeStateStatus: ($s[(.number|tostring)] // .mergeStateStatus),
+                         headCommittedDate: ($c[(.number|tostring)] // .headCommittedDate) }
               else . end ]' <<<"$rows" 2>/dev/null)" || {
     red "  the rollups could not be merged into the population"; return 2; }
   printf '%s' "$out" | jq -e 'all(.[]; .statusCheckRollup != null)' >/dev/null 2>&1 || {
@@ -925,12 +974,27 @@ def commits_since($t):
   if ($t // "") == "" then null
   else [$commits[] | select(. > $t)] | length
   end;
+# THE AGE ANCHOR (see THE AGING BOUND in the header). null = UNREADABLE, and an
+# unreadable anchor is never an age of 0: the caller marks the row AGED.
+def ts($x): ($x | try fromdateiso8601 catch null);
+def age_anchor:
+  ( [ (.headCommittedDate // empty) ] ) as $cd
+  | ( [ .statusCheckRollup[]? | (.completedAt // "")
+        | select(. != "" and (startswith("0001-") | not)) ] ) as $ca
+  | ($cd + $ca) as $raw
+  | [ $raw[] | {iso: ., t: ts(.)} ] as $parsed
+  | if ($parsed | length) == 0 then null
+    elif any($parsed[]; .t == null) then null
+    else ($parsed | min_by(.t)) as $m
+         | if $m.t > ($now + 300) then null else $m end
+    end;
 
 [ .[] |
   . as $pr
   | {
       number, mergeable, mergeStateStatus, headRefOid, updatedAt,
       isDraft: (.isDraft // false),
+      anchor: age_anchor,
       ctx: [ $req[] as $n
              | { name: $n,
                  hits: [ $pr.statusCheckRollup[]?
@@ -954,6 +1018,8 @@ def commits_since($t):
                        | select(.since != null and .since >= $min)
                        | .capped = (.since >= $window) ]
   | .missing       = [ $req[] as $n | select([ .ctx[] | select(.name == $n and (.hits | length) > 0) ] | length == 0) | $n ]
+  | .age_s         = (if .anchor == null then null else ([$now - .anchor.t, 0] | max) end)
+  | .aged          = (.mergeable == "CONFLICTING" and (.age_s == null or .age_s > $maxage))
 ]
 | . as $rows
 | { required: $req,
@@ -988,6 +1054,14 @@ def commits_since($t):
 | .stale               = [ .conflicting[] | select((.stale_greens | length) > 0) ]
 | .reported            = [ .stale[] | select(.isDraft != true) ]
 | .reported_draft      = [ .stale[] | select(.isDraft == true) ]
+# THE AGING BOUND. `.aged` is past the bound OR unreadable; `.young` is under
+# it. Drafts are split out exactly as the stale arm splits them.
+| .max_age_s           = $maxage
+| .now_iso             = $now_iso
+| .aged                = [ .conflicting[] | select(.aged and .isDraft != true) ]
+| .aged_draft          = [ .conflicting[] | select(.aged and .isDraft == true) ]
+| .young               = [ .conflicting[] | select(.aged | not) ]
+| .conflicting_draft_n = [ .conflicting[] | select(.isDraft == true) | .number ]
 '
 
 # ── THE PIN ──────────────────────────────────────────────────────────────────
@@ -1061,8 +1135,15 @@ RATCHET_JQ='
   # has not healed. Without this it would vanish from $R and red rc 8 BASELINE
   # DRIFT, telling a human to delete a line the PR would re-earn the moment it
   # is marked ready. Drafting is reversible; the pin outlives it.
-  | ($v.reported_draft | map(.number))               as $DRAFTN
+  | (($v.reported_draft | map(.number)) + ($v.conflicting_draft_n // [])) as $DRAFTN
   | ($v.all_numbers)                                 as $SEEN
+  # THE AGED ARM, pinned by the SAME (number, head) key. A pin is one debt
+  # about one tree, whichever arm is reporting it.
+  | (($v.aged // []) | map({number, head: .headRefOid})) as $A
+  | [ $A[] | . as $r | select([ $base[] | . as $b | select($b.number == $r.number and ($r.head | startswith($b.head))) ] | length > 0) ] as $aged_known
+  | [ $A[] | . as $r | select([ $base[] | . as $b | select($b.number == $r.number and ($r.head | startswith($b.head))) ] | length == 0) ] as $aged_novel
+  # Healed asks whether ANY arm still reports the pinned number.
+  | ($R + $A) as $RALL
   | [ $R[] | . as $r | select([ $base[] | . as $b | select($b.number == $r.number and ($r.head | startswith($b.head))) ] | length > 0) ] as $known
   | [ $R[] | . as $r | select([ $base[] | . as $b | select($b.number == $r.number and ($r.head | startswith($b.head))) ] | length == 0) ] as $novel
   # A pinned number that IS reported at a different head: covered by no entry,
@@ -1072,7 +1153,7 @@ RATCHET_JQ='
       | select([ $base[] | select(.number == $r.number) ] | length > 0)
       | { number: $r.number, head: $r.head,
           pinned_head: ([ $base[] | select(.number == $r.number) | .head ] | first) } ] as $head_moved
-  | [ $base[] | . as $b | select([ $R[] | select(.number == $b.number) ] | length == 0) ] as $unreported
+  | [ $base[] | . as $b | select([ $RALL[] | select(.number == $b.number) ] | length == 0) ] as $unreported
   | [ $unreported[] | . as $b | select(($UNK | index($b.number)) != null) ] as $pinned_unread
   | [ $unreported[] | . as $b | select(($DRAFTN | index($b.number)) != null) ] as $pinned_draft
   | [ $unreported[] | . as $b
@@ -1086,6 +1167,8 @@ RATCHET_JQ='
       novel:         $novel,
       head_moved:    $head_moved,
       healed:        $healed,
+      aged_known:    $aged_known,
+      aged_novel:    $aged_novel,
       pinned_draft:  $pinned_draft,
       pinned_unread: $pinned_unread } }
 '
@@ -1137,7 +1220,23 @@ render() { # reads the verdict JSON on stdin
     (.ratchet.head_moved | sort_by(.number)[] |
       "  ^ #\(.number) is PINNED at head \(.pinned_head) and is reported at head \(.head[0:9]) — a push landed, the verdict is about a different tree, and the old line does not cover it. Re-pin it (with a reason) or fix the PR."),
     (.ratchet.healed | sort_by(.number)[] |
-      "  ^ #\(.number) pinned \(.pinned_on) is no longer reported (\(if .gone then "the pull request is closed or merged — it is not in the open population at all" else "still open, and no longer asserting a stale green" end)). DELETE its line from the baseline: \(.number) \(.head) \(.pinned_on) …"),
+      "  ^ #\(.number) pinned \(.pinned_on) is no longer reported (\(if .gone then "the pull request is closed or merged — it is not in the open population at all" else "still open, and no longer asserting a stale green, nor CONFLICTING past the age bound" end)). DELETE its line from the baseline: \(.number) \(.head) \(.pinned_on) …"),
+    "",
+    "CONFLICT AGE, against a \(.max_age_s / 3600 | floor)h bound (age = now \(.now_iso) minus the EARLIER of the head commit date and its first completed check; an UPPER bound on how long THIS head has been conflicting — GitHub exposes no \"became conflicting\" time):",
+    "  AGED   \(.ratchet.aged_novel | length)" +
+      (if (.ratchet.aged_novel | length) > 0 then " — \(.ratchet.aged_novel | map(.number) | sort | map("#\(.)") | join(", "))  ← this run FAILS on these" else " — no unpinned CONFLICTING pull request is past the bound" end),
+    "  PINNED \(.ratchet.aged_known | length)" +
+      (if (.ratchet.aged_known | length) > 0 then " — \(.ratchet.aged_known | map(.number) | sort | map("#\(.)") | join(", "))  (past the bound, pinned with a reason, NOT failed on)" else " — no pinned row is past the bound" end),
+    "  YOUNG  \(.young | length)" +
+      (if (.young | length) > 0 then " — \(.young | map(.number) | sort | map("#\(.)") | join(", "))  (CONFLICTING, under the bound: reported, NOT failed on)" else " — no CONFLICTING pull request is under the bound" end),
+    ((.aged + .aged_draft + .young) | sort_by(.number)[] | . as $row |
+      "  ~ #\(.number)  head \(.headRefOid[0:9])  " +
+      (if .age_s == null then "age UNREADABLE — no parseable, non-future anchor, so this row FAILS CLOSED as aged"
+       else "age \(.age_s / 3600 | floor)h\(.age_s % 3600 / 60 | floor)m since \(.anchor.iso)" end) +
+      (if .isDraft == true then "  [DRAFT — printed, NOT failed on]"
+       elif (.aged | not) then "  [YOUNG — under the bound]"
+       elif ([$v.ratchet.aged_known[] | select(.number == $row.number)] | length) > 0 then "  [AGED, PINNED]"
+       else "  [AGED — FAILS]" end)),
     "",
     # THREE WAYS TO SAY "NOT RED", AND THEY ARE NOT THE SAME CLAIM — plus the
     # ratchet adds two more, which come FIRST because they are the only arms that fail.
@@ -1147,8 +1246,12 @@ render() { # reads the verdict JSON on stdin
      then "RED — \(.ratchet.novel | length) NOVEL CONFLICTING pull request(s) assert a green required verdict main has moved past, and no baseline entry covers them. A conflicted PR re-dispatches NOTHING: this cannot clear itself. Rebase it, close it, or pin it with a written reason."
      elif .blind
      then "BLIND — classified 0 of \(.open) open pull request(s): the mergeability of every row was still UNKNOWN after re-polling, so this run classified NOTHING. This is NOT a green — a run that could not look cannot report the population clean."
+     elif (.ratchet.aged_novel | length) > 0
+     then "AGED — \(.ratchet.aged_novel | length) CONFLICTING pull request(s) no pin covers have sat unrebased past the \(.max_age_s / 3600 | floor)h bound (or their age could not be read, which fails closed). A conflicted PR re-dispatches nothing and cannot age backwards: rebase it, close it, or pin it with a written reason."
      elif (.ratchet.healed | length) > 0
      then "BASELINE DRIFT — no novel row, and \(.ratchet.healed | length) pinned entr\(if (.ratchet.healed|length) == 1 then "y is" else "ies are" end) no longer reported. The debt shrank and the committed file did not. This run fails until the line(s) named above are deleted — a pin may only get smaller on its own."
+     elif (.reported | length) == 0 and (.ratchet.aged_known | length) > 0
+     then "WARN — \(.ratchet.aged_known | length) CONFLICTING pull request(s) are past the age bound, and every one of them is PINNED in scripts/stale-verdict-watch.baseline with a reason. Standing debt, printed above with its age; it fails the moment a NEW one crosses the bound or a pinned one heals."
      elif (.reported | length) > 0
      then "WARN — \(.reported | length) CONFLICTING pull request(s) assert a green required verdict main has moved past, and every one of them is PINNED in scripts/stale-verdict-watch.baseline with a reason. This is standing debt, stated in full below and trended; it is not a new fact, so this run does not fail on it. It fails the moment a NEW one arrives or a pinned one heals."
      elif (.unknown | length) > 0
@@ -1224,10 +1327,24 @@ trend_report() { # <reported> [novel] — how the count moved since the last REA
 
 # The DELTA, restated where a human looks first. $GITHUB_STEP_SUMMARY is set by
 # the runner for every step, so this needs no change to the workflow file.
-step_summary() { # <verdict-json> <reported> <novel> <known> <healed>
-  local dest="${GITHUB_STEP_SUMMARY:-}"
+step_summary() { # <verdict-json> <reported> <novel> <known> <healed> <rc>
+  local dest="${GITHUB_STEP_SUMMARY:-}" word
   [ -n "$dest" ] || return 0
+  # THE HEADLINE NAMES THE RC. A green check run is rc 0 OR rc 2, and before
+  # this line the only place that said which was the log. Every arm that is
+  # not 0 is printed alongside, so a HEALED pin under a louder NOVEL red (rc 1
+  # wins the exit code) is still on the page a human opens first.
+  case "${6:-}" in
+    0) word="CLEAN" ;; 1) word="NOVEL STALE GREEN" ;; 2) word="PARTIAL — some rows unread; a green, and NOT rc 0" ;;
+    5) word="BLIND" ;; 8) word="BASELINE DRIFT" ;; 10) word="AGED CONFLICT" ;; *) word="rc ${6:-?}" ;;
+  esac
   {
+    echo "## stale-verdict-watch rc=${6:-?} — $word"
+    echo
+    printf 'novel %s · aged %s · healed %s · unknown %s · classified %s of %s open\n' \
+      "$3" "$(jq '.ratchet.aged_novel | length' <<<"$1")" "$5" "$(jq '.unknown | length' <<<"$1")" \
+      "$(jq '.classified' <<<"$1")" "$(jq '.open' <<<"$1")"
+    echo
     echo "### stale-verdict-watch — delta against the pinned baseline"
     echo
     echo "| | count | pull requests |"
@@ -1236,6 +1353,10 @@ step_summary() { # <verdict-json> <reported> <novel> <known> <healed>
     printf '| KNOWN (pinned standing debt) | %s | %s |\n' "$4" "$(jq -r '.ratchet.known | if length == 0 then "—" else map("#\(.number)") | join(", ") end' <<<"$1")"
     printf '| **HEALED** (fails this run — shrink the baseline) | %s | %s |\n' "$5" "$(jq -r '.ratchet.healed | if length == 0 then "—" else map("#\(.number)") | join(", ") end' <<<"$1")"
     printf '| UNREAD pinned rows (not classified) | %s | %s |\n' "$(jq '.ratchet.pinned_unread | length' <<<"$1")" "$(jq -r '.ratchet.pinned_unread | if length == 0 then "—" else map("#\(.number)") | join(", ") end' <<<"$1")"
+    printf '| **AGED** past the %sh bound (fails this run) | %s | %s |\n' "$(jq '.max_age_s / 3600 | floor' <<<"$1")" "$(jq '.ratchet.aged_novel | length' <<<"$1")" \
+      "$(jq -r '[.aged[] | . as $r | select([$ratchet_known[] | select(.number == $r.number)] | length == 0) | "#\(.number) \(if .age_s == null then "age UNREADABLE" else "\(.age_s / 3600 | floor)h" end)"] | if length == 0 then "—" else join(", ") end' --argjson ratchet_known "$(jq -c '.ratchet.aged_known' <<<"$1")" <<<"$1")"
+    printf '| YOUNG — CONFLICTING, under the bound (reported, not failed) | %s | %s |\n' "$(jq '.young | length' <<<"$1")" \
+      "$(jq -r '.young | if length == 0 then "—" else map("#\(.number) \(.age_s / 3600 | floor)h") | join(", ") end' <<<"$1")"
     echo
     printf '%s pinned entr%s · %s reported · classified %s of %s open\n' \
       "$(jq '.ratchet.pinned' <<<"$1")" "$( [ "$(jq '.ratchet.pinned' <<<"$1")" = "1" ] && echo y || echo ies )" \
@@ -1269,6 +1390,11 @@ selftest() {
   for i in 1 2 3 4 5 6 7 8 9; do echo "2026-08-0${i}T00:00:00Z" >> "$d/commits.txt"; done
   echo "2026-08-10T00:00:00Z" >> "$d/commits.txt"
   local OLDT="2026-07-01T00:00:00Z" HEAD_A="aaaaaaaa11112222333344445555666677778888"
+  # A PINNED CLOCK. The aging bound reads "now"; a selftest that read the wall
+  # clock would change its verdicts as the calendar moved. One hour after the
+  # newest fixture time, so a row whose checks finished at 08-11 is YOUNG and
+  # one whose checks finished at 07-01 is AGED.
+  local ST_NOW="2026-08-11T01:00:00Z"
 
   # Every required context SUCCESS at $OLDT → a full stale green.
   local rollup
@@ -1286,7 +1412,7 @@ selftest() {
   # is a subshell, and every variable the child run set dies with it.
   run_child() { # <fixture> <baseline> -> rc; output in $d/out.txt
     bash "$0" --fixture "$1" --commits "$d/commits.txt" --spec "$SPEC" \
-      --repo FRIKKern/barkpark --baseline "$2" > "$d/out.txt" 2>&1
+      --repo FRIKKern/barkpark --baseline "$2" --now "$ST_NOW" > "$d/out.txt" 2>&1
   }
 
   echo "── stale-verdict-watch --selftest ──"
@@ -1404,7 +1530,7 @@ selftest() {
   # only for CONFLICTING rows. These arms hold the three ways that can go wrong.
   run_child_roll() { # <fixture> <baseline> <rollup-fixture> [extra…] -> rc; output in $d/out.txt
     bash "$0" --fixture "$1" --commits "$d/commits.txt" --spec "$SPEC" \
-      --repo FRIKKern/barkpark --baseline "$2" --rollup-fixture "$3" \
+      --repo FRIKKern/barkpark --baseline "$2" --rollup-fixture "$3" --now "$ST_NOW" \
       "${@:4}" > "$d/out.txt" 2>&1
   }
 
@@ -1466,7 +1592,7 @@ selftest() {
   # 5 — because rc 5 is computed from the shell's `open`/`classified`, and
   # `.blind` is only carried for the report. The mutation survived and told me
   # the predicate lives in TWO places; this one targets the live half.
-  sed 's/then return 5; fi/then :; fi/' "$0" > "$d/mut-blind.sh"
+  sed 's/then final_rc=5$/then :/' "$0" > "$d/mut-blind.sh"
   if diff -q "$0" "$d/mut-blind.sh" >/dev/null 2>&1; then
     st_bad "(s4) MUTATION did not apply — the blind clause moved, so this arm proves nothing"
   else
@@ -1527,6 +1653,10 @@ main() {
         [ "$ATTEMPTS" -ge 1 ] || { red "--attempts must be at least 1: 0 polls is not a read, and a run that never polls cannot report anything about the pull requests."; exit 3; }
         shift 2 ;;
       --min-commits) MIN_COMMITS="${2:-}"; shift 2 ;;
+      --max-conflict-age-hours)
+        MAX_CONFLICT_AGE_H="${2:-}"; shift 2 || true
+        ;;
+      --now) NOW_ISO="${2:-}"; shift 2 || true ;;
       --state-file) STATE_SVW="${2:-}"; shift 2 ;;
       --baseline) BASELINE="${2:-}"; BASELINE_EXPLICIT=1; shift 2 ;;
       --selftest) shift; selftest; return $? ;;
@@ -1535,7 +1665,19 @@ main() {
     esac
   done
 
-  local repo req prs commits rc window verdict
+  local repo req prs commits rc window verdict now_s
+  # THE AGING BOUND's two inputs are validated before anything is read: a bound
+  # or a clock this run cannot interpret is a configuration fault, never a
+  # silent "nothing is old".
+  case "$MAX_CONFLICT_AGE_H" in
+    ''|*[!0-9]*) red "--max-conflict-age-hours must be a whole number of hours, got: '${MAX_CONFLICT_AGE_H}'"; exit 3 ;;
+  esac
+  [ "$MAX_CONFLICT_AGE_H" -ge 1 ] || { red "--max-conflict-age-hours must be at least 1: a 0-hour bound reds every CONFLICTING row the instant it appears, which is a snapshot, not a bound."; exit 3; }
+  [ -n "$NOW_ISO" ] || NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  now_s="$(jq -n --arg t "$NOW_ISO" '$t | fromdateiso8601' 2>/dev/null)" || now_s=""
+  case "$now_s" in
+    ''|*[!0-9]*) red "the clock this run was given ('$NOW_ISO') is not an ISO-8601 UTC instant — no age can be computed against it"; exit 3 ;;
+  esac
   repo="${REPO_OVERRIDE:-$(spec_repo)}"
   req="$(required_contexts)" || { red "cannot read the required-check spec at $SPEC — this verdict has no set to check against"; exit 3; }
   [ -n "$req" ] && [ "$req" != "null" ] || { red "the spec at $SPEC lists no required contexts"; exit 3; }
@@ -1625,6 +1767,9 @@ main() {
       --argjson req "$req" \
       --argjson min "$MIN_COMMITS" \
       --argjson window "$window" \
+      --argjson now "$now_s" \
+      --arg now_iso "$NOW_ISO" \
+      --argjson maxage "$((MAX_CONFLICT_AGE_H * 3600))" \
       "\$prs_in[0] as \$prs | \$commits_in[0] as \$commits | \$prs | $VERDICT_JQ")" || {
     red "COMPUTE FAULT — the pull-request payload was READ ($(wc -c < "$prs_file" | tr -d ' ') bytes) and the verdict could not be computed from it. This is not a credential fault: nothing here says the token cannot read."
     return 4
@@ -1640,7 +1785,9 @@ main() {
   # SVW_MUTATE in a real environment cannot reach the partition.
   if [ "$SELFTEST_CHILD" = "1" ]; then
     case "${SVW_MUTATE:-}" in
-      pin-any)     ratchet_jq="$(printf '%s' "$ratchet_jq" | sed 's/] | length == 0) ] as \$novel/] | length >= 0 and false) ] as $novel/')" ;;
+      # pin-any breaks BOTH arms' novel partition: "a pin covers anything" is
+      # one defect whichever arm the uncovered row arrives through.
+      pin-any)     ratchet_jq="$(printf '%s' "$ratchet_jq" | sed 's/] | length == 0) ] as \$novel/] | length >= 0 and false) ] as $novel/; s/] | length == 0) ] as \$aged_novel/] | length >= 0 and false) ] as $aged_novel/')" ;;
       never-healed) ratchet_jq="$(printf '%s' "$ratchet_jq" | sed 's/| . + { gone: ((\$SEEN | index(\$b.number)) == null) } ] as \$healed/| select(false) ] as $healed/')" ;;
       head-blind)  ratchet_jq="$(printf '%s' "$ratchet_jq" | sed 's/select(\$b.number == \$r.number and (\$r.head | startswith(\$b.head)))/select($b.number == $r.number)/g')" ;;
       '') ;;
@@ -1662,7 +1809,7 @@ main() {
 
   printf '%s' "$verdict" | render
 
-  local reported unknown open classified novel_n healed_n known_n
+  local reported unknown open classified novel_n healed_n known_n aged_n final_rc
   reported="$(jq '.reported | length' <<<"$verdict")"
   unknown="$(jq '.unknown | length' <<<"$verdict")"
   open="$(jq '.open' <<<"$verdict")"
@@ -1670,6 +1817,7 @@ main() {
   novel_n="$(jq '.ratchet.novel | length' <<<"$verdict")"
   known_n="$(jq '.ratchet.known | length' <<<"$verdict")"
   healed_n="$(jq '.ratchet.healed | length' <<<"$verdict")"
+  aged_n="$(jq '.ratchet.aged_novel | length' <<<"$verdict")"
   # The trend is computed BEFORE this run writes its own READ line, so the
   # baseline is always a PREVIOUS read — and only a run that actually read
   # (classified > 0, or a legitimately empty population) becomes one. A BLIND
@@ -1679,24 +1827,30 @@ main() {
   if [ "${open:-0}" -eq 0 ] || [ "${classified:-0}" -gt 0 ]; then # MUT:G-READLINE
     state_read "$reported" "$classified" "$open" "$novel_n"
   fi
-  step_summary "$verdict" "$reported" "$novel_n" "$known_n" "$healed_n"
 
   # THE ORDER MIRRORS render()'s VERDICT ARMS, and it is not arbitrary:
   #   novel first — the only arm that says a NEW pull request needs a human;
   #   blind next  — a run that classified nothing must not issue a ratchet
   #                 verdict about a population it could not read;
+  #   aged next   — a named pull request has sat CONFLICTING past the bound;
   #   healed next — a firm, actionable fact about a committed file;
   #   unknown     — partial coverage;
   #   0           — including a non-empty KNOWN set, which is the whole point.
-  if [ "${novel_n:-0}" -gt 0 ]; then return 1; fi
-  # BEFORE the unknown check: a run that classified nothing is a stronger
-  # statement than "some rows went unread", and 2 is mapped to success by the
-  # workflow. An empty population is not blind — it is a read that found no
-  # pull requests, which is a legitimate 0.
-  if [ "${open:-0}" -gt 0 ] && [ "${classified:-0}" -eq 0 ]; then return 5; fi
-  if [ "${healed_n:-0}" -gt 0 ]; then return 8; fi
-  if [ "$unknown" -gt 0 ]; then return 2; fi
-  return 0
+  # BLIND sits BEFORE the unknown check: a run that classified nothing is a
+  # stronger statement than "some rows went unread", and 2 is mapped to
+  # success by the workflow. An empty population is not blind — it is a read
+  # that found no pull requests, which is a legitimate 0.
+  # The rc is computed ONCE and then handed to the step summary, so the
+  # headline a human reads first names the SAME number the run exits with.
+  if [ "${novel_n:-0}" -gt 0 ]; then final_rc=1
+  elif [ "${open:-0}" -gt 0 ] && [ "${classified:-0}" -eq 0 ]; then final_rc=5
+  elif [ "${aged_n:-0}" -gt 0 ]; then final_rc=10
+  elif [ "${healed_n:-0}" -gt 0 ]; then final_rc=8
+  elif [ "$unknown" -gt 0 ]; then final_rc=2
+  else final_rc=0
+  fi
+  step_summary "$verdict" "$reported" "$novel_n" "$known_n" "$healed_n" "$final_rc"
+  return "$final_rc"
 }
 
 main "$@"

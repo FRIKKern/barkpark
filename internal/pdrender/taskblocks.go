@@ -1223,6 +1223,36 @@ func distributeSegments(total, n int) []int {
 // unresolvedPlaceholder is the honest degrade line for a task block whose
 // resolver key is absent (only a `query` reached the renderer, or the block is
 // empty): a dim `[<label> — unresolved]`.
+// taskUnavailableTypes are the block types the server marks "unavailable": true
+// when no task resolver is loaded (the Tasks plugin is off) — the Elixir
+// TaskResolver.unavailable_types/0 set: the snapshot types, task-detail, and the
+// aggregate data-viz types (task-6b5fa5205732bd0f, reads the key from #20164).
+var taskUnavailableTypes = map[string]bool{
+	"tasks": true, "task-list": true, "task-board": true, "roadmap": true,
+	"task-detail": true, "chart": true, "heatmap": true, "stat": true,
+}
+
+// taskUnavailableNoteText is the server's wording (Components.task_unavailable_note).
+const taskUnavailableNoteText = "tasks unavailable — the Tasks plugin is not loaded"
+
+// taskBlockUnavailable reports whether b is a task block the server marked
+// unavailable. Only the exact JSON `true` switches it, and only for the marked
+// types — any other block (or the key absent/false) renders exactly as before.
+func taskBlockUnavailable(b Block) bool {
+	if !taskUnavailableTypes[b.Type] || b.Attrs == nil {
+		return false
+	}
+	v, ok := b.Attrs["unavailable"].(bool)
+	return ok && v
+}
+
+// taskUnavailableNote paints "<type> — tasks unavailable — the Tasks plugin is
+// not loaded" as one dim line, so a plugins-off paper never reads as an empty
+// board or an unresolved query.
+func taskUnavailableNote(ctx RenderCtx, blockType string) string {
+	return ctx.Theme.Dim.Render(sanitizeText(blockType) + " — " + taskUnavailableNoteText)
+}
+
 func unresolvedPlaceholder(ctx RenderCtx, label string) string {
 	return ctx.Theme.Dim.Render("[" + label + " — unresolved]")
 }

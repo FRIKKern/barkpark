@@ -851,6 +851,7 @@ defmodule BarkparkCloud.Sites.Deploy do
     |> maybe_put_target_port(site)
     |> maybe_put_template(site)
     |> maybe_put_theme(site)
+    |> maybe_put_forms_url(site, bp)
     |> maybe_put_artifact(deployment)
   end
 
@@ -895,6 +896,21 @@ defmodule BarkparkCloud.Sites.Deploy do
   defp maybe_put_theme(payload, %Site{theme: theme}) when is_binary(theme) do
     put_in(payload, [:env, :BARKPARK_THEME], theme)
   end
+
+  # task-71082f5541c13b53 (N-08): the template's form opt-in. The key rides the
+  # env ONLY when the owner turned forms on for this site (`forms_enabled`,
+  # written after the box accepted the `form_endpoint` write), so a site without
+  # forms deploys byte-identical to before. The value is the box's public intake
+  # URL for this site's binding (`Sites.Forms.endpoint_url/2`); the box engines
+  # allow-list BARKPARK_FORMS_URL (DeployRequest + BUILD_ALLOW).
+  defp maybe_put_forms_url(payload, %Site{forms_enabled: true} = site, %Barkpark{} = bp) do
+    case BarkparkCloud.Sites.Forms.endpoint_url(site, bp) do
+      url when is_binary(url) -> put_in(payload, [:env, :BARKPARK_FORMS_URL], url)
+      nil -> payload
+    end
+  end
+
+  defp maybe_put_forms_url(payload, _site, _bp), do: payload
 
   # site-spawner W7 (charter D63): the runtime target the box switches to, mapped
   # from `kind` — node sites boot a process, everything else swaps a symlink.

@@ -174,6 +174,65 @@ defmodule BarkparkWeb.Integration.MutationsTest do
   end
 
   describe "bulk mutations preserve operation order" do
+    test "exact deletion refuses anonymous and read-only callers without changing the draft", %{
+      conn: conn
+    } do
+      d = create_draft!("exact-permissions")
+      {:ok, before} = Content.get_document(d.doc_id, "post", "test")
+
+      body = %{
+        "mutations" => [
+          %{"deleteExactDraft" => %{"id" => d.doc_id, "type" => "post", "ifRevisionID" => d.rev}}
+        ]
+      }
+
+      Barkpark.Auth.create_token("exact-read-token", "dev", "read-only deletion test", ["read"])
+
+      anonymous =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post("/v1/data/mutate/test", Jason.encode!(body))
+
+      assert anonymous.status in [401, 403]
+
+      reader =
+        conn
+        |> put_req_header("authorization", "Bearer exact-read-token")
+        |> put_req_header("content-type", "application/json")
+        |> post("/v1/data/mutate/test", Jason.encode!(body))
+
+      assert reader.status == 403
+      assert {:ok, ^before} = Content.get_document(d.doc_id, "post", "test")
+    end
+
+    test "exact draft delete requires a revision and preserves the published twin", %{conn: conn} do
+      create_draft!("exact-http")
+      {:ok, _} = Content.publish_document("exact-http", "post", "test")
+      {:ok, published} = Content.get_document("exact-http", "post", "test")
+      d = create_draft!("exact-http")
+      op = %{"id" => "drafts.exact-http", "type" => "post", "ifRevisionID" => d.rev}
+
+      assert mutate(conn, %{
+               "mutations" => [%{"deleteExactDraft" => Map.delete(op, "ifRevisionID")}]
+             }).status == 400
+
+      assert mutate(conn, %{
+               "mutations" => [%{"deleteExactDraft" => Map.put(op, "ifRevisionID", "stale")}]
+             }).status == 412
+
+      response = mutate(conn, %{"mutations" => [%{"deleteExactDraft" => op}]})
+      assert response.status == 200
+
+      assert [%{"operation" => "deleteExactDraft", "id" => "drafts.exact-http"}] =
+               Enum.map(
+                 json_response(response, 200)["results"],
+                 &Map.take(&1, ["operation", "id"])
+               )
+
+      assert {:ok, ^published} = Content.get_document("exact-http", "post", "test")
+      assert {:error, :not_found} = Content.get_document(d.doc_id, "post", "test")
+    end
+
     test "create + publish + unpublish across one batch returns results in request order",
          %{conn: conn} do
       body = %{

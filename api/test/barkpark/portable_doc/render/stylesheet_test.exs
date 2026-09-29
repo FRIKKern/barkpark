@@ -38,12 +38,17 @@ defmodule Barkpark.PortableDoc.Render.StylesheetTest do
       assert String.contains?(css, ".bp-paper-surface h1")
     end
 
-    test "is the on-disk source with every comment stripped, rules byte-intact" do
+    test "is the on-disk source (plus the code-token rules) with every comment stripped, rules byte-intact" do
       source = File.read!(@surface_css)
+      # The code tokens (hljs-* classes the canvas and the reader paint from one tokenizer,
+      # Barkdown plan #27) live in a sibling file the canvas stylesheet imports too; css/0
+      # appends it so the reader gets the same rules.
+      tokens = File.read!(Path.join(Path.dirname(@surface_css), "code-tokens.css"))
       css = Stylesheet.css()
 
-      # The served bytes ARE the source minus its comments — nothing else.
-      assert css == Comments.strip(source)
+      # The served bytes ARE the two sources minus their comments — nothing else.
+      assert css == Comments.strip(source <> "\n" <> tokens)
+      assert String.contains?(css, ".hljs-keyword")
 
       # Non-vacuity: the source really does carry comments, so the equality
       # above is a claim about stripping and not about two identical strings.

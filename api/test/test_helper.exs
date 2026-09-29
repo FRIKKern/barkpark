@@ -217,6 +217,11 @@ ALTER TABLE chat_bridge.connector_installs
 # ephemeral postgres service and sets no MIX_TEST_PARTITION), so a refusal keyed
 # on "unpartitioned" would red the required Elixir gate on every PR. The full
 # reasoning, and what each probe is a rule about, is in the module.
+#
+# It also prints ONE `BARKPARK-TEST-DB:` line on every run naming the database
+# and why it was chosen — locally an unset MIX_TEST_PARTITION now means a
+# per-checkout database, CI stays on `barkpark_test` via CI=true
+# (config/test.exs, task-a0b11b3ae0cf45f0).
 Barkpark.SharedTestDb.report!(Barkpark.Repo)
 
 # ── EXIT-CAUSE, printed LAST (task-71dd1eb49e334fbb) ──────────────────────

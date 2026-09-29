@@ -139,6 +139,32 @@ if [ "${1:-}" = "--selftest" ]; then
     exit 1
   fi
 
+  # THE VERDICT WIRING (task-92a213f01ca30817). Every case above grades
+  # run_checks IN PROCESS; none executes the real-check tail that turns a
+  # non-empty DRIFT_REPORT into the process exit code, so flipping its
+  # `exit 1` to `exit 0` kept this selftest green. Same idiom as PR #13405 /
+  # #20180: RE-EXEC THE WHOLE PROGRAM on the fixture root and assert the
+  # PROCESS exit code. REPO_ROOT derives from the script's own location, so a
+  # copy at $tmp/scripts/ reads only the fixture -- no override is added.
+  mkdir -p "$tmp/scripts"
+  cp "$0" "$tmp/scripts/check-astro-finder-drift.sh"
+  set +e
+  bash "$tmp/scripts/check-astro-finder-drift.sh" >/dev/null 2>&1; rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "SELFTEST FAIL: E2E whole program on a drifted fixture exited $rc, expected 1"
+    exit 1
+  fi
+  cp "$tmp/$SRC_BASE/lib/find.ts" "$tmp/$DST_BASE/lib/find.ts"
+  cp "$tmp/$SRC_BASE/components/finder.tsx" "$tmp/$DST_BASE/finder.tsx"
+  set +e
+  bash "$tmp/scripts/check-astro-finder-drift.sh" >/dev/null 2>&1; rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: E2E whole program on a restored fixture exited $rc, expected 0"
+    exit 1
+  fi
+
   echo "SELFTEST PASS: byte-identity tripwire detects drift, deletion, and green parity"
   exit 0
 fi

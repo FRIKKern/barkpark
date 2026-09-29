@@ -21,14 +21,11 @@ defmodule Barkpark.Plugins.GripFactPublishGateTest do
   alias Barkpark.Plugins.Tasks
 
   setup do
-    previous = Application.fetch_env(:barkpark, :plugins)
-    Application.put_env(:barkpark, :plugins, [Grip])
+    previous = Barkpark.PluginEnv.capture()
+    Barkpark.PluginEnv.put!([Grip])
 
     on_exit(fn ->
-      case previous do
-        {:ok, value} -> Application.put_env(:barkpark, :plugins, value)
-        :error -> Application.delete_env(:barkpark, :plugins)
-      end
+      Barkpark.PluginEnv.restore(previous)
     end)
 
     :ok

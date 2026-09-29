@@ -724,6 +724,41 @@ JSON
     st_assert "an empty workflows dir refuses to scan" "refused" "refused"
   fi
 
+  # 10. THE VERDICT WIRING, graded on the whole program (task-92a213f01ca30817).
+  #     Every case above grades scan_subject IN PROCESS; none executes
+  #     run_gate's `return 1`, which IS the process exit of a gate run, so
+  #     flipping it to `return 0` kept this selftest green while the REQUIRED
+  #     Elixir gate certified a rise above the baseline. Same idiom as PR
+  #     #13405 / #20180: RE-EXEC THE WHOLE PROGRAM (this file, by
+  #     BASH_SOURCE, so a disarmed renamed copy re-execs ITSELF) through the
+  #     existing --spec/--workflows/--docs flags and assert the PROCESS exit.
+  #     The fixture carries baseline+1 unresolved claims, so the plant alone
+  #     crosses the committed baseline; the gate run's own path is untouched.
+  d="$(st_fixture whole-program)"
+  cat > "$d/workflows/required.yml" <<'YML'
+jobs:
+  aggregate:
+    name: Widget gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+YML
+  i=0
+  while [ "$i" -le "$MERGE_AUTHORITY_CLAIM_BASELINE" ]; do
+    i=$((i + 1))
+    printf '# widget-lint-%s.yml — the lint ratchet. (blocking)\njobs:\n  lint:\n    name: Widget lint %s\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n' "$i" "$i" > "$d/workflows/denied-$i.yml"
+  done
+  local rc
+  rc=0; bash "${BASH_SOURCE[0]}" --spec "$d/spec.json" --workflows "$d/workflows" --docs "$d/merge-gates.md" >/dev/null 2>&1 || rc=$?
+  st_assert "whole program: $i unresolved claims (baseline $MERGE_AUTHORITY_CLAIM_BASELINE) exits 1" "1" "$rc"
+  rm -f "$d"/workflows/denied-*.yml
+  rc=0; bash "${BASH_SOURCE[0]}" --spec "$d/spec.json" --workflows "$d/workflows" --docs "$d/merge-gates.md" >/dev/null 2>&1 || rc=$?
+  st_assert "whole program: the plant removed exits 0" "0" "$rc"
+  rm -f "$d/workflows/required.yml"
+  rc=0; bash "${BASH_SOURCE[0]}" --spec "$d/spec.json" --workflows "$d/workflows" --docs "$d/merge-gates.md" >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ]; then rc=nonzero; fi
+  st_assert "whole program: an empty workflows dir is never green" "nonzero" "$rc"
+
   echo "----"
   echo "$st_pass passed, $st_fail failed"
   [ "$st_fail" -eq 0 ] || return 1

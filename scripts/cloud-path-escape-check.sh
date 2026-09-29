@@ -104,6 +104,7 @@
 #   cloud-path-escape-check.sh --list-escapes  # print the resolved census
 #   cloud-path-escape-check.sh --print-set cloud|census
 #   cloud-path-escape-check.sh --match cloud   # changed paths on stdin
+#   cloud-path-escape-check.sh --match cloud --null # …NUL-separated (`git diff -z`)
 #                                              # -> prints true|false
 #   cloud-path-escape-check.sh --match census  # the cheap tier: does this diff
 #                                              # touch a tree the reader census
@@ -360,6 +361,17 @@ set -euo pipefail
 # mobile half of the push-token deferral is still unshipped. A DECLARATION, not
 # an exemption: the test is an ordinary cloud/test file in the default lane, so
 # a PR editing apps/mobile/package.json must dispatch the suite that reads it.
+#
+# README.md and docs/setup/DEPLOY-WITH-BARKPARK.md — dwb-9.
+# cloud/test/…/web/deploy_button_docs_test.exs reads both: the root README's
+# "Deploy with Barkpark" badge and the launch page that documents the path
+# behind it. The test checks every URL, route and template slug they name
+# against the router, the template catalog and app.js, so an edit to either
+# document is an edit to the thing under test. Declared as EXACT FILES: the
+# test reads exactly these two, and `docs/**` would hand every doc-only PR the
+# Postgres-backed Cloud suite. Cost measured over the last 60 days: 13 commits
+# touched README.md and 12 of them dispatched nothing else in this set, so 12
+# newly run the suite.
 CLOUD_PATHS='cloud/**
 cloud/lib/**
 .github/workflows/**
@@ -384,7 +396,9 @@ js/packages/create-barkpark-app/templates/**
 scripts/**
 templates/**
 templates/astro-search-starter/src/lib/bp.ts
-templates/search-starter/lib/markers.corpus-status.test.ts'
+templates/search-starter/lib/markers.corpus-status.test.ts
+README.md
+docs/setup/DEPLOY-WITH-BARKPARK.md'
 
 # ---------------------------------------------------------------------------
 # THE CENSUS TIER — a SECOND, NARROWER verdict
@@ -1014,6 +1028,33 @@ audit_dispatch() {
 # modes
 # ---------------------------------------------------------------------------
 
+# ── --null: one path per NUL-terminated record (cch-bl-nul-native-path-matcher)
+# `git diff -z` ends every path with a NUL, and a path may hold a literal
+# NEWLINE. A LINE reader splits that path into two pseudo-paths before the
+# anchored ERE sees it: for a glob anchored at BOTH ends (`docs/cards/*.md`),
+# `docs/cards/a<LF>b.md` becomes `docs/cards/a` and `b.md`, neither matches,
+# and a path IN the set answers false. That was the dispatchers' old
+# `git diff -z … | tr '\0' '\n'`. Under --null each record stays ONE line: an
+# embedded newline is rewritten to \037 (US), a byte no declared glob names and
+# one that `.` and `[^/]` match exactly as they match a newline — so the
+# declared EREs are UNCHANGED and `^…$` anchors the WHOLE path. Without --null
+# stdin is newline-separated, as every other caller (scripts/which-gates.sh,
+# the harness's line fixtures) still writes it.
+#
+# MATCH-INPUT-NUL — the dispatchers grep for this token: a copy that predates
+# --null IGNORES the flag and reads the NUL stream as ONE line (a silent
+# false), so a pinned copy without it is refused, never trusted.
+match_input() {
+  local rec
+  if [ "$1" = null ]; then
+    while IFS= read -r -d '' rec || [ -n "$rec" ]; do
+      printf '%s\n' "${rec//$'\n'/$'\037'}"
+    done
+  else
+    cat
+  fi
+}
+
 mode="${1:---check}"
 
 case "$mode" in
@@ -1038,8 +1079,23 @@ case "$mode" in
     # can never disagree about what the path set contains.
     want="${2:?--match needs a set name (cloud|census)}"
     assert_set_name "$want"
+    case "${3:-}" in
+      '') input=lines ;;
+      --null) input=null ;;
+      *)
+        echo "cloud-path-escape-check: unknown flag '${3}' (want --null)" >&2
+        exit 2
+        ;;
+    esac
+    if [ "$#" -gt 3 ]; then
+      echo "cloud-path-escape-check: unexpected argument '${4}' after --match" >&2
+      exit 2
+    fi
     ere="$(set_ere "$want")"
-    if grep -Eq -- "$ere"; then
+    # A HERE-STRING, never `match_input … | grep -q` (house D37): grep -q
+    # exits on the first match and a writer still holding bytes takes SIGPIPE.
+    changed="$(match_input "$input")"
+    if grep -Eq -- "$ere" <<<"$changed"; then
       echo "true"
     else
       echo "false"
@@ -1077,7 +1133,7 @@ case "$mode" in
 
   *)
     echo "cloud-path-escape-check: unknown argument '$mode'" >&2
-    echo "usage: $0 [--check|--selftest|--list-escapes|--census-source|--print-set SET|--match SET|--audit-set|--audit-dispatch]" >&2
+    echo "usage: $0 [--check|--selftest|--list-escapes|--census-source|--print-set SET|--match SET [--null]|--audit-set|--audit-dispatch]" >&2
     exit 2
     ;;
 esac

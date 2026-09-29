@@ -166,17 +166,22 @@ jobs:
           #     core.quotepath=false — `cloud/lib/we"ird.ex` prints as
           #     `"cloud/lib/we\"ird.ex"`, the anchored ERE below misses it, and
           #     this job reports a GREEN required context over a suite that never
-          #     ran. `-z` emits the raw bytes, which cannot be quoted; `tr`
-          #     restores the line format the matcher reads.
+          #     ran. `-z` emits the raw bytes, which cannot be quoted, and the
+          #     matcher reads those NUL records itself (`--null`).
           #   * rename detection (default-on since git 2.9) prints only the
           #     DESTINATION, so `git mv cloud/lib/a.ex docs/a.ex` yields
           #     cloud=false while cloud/** just lost a file. `--no-renames`
           #     prints both sides.
-          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          # NUL-separated, ON DISK, never re-lined: the old `tr` back to lines
+          # split a path holding a NEWLINE into two pseudo-paths before the
+          # matcher saw it (cch-bl-nul-native-path-matcher). A file, not a
+          # variable: command substitution drops NUL bytes.
+          changed_z="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/cloud-dispatcher-changed.XXXXXX")"
+          git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" >"$changed_z"
           echo "changed files:"
-          printf '%s\n' "$changed"
+          while IFS= read -r -d '' f; do printf '%s\n' "$f"; done <"$changed_z"
 
-          if [ -z "$changed" ]; then
+          if [ ! -s "$changed_z" ]; then
             # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
             # PR, nets to nothing against the base. The old polarity failed here
             # — a permanently red required context on a legal PR, with no
@@ -278,10 +283,10 @@ jobs:
           # ratchet itself on every PR, off the merge ref, and reds the same
           # required context.
           #
-          # A here-string for BOTH sets, never a pipe: `--match` answers through
+          # A file redirect for BOTH sets, never a pipe: `--match` answers through
           # `grep -Eq`, which exits the instant it matches, and a writer still
           # holding bytes then takes SIGPIPE that `set -o pipefail` promotes over
-          # the match that DID occur (the house D37 rule). A here-string has no
+          # the match that DID occur (the house D37 rule). A redirect has no
           # writer process. The `cloud` call carried that pipe until this change.
           # THE `--match` STAYS AT THE CALL SITE, spelled out. scripts/which-gates.sh
           # discovers "which gate will this diff dispatch" by scraping the
@@ -297,7 +302,16 @@ jobs:
               echo "::error::dispatcher: match_set takes '--match <set>' verbatim (got '${flag}')."
               exit 1
             fi
-            out="$(bash "$pin_script" --match "$want" <<<"$changed")" || rc=$?
+            # THE `--null` SKEW. A copy of the script that predates `--match … --null`
+            # does not refuse the flag, it IGNORES it and greps the NUL stream as
+            # ONE line: a silent false, not a refusal. The MATCH-INPUT-NUL token
+            # is how this step tells the two apart.
+            if [ -f "$pin_script" ] && ! grep -qF MATCH-INPUT-NUL "$pin_script"; then
+              echo "::warning::dispatcher: ${pin_script} (read from ${pin_src}) predates '--match … --null' and would read the NUL-separated diff as ONE line. Dispatching ${want}=true: running more, never a silent skip." >&2
+              printf 'true'
+              return 0
+            fi
+            out="$(bash "$pin_script" --match "$want" --null <"$changed_z")" || rc=$?
             case "$out" in
               true | false)
                 printf '%s' "$out"

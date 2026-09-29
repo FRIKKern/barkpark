@@ -1,5 +1,4 @@
-// Mounted regression for node-view controls whose values are held behind their
-// own debounce. The canvas flush must commit those controls before diffing the run.
+// Mounted acknowledgement, navigation protection, stable identity and draft recovery regressions.
 
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
@@ -113,6 +112,28 @@ window.history.replaceState(
 const hooks = window.BarkparkPaperEditorHooks;
 const paragraph = (id, value) => ({id, type: "paragraph", content: [{type: "text", value}]});
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+
+async function blurRichEditor(canvas, label) {
+  const editor = canvas._editor;
+  const target = editor.view.dom;
+  assert.equal(document.activeElement, target, `${label}: native focus before release`);
+  assert.equal(editor.isFocused, true, `${label}: editor focus before release`);
+  // Tiptap schedules DOM blur through requestAnimationFrame. A fixed 30ms sleep
+  // can run before that callback. Await the actual event, then its next task:
+  // the production canvas's ancestor blur listener queues settlement first.
+  await new Promise((resolve, reject) => {
+    const onBlur = () => setTimeout(() => { clearTimeout(timeout); resolve(); }, 0);
+    const timeout = setTimeout(() => {
+      target.removeEventListener("blur", onBlur);
+      reject(new Error(`${label}: native blur was not delivered`));
+    }, 2000);
+    target.addEventListener("blur", onBlur, { once: true });
+    editor.commands.blur();
+  });
+  assert.notEqual(document.activeElement, target, `${label}: native focus released`);
+  assert.equal(editor.isFocused, false, `${label}: editor observed native blur`);
+}
+
 
 async function mount({ revision, blocks = [paragraph("original", "Original")] } = {}) {
   const main = document.createElement("main");
@@ -713,8 +734,7 @@ try {
         continued.resolve({ saved: true, rev: 4, request_id: continued.payload.request_id });
         await tick();
       }
-      overlap.canvas._editor.commands.blur();
-      await new Promise(resolve => setTimeout(resolve, 30));
+      await blurRichEditor(overlap.canvas, choice);
       assert.equal(overlap.canvas._editor.state.doc.firstChild.textContent,
         continuedTyping ? "Original local draft continued" : "Original local draft");
     }

@@ -102,7 +102,7 @@
 #   pds-charter-ledger-sweep.sh<TAB>CONTENT-RED<TAB>by run 2026-08-03: `--check`
 #   rc=1 "RED: an UNRESOLVED-CLAIM ARRIVAL is a charter claim nobody has
 #   adjudicated" (59 arrivals); `--selftest` is rc=0 (3 of 3) and no longer
-#   hostage to the corpus; blocked on scripts/pds-charter-ledger-adjudication.md,
+#   hostage to the corpus; blocked on docs/ledgers/pds-charter-ledger-adjudication.md,
 #   not on price (CPU 3.42 s LOCAL)
 #
 # `--check` is a real invocation as of this commit and is byte-identical to the
@@ -125,7 +125,7 @@
 set -uo pipefail
 
 CHARTER=".claude/workflows/bp-pds-charter.md"
-TABLE="scripts/pds-charter-ledger-adjudication.md"
+TABLE="docs/ledgers/pds-charter-ledger-adjudication.md"
 CACHE=""
 MODE="report"
 SELFTEST=0
@@ -326,7 +326,7 @@ IDIOM = re.compile(r"fail(?:s|ed|ing)?[ -]closed|fail-closed", re.I)
 # is five rounds") and the mined vocabulary then reads them as dispositions.
 #
 # EVERY ENTRY IS MEASURED, NOT GUESSED, AND THE MEASUREMENT IS NAMED: the wave-46
-# adjudication block (scripts/pds-charter-ledger-adjudication.md, "THE VINTAGE
+# adjudication block (docs/ledgers/pds-charter-ledger-adjudication.md, "THE VINTAGE
 # SPLIT") took each of that wave's 71 arrivals, asked whether the identical
 # whitespace-normalised line ALREADY EXISTED at aa81a9b6e — the commit that
 # authored the then-105-row table — and found 14 that did. All 14 fired on one of

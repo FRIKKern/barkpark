@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  146 scenarios, 25 rendered, 121 in a COMMITTED residue literal.
+//   SCENARIO  146 scenarios, 35 rendered, 111 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -210,10 +210,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  The fresh-CDP-target-per-cell requirement is what BUYS liveness, and it
 //  costs roughly a second per cell (0.73s measured). The full render leg is
-//  26 cells x 2 themes x ONE height x 21 boundary widths = 1092 renders: budget
+//  36 cells x 2 themes x ONE height x 21 boundary widths = 1512 renders: budget
 //  MINUTES. The height axis multiplies that and is therefore OPT-IN — all three
-//  declared HEIGHTS make it 2700 renders (32.9 min), the number that decided
-//  the default loop (HEIGHT_REASONS[800]). The width numeral here is
+//  declared HEIGHTS make it 4536 renders (55.2 min); HEIGHT_REASONS[800] carries
+//  the same pair, recounted from the tables by the unit suite. The width numeral here is
 //  the DERIVED boundary walk (`WIDTHS.length`, printed by `--census` as "21
 //  boundary widths"), not the 15 that this file's residue prose still repeats —
 //  that stale numeral has no arm and is owned by
@@ -470,10 +470,71 @@ export const CELLS = [
   { name: "inst-group", scen: "fleet-group-view", hash: `#instance/${INST}/group`, view: "view-instance", sentinel: "#instance-tabpanel .group-table" },
   { name: "site-rollback", scen: "rollback", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
   { name: "site-states", scen: "site-states", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
+  // ── THE FIVE MEDIA GAPS task-1ac954ba0db927cb MEASURED (task-197a30115b0d8a7d)
+  // Each cell below renders a width-@media rule that NO cell rendered before,
+  // and was a genuinely-uncovered residue entry until it became a cell. The
+  // route is READ from the scenario (deepLink / pathname / search) rather than
+  // retyped, so a fixture that moves its route moves the cell with it. Every
+  // cell is named after its scenario, so the residue entries that shared its
+  // gap (`by: "<name>"`) now name a CELL without being rewritten.
+  //
+  // GAP 1 — the @720 theater block re-lays .new-step / .new-step-time /
+  // .new-step-detail / .new-step-probe / .bp-console-*. The rule is container-
+  // blind but the row it wraps is not: the unwrapped row overran itself before
+  // the rule existed (app.css, "IT ALSO CURES A DEFECT NOBODY FILED"), so the
+  // same rows are walked in each of the four containers that hold them — the
+  // instance timeline, the support theater, the offload ladder and the site
+  // deploy rail. `offload-working` needs NO click driver here: mock.js runs the
+  // scenario's own `drive` list on load (`grep -n 'runDrive(def.drive' mock.js`),
+  // and the sentinel is what waits for the ladder that drive mounts.
+  { name: "provisioning", scen: "provisioning", hash: SCENARIOS.provisioning.deepLink, view: "view-instance", sentinel: "#instance-tabpanel .new-step" },
+  { name: "fleet-support-provisioning", scen: "fleet-support-provisioning", hash: SCENARIOS["fleet-support-provisioning"].deepLink, view: "view-instance", sentinel: ".fleet-support-theater .new-step" },
+  { name: "offload-working", scen: "offload-working", hash: SCENARIOS["offload-working"].deepLink, view: "view-instance", sentinel: ".offload-watch .new-step" },
+  { name: "site-deploy-rail-live", scen: "site-deploy-rail-live", hash: SCENARIOS["site-deploy-rail-live"].deepLink, view: "view-site", sentinel: "#deploy-rail-slot .new-step" },
+  // GAP 3 — `.toast-stack` is re-anchored by the @720 block. The portal-return
+  // toast paints on load, but a toast is TRANSIENT (4000ms for an info toast,
+  // `grep -n 'function toast(opts)' app.js`), and the reused-document path
+  // walks 21 widths in one load — the late widths would find the toast gone
+  // and report the cell DEAD on its own sentinel. So this ONE cell is `fresh`:
+  // a new load per width, the path --fresh-targets gives every cell. `search`
+  // is the portal's own return query, read from the scenario.
+  { name: "billing-portal-return", scen: "billing-portal-return", hash: SCENARIOS["billing-portal-return"].deepLink, search: SCENARIOS["billing-portal-return"].search, fresh: true, view: "view-billing", sentinel: "#toast-stack .toast" },
+  // GAP 5 — the Usage sub-tab. It has no @media rule of its own; its quota
+  // bars reflow with every content-width step the 720 fold and the 899 head
+  // breakpoint cause, and until this cell nothing opened the tab at any width.
+  { name: "inst-usage", scen: "usage-quota", hash: SCENARIOS["usage-quota"].deepLink, view: "view-instance", sentinel: "#instance-tabpanel .usage-bar" },
+  // GAP 4 — the account modal's @620 block (.am-identity / .am-who / .am-head /
+  // .session-row, and the enrollment rows .a2f-enroll / .a2f-qr / .a2f-manual /
+  // .a2f-confirm-row / .a2f-otp). modal-oracle holds 1440 and overflow-guard's
+  // AM/A2F legs stop at 620/480; this sweep's boundary walk is what reaches
+  // 621. No modal driver is added: each scenario DECLARES its dialog (`modal:`
+  // in scenarios.mjs) and mock.js opens it — for the 2FA twin, drives the real
+  // enrollment through to the 422 — on load. The view underneath is #overview,
+  // where a no-deeplink scenario lands.
+  { name: "account-modal", scen: "account-modal", hash: "#overview", view: "view-overview", sentinel: "#modal-root:not([hidden]) .am-identity" },
+  { name: "account-modal-2fa-badcode", scen: "account-modal-2fa-badcode", hash: "#overview", view: "view-overview", sentinel: "#modal-root:not([hidden]) #a2f-error" },
+  // GAP 2 — /new is a document OUTSIDE the console shell (`main#new-screen`, no
+  // section.view), so these two cells carry `pathname` and `shell: false`:
+  // liveness clause 1 asks for the named surface to be live instead of a
+  // section.view, Leg A's screen census skips them (they are not registered
+  // views and must not read as phantom ones), and Q3 is NOT asked — its fold
+  // budget is a property of the shell's folded chrome, which this document
+  // does not have. Q1 and Q2 are asked at every walked width like any cell.
+  { name: "theater-midflight", scen: "theater-midflight", pathname: SCENARIOS["theater-midflight"].pathname, search: SCENARIOS["theater-midflight"].search, shell: false, view: "new-screen", sentinel: ".new-theater-grid .new-step" },
+  { name: "theater-ready", scen: "theater-ready", pathname: SCENARIOS["theater-ready"].pathname, search: SCENARIOS["theater-ready"].search, shell: false, view: "new-screen", sentinel: ".new-ready .new-actions .btn" },
 ];
 
+// THE URL A CELL LOADS, in one place (task-197a30115b0d8a7d). A cell used to
+// key a hash only, which is why /new and a return-query toast could not be
+// cells at all. `pathname` defaults to the SPA root, `search` rides ahead of
+// the harness's own scen/theme params, and the hash rides last.
+export function cellUrl(cell, theme, base = BASE) {
+  const search = cell.search ? cell.search.replace(/^\?/, "") + "&" : "";
+  return `${base}${cell.pathname || "/"}?${search}scen=${cell.scen}&theme=${theme}${cell.hash || ""}`;
+}
+
 // The view axis Leg B actually covers, derived from the cell table.
-export const COVERED_VIEWS = [...new Set(CELLS.map((c) => c.view))].sort();
+export const COVERED_VIEWS = [...new Set(CELLS.filter((c) => c.shell !== false).map((c) => c.view))].sort();
 
 // ── AXIS: THEME ──────────────────────────────────────────────────────────────
 // The two modes Leg B loads, and the ONLY declaration of that axis. Derived
@@ -492,7 +553,7 @@ export const HEIGHTS = [390, 667, 800];
 export const HEIGHT_REASONS = {
   390: "LANDSCAPE. 720x390 is the binding height for the fold bar — the shipped 34vh cap read 0.4836 of H here while passing casual inspection at 800, so a height set without it cannot see the defect cch-w15-s1 fixed.",
   667: "SHORT PORTRAIT. iPhone SE / small-phone portrait: the shortest height at which the folded shell is a normal reading posture rather than an edge case.",
-  800: "THE DRIVEN DEFAULT, AND THE DEFAULT LOOP IS ONE HEIGHT — DECIDED, WITH THE NUMBER. Leg B renders at 800 unless --height says otherwise, and every Q3 number this epic quotes was taken there. Walking all three declared heights by default would take the full leg from 26 cells x 2 themes x 1 height x 21 widths = 1092 renders (13.3 min at the measured 0.73s/cell) to 3276 (39.9 min), on an axis whose only measured yield so far is the fold number Q3 already prints at every height it is asked for. So the height axis is OPT-IN (--height 390,667,800), the declared set is what --height will accept, and 390/667 are no longer declared-and-undrivable: cch-w16-bl-legb-drives-one-of-three-heights.",
+  800: "THE DRIVEN DEFAULT, AND THE DEFAULT LOOP IS ONE HEIGHT — DECIDED, WITH THE NUMBER. Leg B renders at 800 unless --height says otherwise, and every Q3 number this epic quotes was taken there. Walking all three declared heights by default would take the full leg from 36 cells x 2 themes x 1 height x 21 widths = 1512 renders (18.4 min at the measured 0.73s/cell) to 4536 (55.2 min), on an axis whose only measured yield so far is the fold number Q3 already prints at every height it is asked for. So the height axis is OPT-IN (--height 390,667,800), the declared set is what --height will accept, and 390/667 are no longer declared-and-undrivable: cch-w16-bl-legb-drives-one-of-three-heights.",
 };
 // THE EPIC'S HEIGHTS DISAGREE, AND THIS IS THE DISAGREEMENT STATED RATHER THAN
 // HIDDEN: modal-oracle/overflow-guard commit to 900, the fold identity is
@@ -544,15 +605,15 @@ export function familyOf(scen) {
 // ENTRY is that entry's own verdict (RESIDUE VERDICTS, below the literal) —
 // where the two disagree, the entry's verdict is the finding.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 34 vary the CONTENT of a panel already rendered at all 18 widths — a new geometry only if the panel's own shape changes, which the five cells would see. The last two (task-499cab525e65018b) vary it by putting a DIALOG over it: `instance-pin-version` and `instance-update-conflict` are `instance-behind`'s fixture with a declared `modal` driver, so the panel beneath each one is the very panel the five cells already walk at all 18 widths, and the dialog's own geometry is modal-oracle's axis — the same split the account family and cch-w45-bl's render-state fixtures are already explained by.",
+  "hash:#instance": "The instance detail screen is swept by ten cells (panel-overview/timeline/metrics/webhooks/update-refused/group, and since task-197a30115b0d8a7d the provision timeline, the support theater, the offload ladder and the usage tab). These 30 vary the CONTENT of a panel already rendered at all 18 widths — a new geometry only if the panel's own shape changes, which the five cells would see. The last two (task-499cab525e65018b) vary it by putting a DIALOG over it: `instance-pin-version` and `instance-update-conflict` are `instance-behind`'s fixture with a declared `modal` driver, so the panel beneath each one is the very panel the five cells already walk at all 18 widths, and the dialog's own geometry is modal-oracle's axis — the same split the account family and cch-w45-bl's render-state fixtures are already explained by.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 13 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all), and cch-w12-followup-login-fixture-gap's `activity-identity-change` (the corpus's ONLY successful-login fixture, a DRIVE through three states rather than a screen — smoke.mjs steps it from Activity to signed out to signed in as another team, and a transition is not a width) — over a grid already walked at all 18 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
-  "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 14 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 18 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 3 routes (cruel + kind control + the classified caption), by overflow-guard's W25-deploy-rail-fail-wrap leg. `site-deploy-rail-failed-classified` (task-877bfc465162e104) is the third of those routes and the family's FOURTH instrument fixture: it renders the same `.deploy-rail-fail` box carrying the one capture in this corpus whose caption MOVES between the box and the browser (`FailureCopy.humanize/1` classifies it; the wave-26 pair passes through unchanged), and its classified sentence is a DIFFERENT length from both, which is content length again — overflow-guard's axis, not this sweep's. `deploy-detail-cruel` (cch-deploy-detail-render-has-no-cap) is the family's OTHER cruel twin and is here for the same reason wearing the other axis: its 2,000-character live sub-caption is bounded VERTICALLY, and a fixture built to be 81 line-boxes tall would red every width of the walk for a height this sweep does not measure. It is driven at 320/390/620/900/1024/1440 x 2 themes by overflow-guard's W34-deploy-detail-render-bound leg. `site-deploy-rail-live` (cch-w29-bl) is the family's THIRD instrument fixture and the only one that is not cruel at all: it renders the rail's OTHER footer — `.deploy-rail-live`, which no scenario in this harness had ever produced — carrying the site's ordinary 55-character live URL. It is here rather than in a cell because what it exists to measure is one ANCHOR's wrap against its own container at phone widths, which is overflow-guard's axis and not a width walk over a .detail-grid the two cells already sweep at all 18 widths. It is driven at 320/360/390 x 2 themes by overflow-guard's W29-deploy-rail-live-url-wrap leg.",
+  "hash:#site": "The site detail screen is swept by three cells (rollback, states, and since task-197a30115b0d8a7d the live deploy rail). These 13 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 18 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 3 routes (cruel + kind control + the classified caption), by overflow-guard's W25-deploy-rail-fail-wrap leg. `site-deploy-rail-failed-classified` (task-877bfc465162e104) is the third of those routes and the family's FOURTH instrument fixture: it renders the same `.deploy-rail-fail` box carrying the one capture in this corpus whose caption MOVES between the box and the browser (`FailureCopy.humanize/1` classifies it; the wave-26 pair passes through unchanged), and its classified sentence is a DIFFERENT length from both, which is content length again — overflow-guard's axis, not this sweep's. `deploy-detail-cruel` (cch-deploy-detail-render-has-no-cap) is the family's OTHER cruel twin and is here for the same reason wearing the other axis: its 2,000-character live sub-caption is bounded VERTICALLY, and a fixture built to be 81 line-boxes tall would red every width of the walk for a height this sweep does not measure. It is driven at 320/390/620/900/1024/1440 x 2 themes by overflow-guard's W34-deploy-detail-render-bound leg. `site-deploy-rail-live` (cch-w29-bl) LEFT this family for a cell (task-197a30115b0d8a7d): its URL anchor's phone-width wrap is still overflow-guard's W29-deploy-rail-live-url-wrap leg, but its rail's .new-step rows are re-laid by the @720 theater block, and no cell walked 719/720/721 over a rail until it became one.",
   "hash:#settings": "The settings screens are swept by EIGHT cells across billing/providers/notifications/tokens/members. These 10 are member-role, ACTOR-IDENTITY, empty-state, cruel-content and dialog-over-the-same-panel variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 18 widths, and a row with fewer buttons is strictly narrower than the one they walk. The followup's `members-self-role-drift` varies one CHIP WORD on one row (Member -> Owner, the shorter string becoming the longer by one character) against a roster the members cells already walk at every width.",
   "hash:#": "Routes whose head is a bare `#` — `#/invitations/accept` and `#/auth/reset`. These render a single centred card over the sign-in surface: no shell, no grid, nothing for a breakpoint to fold.",
-  "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner. `account-modal-cruel-identity` (cch-w23-bl-cruel-identity-own-scenario) is the family's CRUEL twin, wearing the same axis `fleet-cruel-content` and `deploy-detail-cruel` do: its `.am-name` is a 158-character email local part at the server's own `validate_length(:email, max: 160)` cap, and content length is overflow-guard's axis, not this sweep's. It is driven at 320/360/390/430/620/900/1440 x 2 themes by overflow-guard's W23-account-modal-identity-bounded leg, beside `account-modal` as the kind control.",
+  "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner. The ONE thing modal-oracle does not own is a width BOUNDARY: it holds 1440, and app.css re-lays the modal at @media (max-width: 620px), so since task-197a30115b0d8a7d two cells (`account-modal`, `account-modal-2fa-badcode`) walk 619/620/621 and the rest of this family is their content variants. `account-modal-cruel-identity` (cch-w23-bl-cruel-identity-own-scenario) is the family's CRUEL twin, wearing the same axis `fleet-cruel-content` and `deploy-detail-cruel` do: its `.am-name` is a 158-character email local part at the server's own `validate_length(:email, max: 160)` cap, and content length is overflow-guard's axis, not this sweep's. It is driven at 320/360/390/430/620/900/1440 x 2 themes by overflow-guard's W23-account-modal-identity-bounded leg, beside `account-modal` as the kind control.",
   "path:/activate": "The device-activation page is not part of the console shell at all — a different document with its own layout, outside this sweep's screen axis.",
-  "path:/new": "The launch/theater page is likewise its own document outside the shell. cch-r16-w11's three additions (`theater-ready-github`, `theater-ready-github-member`, `theater-failed-member`) vary the ACTOR and one read's fixture over the same two screens `theater-ready` and `theater-failed` already occupy — an authority band deciding whether a button is live or disabled-and-explained, which is a fence measurement and not a geometry one.",
-  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 9 vary member-role, cancelling copy, the portal return, cch-w39-s1's `billing-me-unreadable` and its one-shot recovery twin `billing-me-recovers`, cch-w50-s4's two never-before-minted billing ACTORS (`billing-free-owner`, the unsubscribed owner renderPlanState routes to the upsell card, and `billing-support-plus`, the third catalog tier rendering as a CURRENT plan) and cch-w50-bl's `billing-forever` (the admin-granted comp tier: a NON-catalog plan rendering as the current plan, whose Manage panel carries prose and no button) inside those same panels — the unreadable pair swaps the Manage section's one-line copy for a single .empty-state block, and the upsell card is the same .card.plan-card the trial-tiers cell already walks at all 18 widths, one .plan-rec badge and one full-width button wider than nothing.",
+  "path:/new": "The launch/theater page is likewise its own document outside the shell. Since task-197a30115b0d8a7d two `shell: false` cells (`theater-midflight`, `theater-ready`) walk it anyway, for the @720 block that collapses .new-theater-grid and widens the ready hero's actions; the entries left here vary launch-step content, refusals and actors over those two screens. cch-r16-w11's three additions (`theater-ready-github`, `theater-ready-github-member`, `theater-failed-member`) vary the ACTOR and one read's fixture over the same two screens `theater-ready` and `theater-failed` already occupy — an authority band deciding whether a button is live or disabled-and-explained, which is a fence measurement and not a geometry one.",
+  "hash:#billing": "Billing is swept by three cells (trial tiers, past-due manage, and since task-197a30115b0d8a7d the portal-return toast) — including the 230px tier floor s3 guards. These 8 vary member-role, cancelling copy, cch-w39-s1's `billing-me-unreadable` and its one-shot recovery twin `billing-me-recovers`, cch-w50-s4's two never-before-minted billing ACTORS (`billing-free-owner`, the unsubscribed owner renderPlanState routes to the upsell card, and `billing-support-plus`, the third catalog tier rendering as a CURRENT plan) and cch-w50-bl's `billing-forever` (the admin-granted comp tier: a NON-catalog plan rendering as the current plan, whose Manage panel carries prose and no button) inside those same panels — the unreadable pair swaps the Manage section's one-line copy for a single .empty-state block, and the upsell card is the same .card.plan-card the trial-tiers cell already walks at all 18 widths, one .plan-rec badge and one full-width button wider than nothing.",
   "hash:#operator": "The operator console is swept by two cells (console, halted). These 5 vary zero-staging / denied / route-unreadable / me-unreadable / me-recovers states of the same panels — cch-w37-s6's `operator-me-unreadable` renders ONE empty-state block in place of the four cards, a geometry the two cells already walk at all 18 widths, and cch-w37-bl's `operator-me-recovers` is a CLICK fixture: it boots into that same empty-state block and, after the press smoke.mjs drives, settles on the console geometry the `console` cell already sweeps. Neither end state is new to this sweep; only the transition between them is, and a transition is not a width.",
   "hash:#notifications": "Notifications are swept by two cells (configured, deliveries-error). These 2 are the empty and member-role variants of #notif-matrix.",
   "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 4 vary CONTENT or ACTOR over those same two tables: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg. `fleet-archives-member` (cch-w47-rv-bl) is `fleet-archives-stored`'s fixture with ONE field changed — the actor is a plain member — so the archives panel it paints is the `fleet-archives` cell's own geometry minus one button and plus one `.archives-note` line, strictly less horizontal demand at every width that cell already walks. What it carries that no width can score is an AUTHORITY answer, and smoke.mjs drives it there. `cmdk-palette` (task-5ffdec2b609404bc) is `mixed-fleet`'s fixture plus one declared `modal` field: the command palette opens over the very table the `fleet` cell walks at all 18 widths, and the dialog's own geometry belongs to modal-oracle, not to this sweep.",
@@ -574,8 +635,13 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 146 scenarios · 26 cells over 25 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 121 · 14 families.
+// THE CENSUS THIS RECONCILES AGAINST: 146 scenarios · 36 cells over 35 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 111 · 14 families.
+// task-197a30115b0d8a7d moved it DOWN by TEN, and moved no
+// scenario: the ten genuinely-uncovered entries whose gap only a cell could
+// close became cells (the five media gaps, CELLS above), and this literal's
+// `promoted` refusal removed them. Every integer RE-DERIVED by RUNNING the bare
+// sweep and reading its `>> scenarios` line, never by subtracting ten.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -801,7 +867,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // this epic exists to end. So: every LIVE numeral above the HISTORICAL rule
 // below is now recounted, either from `scenarioReport` or from these same
 // committed bytes, by a NAMED arm in breakpoint-sweep.test.mjs:
-//   * 146 / 26 / 25 / 121 / 14 — "the census five in breakpoint-sweep.mjs's
+//   * 146 / 36 / 35 / 111 / 14 — "the census five in breakpoint-sweep.mjs's
 //     prose are recounted from the derived report", which reads BOTH typed
 //     copies out of the committed bytes (this bullet and "THE CENSUS THIS
 //     RECONCILES AGAINST:" above) and names the drifted numeral by axis and by
@@ -861,13 +927,11 @@ export const RESIDUE_FAMILY_REASONS = {
 //     until cch-w47-s4 this file was carrying two of them: `hash:#billing — 3`
 //     over four entries, and a `These 9` over ten.
 export const SCENARIO_RESIDUE = {
-  // hash:#instance — 34
+  // hash:#instance — 30
   "sites-on-instance": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "the Sites card inside the instance workspace paints instance-detail's width-@media selectors plus .fleet-badges, which the `fleet` cell walks; its rows' phone band is overflow-guard W50-site-row-three-hosts-cruel-by-fixture" },
   "panel-overview-member": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "panel-overview's fixture with a member actor: the same instance panel and the same @media selectors; the up-front refusal is a fence answer, not geometry" },
   "instance-cruel-detail": { family: "hash:#instance", verdict: "adjudicated", why: "the cruel twin of the instance detail: a server-cap custom_host in .detail-url-text is content length, which overflow-guard W21-detail-url-text-page-bound walks at DETAIL_WIDTHS; the layout around it is instance-detail's" },
-  "provisioning": { family: "hash:#instance", verdict: "genuinely-uncovered", cover: "a cell on `provisioning` at its #instance deep link, sentinel `#instance-tabpanel .new-step`", why: "the provision timeline paints the shared newStepsHtml rows and the bp-console (.new-step, .new-step-time, .new-step-detail, .new-step-probe, .bp-console-body, .bp-console-toggle), all re-laid by app.css's @media (max-width: 720px) theater block; no cell paints a single .new-step, so 719/720/721 is walked for none of them" },
-  "usage-quota": { family: "hash:#instance", verdict: "genuinely-uncovered", cover: "an `inst-usage` cell on `usage-quota` at #instance/<id>/usage, sentinel on the quota bars", why: "the Usage sub-tab is a tabpanel no cell opens and no overflow-guard leg names; it has no @media rule of its own, but its quota bars reflow with every content-width step the 720 shell fold and 899 head breakpoints cause, and nothing measures them at any width" },
-  "failed": { family: "hash:#instance", verdict: "genuinely-uncovered", cover: "a cell on `failed` at its #instance deep link, sentinel `#instance-tabpanel .new-step.failed`", why: "the failed provision timeline: the same @720 .new-step and .bp-console rules as `provisioning` in the snap state, plus the docked Retry; no cell renders a failed box on the instance route, so its 719/720/721 is walked by nothing" },
+  "failed": { family: "hash:#instance", verdict: "superseded", by: "provisioning", why: "the failed provision timeline in its snap state: measured at 720 (task-197a30115b0d8a7d) it paints .new-step, .new-step-time, .new-step-probe, .bp-console-body and .bp-console-toggle in the SAME #instance-tabpanel container the `provisioning` cell walks, a strict subset of that cell's @720 selectors; the docked Retry sits in .detail-head--inst .detail-actions, which instance-detail walks. Was genuinely-uncovered until that cell existed" },
   "timeline-events-only": { family: "hash:#instance", verdict: "superseded", by: "inst-timeline", why: "the audit 403 degrades the timeline to events plus one line: it paints exactly the inst-timeline cell's @media selectors, over fewer rows" },
   "verify-pass": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "verify-card chip content (all green) inside the instance panel; paints instance-detail's selectors plus .fleet-badges, which `fleet` walks — the three verify-* entries share this cause" },
   "verify-fail": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "verify-card chip content (a 502 probe) inside the instance panel; same selectors and same cause as verify-pass" },
@@ -877,14 +941,12 @@ export const SCENARIO_RESIDUE = {
   "webhooks-autodisabled": { family: "hash:#instance", verdict: "superseded", by: "inst-webhooks", why: "an auto-disabled banner and one failed delivery inside the webhooks tab: exactly the inst-webhooks cell's @media selectors (.wh-card-head, .wh-dataset-input)" },
   "metrics-stale": { family: "hash:#instance", verdict: "superseded", by: "inst-metrics", why: "last-known vitals flagged offline in the same metrics grid the inst-metrics cell walks: same @media selectors" },
   "metrics-absent": { family: "hash:#instance", verdict: "superseded", by: "inst-metrics", why: "the waiting panel replaces the metrics grid: strictly less than the inst-metrics cell paints" },
-  "fleet-support-provisioning": { family: "hash:#instance", verdict: "genuinely-uncovered", cover: "a cell on `fleet-support-provisioning` at its #instance deep link, sentinel `.fleet-support-theater .new-step`", why: "the SUPPORT theater renders newStepsHtml rows inside .fleet-support-theater under the same @720 .new-step block no cell paints — a different container from the timeline's rows, so the `provisioning` cell would not close it" },
   "fleet-support-online": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "the roster presence chip and capacity on the fleet card add no width-@media selector beyond instance-detail's" },
   "fleet-support-failed": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "the failed support card adds no width-@media selector beyond instance-detail's; its money message is walked across the tablet band by overflow-guard's FLEET_WIDTHS legs" },
   "fleet-support-empty": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "the add-a-support CTA on a live main is one button inside instance-detail's panel; no new @media selector" },
   "offload-filing": { family: "hash:#instance", verdict: "superseded", by: "offload-working", why: "the same .offload-watch ladder at its first stage; it paints no selector offload-working does not, so one cell there closes both" },
-  "offload-working": { family: "hash:#instance", verdict: "genuinely-uncovered", cover: "a click-driven cell (press File) on `offload-working`, sentinel `.offload-watch .new-step` — CELLS has no click driver today", why: "the offload ladder is newStepsHtml inside .offload-watch, with a .toast-stack toast beside it: both are re-laid by @media (max-width: 720px) rules and no cell paints either" },
-  "offload-done": { family: "hash:#instance", verdict: "superseded", by: "offload-working", why: "the ladder at its terminal success plus a .notice banner, which has no @media rule; the gap is offload-working's" },
-  "offload-blocked": { family: "hash:#instance", verdict: "superseded", by: "offload-working", why: "the ladder at its blocked terminal plus a .notice banner, which has no @media rule; the gap is offload-working's" },
+  "offload-done": { family: "hash:#instance", verdict: "superseded", by: "offload-working", why: "the ladder at its terminal success plus a .notice banner, which has no @media rule; the ladder is the offload-working cell's" },
+  "offload-blocked": { family: "hash:#instance", verdict: "superseded", by: "offload-working", why: "the ladder at its blocked terminal plus a .notice banner, which has no @media rule; the ladder is the offload-working cell's" },
   // cch-w45-bl — the three instance states no cell renders and no scenario used
   // to produce: a box one release BEHIND (#inst-update), a teardown that FAILED
   // (#inst-remove-retry) and a /verify that answers 404 no_admin_token
@@ -917,7 +979,7 @@ export const SCENARIO_RESIDUE = {
   // member-authority-sweep.mjs's axis (and smoke.mjs's).
   "instance-behind-member": { family: "hash:#instance", verdict: "superseded", by: "inst-update-refused", why: "the self-update control rendered disabled-and-explained, the shape the inst-update-refused cell walks; only the actor moves" },
   "instance-remove-failed-member": { family: "hash:#instance", verdict: "superseded", by: "inst-update-refused", why: "the Retry-removal control rendered disabled-and-explained in the head actions row, the shape the inst-update-refused cell walks" },
-  "instance-failed-member": { family: "hash:#instance", verdict: "superseded", by: "failed", why: "failed's timeline with the docked Retry disabled-and-explained: it paints no selector `failed` does not, so it shares that gap" },
+  "instance-failed-member": { family: "hash:#instance", verdict: "superseded", by: "provisioning", why: "failed's timeline with the docked Retry disabled-and-explained: it paints no selector `failed` does not, and `failed` paints none the `provisioning` cell does not" },
   // cch-w34-bl-preview-scenario-for-a-failed-sites-read — the FAILED
   // /v1/sites read. Residue rather than a cell for the same reason as the
   // six above and one of its own: it paints the instance-detail layout every
@@ -974,16 +1036,15 @@ export const SCENARIO_RESIDUE = {
   // with an account change across it. Its terminal geometry is the `activity`
   // cell's, which this sweep already renders.
   "activity-identity-change": { family: "hash:#overview", verdict: "adjudicated", why: "a DRIVE across sign-out and sign-in as another team; a transition is not a width, and its terminal screen is the `activity` cell's" },
-  // hash:#site — 14
+  // hash:#site — 13
   "deploy-detail-cruel": { family: "hash:#site", verdict: "adjudicated", why: "the cruel twin of the deploy detail: a store-cap sub-caption bounded vertically, which overflow-guard W34-deploy-detail-render-bound owns; the rail rows it also paints are site-deploy-rail-live's gap" },
   "promote-failure": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "the 409 renders inside the promote confirm over the site-rollback cell's grid; no new @media selector" },
-  "promote-in-flight": { family: "hash:#site", verdict: "superseded", by: "site-deploy-rail-live", why: "the streaming build paints the deploy rail's .new-step rows over site-rollback's grid; that rail is the one uncovered selector, and it is site-deploy-rail-live's gap" },
+  "promote-in-flight": { family: "hash:#site", verdict: "superseded", by: "site-deploy-rail-live", why: "the streaming build paints the deploy rail's .new-step rows over site-rollback's grid; that rail's .new-step rows are the site-deploy-rail-live cell's, in the same #deploy-rail-slot" },
   "promote-retry": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "Try again inside the promote confirm over the site-rollback cell's grid; no new @media selector" },
   "promote-migrated": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "the Current chip moved to another deploy row: the same grid and the same @media selectors" },
   "shell-site": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "the sidebar morph to the site layer, which every site cell renders at every walked width" },
   "site-deploy-rail-failed": { family: "hash:#site", verdict: "adjudicated", why: "the cruel twin of the rail: an unbreakable builder error in .deploy-rail-fail is content length, which overflow-guard W25-deploy-rail-fail-wrap owns; its rail rows are site-deploy-rail-live's gap" },
   "site-deploy-rail-failed-classified": { family: "hash:#site", verdict: "adjudicated", why: "a caption-length instrument fixture for overflow-guard W25-deploy-rail-fail-wrap's classified route; its rail rows are site-deploy-rail-live's gap" },
-  "site-deploy-rail-live": { family: "hash:#site", verdict: "genuinely-uncovered", cover: "a cell on `site-deploy-rail-live` at its #site deep link, sentinel `#deploy-rail-slot .new-step`", why: "the deploy rail renders newStepsHtml rows (.new-step, .new-step-time, .new-step-detail) under the @720 block; neither site cell paints a rail, and overflow-guard's LIVE_WIDTHS and RAIL_WIDTHS never touch 719-721" },
   "site-binding-bound": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "binding-rail content inside the same .detail-grid; the three site-binding-* entries share this cause" },
   "site-binding-unknown": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "binding-rail content inside the same .detail-grid; same cause as site-binding-bound" },
   "site-binding-mismatch": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "binding-rail content inside the same .detail-grid; same cause as site-binding-bound" },
@@ -1017,12 +1078,10 @@ export const SCENARIO_RESIDUE = {
   "invite-already-member": { family: "hash:#", verdict: "adjudicated", why: "the invitation dead-end card on the sign-in surface; same cause as invite-joined" },
   "invite-invalid": { family: "hash:#", verdict: "adjudicated", why: "the invitation dead-end card on the sign-in surface; same cause as invite-joined" },
   "loggedout-reset": { family: "hash:#", verdict: "adjudicated", why: "the set-new-password card on the sign-in surface (main.auth-screen): no shell, and app.css has no width @media rule for anything it paints, so a centred max-width card has no breakpoint to fold at" },
-  // no-deeplink — 7
-  "account-modal": { family: "no-deeplink", verdict: "genuinely-uncovered", cover: "621 in overflow-guard's AM_WIDTHS (or a modal-capable cell here; CELLS has no modal field)", why: "the .am-modal block (.am-identity, .am-who, .am-head, .session-row) flips at @media (max-width: 620px); overflow-guard opens modal=account at FLOOR_WIDTHS and AM_WIDTHS and modal-oracle at 1440, and none holds 621 — the narrowest width the unfolded modal must fit" },
+  // no-deeplink — 5
   "account-modal-tall": { family: "no-deeplink", verdict: "superseded", by: "account-modal", why: "more session rows is height, not width: the same .am-modal selectors as account-modal" },
   "account-modal-revoke": { family: "no-deeplink", verdict: "superseded", by: "account-modal", why: "the revoke path's rows and confirm inside the same .am-modal selectors as account-modal" },
   "account-modal-cruel-identity": { family: "no-deeplink", verdict: "adjudicated", why: "the cruel twin of the modal: a server-cap email local part in .am-name is content length, which overflow-guard W23-account-modal-identity-bounded owns" },
-  "account-modal-2fa-badcode": { family: "no-deeplink", verdict: "genuinely-uncovered", cover: "620 and 621 in overflow-guard's A2F_WIDTHS (W22-2fa-enroll-phone-band)", why: "the enrollment rows (.a2f-enroll, .a2f-qr, .a2f-manual, .a2f-otp, .a2f-confirm-row) sit in the same @620 block, and the only legs that open enrollment walk FLOOR_WIDTHS and A2F_WIDTHS, both of which stop below the band edge" },
   "account-modal-2fa-on": { family: "no-deeplink", verdict: "superseded", by: "account-modal", why: "the 2FA-on row inside the same .am-modal selectors as account-modal; no enrollment rows" },
   // cch-w39-s2-fu — the unknown two-factor arm, over a /v1/me that never lands.
   // Same residue reason as its six siblings and for the same owner: the state's
@@ -1036,11 +1095,9 @@ export const SCENARIO_RESIDUE = {
   "activate-gone": { family: "path:/activate", verdict: "adjudicated", why: "the expired-code dead-end on the activation page; same cause as activate-entry" },
   "activate-rate-limited": { family: "path:/activate", verdict: "adjudicated", why: "the paused retry countdown on the activation page; same cause as activate-entry" },
   "activate-logged-out": { family: "path:/activate", verdict: "adjudicated", why: "the parked-code banner on the sign-in card: the sign-in surface (main.auth-screen): no shell, and app.css has no width @media rule for anything it paints, so a centred max-width card has no breakpoint to fold at" },
-  // path:/new — 10
+  // path:/new — 8
   "new-launch": { family: "path:/new", verdict: "adjudicated", why: "the /new launch form paints no width-@media selector (the @720 block targets the theater and the ready hero, not the form); its phone band is overflow-guard W26-new-ready-and-launch-bounded's" },
-  "theater-midflight": { family: "path:/new", verdict: "genuinely-uncovered", cover: "a pathname-capable cell (CELLS keys a hash only) on `theater-midflight` at /new, sentinel `.new-theater-grid .new-step`", why: "@media (max-width: 720px) collapses .new-theater-grid and re-lays .new-step, .new-step-time, .new-step-detail, .new-step-probe and .new-console-body; overflow-guard's theater legs drive W26_WIDTHS and FAIL_WIDTHS, all phone widths, so 719/720/721 is walked by nothing" },
   "theater-failed": { family: "path:/new", verdict: "superseded", by: "theater-midflight", why: "the same theater grid in its snap state; it paints no selector theater-midflight does not" },
-  "theater-ready": { family: "path:/new", verdict: "genuinely-uncovered", cover: "the same pathname-capable cell on `theater-ready`, sentinel `.new-ready .new-actions .btn`", why: "`.new-ready .new-actions .btn` goes full-width under @media (max-width: 720px); the ready hero is not the theater grid, and no instrument drives it at 719/720/721" },
   "new-launch-me-unreadable": { family: "path:/new", verdict: "adjudicated", why: "the unknown arm replaces the launch form with one block and a Retry; it paints no width-@media selector" },
   "theater-ready-github": { family: "path:/new", verdict: "superseded", by: "theater-ready", why: "the ready hero with the GitHub action live: the same .new-actions row theater-ready carries" },
   "theater-ready-github-member": { family: "path:/new", verdict: "superseded", by: "theater-ready", why: "the ready hero with the GitHub action disabled-and-explained: the same .new-actions row theater-ready carries" },
@@ -1052,9 +1109,8 @@ export const SCENARIO_RESIDUE = {
   // with only the POST /v1/launch answer changed.
   "new-launch-limit-reached": { family: "path:/new", verdict: "adjudicated", why: "new-launch's form plus a toast after a DRIVEN submit, which no cell performs; the .toast-stack @720 gap it would expose is recorded on billing-portal-return, which paints a toast on load" },
   "new-launch-forbidden": { family: "path:/new", verdict: "adjudicated", why: "new-launch's form plus a toast after a DRIVEN submit; same cause as new-launch-limit-reached" },
-  // hash:#billing — 9
+  // hash:#billing — 8
   "billing-forever": { family: "hash:#billing", verdict: "superseded", by: "billing-past-due", why: "a comp plan as the current plan, its Manage panel prose with no button, inside the manage section the billing-past-due cell walks" },
-  "billing-portal-return": { family: "hash:#billing", verdict: "genuinely-uncovered", cover: "a cell on `billing-portal-return` at #settings/billing, sentinel `.toast-stack .toast`", why: "the portal ack is a toast, and `.toast-stack` is re-anchored by @media (max-width: 720px); it paints on load with no driver, yet no cell renders a toast, so the stack's 719/720/721 is walked by nothing" },
   "billing-member": { family: "hash:#billing", verdict: "superseded", by: "billing-past-due", why: "a read-only plan with no manage or cancel CTA: less than the billing-past-due cell paints" },
   "billing-me-unreadable": { family: "hash:#billing", verdict: "superseded", by: "billing-past-due", why: "the Manage section's copy swapped for one .empty-state with a retry: narrower than what billing-past-due walks" },
   "billing-me-recovers": { family: "hash:#billing", verdict: "adjudicated", why: "a one-shot fault whose retry smoke.mjs drives: a transition between billing-me-unreadable's block and billing-past-due's panel, and a transition is not a width" },
@@ -1064,7 +1120,7 @@ export const SCENARIO_RESIDUE = {
   "billing-unconfigured": { family: "hash:#billing", verdict: "superseded", by: "billing-trial", why: "billing-trial's tier grid minus the Subscribe buttons plus one .tier-omit-note row: less horizontal demand than the cell walks" },
   // hash:#operator — 5
   "operator-zero-staging": { family: "hash:#operator", verdict: "superseded", by: "operator", why: "an empty staging list and warm pool inside the four cards the operator cell walks; its gate pill's band is overflow-guard W20-op-gate-pill-bounded's" },
-  "operator-denied": { family: "hash:#operator", verdict: "superseded", by: "billing-portal-return", why: "a non-operator is bounced to #overview (overview-fleet's geometry) with a toast; the one uncovered selector is .toast-stack, which is billing-portal-return's gap" },
+  "operator-denied": { family: "hash:#operator", verdict: "superseded", by: "billing-portal-return", why: "a non-operator is bounced to #overview (overview-fleet's geometry) with a toast; the one selector beyond it is .toast-stack, which the billing-portal-return cell walks (fresh per width, since a toast is transient)" },
   "operator-unreadable": { family: "hash:#operator", verdict: "superseded", by: "operator", why: "every operator route 403s and the four cards degrade to empty-state blocks: less than the operator cell paints" },
   "operator-me-unreadable": { family: "hash:#operator", verdict: "superseded", by: "operator", why: "one .empty-state in place of the four cards: less than the operator cell paints" },
   "operator-me-recovers": { family: "hash:#operator", verdict: "adjudicated", why: "a CLICK fixture: the transition from operator-me-unreadable's block to the console the operator cell walks; a transition is not a width" },
@@ -1691,7 +1747,9 @@ export function coverageReport({
   const { preludes, breakpoints, unresolved, heights: derivedHeights, heightUnresolved } = parseMediaBreakpoints(css);
   const views = parseViewIds(html);
   const w = new Set(widths);
-  const covered = new Set(cells.map((c) => c.view));
+  // `shell: false` cells (/new) render a surface that is not a section.view,
+  // so they neither cover a registered screen nor count as a phantom one.
+  const covered = new Set(cells.filter((c) => c.shell !== false).map((c) => c.view));
 
   const uncoveredBreakpoints = breakpoints
     .map((b) => ({ b, missing: [b - 1, b, b + 1].filter((x) => !w.has(x)) }))
@@ -1849,7 +1907,11 @@ function cellProbeJs(cell) {
   var live=null, views=document.querySelectorAll('section.view');
   for (var i=0;i<views.length;i++){ if(!views[i].hidden){ live=views[i]; break; } }
   var want=document.getElementById(${JSON.stringify(cell.view)});
-  var liveId = live ? live.id : null;
+  // clause 1 for a "shell: false" cell (/new): the named SURFACE is live, since
+  // that document has no section.view for the loop above to find.
+  var liveId = ${cell.shell === false}
+    ? ((want && !want.hidden && want.getBoundingClientRect().height > 0) ? want.id : null)
+    : (live ? live.id : null);
   var wantBox = want ? want.getBoundingClientRect() : null;
   var sentinel = document.querySelector(${JSON.stringify(cell.sentinel)});
   var liveness = {
@@ -2047,7 +2109,9 @@ function cellProbeJs(cell) {
   // at-320): the raw .content offset this probe always read, the FOLDED CHROME
   // bottom under it, and the live view's first painted box. The verdict is
   // computed on the node side by foldVerdict(); the probe only measures.
-  var content=document.querySelector('.content');
+  // Q3's fold budget belongs to the shell's folded chrome; a "shell: false"
+  // cell has none, so .content (present but hidden there) is not read.
+  var content=${cell.shell === false} ? null : document.querySelector('.content');
   var r2=function(n){return Math.round(n*100)/100;};
   var q3={top: content ? r2(content.getBoundingClientRect().top) : null,
           vh: window.innerHeight,
@@ -2663,8 +2727,14 @@ async function legRender(rep) {
     out(freshTargets
       ? `              targets    FRESH per (cell, width) — ${total} cross-document loads. Any --widths order is accepted. This is the equivalence path.\n`
       : `              targets    REUSED across the WIDTH axis — ${cells.length * themes.length * heights.length} group(s) of (cell, theme, height), each ONE load then ${widths.length} metrics override(s), widths ASCENDING [${widths.join(",")}]. Theme and height stay FRESH loads; reuse across heights is untested and assumed unsafe. --fresh-targets restores the per-width path.\n`);
+    // A `fresh: true` cell overrides reuse for itself; say which, so the path
+    // label above is not read as covering it.
+    const freshCells = cells.filter((c) => c.fresh === true).map((c) => c.name);
+    if (!freshTargets && freshCells.length) {
+      out(`              fresh      ${freshCells.join(",")} — FRESH per width anyway (a transient sentinel would not survive a reused document)\n`);
+    }
     if (!heightFilter) {
-      out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 26x2x1x21 = 1092 renders (13.3 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 3276 (39.9 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
+      out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is ${CELLS.length}x${THEMES.length}x1x${WIDTHS.length} = ${CELLS.length * THEMES.length * WIDTHS.length} renders (${(CELLS.length * THEMES.length * WIDTHS.length * 0.73 / 60).toFixed(1)} min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it ${CELLS.length * THEMES.length * HEIGHTS.length * WIDTHS.length} (${(CELLS.length * THEMES.length * HEIGHTS.length * WIDTHS.length * 0.73 / 60).toFixed(1)} min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
     }
     const dead = [], q1f = [], q2f = [], q3f = [], notes = [], honest = [];
     // The shell's own pin, alongside Q3's screen number — this row's whole
@@ -2686,7 +2756,11 @@ async function legRender(rep) {
       // --fresh-targets. `navigated` is what makes the first width of a reused
       // group pay for the cross-document load and the rest pay for a resize.
       let group = null, navigated = false;
-      if (!freshTargets) {
+      // A `fresh: true` CELL takes the per-width path whatever the run's flag
+      // says (task-197a30115b0d8a7d): its sentinel is TRANSIENT (a toast), so a
+      // reused document would outlive it and the late widths would read DEAD.
+      const fresh = freshTargets || cell.fresh === true;
+      if (!fresh) {
         group = await openCell();
         // cch-bl-tier-card — installed on the GROUP's target, before the single
         // navigation, for the same reason the fresh path installs it before its
@@ -2698,14 +2772,14 @@ async function legRender(rep) {
       }
       try {
       for (const width of widths) {
-        const { targetId, sessionId } = freshTargets ? await openCell() : group;
+        const { targetId, sessionId } = fresh ? await openCell() : group;
         try {
           // cch-bl-tier-card — the hook receiver for the tier-CTA tense probe
           // below, installed BEFORE app.js parses and ONLY for the cell that
           // uses it (an accessor, not an assignment: see TIERS5_HOOK_TAP for the
           // measured reason mock.js would otherwise overwrite it). Every other
           // cell renders exactly as it did before.
-          if (freshTargets && cell.name === "billing-trial") {
+          if (fresh && cell.name === "billing-trial") {
             await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: TIERS5_HOOK_TAP }, sessionId);
           }
           await cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
@@ -2718,10 +2792,10 @@ async function legRender(rep) {
           // would measure the wrong control text and could not see a
           // theme-differentiated defect at all. mock.js seeds ?theme= into
           // localStorage before first paint, which is why the load is honest.
-          const url = `${BASE}/?scen=${cell.scen}&theme=${theme}${cell.hash}`;
+          const url = cellUrl(cell, theme);
           let m = null;
           try {
-            if (freshTargets || !navigated) {
+            if (fresh || !navigated) {
               await navSettle(sessionId, url, `document.querySelector(${JSON.stringify(cell.sentinel)})`);
               navigated = true;
             } else {
@@ -2842,7 +2916,7 @@ async function legRender(rep) {
           }
           row.push(`${width}:${m.q1.sw}${m.q1.over ? "!" : ""}`);
         } finally {
-          if (freshTargets) await closeCell(targetId);
+          if (fresh) await closeCell(targetId);
           done++;
         }
       }
@@ -3133,7 +3207,7 @@ async function legTiers5() {
         await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: TIERS5_HOOK_TAP }, sessionId);
         await cdp.send("Emulation.setDeviceMetricsOverride",
           { width, height: TIERS5_HEIGHT, deviceScaleFactor: 1, mobile: false }, sessionId);
-        const url = `${BASE}/?scen=${cell.scen}&theme=light${cell.hash}`;
+        const url = cellUrl(cell, "light");
         if (!await navSettle(sessionId, url, `document.querySelector(${JSON.stringify(cell.sentinel)})`)) {
           return die(`billing-trial@${width}: the tier grid never populated — refusing to publish a measurement of an empty screen.`);
         }

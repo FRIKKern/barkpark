@@ -270,6 +270,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       paper_rev: 0,
       paper_html: "",
       paper_block_mode: false,
+      # Paper masters (task-3b6e562e916c8ce4): the open paper's in-scope
+      # masters for the slash picker, or nil when the pane may not write.
+      paper_masters: nil,
+      paper_masters_impl: nil,
+      # Linked master instances (task-59f078a2fd248698): the open paper's
+      # `%{key => html}` render map for the boundary preview, or nil.
+      paper_master_render: nil,
       paper_topic: nil,
       # t9 — live task-block previews, keyed by block id. Display-only rows
       # for the canvas boundary widgets (never the save baseline — doctrine

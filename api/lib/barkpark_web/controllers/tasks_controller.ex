@@ -3913,6 +3913,13 @@ defmodule BarkparkWeb.TasksController do
           "capacity must be a free-form string or an object with size_class (light | standard | heavy | xl), non-negative slots_total/slots_free (slots_free <= slots_total), and an optional non-negative budget"
         )
 
+      {:error, :invalid_feed} ->
+        unprocessable(
+          conn,
+          "invalid_feed",
+          "feed must be one of: " <> Enum.join(Fleet.feeds(), " | ")
+        )
+
       {:error, :stale_beat} ->
         conflict(conn, :stale_beat, nil)
 

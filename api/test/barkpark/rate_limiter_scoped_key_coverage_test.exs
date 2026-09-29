@@ -47,11 +47,13 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
   # these is required to be compliant. It exists so the scan cannot go green by
   # finding nothing — if a site is renamed away, fix this list deliberately.
   @known_sites [
+    "lib/barkpark/plugins/forms/web/submission_controller.ex",
     "lib/barkpark/quiz/spawn_budget.ex",
     "lib/barkpark_web/channels/user_socket.ex",
     "lib/barkpark_web/controllers/app_token_controller.ex",
     "lib/barkpark_web/controllers/bulldocs_form_controller.ex",
     "lib/barkpark_web/controllers/pulse_controller.ex",
+    "lib/barkpark_web/live/studio/account_live.ex",
     "lib/barkpark_web/plugs/auth_write_rate_limit.ex",
     "lib/barkpark_web/plugs/rate_limit.ex",
     "lib/barkpark_web/plugs/ticket_rate_limit.ex"
@@ -131,9 +133,11 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
              "call in it — the matcher has drifted: #{inspect(counts)}"
 
     # pulse_controller carries two (write bucket + read bucket); quiz
-    # spawn_budget added the ninth.
-    assert Enum.sum(Enum.map(counts, &elem(&1, 1))) == 9,
-           "expected the 9 call sites the row names, found #{inspect(counts)}"
+    # spawn_budget added the ninth; the Forms submission controller the tenth
+    # (one `check` call serving its per-IP and per-endpoint buckets); the
+    # Studio "Your data" page's per-user erase-password cap the eleventh.
+    assert Enum.sum(Enum.map(counts, &elem(&1, 1))) == 11,
+           "expected the 11 call sites the row names, found #{inspect(counts)}"
   end
 
   test "POSITIVE CONTROL: the scanner catches a call site that bypasses the helper" do

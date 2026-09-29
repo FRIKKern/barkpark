@@ -556,12 +556,24 @@ defmodule PDS.Census do
   # build-free by construction, so the figures are engine-independent by design — but that
   # is a claim the required Elixir gate re-measures on every run, not one this comment
   # settles.
+  # RE-DERIVED AGAIN 2026-09-25 at task-71082f5541c13b53 (PR #20245, the Forms plugin's
+  # public intake endpoint): textual 113 -> 115, ast-literal 104 -> 106, emitted 100 ->
+  # 102, read-routed 29 -> 31. TWO ADDED SITES, both inside
+  # `Barkpark.Plugins.Forms.Web.SubmissionController.submit/2`: the `ok: true, id:` success
+  # arm and the honeypot's identical-shaped decoy (the BulldocsFormController precedent).
+  # Both land READ-routed because submit/2 reaches `Content.get_document/4` (the
+  # endpoint lookup in `Intake.resolve_endpoint/4`) within the depth budget, while the
+  # write sits deeper. `phantom` (9), `consumer` (4), `write-routed` (57) and `unrouted`
+  # (14) read `==` in the SAME run. Both sites carry register rows below. DERIVED BY THE
+  # INSTRUMENT: the numbers are the `derived` half of this census's own D448-DRIFT-REFUSES
+  # line on the rebased PR tree (pds_elixir_census_test.exs, strict runner), amended in
+  # the same commit as the change that moved them (PDS-D448a).
   @rederived %{
-    textual: 113,
-    ast: 104,
+    textual: 115,
+    ast: 106,
     phantom: 9,
     consumer: 4,
-    emitted: 100,
+    emitted: 102,
     # RE-DERIVED BY RUN AT PDS-D480/PDS-D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
@@ -662,9 +674,56 @@ defmodule PDS.Census do
     # counts, route depth 6, @write_verbs without `transaction`, corpus api/lib/**/*.ex).
     # Engine printed live by that run:
     #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
-    write: 57,
-    read: 29,
-    unrouted: 14
+    #
+    # RE-DERIVED AGAIN 2026-09-27 at codex/managed-write-wiring (Barkdown C083, write
+    # admission doors): write-routed 57 -> 56 and unrouted 14 -> 15. Fronting
+    # `Writer.create_document/4` and `upsert_document/4` with
+    # `WriteAdmission.Door.admit/1` inserted ONE closure hop (public head -> Door.admit's
+    # `fn` -> `admitted_upsert_document/4`) between every context caller and the row
+    # write — the same shape #17321 recorded above for `write_atomically/1`. ONE receipt
+    # can no longer reach a write verb inside the depth-6 budget: `--sites` diffed
+    # against origin/main (1c6c3f21f) names it —
+    #   barkpark/plugins/sheets/web/import_controller.ex
+    #       Sheets.Web.ImportController.create/2   [WRITE d6] -> [UNROUTED]
+    # and the census's own depth sweep lists that same site among the "unrouted @6 that
+    # ROUTE at @route_depth 10", so it did not fall out of the route relation; the
+    # budget stopped seeing it. `textual` (115), `ast` (106), `phantom` (9), `consumer`
+    # (4), `emitted` (102) and `read` (31) all read `==` in the same run.
+    #
+    # NOT DONE, DELIBERATELY: the hop is removable by inlining the door into each writer
+    # body, but the door owns checkout, settlement-on-exception and the bounded wait for
+    # inherited children in ONE place; restructuring the fix to flatter the lens is the
+    # ruling task-a0ce4e18f6776400 already refused. DERIVED BY THE INSTRUMENT, not typed:
+    # the `derived` half of this census's own D448-DRIFT-REFUSES line, run from the repo
+    # root on this commit's tree, lens unchanged. Engine printed live by that run:
+    #   Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
+    #
+    # RE-DERIVED AGAIN 2026-09-28 at codex/write-admission-slice2 (Barkdown C083 slice 2,
+    # BlockOps and media doors): write-routed 56 -> 54 and read-routed 31 -> 33. Fronting
+    # every `Papers.BlockOps` entry with `WriteAdmission.Door.admit/1` inserted the same ONE
+    # closure hop as slice 1 did for Writer, this time between the ingest controller and
+    # `upsert_blocks_doc`'s row write. TWO receipts can no longer reach a write verb inside
+    # the depth-6 budget and land in the READ class — `--sites` diffed against origin/main
+    # (c35d45aaf) names them, both in barkpark_web/controllers/bulldocs_ingest_controller.ex:
+    #   BulldocsIngestController.sync/2            [WRITE d6] -> [READ]
+    #   BulldocsIngestController.ingest_session/2  [WRITE d6] -> [READ]
+    # and the depth sweep shows the same sites at [WRITE d6] one hop deeper, so they did not
+    # fall out of the route relation. `textual` (115), `ast` (106), `phantom` (9), `consumer`
+    # (4), `emitted` (102) and `unrouted` (15) all read `==` in the same run. Same ruling as
+    # the two entries above: the hop stays, the door is one place. DERIVED BY THE INSTRUMENT,
+    # not typed: the `derived` half of this census's own D448-DRIFT-REFUSES line, run from the
+    # repo root on this commit's tree, lens unchanged. Engine printed live by that run:
+    #   Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
+    #
+    # RE-DERIVED AGAIN 2026-09-28 at codex/write-admission-slice4 (Barkdown C083 slice 4, the task
+    # board door): write-routed 54 -> 52 and read-routed 33 -> 35. `Tasks.Internal.fenced_content_write/4`
+    # and `insert_mutation_event!/1` now pass through `WriteAdmission.Door.admit!/1`, the same ONE
+    # closure hop as the earlier entries, between every task verb and the fenced `Repo.update_all`;
+    # two task-verb receipts land in the READ class at depth 6. Same ruling: the hop stays, the door is
+    # one place. Engine printed live by that run: Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
+    write: 52,
+    read: 35,
+    unrouted: 15
   }
 
   # THE ROW THE TWO D448 SELFTEST CASES INJECT, BUILT THE WAY drift/4 BUILDS IT — including
@@ -741,7 +800,11 @@ defmodule PDS.Census do
   # and collapsing it (collapse_draft_twin/5 deleted), so the longest write chain lost
   # two hops and the table went flat at 10 — write 78 / read 15 / unrouted 3, identical
   # at 12/14/16. Read off the run, not typed; ROUTE-DEPTH-IS-CLOSURE reds if it moves.
-  @route_depth 10
+  # RE-DERIVED 2026-09-28 (10 -> 12): Tasks.Internal.fenced_content_write/4 and
+  # insert_mutation_event!/1 now pass through WriteAdmission.Door.admit!/1 (Barkdown C083
+  # slice 4), so every task-verb write chain gained the door's closure hops and the
+  # table goes flat at 12 — write 83 / read 16 / unrouted 3, identical at 14/16.
+  @route_depth 12
   @sweep [1, 2, 3, 4, 5, 6]
 
   # DEPTHS PAST THE CENSUS DEPTH, MEASURED RATHER THAN ASSERTED. The claim "the route
@@ -928,6 +991,7 @@ defmodule PDS.Census do
     {:live, "/w/:workspace_slug/p/:project_slug/admin/pulse", "Barkpark.Plugins.Pulse.Web.DashboardLive", :index, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio", "BarkparkWeb.Studio.StudioLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/*path", "BarkparkWeb.Studio.StudioLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_account", "BarkparkWeb.Studio.AccountLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_plugins", "BarkparkWeb.Admin.PluginsLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_plugins/:plugin/settings", "BarkparkWeb.Admin.PluginSettingsLive", nil, :liveview_handle_event},
     {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/api-tester", "BarkparkWeb.Studio.ApiTesterLive", nil, :liveview_handle_event},
@@ -980,6 +1044,12 @@ defmodule PDS.Census do
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint, :status_only_receipt},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim, :status_only_receipt},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback, :status_only_receipt},
+    # C083 trusted hold endpoint (2026-09-29): both render the Holder's view of the
+    # coordinator (phase, generation, boot) — a bound value, no `ok: true` literal, no
+    # roster anchor — which is exactly what `status_only_receipt` names.
+    {:post, "/v1/admin/write-admission/hold", "BarkparkWeb.WriteAdmissionController", :hold, :status_only_receipt},
+    {:delete, "/v1/admin/write-admission/hold/:capability", "BarkparkWeb.WriteAdmissionController", :reopen, :status_only_receipt},
+    {:post, "/v1/admin/write-admission/recover", "BarkparkWeb.WriteAdmissionController", :recover, :status_only_receipt},
     # SiteDeployController.trigger IS DISPOSED IN WRITING, NOT SILENTLY (PDS-D554/PDS-D566).
     # IT IS THE ONE MEMBER A BFS AT DEPTHS 2..12 RECOVERS OUT OF EVERY EXCLUDED ROW, and
     # it stays in `status_only_receipt` with this comment rather than being moved, because
@@ -1251,6 +1321,9 @@ defmodule PDS.Census do
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint} => {"BarkparkWeb.AccessController.mint/2", 1, "83944541"},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim} => {"BarkparkWeb.AccessController.claim/2", 2, "9774625"},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback} => {"BarkparkWeb.SelfUpdateController.rollback/2", 1, "123741443"},
+    {:post, "/v1/admin/write-admission/hold", "BarkparkWeb.WriteAdmissionController", :hold} => {"BarkparkWeb.WriteAdmissionController.hold/2", 2, "111003360"},
+    {:delete, "/v1/admin/write-admission/hold/:capability", "BarkparkWeb.WriteAdmissionController", :reopen} => {"BarkparkWeb.WriteAdmissionController.reopen/2", 1, "39928"},
+    {:post, "/v1/admin/write-admission/recover", "BarkparkWeb.WriteAdmissionController", :recover} => {"BarkparkWeb.WriteAdmissionController.recover/2", 2, "76331147"},
     {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger} => {"BarkparkWeb.SiteDeployController.trigger/2", 1, "51850737"},
     {:post, "/v1/admin/workspaces/:slug/reinstate", "BarkparkWeb.WorkspaceReinstateController", :create} => {"BarkparkWeb.WorkspaceReinstateController.create/2", 1, "25110011"},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create} => {"BarkparkWeb.AppTokenController.create/2", 1, "77961954"},
@@ -1937,6 +2010,31 @@ defmodule PDS.Census do
   ]
 
   @register [
+    # Barkpark.Plugins.Forms.Web.SubmissionController.submit/2 — the success arm,
+    # `%{ok: true, id: stored.doc_id}` (task-71082f5541c13b53). PROVEN/end_to_end: the
+    # cited test posts to the public route and then reads the stored form_submission
+    # row back through Repo, asserting its id equals the receipt's id and its
+    # workspace/project/dataset equal the bound scope. Mutation-exercised on the PR: an
+    # unscoped endpoint lookup reds the cross-tenant tests with a 201 where a 404 belongs.
+    %{key: {"api/lib/barkpark/plugins/forms/web/submission_controller.ex",
+            "Barkpark.Plugins.Forms.Web.SubmissionController.submit/2", "39918431", "127244318"},
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence:
+        {"api/test/barkpark_web/controllers/forms_submission_controller_test.exs",
+         ~S|test "a valid post lands in the bound workspace/project/dataset only", ctx do|}},
+    # Barkpark.Plugins.Forms.Web.SubmissionController.submit/2 — the honeypot decoy,
+    # `%{ok: true}` with NO write, by design: the trap must be indistinguishable from
+    # success (the same ruling as BulldocsFormController's declared HONEYPOT row).
+    %{key: {"api/lib/barkpark/plugins/forms/web/submission_controller.ex",
+            "Barkpark.Plugins.Forms.Web.SubmissionController.submit/2", "39918431", "17468236"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "A DELIBERATE DECOY, not a laundered success: a filled `bp_hp` honeypot gets the " <>
+          "happy receipt and nothing is written, so a bot cannot tell it was caught. The " <>
+          "no-write half IS tested (forms_submission_controller_test.exs `a filled honeypot " <>
+          "gets the success shape and writes nothing` reads the table back empty); the " <>
+          "receipt-vs-stored-row question this register asks has no honest yes here, " <>
+          "because the receipt is untrue on purpose."},
     # barkpark/plugins/sheets/web/import_controller.ex:64
     %{key: {"api/lib/barkpark/plugins/sheets/web/import_controller.ex",
             "Barkpark.Plugins.Sheets.Web.ImportController.create/2", "51320322", "13286890"},
@@ -2070,10 +2168,10 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :declared_basis},
     # barkpark_web/controllers/bulldocs_ingest_controller.ex:164
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
-            "BarkparkWeb.BulldocsIngestController.ingest_blocks/4", "1989150", "124223564"},
-      stale_ack: %{recorded: {"1989150", "124223564"}, current: {"1989150", "63570316"},
+            "BarkparkWeb.BulldocsIngestController.ingest_blocks/5", "1989150", "124223564"},
+      stale_ack: %{recorded: {"1989150", "124223564"}, current: {"82242138", "63570316"},
         why:
-          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 124223564 -> 63570316; head_hash 1989150 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: the earlier expr_fp movement 124223564 -> 63570316 was recorded at 9b5dc6c35. Create-only ingest adds an optional opts argument and shares this receipt through ingest_blocks/5; the hosted census on 446f29ced derives head_hash 82242138 and unchanged expr_fp 63570316. The original recorded pair and UNJUDGED demotion remain intact; the new signature does not re-judge the receipt. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "DEMOTED ON THE ADVISORY LINE. side_effect_existence_only claims a Repo read that asserts EXISTENCE; the cited positive control (bulldocs_ingest_controller_test.exs `a valid block paper (locked title at index 0) still saves — positive control`) reads nothing back at all, so it cannot even assert that."},
@@ -6949,7 +7047,7 @@ defmodule PDS.Census do
   # the filing — which is why it is keyed on {path, def, payload key} and not on a line.
   @response_carries_read_expected [
     {"barkpark_web/controllers/bulldocs_ingest_controller.ex",
-     "BarkparkWeb.BulldocsIngestController.ingest_blocks/4", "scoped_liveview_path"},
+     "BarkparkWeb.BulldocsIngestController.ingest_blocks/5", "scoped_liveview_path"},
     {"barkpark_web/controllers/bulldocs_ingest_controller.ex",
      "BarkparkWeb.BulldocsIngestController.ingest_html_write/2", "scoped_liveview_path"},
     {"barkpark_web/controllers/query_controller.ex", "BarkparkWeb.QueryController.counts/2",
@@ -11629,7 +11727,11 @@ defmodule PDS.Census do
   #            remaining 185 are EXCLUDED, already quad-keyed, and not this arm's.
   # :erlang.phash2/1 is the same hash roster_def_fp/1 already fingerprints defs with, and
   # it is stable across OTP releases — which is why a CI run on another engine compares.
-  @derived_disposition_pin %{count: 83, fp: "100841140"}
+  # Re-derived 2026-09-25 with Elixir 1.18.4 / OTP27.3.4 on Windows x64:
+  # `elixir scripts/pds-elixir-receipt-census.exs` printed count 84 fp 103207718.
+  # The create-only Paper route reaches the existing UNJUDGED receipt, now /5;
+  # both prior ingest routes remain disposed through the register. No exclusion was added.
+  @derived_disposition_pin %{count: 84, fp: "103207718"}
 
   # ONE DERIVATION, READ TWICE — the printed pair and the compared pair are this function,
   # so the value a maintainer copies out of the report cannot differ from the value the arm

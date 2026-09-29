@@ -449,6 +449,50 @@ if [ "${UDT_SELFTEST:-0}" = 1 ]; then
     && ok "run_arms: BOTH arms run and are both recorded in one call" || no "run_arms: did not record both arms (ARMS_RUN=$ARMS_RUN)"
   ARMOUT=""
 
+  # THE VERDICT WIRING, graded on the whole program (task-92a213f01ca30817).
+  # Every arm above grades cover.py / run_arms IN PROCESS, and the script arms
+  # only reach the CANNOT READ refusals; none reaches the audit tail that turns
+  # FINDINGS into the process exit, so flipping its `exit 1` to `exit 0` kept
+  # this selftest green while CI certified an undispatched target. Same idiom
+  # as PR #13405 / #20180: RE-EXEC THE WHOLE PROGRAM on a fixture root and
+  # assert the PROCESS exit. The fixture mirrors this tree's workflows
+  # and derived guards (so the generator control and the acknowledged block
+  # hold exactly as on the real tree); the plant deletes one declared target
+  # from ci.yml's push.paths — the exact defect this script exists to find.
+  # The fixture is a SYMLINK FARM over this root: the guards derive their own
+  # root from their (logical) location and read declaration sources all over
+  # the tree, so every top-level entry is linked and only ci.yml is a real,
+  # plantable file.
+  E2E="$S/e2e"
+  mkdir -p "$E2E/.github/workflows"
+  for e in "$ROOT"/* "$ROOT"/.[!.]*; do
+    [ -e "$e" ] || continue
+    case "$(basename "$e")" in .github|.git) continue ;; esac
+    ln -s "$e" "$E2E/$(basename "$e")"
+  done
+  for e in "$ROOT"/.github/* "$ROOT"/.github/.[!.]*; do
+    [ -e "$e" ] || continue
+    [ "$(basename "$e")" = workflows ] && continue
+    ln -s "$e" "$E2E/.github/$(basename "$e")"
+  done
+  for e in "$WF_DIR"/*; do
+    [ "$(basename "$e")" = ci.yml ] && continue
+    ln -s "$e" "$E2E/.github/workflows/$(basename "$e")"
+  done
+  grep -vxF '      - "design/tokens.json"' "$WF_DIR/ci.yml" >"$E2E/.github/workflows/ci.yml"
+  if cmp -s "$WF_DIR/ci.yml" "$E2E/.github/workflows/ci.yml"; then
+    no "whole program: the plant did not apply (ci.yml push.paths carries no design/tokens.json line) — the next arm would be vacuous"
+  else
+    out="$(UNDISPATCHED_ROOT="$E2E" bash "$E2E/$SELF_REL" 2>&1)"; rc=$?
+    case "$out" in
+      *"UNDISPATCHED DECLARED TARGET: 'design/tokens.json'"*) [ "$rc" = 1 ] && ok "whole program: a planted undispatched target exits 1, naming it" || no "whole program: the plant was named but the PROCESS exited $rc, not 1" ;;
+      *) no "whole program: the planted undispatched target was not named (rc=$rc)" ;;
+    esac
+  fi
+  cp "$WF_DIR/ci.yml" "$E2E/.github/workflows/ci.yml"
+  out="$(UNDISPATCHED_ROOT="$E2E" bash "$E2E/$SELF_REL" 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && ok "whole program: the plant removed, the PROCESS exits 0" || no "whole program: the plant removed, the PROCESS exited $rc, not 0: $(printf '%s\n' "$out" | grep -E '::error::|CANNOT READ' | head -3)"
+
   pat="$(print_pattern)"
   for needle in "SINGLE DERIVATION POINT" "NO WORKFLOW-LEVEL" "SELF-INCLUSION" "scripts/console-path-escape-check.sh" "console-harness.yml"; do
     case "$pat" in *"$needle"*) ok "pattern: names '$needle'" ;; *) no "pattern: does NOT name '$needle'" ;; esac

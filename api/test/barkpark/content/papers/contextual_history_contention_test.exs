@@ -11,6 +11,8 @@ defmodule Barkpark.Content.Papers.ContextualHistoryContentionTest do
   @dataset "production"
 
   test "concurrent requests can consume one contextual history reference only once" do
+    Barkpark.DeletedWorkspaceResidue.purge_on_exit()
+
     Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
       workspace = TenancyFixtures.create_workspace!()
       project = TenancyFixtures.create_project!(workspace)
@@ -104,6 +106,8 @@ defmodule Barkpark.Content.Papers.ContextualHistoryContentionTest do
   end
 
   test "concurrent retries of one contextual history request replay one receipt after one write" do
+    Barkpark.DeletedWorkspaceResidue.purge_on_exit()
+
     Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
       workspace = TenancyFixtures.create_workspace!()
       project = TenancyFixtures.create_project!(workspace)
@@ -202,6 +206,8 @@ defmodule Barkpark.Content.Papers.ContextualHistoryContentionTest do
   end
 
   test "contextual history holds the physical paper row lock through persistence" do
+    Barkpark.DeletedWorkspaceResidue.purge_on_exit()
+
     Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
       workspace = TenancyFixtures.create_workspace!()
       project = TenancyFixtures.create_project!(workspace)

@@ -38,7 +38,7 @@ defmodule Barkpark.Tasks.QueueGateCallerCensusTest do
     * `barkpark/tasks.ex` (1) — LIVE by pass-through. A `defdelegate` re-export
       that makes no decision of its own; it is counted because it is a public
       door onto the predicate.
-    * `barkpark/content/mutations.ex` (1) — LIVE. `live_claim?/1` refuses a
+    * `barkpark/tasks/mutate_guards.ex` (1) — LIVE. `live_claim?/1` refuses a
       create-family write that would fork a row SOMEBODY IS WORKING ON. A row
       whose holder left six days ago is not being worked on, and refusing that
       write would strand an importer on residue.
@@ -70,7 +70,7 @@ defmodule Barkpark.Tasks.QueueGateCallerCensusTest do
   @census %{
     "lib/barkpark/tasks.ex" => {1, :live},
     "lib/barkpark/tasks/queue_gate.ex" => {2, :live},
-    "lib/barkpark/content/mutations.ex" => {1, :live},
+    "lib/barkpark/tasks/mutate_guards.ex" => {1, :live},
     "lib/barkpark_web/controllers/tasks_controller.ex" => {5, :live},
     "lib/barkpark_web/controllers/tasks_controller/params.ex" => {2, :live}
   }

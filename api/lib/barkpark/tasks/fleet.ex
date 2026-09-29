@@ -84,11 +84,37 @@ defmodule Barkpark.Tasks.Fleet do
   `last_seen` is missing, unparsable, or older than its OWN `ttl_s` reads
   `"offline"` (fail closed); a fresh row reads its stored self-declared
   status.
+
+  ## Read-time decorations (pdf-bl-roster-enrichment)
+
+  Two roster columns decorate a row and are NEVER written back — presence
+  stays the one record of truth (the charter forbids a second writer):
+
+    * `contradiction` — a DERIVED cross-check. A row that self-declares
+      `"idle"` while the ledger holds a LIVE claim under that exact worker
+      carries `%{"kind" => "idle_with_live_claim", "task" => doc_id,
+      "claim_ts_iso" => ts}`; every other row carries `nil`. "Live" is
+      narrow on purpose (`live_claim?/3`): an `in_progress` row, whose
+      `claim.worker` IS this worker (never the `assignee` fallback the `task`
+      column uses), whose `claim.ts_iso` parses and sits inside the server's
+      lease window (`QueueGate.lease_ttl_seconds/0`, the reap boundary). A
+      released or reaped claim (`worker: nil`, the object left behind), a
+      closed row (lifecycle terminal; its claim survives as a receipt), a
+      lapsed lease and another worker's claim all read as NO evidence. An
+      `offline` row is not a current declaration, so it is never flagged.
+    * `feed` — a SELF-DECLARED annotation a beat may carry (`"sse"` |
+      `"poll"`): how the listener expects to receive orders. The server
+      tracks no connections (the SSE endpoint holds no registry), so this is
+      the listener's word only. Absent renders `"unknown"` — never inferred.
+
+  Both ride the ONE in-progress task read the `task` join already makes: no
+  extra query, no per-worker query.
   """
 
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Tasks.LockKey
+  alias Barkpark.Tasks.QueueGate
   alias Barkpark.Tasks.TwinCollapse
   alias Barkpark.Content
   alias Barkpark.Content.Document
@@ -106,6 +132,11 @@ defmodule Barkpark.Tasks.Fleet do
   # heavy -> big). A beat that declares a size_class MUST use this vocab —
   # the observed off-vocab `"big"` is refused, not silently stored.
   @size_classes ~w(light standard heavy xl)
+  # pdf-bl-roster-enrichment: the self-declared order-feed vocabulary. Bounded
+  # like status — an off-vocab feed is refused, never stored. Absent is
+  # rendered "unknown" at read time, never stored and never inferred.
+  @feeds ~w(sse poll)
+  @unknown_feed "unknown"
 
   @doc "The default self-declared staleness budget, in seconds."
   def default_ttl_s, do: @default_ttl_s
@@ -117,6 +148,9 @@ defmodule Barkpark.Tasks.Fleet do
   """
   def statuses, do: @self_declared_statuses
 
+  @doc "The beat-declarable order-feed annotations (`feed`); absent reads `\"unknown\"`."
+  def feeds, do: @feeds
+
   @doc """
   Heartbeat: upsert the caller's listener row, keyed on `params["worker"]`.
 
@@ -126,8 +160,8 @@ defmodule Barkpark.Tasks.Fleet do
   `"listener:<logical_id>"`, merging into content:
 
     * `last_seen` — ALWAYS, ISO8601, computed server-side inside the write.
-    * `status` / `agent` / `scope` / `capacity` / `ttl_s` — only when the
-      beat provides them (`ttl` is accepted as an alias for `ttl_s`).
+    * `status` / `agent` / `scope` / `capacity` / `ttl_s` / `feed` — only
+      when the beat provides them (`ttl` is accepted as an alias for `ttl_s`).
 
   `opts` carry the caller's tenant scope (`ScopeHelpers.scope_opts(conn)`), and
   BOTH halves of the beat run under it: the RESOLVE that decides
@@ -141,7 +175,7 @@ defmodule Barkpark.Tasks.Fleet do
 
   Returns `{:ok, receipt}` with
   `%{registered: boolean, doc: %{...}}`, or `{:error, :missing_worker |
-  :invalid_status | :invalid_ttl | :invalid_capacity | :stale_beat |
+  :invalid_status | :invalid_ttl | :invalid_capacity | :invalid_feed | :stale_beat |
   :worker_name_taken | :unscoped_beat}`
   (`:invalid_capacity` = a structured capacity that violates the contract, see
   `put_capacity/2`; `:stale_beat` = a non-beat writer raced the CAS; safe to
@@ -192,7 +226,8 @@ defmodule Barkpark.Tasks.Fleet do
   current task joined in.
 
   Rows are string-keyed maps (`worker`, `agent`, `scope`, `status`,
-  `capacity`, `last_seen`, `ttl_s`, `task`) sorted by `worker`, ready for the
+  `capacity`, `last_seen`, `ttl_s`, `task`, `feed`, `contradiction` — the
+  last two are read-time decorations, see the moduledoc) sorted by `worker`, ready for the
   `{"ok": true, "documents": [...]}` envelope every installed `bp` binary
   renders as a real table (PDF-D21). `opts[:now]` injects the clock (tests).
 
@@ -208,11 +243,16 @@ defmodule Barkpark.Tasks.Fleet do
   def roster(dataset, opts \\ []) when is_binary(dataset) do
     now = Keyword.get(opts, :now) || DateTime.utc_now()
     scope = roster_scope(opts)
-    tasks_by_worker = current_tasks_by_worker(dataset, scope)
+    in_progress = in_progress_tasks(dataset, scope)
+
+    joins = %{
+      tasks: current_tasks_by_worker(in_progress),
+      claims: live_claims_by_worker(in_progress, now)
+    }
 
     dataset
     |> load_listeners(scope)
-    |> Enum.map(&to_row(&1, tasks_by_worker, now))
+    |> Enum.map(&to_row(&1, joins, now))
     |> Enum.sort_by(& &1["worker"])
   end
 
@@ -268,7 +308,10 @@ defmodule Barkpark.Tasks.Fleet do
   # Carries the SAME scope as load_listeners/2 — this half leaked too: the
   # `task` column is a published doc_id, so an unscoped join handed a caller
   # in workspace A the id of a task being worked in workspace B.
-  defp current_tasks_by_worker(dataset, scope) do
+  #
+  # ONE read feeds both joins (`task` and `contradiction`): the canonical
+  # in_progress task rows in scope, newest first.
+  defp in_progress_tasks(dataset, scope) do
     from(d in Document,
       where: d.type == "task" and d.dataset == ^dataset,
       where: fragment("?->>'lifecycle_status' = 'in_progress'", d.content)
@@ -278,6 +321,10 @@ defmodule Barkpark.Tasks.Fleet do
     |> Enum.group_by(fn d -> Content.published_id(d.doc_id) end)
     |> Enum.map(fn {_lid, twins} -> TwinCollapse.canonical(twins) end)
     |> Enum.sort_by(& &1.updated_at, {:desc, DateTime})
+  end
+
+  defp current_tasks_by_worker(in_progress) do
+    in_progress
     |> Enum.reduce(%{}, fn doc, acc ->
       case task_worker(doc.content || %{}) do
         nil -> acc
@@ -296,20 +343,75 @@ defmodule Barkpark.Tasks.Fleet do
     end
   end
 
-  defp to_row(%Document{content: content}, tasks_by_worker, now) do
+  # The contradiction join's evidence: worker -> its newest LIVE claim, as
+  # `%{"task" => published doc_id, "claim_ts_iso" => ts}`. Only a claim that
+  # passes `live_claim?/3` counts — see the moduledoc for every shape that
+  # must NOT (released/reaped, closed, lapsed, foreign, assignee-only).
+  defp live_claims_by_worker(in_progress, now) do
+    lease_ttl_s = QueueGate.lease_ttl_seconds()
+
+    Enum.reduce(in_progress, %{}, fn doc, acc ->
+      claim = get_in(doc.content || %{}, ["claim"])
+
+      if live_claim?(claim, now, lease_ttl_s) do
+        Map.put_new(acc, claim["worker"], %{
+          "task" => Content.published_id(doc.doc_id),
+          "claim_ts_iso" => claim["ts_iso"]
+        })
+      else
+        acc
+      end
+    end)
+  end
+
+  # A claim is ledger evidence of CURRENT work only while its holder is named
+  # (release and reap null `worker` but leave the object behind) and its lease
+  # is inside the window the TTL sweeper enforces (`ts_iso` is refreshed by
+  # claim, renew and pulse). An unparsable or missing `ts_iso` is no evidence.
+  defp live_claim?(%{"worker" => worker, "ts_iso" => ts}, now, lease_ttl_s)
+       when is_binary(worker) and worker != "" and is_binary(ts) do
+    case DateTime.from_iso8601(ts) do
+      {:ok, granted, _} -> DateTime.diff(now, granted, :second) <= lease_ttl_s
+      _ -> false
+    end
+  end
+
+  defp live_claim?(_claim, _now, _lease_ttl_s), do: false
+
+  defp to_row(%Document{content: content}, joins, now) do
     content = content || %{}
     worker = Map.get(content, "worker")
+    status = presence_status(content, now)
 
     %{
       "worker" => worker,
       "agent" => Map.get(content, "agent"),
       "scope" => Map.get(content, "scope"),
-      "status" => presence_status(content, now),
+      "status" => status,
       "capacity" => Map.get(content, "capacity"),
       "last_seen" => Map.get(content, "last_seen"),
       "ttl_s" => effective_ttl(content),
-      "task" => worker && Map.get(tasks_by_worker, worker)
+      "task" => worker && Map.get(joins.tasks, worker),
+      "feed" => declared_feed(content),
+      "contradiction" => contradiction(status, worker && Map.get(joins.claims, worker))
     }
+  end
+
+  # Derived at read time, never stored. Only a FRESH `idle` declaration is
+  # checked: `offline` is the server's staleness verdict, not the worker's
+  # word, and `working`/`blocked` beside a live claim is the expected pairing.
+  defp contradiction("idle", %{} = evidence),
+    do: Map.put(evidence, "kind", "idle_with_live_claim")
+
+  defp contradiction(_status, _evidence), do: nil
+
+  # Self-declared only: a stored on-vocab value, else "unknown". Never inferred
+  # from anything the server observes.
+  defp declared_feed(content) do
+    case Map.get(content, "feed") do
+      f when f in @feeds -> f
+      _ -> @unknown_feed
+    end
   end
 
   # Fail-closed staleness: missing or unparsable last_seen = offline; older
@@ -372,7 +474,8 @@ defmodule Barkpark.Tasks.Fleet do
   defp beat_fields(params) do
     with {:ok, fields} <- put_status(%{}, Map.get(params, "status")),
          {:ok, fields} <- put_ttl(fields, Map.get(params, "ttl_s") || Map.get(params, "ttl")),
-         {:ok, fields} <- put_capacity(fields, Map.get(params, "capacity")) do
+         {:ok, fields} <- put_capacity(fields, Map.get(params, "capacity")),
+         {:ok, fields} <- put_feed(fields, Map.get(params, "feed")) do
       fields =
         Enum.reduce(["agent", "scope"], fields, fn key, acc ->
           case Map.get(params, key) do
@@ -391,6 +494,11 @@ defmodule Barkpark.Tasks.Fleet do
     do: {:ok, Map.put(fields, "status", s)}
 
   defp put_status(_fields, _), do: {:error, :invalid_status}
+
+  # `feed` is optional and bounded; omitted preserves the stored value.
+  defp put_feed(fields, nil), do: {:ok, fields}
+  defp put_feed(fields, f) when f in @feeds, do: {:ok, Map.put(fields, "feed", f)}
+  defp put_feed(_fields, _), do: {:error, :invalid_feed}
 
   defp put_ttl(fields, nil), do: {:ok, fields}
 

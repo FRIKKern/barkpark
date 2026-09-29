@@ -1,0 +1,203 @@
+# Weekly differential: core must stay green with the plugin/fleet tables GONE.
+#
+# WHAT IT RUNS. `mix test.core_without_owned_tables` (api/mix.exs alias for
+# Mix.Tasks.Barkpark.CoreWithoutOwnedTables, #20401). It creates two fresh
+# databases — barkpark_test_otp (owned tables PRESENT) and barkpark_test_ota
+# (every table in Barkpark.OwnedTables.tables/0, the core triggers and the fleet
+# functions DROPPED) — runs the api suite against each with BARKPARK_PLUGINS
+# off and every capability off, same seed, and exits 1 only when a test is red
+# in the ABSENT run, green in the PRESENT run, and stays that way on a rerun of
+# its file. It also exits 1 when either run printed no ExUnit summary line.
+# Tests already red with the tables present are not its subject.
+#
+# WHY WEEKLY AND NOT A PR CHECK (task-19428fc715804f49). Two full suite runs
+# take about 40 minutes. Main's ruling on #20401: it is NOT a PR gate and must
+# never become one. So the triggers are schedule + workflow_dispatch and nothing
+# else — no pull_request arm (it can never render on a PR, so it can never be
+# required), no push arm (it does not run 40 minutes on every merge). It is not
+# in .github/required-checks.json and no required aggregator needs it.
+#
+# WHO READS ITS RED. A schedule-only workflow renders a check run on no pull
+# request and is outside main-red-predicate.sh's push-arm enumeration, so the
+# reader is R3 (scripts/cron-scream-coverage.sh): the `Report a failed run to a
+# human` step files or appends to ONE issue through
+# scripts/file-ci-failure-issue.sh under its own key — the same notifier and
+# step shape elixir-nightly.yml's full-suite job uses.
+name: core-without-owned-tables
+
+on:
+  schedule:
+    - cron: "43 1 * * 0" # Sundays 01:43 UTC — a quiet slot, clear of the 03:17 elixir-nightly
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write # so a failed run can surface itself to a human
+
+concurrency:
+  group: core-without-owned-tables-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  differential:
+    name: Core without owned tables (differential, two suite runs)
+    runs-on: ubuntu-latest
+    # Two full suites plus a confirming rerun of each newly-red file. The
+    # nightly's single full suite fits in 60, so 150 leaves room without letting
+    # a hung run hold a runner for GitHub's six-hour default.
+    timeout-minutes: 150
+    # Same service as elixir.yml's mix-test job. The task creates and drops its
+    # own two databases (barkpark_test_otp / barkpark_test_ota — CI=true makes
+    # the partition suffix ""), so POSTGRES_DB only has to exist.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: barkpark_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MIX_ENV: test
+      DATABASE_URL: ecto://postgres:postgres@localhost:5432/barkpark_test
+      SECRET_KEY_BASE: ci-secret-key-base-not-used-in-test-env-just-needs-64-chars-padding
+      BARKPARK_CLOAK_KEY: ci-cloak-key-32-chars-padding-aaa
+      PREVIEW_JWT_SECRET: ci-preview-jwt-secret-not-used-padding
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      # fetch-depth: 0 for the same reason elixir.yml's mix-test and the nightly
+      # carry it: suite tests walk git history and `git describe --tags`.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Same pins as elixir.yml's blocking Test job and elixir-nightly.yml.
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27.0"
+          elixir-version: "1.18.4"
+
+      - name: Setup Node (js_harness_test.exs shells node over api/assets/sheet-grid)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Dependency SOURCES only, READ-ONLY, from mix-test's key family. No
+      # _build restore and no save: this job compiles from nothing, so it can
+      # neither read a contaminated build nor write one into the gate's namespace.
+      - name: Restore deps (dependency SOURCES)
+        uses: actions/cache/restore@v4
+        with:
+          path: api/deps
+          key: ${{ runner.os }}-mix-test-deps-v2-27.0-1.18.4-${{ hashFiles('api/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-test-deps-v2-27.0-1.18.4-
+
+      - name: Fetch deps
+        run: mix deps.get
+
+      - name: Install libxml2-utils for ONIX XSD validation
+        # Copied from elixir-nightly.yml: the refresh may fail (retried, then
+        # tolerated); the install is retried and is the decision; the binary is
+        # asserted so an absent package still reds loudly.
+        run: |
+          set -u
+          for i in 1 2 3; do
+            if sudo apt-get update; then break; fi
+            echo "apt-get update attempt ${i}/3 failed — an index this install does not use may be broken; continuing"
+            sleep 5
+          done
+          installed=0
+          for i in 1 2 3; do
+            if sudo apt-get install -y libxml2-utils; then installed=1; break; fi
+            echo "apt-get install libxml2-utils attempt ${i}/3 failed"
+            sleep 10
+          done
+          if [ "$installed" != 1 ]; then
+            echo "::error::libxml2-utils could not be installed after 3 attempts"
+            exit 1
+          fi
+          if ! xmllint --version >/dev/null 2>&1; then
+            echo "::error::xmllint is not on PATH after a successful-looking install"
+            exit 1
+          fi
+          xmllint --version 2>&1
+
+      # Not --warnings-as-errors: the blocking gate owns warnings, and a warning
+      # must not stop the one run that measures core without the owned tables.
+      - name: Compile (test)
+        run: mix compile
+
+      - name: Differential run (tables present, then absent)
+        run: |
+          set -o pipefail
+          mix test.core_without_owned_tables 2>&1 | tee core-without-owned-tables.log
+
+      # The two counts are the run's record: PRESENT and ABSENT summary lines,
+      # the newly-red tally, and every confirmed NEWLY RED test.
+      - name: Both counts into the step summary
+        if: always()
+        run: |
+          set -u
+          log=core-without-owned-tables.log
+          {
+            echo '### Core without owned tables'
+            echo '```'
+            if [ -f "$log" ] && grep -E '^\[core-without-owned-tables\] ' "$log"; then
+              :
+            else
+              echo '(no [core-without-owned-tables] lines — the run aborted before the task reported)'
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-without-owned-tables-${{ github.sha }}
+          # The task writes present.log / absent.log / confirm_*.log under
+          # System.tmp_dir(), which is /tmp on the runner.
+          path: |
+            api/core-without-owned-tables.log
+            /tmp/core_without_owned_tables_*/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Report a failed run to a human
+        # THE READER. A schedule-only workflow has no push arm and renders on no
+        # pull request, so without this step a red reaches nobody. `cancelled()`
+        # is included because a timeout that reports nothing is the same silence.
+        # The ref conjunct keeps a dispatch on a topic branch from filing a
+        # public issue. working-directory is overridden because the job
+        # defaults to `api` and the notifier lives at the repository root.
+        if: (failure() || cancelled()) && github.ref == 'refs/heads/main'
+        working-directory: ${{ github.workspace }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: core-without-owned-tables
+          CI_FAILURE_DETAIL: |
+            The weekly core-without-owned-tables differential failed on main.
+            `mix test.core_without_owned_tables` runs the api suite twice with
+            every plugin and capability off — once with the plugin/fleet tables
+            PRESENT, once with them DROPPED — and reds only on a test that is
+            red when ABSENT, green when PRESENT, and stays red on a rerun of its
+            file, or when either run printed no ExUnit summary line.
+            Read `### Core without owned tables` in the run's step summary for
+            both counts and every NEWLY RED test; the present/absent/confirm
+            logs are in the `core-without-owned-tables-<sha>` artifact.
+            A NEWLY RED test means core code now reads a table in
+            Barkpark.OwnedTables.tables/0: fix the reader, or tag the test
+            `@tag :owned_tables` if its subject IS that table.
+            Reproduce: cd api && mix test.core_without_owned_tables <test path>
+            A red before the differential step (deps, apt, compile) is the venue.
+        run: bash scripts/file-ci-failure-issue.sh

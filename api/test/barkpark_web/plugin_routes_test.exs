@@ -11,7 +11,7 @@ defmodule BarkparkWeb.PluginRoutesTest do
        (s2), the `plugin_routes/1` macro inside `BarkparkWeb.Router` (s3),
        and the `PingLive` mount (s4) all wire together correctly.
 
-    2. With `Application.put_env(:barkpark, :plugins, [])`,
+    2. With `Barkpark.PluginEnv.put!([])`,
        `Plugins.Registry.collect_routes/1` returns `[]` — proving the
        macro INPUT collapses to an empty list under the fresh-install
        invariant. The macro emits routes at compile time, so we cannot
@@ -113,14 +113,11 @@ defmodule BarkparkWeb.PluginRoutesTest do
 
   describe "fresh-install invariant — plugins=[] (G1's contract)" do
     setup do
-      prev_plugins = Application.get_env(:barkpark, :plugins, :unset)
-      Application.put_env(:barkpark, :plugins, [])
+      prev_plugins = Barkpark.PluginEnv.capture()
+      Barkpark.PluginEnv.put!([])
 
       on_exit(fn ->
-        case prev_plugins do
-          :unset -> Application.delete_env(:barkpark, :plugins)
-          v -> Application.put_env(:barkpark, :plugins, v)
-        end
+        Barkpark.PluginEnv.restore(prev_plugins)
       end)
 
       :ok
@@ -337,14 +334,11 @@ defmodule BarkparkWeb.PluginRoutesTest do
     end
 
     setup do
-      prev = Application.get_env(:barkpark, :plugins, :unset)
-      Application.put_env(:barkpark, :plugins, [BucketProbePlugin])
+      prev = Barkpark.PluginEnv.capture()
+      Barkpark.PluginEnv.put!([BucketProbePlugin])
 
       on_exit(fn ->
-        case prev do
-          :unset -> Application.delete_env(:barkpark, :plugins)
-          v -> Application.put_env(:barkpark, :plugins, v)
-        end
+        Barkpark.PluginEnv.restore(prev)
       end)
 
       :ok

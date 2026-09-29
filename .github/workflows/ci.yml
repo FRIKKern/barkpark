@@ -195,11 +195,16 @@ jobs:
           # over a suite that never ran; rename detection prints only the
           # DESTINATION, so `git mv web/a.ts docs/a.ts` would read as "web/ lost
           # nothing".
-          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          # NUL-separated, ON DISK, never re-lined: the old `tr` back to lines
+          # split a path holding a NEWLINE into two pseudo-paths before the
+          # matcher saw it (cch-bl-nul-native-path-matcher). A file, not a
+          # variable: command substitution drops NUL bytes.
+          changed_z="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/web-dispatcher-changed.XXXXXX")"
+          git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" >"$changed_z"
           echo "changed files:"
-          printf '%s\n' "$changed"
+          while IFS= read -r -d '' f; do printf '%s\n' "$f"; done <"$changed_z"
 
-          if [ -z "$changed" ]; then
+          if [ ! -s "$changed_z" ]; then
             # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
             # PR, nets to nothing against the base. Run everything instead:
             # expensive, never wrong. Never `false`, the only unsafe answer.
@@ -261,7 +266,7 @@ jobs:
           # `--selftest` and the ratchet off the merge ref on every PR, and reds
           # the same aggregator.
           #
-          # A here-string, never a pipe: `--match` answers through `grep -Eq`,
+          # A file redirect, never a pipe: `--match` answers through `grep -Eq`,
           # which exits the instant it matches, and a writer still holding bytes
           # then takes SIGPIPE that `set -o pipefail` promotes over the match
           # that DID occur (the house D37 rule).
@@ -274,7 +279,16 @@ jobs:
               echo "::error::dispatcher: match_set takes '--match <set>' verbatim (got '${flag}')."
               exit 1
             fi
-            out="$(bash "$pin_script" --match "$want" <<<"$changed")" || rc=$?
+            # THE `--null` SKEW. A copy of the script that predates `--match … --null`
+            # does not refuse the flag, it IGNORES it and greps the NUL stream as
+            # ONE line: a silent false, not a refusal. The MATCH-INPUT-NUL token
+            # is how this step tells the two apart.
+            if [ -f "$pin_script" ] && ! grep -qF MATCH-INPUT-NUL "$pin_script"; then
+              echo "::warning::dispatcher: ${pin_script} (read from ${pin_src}) predates '--match … --null' and would read the NUL-separated diff as ONE line. Dispatching ${want}=true: running more, never a silent skip." >&2
+              printf 'true'
+              return 0
+            fi
+            out="$(bash "$pin_script" --match "$want" --null <"$changed_z")" || rc=$?
             case "$out" in
               true | false)
                 printf '%s' "$out"

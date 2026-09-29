@@ -58,6 +58,14 @@ export const CANVAS_SLASH_TYPES = new Set([
   "diagram",
   "action",
   "figure",
+  "image",
+  "expandable",
+  "steps",
+  "tabs",
+  "equation",
+  "footnote",
+  "toc",
+  "video",
   "columns",
   "section",
   "terminal",
@@ -111,6 +119,11 @@ export function canvasDefaultBlock(type) {
       return { id: null, type: "heading", text: "New heading", level: 2 };
     case "paragraph":
       return { id: null, type: "paragraph", content: [{ type: "text", value: "" }] };
+    case "blockquote":
+      // The plain quote: an empty inline body, like a paragraph (the catch-all below
+      // used to swallow this into a paragraph, so "/Quote" inserted no quote at all —
+      // found by Barkdown's row 12 slash sweep).
+      return { id: null, type: "blockquote", content: [{ type: "text", value: "" }] };
     case "list":
       return {
         id: null,
@@ -146,6 +159,10 @@ export function canvasDefaultBlock(type) {
       return { id: null, type: "diagram", source: "", caption: "" };
     case "action":
       return { id: null, type: "action", href: "", label: "" };
+    case "image":
+      // An empty image: the node-view shows the "no image yet" frame with the url
+      // input open, so the author pastes a url (uploads are the next plan item).
+      return { id: null, type: "image", src: "", alt: "" };
     case "figure":
       return {
         id: null,
@@ -164,6 +181,26 @@ export function canvasDefaultBlock(type) {
         id: null,
         type: "section",
         title: "New section",
+        blocks: [{ type: "paragraph", content: [{ type: "text", value: "" }] }],
+      };
+    case "equation":
+      return { id: null, type: "equation", tex: "" };
+    case "footnote":
+      return { id: null, type: "footnote", notes: [] };
+    case "toc":
+      return { id: null, type: "toc", items: [] };
+    case "video":
+      return { id: null, type: "video", src: "" };
+    case "steps":
+      return { id: null, type: "steps", steps: [{ title: "Step 1", blocks: [{ type: "paragraph", content: [{ type: "text", value: "" }] }] }] };
+    case "tabs":
+      return { id: null, type: "tabs", tabs: [{ label: "Tab 1", blocks: [{ type: "paragraph", content: [{ type: "text", value: "" }] }] }] };
+    case "expandable":
+      // A toggle with a summary and one empty paragraph (the `+` body must hold a child).
+      return {
+        id: null,
+        type: "expandable",
+        summary: "Details",
         blocks: [{ type: "paragraph", content: [{ type: "text", value: "" }] }],
       };
     case "terminal":
@@ -341,4 +378,27 @@ export function compoundInsertBlock(kind) {
 export function compoundKindToNode(kind) {
   const block = compoundInsertBlock(kind);
   return block ? runToTiptap([block]).content[0] : null;
+}
+
+// ── paper masters (task-3b6e562e916c8ce4) ─────────────────────────────────────
+//
+// masterInsertAnchor(liveIds, slashIndex, confirmedIds) → the block id a master
+// copy is inserted AFTER, or null.
+//
+// A master pick removes the "/query" paragraph and asks the SERVER to insert the
+// copy. The anchor must be a block the server already holds, so it is chosen
+// from the CONFIRMED baseline only (`confirmedIds`, the canvas's acknowledged
+// `blocks`), never the slash paragraph itself (it is being removed) and never a
+// just-typed block the server has not seen. Preference: the nearest confirmed
+// block ABOVE the slash paragraph (the copy lands where the author typed "/");
+// else the nearest confirmed block BELOW it (the copy lands right after it —
+// the closest the insert-after op can reach from the top of a run); else null
+// (the server appends).
+export function masterInsertAnchor(liveIds, slashIndex, confirmedIds) {
+  const confirmed = confirmedIds instanceof Set ? confirmedIds : new Set(confirmedIds || []);
+  const ids = Array.isArray(liveIds) ? liveIds : [];
+  const ok = (id) => typeof id === "string" && id !== "" && confirmed.has(id);
+  for (let i = slashIndex - 1; i >= 0; i--) if (ok(ids[i])) return ids[i];
+  for (let i = slashIndex + 1; i < ids.length; i++) if (ok(ids[i])) return ids[i];
+  return null;
 }

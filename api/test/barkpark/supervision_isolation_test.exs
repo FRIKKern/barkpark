@@ -305,7 +305,7 @@ defmodule Barkpark.SupervisionIsolationTest do
       assert Barkpark.Plugins.Supervisor in mods
       assert Barkpark.Plugins.Indx.Supervisor in mods
       assert Barkpark.Plugins.Sheets.Supervisor in mods
-      assert Barkpark.StudioChat.Supervisor in mods
+      assert Barkpark.Capability.Supervisor in mods
       assert length(mods) >= 4, "derived population: #{inspect(mods)}"
     end
 

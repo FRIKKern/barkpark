@@ -49,6 +49,17 @@ defmodule BarkparkCloud.Templates do
   # at different repos.
   @docs_path "/blob/main/templates/MANIFEST.md"
 
+  # `app_dir` is the folder inside `repo/0` that Vercel can build AS-IS: the
+  # clone handoff passes it as Vercel's `root-directory` parameter when the user
+  # has no repo of their own, because `repository-url` alone clones the monorepo
+  # ROOT, whose `vercel.json` and echo-only `build` script belong to the Barkpark
+  # demo, not to the template. `nil` means no such folder exists; the console
+  # then withholds the monorepo link and shows `no_app_dir_reason`. This field is
+  # the ONE source for that decision: `priv/static/__fixtures__/template_app_dirs.json`
+  # mirrors it for the console tests, and `BarkparkCloud.TemplatesAppDirTest`
+  # checks the mirror and every directory against the repo.
+  @scaffolded_reason "This starter is assembled by create-barkpark-app, so the Barkpark repository has no folder Vercel can build as-is. Create a GitHub repo for it on this screen (GitHub must be connected), or run npx create-barkpark-app and import the result into Vercel."
+
   @catalog [
     %{
       slug: "astro-search-starter",
@@ -63,7 +74,9 @@ defmodule BarkparkCloud.Templates do
         "Per-keystroke live search straight from the browser (Phoenix WebSocket, HTTP fallback)",
         "Symlink-swap deploys: immutable releases, health-gated, instant rollback"
       ],
-      env_keys: @env_common ++ ~w(BARKPARK_DOC_TYPE)
+      env_keys: @env_common ++ ~w(BARKPARK_DOC_TYPE),
+      app_dir: "templates/astro-search-starter",
+      no_app_dir_reason: nil
     },
     %{
       slug: "blog-starter",
@@ -77,7 +90,9 @@ defmodule BarkparkCloud.Templates do
         "A Next.js blog: index list + per-post detail pages",
         "Demo posts seeded so it's live from the first deploy"
       ],
-      env_keys: @env_common ++ ~w(BARKPARK_WEBHOOK_SECRET)
+      env_keys: @env_common ++ ~w(BARKPARK_WEBHOOK_SECRET),
+      app_dir: nil,
+      no_app_dir_reason: @scaffolded_reason
     },
     %{
       slug: "place-directory",
@@ -91,7 +106,10 @@ defmodule BarkparkCloud.Templates do
         "A Next.js map-backed listing site",
         "Demo places seeded so the map is populated on first deploy"
       ],
-      env_keys: @env_common ++ ~w(NEXT_PUBLIC_FINDER_LANDING BARKPARK_WEBHOOK_SECRET)
+      env_keys: @env_common ++ ~w(NEXT_PUBLIC_FINDER_LANDING BARKPARK_WEBHOOK_SECRET),
+      app_dir: nil,
+      no_app_dir_reason:
+        "This template runs on the Barkpark web demo, which needs its local packages built before Next.js can build it. Vercel's default build cannot do that, so there is no Deploy to Vercel link for it yet."
     },
     %{
       slug: "search-starter",
@@ -106,7 +124,9 @@ defmodule BarkparkCloud.Templates do
         "An `entry` content type seeded reference-rich, so the graph is alive from minute one",
         "Document pages rendered by the canonical @barkpark/react PortableDoc"
       ],
-      env_keys: @env_common ++ ~w(BARKPARK_DOC_TYPE)
+      env_keys: @env_common ++ ~w(BARKPARK_DOC_TYPE),
+      app_dir: "templates/search-starter",
+      no_app_dir_reason: nil
     },
     %{
       slug: "website-starter",
@@ -120,7 +140,9 @@ defmodule BarkparkCloud.Templates do
         "A minimal Next.js marketing site",
         "Demo pages seeded so it renders on first deploy"
       ],
-      env_keys: @env_common ++ ~w(BARKPARK_WEBHOOK_SECRET)
+      env_keys: @env_common ++ ~w(BARKPARK_WEBHOOK_SECRET),
+      app_dir: nil,
+      no_app_dir_reason: @scaffolded_reason
     }
   ]
 

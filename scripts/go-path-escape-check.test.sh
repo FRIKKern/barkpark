@@ -427,6 +427,69 @@ else
   no "  …and exited 0 with NO go= line — the gated job would read an empty output"
 fi
 
+# ── arm NL (cch-bl-nul-native-path-matcher) — a NEWLINE inside the directory
+# of an in-set path. go-tests.yml computes its verdict IN-JOB (its own g2e awk,
+# not this script's --match), and every Go glob is `dir/**`, an exact literal,
+# or the suffix-only `**/*.go` — so a split fragment always still matches and
+# the false skip is UNREACHABLE here. This arm pins the TRUE the row asks for,
+# through the real step body, on the fixture's pinned declaration.
+echo "  arm NL — a NEWLINE inside the directory of an in-set path"
+git -C "$DR" checkout -q -b nl-head "$DR_BASE"
+mkdir -p "$DR/internal/a"$'\n'"b"
+printf 'package b\n' >"$DR/internal/a"$'\n'"b/x.go"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nl >/dev/null 2>&1
+run_sets "$SETS"
+if [ "$SRC" -eq 0 ] && grep -qx 'go=true' "$SGH"; then
+  ok "internal/a<LF>b/x.go dispatches go=true"
+else
+  no "internal/a<LF>b/x.go: exit $SRC, $(grep '^go=' "$SGH" || echo 'no go= line') — wanted go=true"
+  sed 's/^/        /' "$SOUT" >&2
+fi
+
+# ── case NUL: `--match … --null` reads one path per NUL record ─────────────
+# (cch-bl-nul-native-path-matcher) The dispatchers now feed `git diff -z`
+# output straight in. A path holding a NEWLINE must reach the anchored ERE as
+# ONE record, in both directions; newline-mode stdin must keep working for
+# every other caller (scripts/which-gates.sh).
+echo "case NUL: --match --null reads NUL-terminated records"
+NUL_IN="$TMPROOT/nul-match.in"
+printf '%s\0%s\0' docs/x.md "internal/a"$'\n'"b/x.go" >"$NUL_IN"
+nul_out="$(bash "$REPO_ROOT/scripts/go-path-escape-check.sh" --match --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: internal/a<LF>b/x.go is IN the set -> true"
+else
+  no "--null: internal/a<LF>b/x.go answered '$nul_out', wanted true"
+fi
+printf '%s\0' docs/x.md "go.mod"$'\n'"foo" >"$NUL_IN"
+nul_out="$(bash "$REPO_ROOT/scripts/go-path-escape-check.sh" --match --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = false ]; then
+  ok "--null: go.mod<LF>foo is ONE record, not in the set -> false"
+else
+  no "--null: go.mod<LF>foo answered '$nul_out', wanted false — the matcher still splits records"
+fi
+printf '%s\0%s' docs/x.md "internal/a"$'\n'"b/x.go" >"$NUL_IN"
+nul_out="$(bash "$REPO_ROOT/scripts/go-path-escape-check.sh" --match --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: an unterminated LAST record is still read"
+else
+  no "--null: an unterminated last record was dropped ('$nul_out')"
+fi
+nul_out="$(printf '%s\n%s\n' docs/x.md "internal/a"$'\n'"b/x.go" | bash "$REPO_ROOT/scripts/go-path-escape-check.sh" --match 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "control: the same bytes read as LINES answer true — newline mode is unchanged"
+else
+  no "control: newline mode answered '$nul_out', wanted true"
+fi
+nul_rc=0
+nul_out="$(bash "$REPO_ROOT/scripts/go-path-escape-check.sh" --match --nul </dev/null 2>&1)" || nul_rc=$?
+if [ "$nul_rc" -eq 2 ]; then
+  ok "--nul (a typo) is REFUSED with exit 2, never read as newline mode"
+else
+  no "--nul exited $nul_rc ('$nul_out'), wanted 2"
+fi
+echo
+
 echo
 echo "passed: $PASS   failed: $FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

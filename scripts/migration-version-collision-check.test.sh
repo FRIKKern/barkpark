@@ -196,6 +196,63 @@ expect_rc 0 "C3 unresolvable base ref does not fail the run"
 expect_out "C3 unresolvable base ref" "NOT RUN: detector C"
 expect_out "C3 unresolvable base ref" "DISCLOSURE:"
 
+printf '== Plugin and capability folders share their app keyspace ==\n'
+
+# A plugin folder (cloud/priv/plugins/<name>/migrations) is migrated against the
+# SAME schema_migrations table as cloud/priv/repo/migrations (Barkpark.MigrationPaths).
+
+# --- K1: CONTROL. A plugin migration with its own version is green.
+T=$(new_tree k1)
+mkdir -p "$T/cloud/priv/plugins/fx/migrations" "$T/cloud/priv/capabilities/cx/migrations"
+printf 'defmodule P.M1 do\nend\n' > "$T/cloud/priv/plugins/fx/migrations/20260903120000_create_fx.exs"
+git_init_tree "$T"
+run_check --root "$T"
+expect_rc 0 "K1 control: a plugin folder with its own version is green"
+
+# --- K2: PLANT. The plugin file reuses a CORE version → one keyspace, so red,
+# naming both files.
+printf 'defmodule P.M2 do\nend\n' > "$T/cloud/priv/plugins/fx/migrations/20260902120000_add_fx_colour.exs"
+git -C "$T" add -A >/dev/null 2>&1
+run_check --root "$T"
+expect_rc 1 "K2 plant: plugin folder reusing a core version reds"
+expect_out "K2 plant" "VIOLATION (A duplicate version): 20260902120000 in cloud/priv/repo/migrations"
+expect_out "K2 plant" "cloud/priv/repo/migrations/20260902120000_add_colour.exs"
+expect_out "K2 plant" "cloud/priv/plugins/fx/migrations/20260902120000_add_fx_colour.exs"
+rm "$T/cloud/priv/plugins/fx/migrations/20260902120000_add_fx_colour.exs"
+
+# --- K3: PLANT. A capability folder colliding with a plugin folder reds too.
+printf 'defmodule C.M1 do\nend\n' > "$T/cloud/priv/capabilities/cx/migrations/20260903120000_create_cx.exs"
+git -C "$T" add -A >/dev/null 2>&1
+run_check --root "$T"
+expect_rc 1 "K3 plant: capability folder reusing a plugin version reds"
+expect_out "K3 plant" "cloud/priv/capabilities/cx/migrations/20260903120000_create_cx.exs"
+rm "$T/cloud/priv/capabilities/cx/migrations/20260903120000_create_cx.exs"
+git -C "$T" add -A >/dev/null 2>&1
+
+# --- K4: detector B. A row the plugin file claims is NOT an orphan when the
+# database half is bound to the core directory.
+printf '20260901120000\n20260902120000\n20260903120000\n' > "$TMP/versions_k.txt"
+run_check --root "$T" --dir cloud/priv/repo/migrations --db-versions-file "$TMP/versions_k.txt"
+expect_rc 0 "K4 a plugin-claimed row is not an orphaned version"
+expect_no_out "K4" "VIOLATION (B"
+
+# --- K5: detector C. A plugin file ADDED by this branch whose version is
+# already recorded is the incident shape, same as a core file.
+git -C "$T" -c user.email=h@x -c user.name=h commit -q -m k >/dev/null 2>&1
+git -C "$T" branch -q base
+printf 'defmodule P.M3 do\nend\n' > "$T/cloud/priv/plugins/fx/migrations/20260910160000_add_fx_slot.exs"
+git -C "$T" add -A >/dev/null 2>&1
+git -C "$T" -c user.email=h@x -c user.name=h commit -q -m "add plugin migration" >/dev/null 2>&1
+printf '20260901120000\n20260902120000\n20260903120000\n20260910160000\n' > "$TMP/versions_k5.txt"
+run_check --root "$T" --dir cloud/priv/repo/migrations --db-versions-file "$TMP/versions_k5.txt" --base-ref base
+expect_rc 1 "K5 plant: plugin file added after its version was recorded reds"
+expect_out "K5 plant" "VIOLATION (C recorded before added): 20260910160000"
+expect_out "K5 plant" "cloud/priv/plugins/fx/migrations/20260910160000_add_fx_slot.exs"
+
+# --- K6: RESTORE. The same added plugin file with no prior row is green.
+run_check --root "$T" --dir cloud/priv/repo/migrations --db-versions-file "$TMP/versions_k.txt" --base-ref base
+expect_rc 0 "K6 restore: the added plugin file with no prior row is green"
+
 printf '== Disclosure and --require-db ==\n'
 
 # --- D1: no database at all → the A-only run is green but SAYS SO.

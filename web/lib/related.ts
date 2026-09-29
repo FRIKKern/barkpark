@@ -61,9 +61,13 @@ const cachedRelated = unstable_cache(rawRelated, ["related", DATASET], {
 
 /**
  * Related documents for `id` (a slug or doc id) within `dataset`, best first.
- * Never throws — an empty list is a first-class, common answer (the ~35%
- * untagged corpus, an anonymous/token-less deploy that 404s, or a transient
- * upstream error), and the Related section renders NOTHING for it.
+ * Never throws — an empty list is a first-class, common answer (an untagged
+ * and unreferenced source, an anonymous/token-less deploy that 404s, or a
+ * transient upstream error), and the Related section renders NOTHING for it.
+ * Sources with no weighted tag: 1120/10863 = 10.3% of published `production`
+ * docs, 0/1056 papers (census 2026-09-23: `bp doc ls <type> --perspective
+ * published --fields tags --all` over every type; supersedes charter D68's
+ * 2026-07-22 ~35%).
  */
 export async function fetchRelated(
   id: string,

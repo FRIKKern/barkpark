@@ -39,6 +39,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   }
 
   alias Barkpark.Content.CallerContext
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.CanvasRunContext
@@ -116,13 +117,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
   `paper_topic(slug, dataset)` and returns `{:ok, %Document{}}`. Returns
   `{:error, changeset}` on validation/constraint failure.
   """
-  def upsert_blocks_doc(type, attrs, opts \\ [])
+  def upsert_blocks_doc(type, attrs, opts \\ []),
+    do: Door.admit(fn -> admitted_upsert_blocks_doc(type, attrs, opts) end)
 
-  def upsert_blocks_doc(type, _attrs, _opts) when type not in @blocks_types,
+  defp admitted_upsert_blocks_doc(type, _attrs, _opts) when type not in @blocks_types,
     do: {:error, :not_a_blocks_type}
 
   # PAPER leg — unchanged, unlocked, byte-identical to the pre-fix path.
-  def upsert_blocks_doc(@paper_type, attrs, opts) when is_map(attrs) and is_list(opts),
+  defp admitted_upsert_blocks_doc(@paper_type, attrs, opts) when is_map(attrs) and is_list(opts),
     do: do_upsert_blocks_doc(@paper_type, attrs, opts)
 
   # NON-PAPER leg (today: "session") — SERIALIZED against the OTHER writer of
@@ -144,7 +146,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # waits behind its commit (and appends to the freshly-written content).
   # `pg_advisory_xact_lock` is released at commit/rollback — no unlock path to
   # leak. A slug-less write (no row to race on) skips the lock entirely.
-  def upsert_blocks_doc(type, attrs, opts) when is_map(attrs) and is_list(opts) do
+  defp admitted_upsert_blocks_doc(type, attrs, opts) when is_map(attrs) and is_list(opts) do
     case attrs["slug"] || attrs[:slug] do
       slug when is_binary(slug) and slug != "" ->
         # OWNERSHIP OF THE TAIL, not merely of the lock (task-c352740ae6b0f72a).
@@ -305,7 +307,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
           stamped_scope_attrs(dataset, [])
       end
 
-    with {:ok, scope_attrs} <- scope_attrs_result do
+    with {:ok, scope_attrs} <- scope_attrs_result,
+         :ok <- require_new_paper(type, slug, dataset, attrs, opts) do
       upsert_blocks_doc_stamped(type, attrs, opts, dataset, slug, existing, scope_attrs)
     end
   end
@@ -476,6 +479,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
     render_opts =
       Labels.paper_render_opts(dataset, style, paper_scope(existing, scope_attrs))
 
+    # A write that sends neither blocks nor body_html (a title or metadata
+    # patch) on a doc that already HAS blocks: the cache is re-rendered from
+    # those stored blocks instead of carried forward. A carried cache may come
+    # from an older renderer, and the `{:paper_updated, …}` frame for this
+    # write is built from the row it commits, so a write-capable Studio socket
+    # would paint the old bytes (task-0d3b2cd020238663). The stored blocks are
+    # already sealed, exactly what the original render saw, so this is the
+    # same render a blocks write makes. nil (no stored blocks, or an explicit
+    # `clear_blocks`) keeps the byte-for-byte carry-over of an HTML-only doc,
+    # whose cache is its only source.
+    carried_blocks = carried_blocks(blocks, attrs, existing)
+
     body_html =
       cond do
         is_list(blocks) -> Render.render_blocks(blocks, render_opts)
@@ -484,6 +499,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         # a <script>/onerror= payload never persists (defensive; the reader CSP
         # is the second layer). See Barkpark.PortableDoc.HtmlSanitizer.
         is_binary(attrs["body_html"]) -> HtmlSanitizer.sanitize(attrs["body_html"])
+        is_list(carried_blocks) -> Render.render_blocks(carried_blocks, render_opts)
         true -> (existing && get_in(existing.content || %{}, ["body_html"])) || ""
       end
 
@@ -503,13 +519,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
     #     routes it into the OVERWRITE branch and discards the caller's HTML.
     #     Absent is the legacy class readers already fail closed on.
     #
-    #   carry-over — a metadata-only update rewrites the EXISTING body_html
-    #     byte-for-byte, so an existing stamp still describes exactly those
-    #     bytes and stays TRUE. Deleting here would demote a coherent paper into
-    #     the fail-closed unknown class and manufacture false 422s.
+    #   carry-over — a metadata-only update of a doc with NO stored blocks
+    #     rewrites the EXISTING body_html byte-for-byte, so an existing stamp
+    #     still describes exactly those bytes and stays TRUE. Deleting here
+    #     would demote a coherent paper into the fail-closed unknown class and
+    #     manufacture false 422s. (With stored blocks the cache is re-rendered
+    #     above, so it takes the fresh stamp like a blocks write.)
     content =
       cond do
-        is_list(blocks) ->
+        is_list(blocks) or is_list(carried_blocks) ->
           put_body_html(base_content, body_html)
 
         is_binary(attrs["body_html"]) ->
@@ -681,8 +699,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # (the non-paper leg's per-slug lock) it runs the function as is.
     written =
       Broadcast.write_atomically(fn ->
-        with :ok <- recheck_dedup(ref, type, slug, dataset, lock_opts, opts) do
-          write_blocks_doc_row(type, content, existing, dataset, slug, scope_attrs, title)
+        with :ok <- recheck_dedup(ref, type, slug, dataset, lock_opts, opts),
+             :ok <- require_new_paper(type, slug, dataset, attrs, opts) do
+          row = if Keyword.get(opts, :create_only, false), do: nil, else: existing
+          write_blocks_doc_row(type, content, row, dataset, slug, scope_attrs, title)
         end
       end)
 
@@ -697,6 +717,27 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
       other ->
         other
+    end
+  end
+
+  # Create-only callers never enter the update branch. Recheck after the
+  # publish-scope lock as well as before content preparation; the unique row
+  # constraint remains the final guard against writers outside that lock.
+  defp require_new_paper(type, slug, dataset, attrs, opts) do
+    if Keyword.get(opts, :create_only, false) do
+      cond do
+        not is_binary(slug) or slug == "" or DraftId.draft?(slug) ->
+          {:error, :invalid_create_slug}
+
+        get_existing_blocks_doc_for_write(type, slug, dataset, attrs) ||
+            get_existing_blocks_doc_for_write(type, DraftId.draft_id(slug), dataset, attrs) ->
+          {:error, :paper_exists}
+
+        true ->
+          :ok
+      end
+    else
+      :ok
     end
   end
 
@@ -904,8 +945,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
   paper's current streaming revision and the final row update is atomically
   fenced; omitting it preserves the legacy last-write-wins contract.
   """
-  def apply_paper_block_op(slug, op, dataset \\ @paper_default_dataset, opts \\ [])
-      when is_binary(slug) and is_map(op) do
+  def apply_paper_block_op(slug, op, dataset \\ @paper_default_dataset, opts \\ []),
+    do: Door.admit(fn -> admitted_apply_paper_block_op(slug, op, dataset, opts) end)
+
+  defp admitted_apply_paper_block_op(slug, op, dataset, opts)
+       when is_binary(slug) and is_map(op) do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          :ok <- reject_implicit_html_conversion(doc),
          if_rev = Keyword.get(opts, :if_rev),
@@ -1059,8 +1103,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
   no-op that still loads the paper and returns the receipt at the current rev
   with `op_count: 0` and no block_ids, without writing.
   """
-  def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ [])
-      when is_binary(slug) and is_list(ops) do
+  def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ []),
+    do: Door.admit(fn -> admitted_apply_paper_block_ops(slug, ops, dataset, opts) end)
+
+  defp admitted_apply_paper_block_ops(slug, ops, dataset, opts)
+       when is_binary(slug) and is_list(ops) do
     with :ok <- require_editor_ops_revision(ops, Keyword.get(opts, :if_rev)),
          {:ok, opts} <- normalize_canvas_run_opts(opts),
          %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
@@ -1086,17 +1133,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
   boundary so those effects run only after the actual commit; calling it from
   an already-open transaction is rejected before any read, claim, or mutation.
   """
-  def apply_paper_block_ops_once(
-        slug,
-        ops,
-        dataset,
-        request_id,
-        principal_key,
-        opts \\ []
-      )
+  def apply_paper_block_ops_once(slug, ops, dataset, request_id, principal_key, opts \\ []),
+    do:
+      Door.admit(fn ->
+        admitted_apply_paper_block_ops_once(slug, ops, dataset, request_id, principal_key, opts)
+      end)
 
-  def apply_paper_block_ops_once(slug, ops, dataset, request_id, principal_key, opts)
-      when is_binary(slug) and is_list(ops) and is_binary(dataset) and is_list(opts) do
+  defp admitted_apply_paper_block_ops_once(slug, ops, dataset, request_id, principal_key, opts)
+       when is_binary(slug) and is_list(ops) and is_binary(dataset) and is_list(opts) do
     with false <- Repo.in_transaction?(),
          {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
          {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
@@ -1161,8 +1205,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  def apply_paper_block_ops_once(_slug, _ops, _dataset, _request_id, _principal_key, _opts),
-    do: {:error, :invalid_paper_ops_request}
+  defp admitted_apply_paper_block_ops_once(
+         _slug,
+         _ops,
+         _dataset,
+         _request_id,
+         _principal_key,
+         _opts
+       ),
+       do: {:error, :invalid_paper_ops_request}
 
   @doc """
   Apply one server-authorized contextual history continuation exactly once.
@@ -1181,19 +1232,31 @@ defmodule Barkpark.Content.Papers.BlockOps do
         request_id,
         principal_key,
         opts \\ []
-      )
+      ),
+      do:
+        Door.admit(fn ->
+          admitted_apply_paper_contextual_history_once(
+            slug,
+            history_ref,
+            action,
+            dataset,
+            request_id,
+            principal_key,
+            opts
+          )
+        end)
 
-  def apply_paper_contextual_history_once(
-        slug,
-        history_ref,
-        action,
-        dataset,
-        request_id,
-        principal_key,
-        opts
-      )
-      when is_binary(slug) and is_binary(history_ref) and is_binary(action) and
-             is_binary(dataset) and is_binary(request_id) and is_list(opts) do
+  defp admitted_apply_paper_contextual_history_once(
+         slug,
+         history_ref,
+         action,
+         dataset,
+         request_id,
+         principal_key,
+         opts
+       )
+       when is_binary(slug) and is_binary(history_ref) and is_binary(action) and
+              is_binary(dataset) and is_binary(request_id) and is_list(opts) do
     with false <- Repo.in_transaction?(),
          {:ok, history_ref} <- normalize_paper_ops_request_id(history_ref),
          {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
@@ -1289,16 +1352,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  def apply_paper_contextual_history_once(
-        _slug,
-        _history_ref,
-        _action,
-        _dataset,
-        _request_id,
-        _principal_key,
-        _opts
-      ),
-      do: {:error, :invalid_paper_contextual_history_request}
+  defp admitted_apply_paper_contextual_history_once(
+         _slug,
+         _history_ref,
+         _action,
+         _dataset,
+         _request_id,
+         _principal_key,
+         _opts
+       ),
+       do: {:error, :invalid_paper_contextual_history_request}
 
   @doc """
   Resolve trusted server-owned block-form source against the revision-accepted
@@ -1317,21 +1380,34 @@ defmodule Barkpark.Content.Papers.BlockOps do
         principal_key,
         resolver,
         opts \\ []
-      )
+      ),
+      do:
+        Door.admit(fn ->
+          admitted_apply_paper_block_form_once(
+            slug,
+            source_tag,
+            source_params,
+            dataset,
+            request_id,
+            principal_key,
+            resolver,
+            opts
+          )
+        end)
 
-  def apply_paper_block_form_once(
-        slug,
-        source_tag,
-        source_params,
-        dataset,
-        request_id,
-        principal_key,
-        resolver,
-        opts
-      )
-      when is_binary(slug) and is_binary(source_tag) and source_tag != "" and
-             is_map(source_params) and is_binary(dataset) and is_function(resolver, 1) and
-             is_list(opts) do
+  defp admitted_apply_paper_block_form_once(
+         slug,
+         source_tag,
+         source_params,
+         dataset,
+         request_id,
+         principal_key,
+         resolver,
+         opts
+       )
+       when is_binary(slug) and is_binary(source_tag) and source_tag != "" and
+              is_map(source_params) and is_binary(dataset) and is_function(resolver, 1) and
+              is_list(opts) do
     with false <- Repo.in_transaction?(),
          {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
          {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
@@ -1403,17 +1479,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  def apply_paper_block_form_once(
-        _slug,
-        _source_tag,
-        _source_params,
-        _dataset,
-        _request_id,
-        _principal_key,
-        _resolver,
-        _opts
-      ),
-      do: {:error, :invalid_block_form_request}
+  defp admitted_apply_paper_block_form_once(
+         _slug,
+         _source_tag,
+         _source_params,
+         _dataset,
+         _request_id,
+         _principal_key,
+         _resolver,
+         _opts
+       ),
+       do: {:error, :invalid_block_form_request}
 
   defp resolve_paper_block_form(%Document{} = doc, resolver, opts) do
     with if_rev = Keyword.get(opts, :if_rev),
@@ -2334,8 +2410,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
   """
   @spec apply_document_block_op(String.t(), String.t(), map(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def apply_document_block_op(doc_id, type, op, dataset, opts \\ [])
-      when is_binary(doc_id) and is_binary(type) and is_map(op) do
+  def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
+    do: Door.admit(fn -> admitted_apply_document_block_op(doc_id, type, op, dataset, opts) end)
+
+  defp admitted_apply_document_block_op(doc_id, type, op, dataset, opts)
+       when is_binary(doc_id) and is_binary(type) and is_map(op) do
     with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
          :ok <- reject_implicit_html_conversion(doc),
          if_rev = Keyword.get(opts, :if_rev),
@@ -2467,19 +2546,31 @@ defmodule Barkpark.Content.Papers.BlockOps do
         request_id,
         principal_key,
         opts \\ []
-      )
+      ),
+      do:
+        Door.admit(fn ->
+          admitted_apply_document_block_op_once(
+            doc_id,
+            type,
+            op,
+            dataset,
+            request_id,
+            principal_key,
+            opts
+          )
+        end)
 
-  def apply_document_block_op_once(
-        doc_id,
-        type,
-        op,
-        dataset,
-        request_id,
-        principal_key,
-        opts
-      )
-      when is_binary(doc_id) and is_binary(type) and is_map(op) and is_binary(dataset) and
-             is_list(opts) do
+  defp admitted_apply_document_block_op_once(
+         doc_id,
+         type,
+         op,
+         dataset,
+         request_id,
+         principal_key,
+         opts
+       )
+       when is_binary(doc_id) and is_binary(type) and is_map(op) and is_binary(dataset) and
+              is_list(opts) do
     with false <- Repo.in_transaction?(),
          {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
          {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
@@ -2564,16 +2655,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  def apply_document_block_op_once(
-        _doc_id,
-        _type,
-        _op,
-        _dataset,
-        _request_id,
-        _principal_key,
-        _opts
-      ),
-      do: {:error, :invalid_document_op_request}
+  defp admitted_apply_document_block_op_once(
+         _doc_id,
+         _type,
+         _op,
+         _dataset,
+         _request_id,
+         _principal_key,
+         _opts
+       ),
+       do: {:error, :invalid_document_op_request}
 
   @doc """
   Resolve trusted server-owned block-form source against the current generic
@@ -2594,22 +2685,36 @@ defmodule Barkpark.Content.Papers.BlockOps do
         principal_key,
         resolver,
         opts \\ []
-      )
+      ),
+      do:
+        Door.admit(fn ->
+          admitted_apply_document_block_form_once(
+            doc_id,
+            type,
+            source_tag,
+            source_params,
+            dataset,
+            request_id,
+            principal_key,
+            resolver,
+            opts
+          )
+        end)
 
-  def apply_document_block_form_once(
-        doc_id,
-        type,
-        source_tag,
-        source_params,
-        dataset,
-        request_id,
-        principal_key,
-        resolver,
-        opts
-      )
-      when is_binary(doc_id) and is_binary(type) and is_binary(source_tag) and
-             source_tag != "" and is_map(source_params) and is_binary(dataset) and
-             is_function(resolver, 1) and is_list(opts) do
+  defp admitted_apply_document_block_form_once(
+         doc_id,
+         type,
+         source_tag,
+         source_params,
+         dataset,
+         request_id,
+         principal_key,
+         resolver,
+         opts
+       )
+       when is_binary(doc_id) and is_binary(type) and is_binary(source_tag) and
+              source_tag != "" and is_map(source_params) and is_binary(dataset) and
+              is_function(resolver, 1) and is_list(opts) do
     with false <- Repo.in_transaction?(),
          {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
          {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
@@ -2705,18 +2810,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  def apply_document_block_form_once(
-        _doc_id,
-        _type,
-        _source_tag,
-        _source_params,
-        _dataset,
-        _request_id,
-        _principal_key,
-        _resolver,
-        _opts
-      ),
-      do: {:error, :invalid_block_form_request}
+  defp admitted_apply_document_block_form_once(
+         _doc_id,
+         _type,
+         _source_tag,
+         _source_params,
+         _dataset,
+         _request_id,
+         _principal_key,
+         _resolver,
+         _opts
+       ),
+       do: {:error, :invalid_block_form_request}
 
   defp resolve_document_blocks_for_edit(doc, type, dataset) do
     case Papers.resolve_blocks_for_edit(doc, type, dataset) do
@@ -2820,8 +2925,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
   """
   @spec apply_field_block_ops(String.t(), String.t(), String.t(), [map()], String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ [])
-      when is_binary(doc_id) and is_binary(type) and is_binary(field) and is_list(ops) do
+  def apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ []),
+    do:
+      Door.admit(fn ->
+        admitted_apply_field_block_ops(doc_id, type, field, ops, dataset, opts)
+      end)
+
+  defp admitted_apply_field_block_ops(doc_id, type, field, ops, dataset, opts)
+       when is_binary(doc_id) and is_binary(type) and is_binary(field) and is_list(ops) do
     with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
          {:ok, field_def} <- field_definition(type, dataset, field, opts),
          blocks = field_blocks(Map.get(doc.content || %{}, field)),
@@ -4985,6 +5096,34 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp maybe_put_paper(map, _key, nil), do: map
   defp maybe_put_paper(map, key, value), do: Map.put(map, key, value)
+
+  # The stored block list a body-less write re-renders its cache from (see
+  # `write_encrypted_blocks_doc/8`). nil when the write carries its own body,
+  # drops the blocks, or the doc has no non-empty stored block list — an
+  # HTML-only doc's cache is its source and must not be re-rendered to "".
+  # Reads the stored list shapes only (`Projection.read_blocks/1` minus its
+  # markdown arm); a markdown `body` string is not a block list.
+  defp carried_blocks(blocks, _attrs, _existing) when is_list(blocks), do: nil
+  defp carried_blocks(_blocks, _attrs, nil), do: nil
+
+  defp carried_blocks(_blocks, attrs, %Document{} = existing) do
+    content = existing.content || %{}
+
+    stored =
+      case content do
+        %{"blocks" => list} when is_list(list) -> list
+        %{"body" => %{"blocks" => list}} when is_list(list) -> list
+        %{"body" => list} when is_list(list) -> list
+        _ -> nil
+      end
+
+    cond do
+      is_binary(attrs["body_html"]) -> nil
+      clear_blocks?(attrs["clear_blocks"]) -> nil
+      stored in [nil, []] -> nil
+      true -> stored
+    end
+  end
 
   # Blocks on the way into `content`, with ONE new arm.
   #

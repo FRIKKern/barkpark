@@ -23,6 +23,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   # OnixEdit `register_routes/1`), prefixed with the host's `/v1/plugins` mount.
   @bulldocs_routes MapSet.new([
                      "/v1/plugins/bulldocs/papers",
+                     "/v1/plugins/bulldocs/papers/:slug/create",
                      "/v1/plugins/bulldocs/papers/:slug/ops",
                      "/v1/plugins/bulldocs/papers/:slug/proposals",
                      "/v1/plugins/bulldocs/intents",
@@ -95,21 +96,22 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Bulldocs.cli_commands/0" do
-    test "declares five paper verbs, all ingest-tier, all grounded in a real route" do
+    test "declares six paper verbs, all ingest-tier, all grounded in a real route" do
       cmds = Bulldocs.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
+      assert "bulldocs.create" in ids
       assert "bulldocs.publish" in ids
       assert "bulldocs.patch" in ids
       assert "bulldocs.propose" in ids
       assert "bulldocs.intents" in ids
       assert "bulldocs.intent-processed" in ids
 
-      # The five `bulldocs.*` paper verbs all sit behind the ingest highway
+      # The six `bulldocs.*` paper verbs all sit behind the ingest highway
       # bucket (the `session.*` group added in task 6 is NOT all-ingest —
       # see the dedicated describe block below).
       paper_cmds = Enum.filter(cmds, &(&1.noun == "bulldocs"))
-      assert length(paper_cmds) == 5
+      assert length(paper_cmds) == 6
       assert Enum.all?(paper_cmds, &(&1.auth_tier == "ingest"))
 
       # Every path_template is a route the plugin actually mounts — no invented
@@ -341,6 +343,38 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       # unit, because "files" plural invites a caller to pass a comma-joined
       # list as ONE path.
       assert files.summary =~ "ONE changed path per occurrence"
+    end
+
+    # pdf-bl-roster-enrichment's CLI half (task-ba602058cd90881d): the server has
+    # accepted a beat's `feed` since #20100, but `bp` refuses an undeclared flag
+    # and sends NOTHING, so the annotation was reachable by curl alone. The
+    # vocabulary is read from Fleet.feeds/0 — the list put_feed/2 enforces — so
+    # a value added or dropped server-side reds here until the help says so.
+    test "fleet.beat declares --feed and its help names every value the server accepts" do
+      beat = Enum.find(Tasks.cli_commands(), &(&1.id == "fleet.beat"))
+      feed = Enum.find(beat.flags, &(&1.name == "feed"))
+
+      assert feed,
+             "fleet.beat declares no --feed flag, so `bp fleet beat w --feed sse` is an " <>
+               "unknown-flag usage error and the beat's feed key is unreachable from the CLI"
+
+      assert feed.type == "string"
+      assert Barkpark.Tasks.Fleet.feeds() == ~w(sse poll)
+      assert feed.summary =~ Enum.join(Barkpark.Tasks.Fleet.feeds(), " | ")
+      assert feed.summary =~ "invalid_feed"
+    end
+
+    # task-ba602058cd90881d: #20073 added the fifth rerun-screen arm
+    # (:prefix_match_probe in Barkpark.Tasks.Stage). The help is the only place a
+    # writer learns why an unterminated definition-shaped grep is a 422, and what
+    # the one-character fix is.
+    test "task.stage --rerun help names the prefix-match probe refusal and its fix" do
+      stage = Enum.find(Tasks.cli_commands(), &(&1.id == "task.stage"))
+      rerun = Enum.find(stage.flags, &(&1.name == "rerun"))
+
+      assert rerun.summary =~ "PREFIX match"
+      assert rerun.summary =~ "`'defp apply_engagement('`"
+      assert rerun.summary =~ "`'defp handle_[a-z]'`"
     end
 
     test "declares the sixteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
@@ -704,10 +738,12 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
 
       assert parent.type == "string"
 
-      # The help text has to say WHY this route rather than the rail: it is the
-      # one that answers a close-time question. A summary that merely said
-      # "filter by parent" would leave the audit ergonomics exactly where the
-      # trap found them.
+      # The help text has to name the close-time field, so a reader auditing
+      # "which children closed in this window?" knows the answer is on the
+      # row. Both this listing and `bp task get`'s child rail carry updated_at
+      # (pinned below); the help states the real difference between them
+      # (claim/assignee/content on these rows) rather than implying the rail
+      # lacks it — task-40e138710f10229b.
       assert parent.summary =~ "updated_at"
       assert parent.summary =~ "close-time"
     end

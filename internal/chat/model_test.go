@@ -116,7 +116,7 @@ func (f *fakeTransport) AnswerQuestion(id, requestID string, answers map[string]
 	f.answers = append(f.answers, answerCall{id: id, requestID: requestID, answers: answers})
 	return f.answerErr
 }
-func (f *fakeTransport) Events(ctx context.Context, id string, lastSeq int, onFrame func(string, []byte)) error {
+func (f *fakeTransport) Events(ctx context.Context, id string, lastSeq int, onFrame func(string, []byte), onReconnect func()) error {
 	<-ctx.Done()
 	return nil
 }

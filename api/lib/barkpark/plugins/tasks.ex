@@ -128,6 +128,12 @@ defmodule Barkpark.Plugins.Tasks do
   decides which refusal a write that trips two fences receives — and
   `pre_write_fences_test.exs` pins it.
 
+  The two change guards (`Barkpark.Tasks.ChangeGuards`, formerly the writer's
+  own `ensure_task_transition_legal/6` and
+  `ensure_close_reason_lands_with_a_close/6`, task-d91ccf54d43b9800) come
+  FIRST, where the writer ran them: before every other fence, so an illegal
+  lifecycle transition is refused as one before any sibling judges the write.
+
   The two birth guards (`Barkpark.Tasks.BirthGuards`, formerly the writer's own
   `ensure_task_born_adjudicated/5` and `ensure_task_surface_declared/5`,
   task-2978357a0701cd10) sit where the writer ran them: after
@@ -138,6 +144,8 @@ defmodule Barkpark.Plugins.Tasks do
   @impl Barkpark.Plugin
   def pre_write_fences do
     [
+      {Barkpark.Tasks.ChangeGuards, :transition_legal},
+      {Barkpark.Tasks.ChangeGuards, :close_reason_lands_with_a_close},
       {Barkpark.Tasks.DraftTerminalFence, :check},
       {Barkpark.Tasks.DatasetTwinFence, :check},
       {Barkpark.Tasks.TerminalCriteriaFence, :check},
@@ -151,6 +159,85 @@ defmodule Barkpark.Plugins.Tasks do
   @doc false
   def dedup_check_new_task(type, attrs, dataset, _doc_id, prev_doc, opts),
     do: Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts)
+
+  @doc """
+  The task gates at the PUBLISH door, formerly named directly in
+  `Barkpark.Content.Lifecycle` (task-8273f2f1b24a6de1), each at the position
+  it held there — see `Barkpark.Tasks.PublishGuards`:
+
+    * `:door` — `door_gate/4`: transition legality, stale claim, the
+      claim-time criteria contract, the criteria regression fence, the
+      terminal-criteria fence and the task-door field fence. Last gate before
+      the authoring wall and the `:before_publish` hooks.
+    * `:in_transaction` — `no_criteria_regression/4`: the criteria and
+      terminal fences re-evaluated on the incumbent row locked `FOR UPDATE`.
+
+  `pre_publish_fences_test.exs` pins the order.
+  """
+  @impl Barkpark.Plugin
+  def pre_publish_fences do
+    [
+      {:door, Barkpark.Tasks.PublishGuards, :door_gate},
+      {:in_transaction, Barkpark.Tasks.PublishGuards, :no_criteria_regression}
+    ]
+  end
+
+  @doc """
+  The two task steps the writer ran over a write's attrs at the end of its
+  attrs pipeline, on both write doors, when it named them directly
+  (task-aed4f02e57d3a760), in the order it ran them:
+
+    * `{:transform, BriefMirror, :maybe_resync_task_brief}` — re-derive the
+      brief's `purpose-copy` / `criteria-list` blocks from `description` and
+      `acceptance_criteria`.
+    * `{:check, Validation, :validate_task_kind}` — the §1 content contract,
+      judged on the re-synced attrs. A `:check` here, not a pre-write fence:
+      the fences run later (after the prev-doc read and, on create, after the
+      label-spine shape gate), so moving it there would change which refusal
+      a write that trips both receives.
+
+  `pre_write_transforms_test.exs` pins the order.
+  """
+  @impl Barkpark.Plugin
+  def pre_write_transforms do
+    [
+      {:transform, Barkpark.Tasks.BriefMirror, :maybe_resync_task_brief},
+      {:check, Barkpark.Tasks.Validation, :validate_task_kind}
+    ]
+  end
+
+  @doc """
+  The module papers read task data through — a task chip's criteria segment
+  and a task query block's rows and aggregates (task-9c59aa555e1e015e). With
+  this plugin out of the load order papers render an explicit "unavailable"
+  placeholder instead; `paper_task_resolver_test.exs` pins both paths.
+  """
+  @impl Barkpark.Plugin
+  def paper_task_resolver, do: Barkpark.Tasks.PaperResolver
+
+  @doc """
+  The task guards of the RAW mutate door (`/v1/data/mutate`), formerly
+  private to `Barkpark.Content.Mutations` (task-b04cbe7823d084a6), each at the
+  position it held there — see `Barkpark.Tasks.MutateGuards`:
+
+    * `:before_rev` — the create family's published-fork fence, before the
+      revision precondition.
+    * `:after_claim` — after the door's close-CAS and claim fences, before the
+      writer: disposition by verb (term, rerun, operating instruction, reopen
+      trigger), adoption adjudicated, disposition owner registered — the order
+      the door's `with` chain named them in.
+
+  `mutate_door_fences_test.exs` pins the order.
+  """
+  @impl Barkpark.Plugin
+  def mutate_door_fences do
+    [
+      {:before_rev, Barkpark.Tasks.MutateGuards, :create_not_forking_published},
+      {:after_claim, Barkpark.Tasks.MutateGuards, :disposition_via_verb},
+      {:after_claim, Barkpark.Tasks.MutateGuards, :adoption_adjudicated},
+      {:after_claim, Barkpark.Tasks.MutateGuards, :disposition_owner_registered}
+    ]
+  end
 
   @tui_block_types ~w(
     heading paragraph list callout divider section code table figure action
@@ -884,12 +971,12 @@ defmodule Barkpark.Plugins.Tasks do
             type: "string",
             summary:
               "Narrow the page to the DIRECT children of this parent task id " <>
-                "(`parent_id` is an accepted alias server-side). This is the " <>
-                "parent-scoped read that carries updated_at per row — the " <>
-                "close-time field a \"which children closed between T1 and T2\" " <>
-                "audit needs. `bp task get <parent>` renders the same rail but " <>
-                "its child summaries are a lighter card; use this verb when you " <>
-                "are querying by time rather than reading one task."
+                "(`parent_id` is an accepted alias server-side). Each row is " <>
+                "the full card, claim, assignee and content included. " <>
+                "`bp task get <parent>` lists the same children as summaries " <>
+                "of at most seven keys (updated_at, the close-time field, " <>
+                "included; no claim, assignee or content). Both omit " <>
+                "criteria_progress on a row with no criteria."
           }
         ],
         writes: false,
@@ -1618,7 +1705,7 @@ defmodule Barkpark.Plugins.Tasks do
             name: "rerun",
             type: "string",
             summary:
-              "PDS wave 28 — THE FOURTH DURABLE KEY: one command an auditor can run to try to prove this reason WRONG. Written to the DURABLE content.disposition_rerun in the SAME CAS update as the rest of the adjudication; the raw /v1/data/mutate door refuses it and names this flag, exactly as it does for content.disposition. OPTIONAL, and that is deliberate: a reason may honestly refuse to be checkable (a licence, a runtime-only probe, a judgment call) and omitting --rerun is a PASS, demoted never rejected. LEGAL SPELLINGS — `git rev-list --count origin/main..<sha> | grep -qx 0`, `git cat-file -e origin/main:<path>`, `git grep -n <token> origin/main -- <path>`; each reports the probe's OWN failure as a non-zero exit. REFUSED SPELLINGS (422 unfalsifiable_rerun, NOTHING written): `git -C` in any spelling (also --git-dir/--work-tree — it retargets the repo the check runs against), a `test`/`[` filesystem predicate (asserts about the local checkout, not origin/main), `$( … )` or backtick command substitution (the exit code becomes the outer command's, swallowing the probe's failure), `git merge-base --is-ancestor` (refused by truth-grip's own screen), and a PIPE-MASKED tail whose last stage merely formats (head/tail/wc/cat/jq/…) — `git show origin/main:<deleted> | head -1` exits 0 while the bare `git show` exits 128. Blank counts as absent. Distinctness is NOT applied to this field (PDS-D391b/PDS-D336(a)): a SHARED rerun over distinct rows is the honest shape."
+              "PDS wave 28 — THE FOURTH DURABLE KEY: one command an auditor can run to try to prove this reason WRONG. Written to the DURABLE content.disposition_rerun in the SAME CAS update as the rest of the adjudication; the raw /v1/data/mutate door refuses it and names this flag, exactly as it does for content.disposition. OPTIONAL, and that is deliberate: a reason may honestly refuse to be checkable (a licence, a runtime-only probe, a judgment call) and omitting --rerun is a PASS, demoted never rejected. LEGAL SPELLINGS — `git rev-list --count origin/main..<sha> | grep -qx 0`, `git cat-file -e origin/main:<path>`, `git grep -n <token> origin/main -- <path>`; each reports the probe's OWN failure as a non-zero exit. REFUSED SPELLINGS (422 unfalsifiable_rerun, NOTHING written): `git -C` in any spelling (also --git-dir/--work-tree — it retargets the repo the check runs against), a `test`/`[` filesystem predicate (asserts about the local checkout, not origin/main), `$( … )` or backtick command substitution (the exit code becomes the outer command's, swallowing the probe's failure), `git merge-base --is-ancestor` (refused by truth-grip's own screen), a definition-shaped `git grep` pattern ending in a bare identifier (`'defp apply_engagement'` is a PREFIX match that stays green across a suffix rename — terminate it: `'defp apply_engagement('`, `$` or `\\b`; a deliberate family probe takes a character class, `'defp handle_[a-z]'`), and a PIPE-MASKED tail whose last stage merely formats (head/tail/wc/cat/jq/…) — `git show origin/main:<deleted> | head -1` exits 0 while the bare `git show` exits 128. Blank counts as absent. Distinctness is NOT applied to this field (PDS-D391b/PDS-D336(a)): a SHARED rerun over distinct rows is the honest shape."
           },
           %{
             name: "clear-rerun",
@@ -1848,6 +1935,12 @@ defmodule Barkpark.Plugins.Tasks do
             name: "scope",
             type: "string",
             summary: "What the listener works on (repo, area, project)."
+          },
+          %{
+            name: "feed",
+            type: "string",
+            summary:
+              "How this listener learns of new orders: sse | poll. Omitted leaves the stored value as it was (a roster row with none reads unknown); anything else is a 422 (invalid_feed) and nothing is written."
           },
           %{
             name: "capacity",

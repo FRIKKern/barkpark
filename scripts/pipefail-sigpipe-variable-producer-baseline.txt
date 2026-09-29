@@ -130,4 +130,22 @@
 # files this PR touches on both sides with --count-only <file> — every one
 # identical except pds-threshold-move-guard_test.sh, 10 -> 19; 124 - 9 = 115).
 #
-95
+# ── RE-MEASURED 2026-09-25 (task-3e7dbdd6620bd87e) ───────────────────────────
+#
+# 95 -> 92. origin/main 1a4503733f2d74bc0c664dcbf5ce6d96386f2b38 measures 94 (arrears 1, inside
+# the bound); this change fixes 2 more sites, which would make the arrears 3
+# against the bound of 2 — a red on a FALL. So it is banked here.
+#
+# WHAT MOVED THE NUMBER. scripts/reap-test-databases.sh, its --selftest arm
+# helper: `printf '%s' "$3" | grep -q -- "- *$FIX"` twice, now a `case`
+# membership test (no pipe). Measured per file: origin/main's copy 2, this one 0.
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --only-shape variable-producer --count-only
+#     -> pipefail-sigpipe-scan: 92 finding(s) — high 4 · medium 88 · low 0 — over 481 file(s)
+#
+#   date       2026-09-25T19:52:05Z
+#   tree       2e63ed0e11368f5a1df48811dc1b2653dd628b6a
+#              (this PR's head, rebased onto origin/main 1a4503733f2d74bc0c664dcbf5ce6d96386f2b38,
+#               0 commits behind at the time of measurement)
+#
+92

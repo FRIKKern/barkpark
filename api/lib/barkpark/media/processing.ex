@@ -13,7 +13,10 @@ defmodule Barkpark.Media.Processing do
 
   @doc "Run after a blob lands and its `mediaAsset` draft exists."
   @spec process(%MediaFile{}) :: :ok
-  def process(%MediaFile{} = file) do
+  def process(%MediaFile{} = file),
+    do: Barkpark.ManagedRuntime.WriteAdmission.Door.admit(fn -> admitted_process(file) end)
+
+  defp admitted_process(%MediaFile{} = file) do
     case Assets.find_by_media_file_id(file.id, file.dataset) do
       nil ->
         :ok

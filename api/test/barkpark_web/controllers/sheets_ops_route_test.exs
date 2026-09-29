@@ -472,21 +472,10 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
   # installed; the double is additive, contributing only its `before_save`
   # halt. This is the seam behaving correctly, not a workaround.
   defp with_failing_persist(fun) do
-    prior = Application.fetch_env(:barkpark, :plugins)
-
-    Application.put_env(:barkpark, :plugins, [
-      BarkparkWeb.SheetsOpsRouteTest.HaltingPersist,
-      Barkpark.Plugins.Sheets
-    ])
-
-    try do
-      fun.()
-    after
-      case prior do
-        {:ok, v} -> Application.put_env(:barkpark, :plugins, v)
-        :error -> Application.delete_env(:barkpark, :plugins)
-      end
-    end
+    Barkpark.PluginEnv.run_with(
+      [BarkparkWeb.SheetsOpsRouteTest.HaltingPersist, Barkpark.Plugins.Sheets],
+      fun
+    )
   end
 
   defp registry_partitions do

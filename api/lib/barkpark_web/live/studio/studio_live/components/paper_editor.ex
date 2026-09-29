@@ -148,6 +148,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # neither) keeps the quiet, unhalted footer.
   attr(:save_status, :string, default: "")
   attr(:paper_halt, :string, default: nil)
+  # Paper masters (task-3b6e562e916c8ce4). A LIST (possibly empty) turns the
+  # masters affordances on: the `[data-paper-masters]` carrier the canvas slash
+  # menu reads its Masters group from, the canvas block menu's "Save as
+  # master", and the boundary toolbar's save button. `nil` (the default — the
+  # public reader, the Beta document editor, a pane that may not write) renders
+  # none of them, so those surfaces are byte-unchanged.
+  attr(:masters, :any, default: nil)
+  # The masters implementation (`PaperMastersSeam.impl/1`), or nil when the
+  # plugin providing masters is off — then no Save action renders.
+  attr(:masters_impl, :any, default: nil)
+  # Linked master instances (task-59f078a2fd248698): the open paper's
+  # `%{key => prerendered_html}` render map, resolved per read in the paper's
+  # tenant, or nil (then an instance shows the neutral placeholder).
+  attr(:master_render, :any, default: nil)
 
   def paper_block_editor(assigns) do
     if assigns.canvas_resume_halt do
@@ -318,6 +332,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         hidden
       ></div>
 
+      <%!-- Paper masters carrier (task-3b6e562e916c8ce4). Same contract as the
+            expected-fields carrier above: LiveView-driven, outside every
+            phx-update="ignore" wrapper, read fresh by the canvas slash menu on
+            each open, so a master saved a moment ago is offered at once. Lists
+            only masters in THIS paper's workspace, project and dataset
+            (`list_for_paper/1`). Absent unless the pane may write,
+            and on the canvas path only (the BARKPARK_PAPER_CANVAS=0 opt-out
+            stays byte-identical to legacy). --%>
+      <div
+        :if={is_list(@masters) and @canvas_on?}
+        id="bp-paper-masters"
+        data-paper-masters={Jason.encode!(@masters)}
+        data-test-id="bp-paper-masters"
+        hidden
+      ></div>
+
       <%!-- Right-click block context-menu host. A zero-layout hidden carrier for
             the BarkparkPaperContextMenu hook (defined in root.html.heex). It is a
             SEPARATE hook because BarkparkPaperSortable already owns this editor
@@ -417,6 +447,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 tree_identity_safe={@tree_identity_safe}
                 table_editor_target_ids={@table_editor_target_ids}
                 canvas_retained={@canvas_retained}
+                masters_impl={is_list(@masters) && @masters_impl}
+                master_render={@master_render}
               />
             <% {:ghosts, ghosts, anchor_id} -> %>
               <.ghost_slots_group ghosts={ghosts} anchor_id={anchor_id} />
@@ -519,6 +551,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             tree_identity_safe={@tree_identity_safe}
             table_editor_target_ids={@table_editor_target_ids}
             canvas_retained={@canvas_retained}
+            master_render={@master_render}
           />
         </div>
       <% end %>
@@ -1002,6 +1035,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:tree_identity_safe, :boolean, default: true)
   attr(:table_editor_target_ids, :any, default: nil)
   attr(:canvas_retained, :any, default: nil)
+  attr(:masters_impl, :any, default: nil)
+  attr(:master_render, :any, default: nil)
 
   def edit_block(assigns) do
     ~H"""
@@ -1060,6 +1095,47 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             disabled={@index == @last_index}
             data-test-id="paper-move-down"
           >▼</button>
+          <%!-- Paper masters (task-3b6e562e916c8ce4): save this element,
+                widget or section as a master. Offered only where the pane may
+                write and masters are available (masters_impl) and the block is
+                masterable — the same refusal set `save_master/4` enforces. --%>
+          <button
+            :if={@masters_impl && @masters_impl.masterable?(@block)}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            title="Save as master"
+            aria-label="Save block as master"
+            phx-click="paper-save-master"
+            phx-value-block_id={Map.get(@block, "id")}
+            data-test-id="paper-save-master"
+          >☆</button>
+          <%!-- Linked master instance (task-59f078a2fd248698): Pin freezes it
+                to the master's latest PUBLISHED revision, the one the public
+                reader shows (task-881d4b6e857b1b65; Unpin follows latest again);
+                Detach copies in the PUBLISHED version readers see, never the
+                master's draft (task-01c812041613a8d3). Offered only
+                where masters are available and the pane may write. --%>
+          <button
+            :if={@masters_impl && @masters_impl.linked?(@block)}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            title={if linked_pinned?(@block), do: "Unpin: follow the master's latest", else: "Pin to the master's published version"}
+            phx-click="paper-pin-master"
+            phx-value-block_id={Map.get(@block, "id")}
+            phx-value-pin={if linked_pinned?(@block), do: "false", else: "true"}
+            phx-value-if_rev={@paper_rev}
+            data-test-id="paper-pin-master"
+          >{if linked_pinned?(@block), do: "Unpin", else: "Pin"}</button>
+          <button
+            :if={@masters_impl && @masters_impl.linked?(@block)}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            title="Detach: copy the published version readers see in as plain blocks"
+            phx-click="paper-detach-master"
+            phx-value-block_id={Map.get(@block, "id")}
+            phx-value-if_rev={@paper_rev}
+            data-test-id="paper-detach-master"
+          >Detach</button>
           <button
             :if={Map.get(@block, "locked") != true}
             type="button"
@@ -1098,6 +1174,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         tree_identity_safe={@tree_identity_safe}
         table_editor_target_ids={@table_editor_target_ids}
         canvas_retained={@canvas_retained}
+        master_render={@master_render}
       />
     </div>
     """
@@ -2107,6 +2184,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:tree_identity_safe, :boolean, default: nil)
   attr(:table_editor_target_ids, :any, default: nil)
   attr(:canvas_retained, :any, default: nil)
+  # Linked master instances (task-59f078a2fd248698): the open paper's
+  # `%{key => html}` render map. Threaded through every nested
+  # `paper_block_fields` call, so a `master-ref` inside a section or a column
+  # previews its master too (task-59be65118320fa0e item 2); nil shows the
+  # neutral "Linked master" placeholder.
+  attr(:master_render, :any, default: nil)
 
   def paper_block_fields(assigns) do
     tree_identity_safe =
@@ -2559,6 +2642,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
                           canvas_retained={@canvas_retained}
+                          master_render={@master_render}
                         />
                     <% end %>
                   <% end %>
@@ -2869,6 +2953,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
                         canvas_retained={@canvas_retained}
+                        master_render={@master_render}
                       />
                   <% end %>
                 <% end %>
@@ -3319,6 +3404,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       tree_identity_safe={@tree_identity_safe}
                       table_editor_target_ids={@table_editor_target_ids}
                       canvas_retained={@canvas_retained}
+                      master_render={@master_render}
                     />
                   </div>
                 </div>
@@ -3348,6 +3434,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
                         canvas_retained={@canvas_retained}
+                        master_render={@master_render}
                       />
                   <% end %>
                 <% end %>
@@ -3385,7 +3472,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </div>
             </details>
           <% else %>
-            <div :if={section_renderable?(@block)} class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article})) %></div>
+            <div :if={section_renderable?(@block)} class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article, masters: @master_render})) %></div>
             <p class="bp-paper-edit-readonly">This Section's child structure needs stable identities before editing; original content is preserved.</p>
           <% end %>
         </div>
@@ -3418,6 +3505,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
                         canvas_retained={@canvas_retained}
+                        master_render={@master_render}
                       />
                   <% end %>
                 <% end %>
@@ -3459,7 +3547,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </div>
             </details>
           <% else %>
-            <div class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article})) %></div>
+            <div class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article, masters: @master_render})) %></div>
             <p class="bp-paper-edit-readonly">This Columns block has malformed column data; original content is preserved.</p>
           <% end %>
         </div>
@@ -3879,6 +3967,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
                           canvas_retained={@canvas_retained}
+                          master_render={@master_render}
                         />
                     <% end %>
                   <% end %>
@@ -3992,6 +4081,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
                         canvas_retained={@canvas_retained}
+                        master_render={@master_render}
                       />
                   <% end %>
                 <% end %>
@@ -4103,6 +4193,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
                           canvas_retained={@canvas_retained}
+                          master_render={@master_render}
                         />
                       </div>
                   <% end %>
@@ -4130,6 +4221,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     tree_identity_safe={@tree_identity_safe}
                     table_editor_target_ids={@table_editor_target_ids}
                     canvas_retained={@canvas_retained}
+                    master_render={@master_render}
                   />
                 </div>
               <% end %>
@@ -4586,6 +4678,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           if_rev={if(@doc_type == "paper", do: @paper_rev, else: @document_rev)}
         />
 
+      <% "master-ref" -> %>
+        <%!-- Linked master instance (task-59f078a2fd248698): the master's
+              current (or pinned) content, rendered by the reader's own
+              producer from the per-read render map — never stored in this
+              paper. Here, not in `edit_block`, so a nested instance gets it
+              too (task-59be65118320fa0e item 2). --%>
+        <div
+          class="bp-paper-surface bp-paper-master-ref-preview"
+          data-test-id="paper-master-ref-preview"
+          data-master-ref-id={Map.get(@block, "id")}
+        >
+          {raw(Render.render_block(@block, %{style: :article, masters: @master_render}))}
+        </div>
+        <p class="bp-paper-edit-readonly" data-test-id="paper-master-ref-note">
+          <%= if linked_pinned?(@block) do %>
+            Pinned to a published version of the master — readers see exactly this. Unpin to follow the master, or Detach to edit it here.
+          <% else %>
+            Linked master — it shows the master's content. Edit the master, or Detach to edit it here.
+          <% end %>
+        </p>
       <% _ -> %>
         <%!-- Genuinely-unhandled types are read-only in the MVP (view/delete/reorder).
              `table` (editable-table) and `action` (editable-action, the CTA button) are
@@ -4597,6 +4709,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     <% end %>
     """
   end
+
+  # A linked master instance pinned to a revision (task-59f078a2fd248698).
+  defp linked_pinned?(block), do: Barkpark.PortableDoc.MasterRef.version(block) != nil
 
   defp editable_step_rows(%{"steps" => rows}) when is_list(rows),
     do: Enum.filter(rows, &(is_map(&1) and is_binary(&1["id"]) and &1["id"] != ""))

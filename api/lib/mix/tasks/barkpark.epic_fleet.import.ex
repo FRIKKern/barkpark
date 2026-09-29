@@ -18,6 +18,7 @@ defmodule Mix.Tasks.Barkpark.EpicFleet.Import do
         _ -> Mix.raise("usage: mix barkpark.epic_fleet.import <path|->")
       end
 
+    refuse_unless_enabled!()
     json = if path == "-", do: IO.read(:stdio, :eof), else: File.read!(path)
     Mix.Task.run("app.start")
 
@@ -27,6 +28,20 @@ defmodule Mix.Tasks.Barkpark.EpicFleet.Import do
 
       {:error, reason} ->
         Mix.raise("EpicFleet benchmark import failed: #{inspect(reason)}")
+    end
+  end
+
+  # task-71ea7ca2c8fabce2: an operator who switched EpicFleet off gets a named
+  # refusal before the task reads its input, boots the app or writes the
+  # ledger. `app.config` loads config/runtime.exs, where
+  # BARKPARK_CAPABILITIES_OFF is read.
+  defp refuse_unless_enabled! do
+    Mix.Task.run("app.config")
+
+    unless Barkpark.Capability.enabled?(:epic_fleet) do
+      Mix.raise(
+        "EpicFleet benchmark import refused: " <> Barkpark.Capability.off_message(:epic_fleet)
+      )
     end
   end
 end

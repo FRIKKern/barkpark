@@ -61,7 +61,15 @@
 # newcomer — diff the printed list against the previous run's. Naming it would
 # need a committed list, and a list is a snapshot that goes stale silently, which
 # is the fault this file exists to answer.
-BASELINE=22
+#
+# 22 -> 21, 2026-09-24 (task-88edd0348e6f703d, PR #20086). Re-measured, not
+# decremented: `bash scripts/unaccounted-workflow-ratchet.sh` printed count=21 on
+# origin/main a3d6027da. Walking every commit that touched .github/required-checks.json
+# or .github/workflows since 5541e5c33 (which set 22) with this script, the count
+# first moves at 8d94b7a00 (#20042, the absent-context census fires on producer
+# completion): `absent-context-census.yml` left the list because that PR gave its
+# job name a status in the spec. Good news, recorded here so the ratchet holds it.
+BASELINE=21
 
 set -uo pipefail
 

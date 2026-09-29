@@ -21,6 +21,11 @@
 //   · SCEN VALIDATION — an unknown SCEN name matched nothing, was silently
 //     dropped, and the run still printed ">> Done" over a short matrix.
 //
+// And one SEAM that is not a refusal (modal-by-field, gr-backlog-scenario-
+// drive-field): the `&modal=` query comes from the scenario's declared `modal`
+// field. It used to come from an `account-modal*` NAME, so a renamed scenario
+// shot the bare shell. Its mutant restores that deleted line verbatim.
+//
 // Every one of those four was proven to fire BY HAND, once, and the proof lived
 // only in a task ledger and a commit message. shoot.sh itself says, at its
 // accent tripwire, that having no automated coverage "is exactly how the
@@ -74,7 +79,7 @@ import net from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { replaceUnique } from './anchored-replace.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -124,7 +129,9 @@ for a in "$@"; do
 done
 case "\${FAKE_MODE:-write}" in
   write)
-    printf 'fake-png-bytes-for-the-shoot-guards-harness-%s\\n' "$png" > "$png"
+    # The URL is recorded INTO the stub PNG (it is always the last argument),
+    # so a check can read back exactly what shoot.sh asked Chrome to load.
+    printf 'fake-png-bytes-for-the-shoot-guards-harness-%s\\nurl=%s\\n' "$png" "\${@: -1}" > "$png"
     exit 0
     ;;
   hang-nopng)
@@ -137,13 +144,19 @@ esac
 exit 0
 `;
 
-const makeSandbox = (shootText) => {
+// `scenarios`, when a check passes one, REPLACES the scenarios.mjs symlink with
+// that module text — the one check that needs a scenario the corpus does not
+// carry (modal-by-field) gets it here, and every other check still reads the
+// shipped file through the symlink.
+const makeSandbox = (shootText, { scenarios } = {}) => {
   const sand = fs.mkdtempSync(path.join(os.tmpdir(), 'shoot-guards-'));
   const prev = path.join(sand, '__preview__');
   fs.mkdirSync(prev);
   fs.mkdirSync(path.join(sand, 'out'));
   for (const f of ['app.css', 'app.js']) fs.symlinkSync(path.join(STATIC, f), path.join(sand, f));
-  for (const f of ['scenarios.mjs', 'serve.mjs']) fs.symlinkSync(path.join(HERE, f), path.join(prev, f));
+  fs.symlinkSync(path.join(HERE, 'serve.mjs'), path.join(prev, 'serve.mjs'));
+  if (scenarios) fs.writeFileSync(path.join(prev, 'scenarios.mjs'), scenarios);
+  else fs.symlinkSync(path.join(HERE, 'scenarios.mjs'), path.join(prev, 'scenarios.mjs'));
   const shoot = path.join(prev, 'shoot.sh');
   fs.writeFileSync(shoot, shootText, { mode: 0o755 });
   const chrome = path.join(sand, 'fake-chrome.sh');
@@ -251,6 +264,17 @@ const killOwnPreviewServer = (shootPid) => {
 // arm demands. Each `cut` removes that guard and nothing else; `gone` is the
 // string that must vanish from the cut source — an independent second reader on
 // top of replaceUnique's own refusal.
+
+// modal-by-field's fixture: the shipped corpus with `account-modal-2fa-badcode`
+// MOVED to a name that shares nothing with the old prefix — the old key is
+// DELETED, so no name match anywhere in shoot.sh can be what supplies the modal.
+// Imported from the real file by absolute URL, so the fixture is the shipped
+// scenario object under a new key and cannot drift into a hand copy.
+const RENAMED_BADCODE = 'twofactor-rejected-code';
+const RENAMED_BADCODE_FIXTURE = `import { SCENARIOS as REAL } from ${JSON.stringify(pathToFileURL(path.join(HERE, 'scenarios.mjs')).href)};
+export const SCENARIOS = { ...REAL, ${JSON.stringify(RENAMED_BADCODE)}: REAL["account-modal-2fa-badcode"] };
+delete SCENARIOS["account-modal-2fa-badcode"];
+`;
 
 const ok = (out) => ({ ok: true, why: null, out });
 const bad = (why, out) => ({ ok: false, why, out });
@@ -382,6 +406,42 @@ const CHECKS = [
       return ok(r.out);
     },
   },
+  {
+    id: 'modal-by-field',
+    guard: 'the modal query is the scenario\'s declared `modal` field, never its NAME',
+    message: '&modal=<driver> on a scenario named outside account-modal*',
+    gone: 'modal_q="&modal=$smodal"',
+    // THE MUTANT IS THE DELETED CONVENTION, restored verbatim — not a blank.
+    // gr-backlog-scenario-drive-field asks for proof that the name convention is
+    // GONE rather than widened, and the only honest red for that is the old
+    // line itself coming back: under it, a scenario named outside the prefix
+    // shoots with no dialog, and the badcode driver collapses to plain
+    // `account` — the byte-identical-twin defect gr-p5r5 was spent fixing.
+    cut: (src) => replaceUnique(
+      src,
+      'if [[ -n "$smodal" ]]; then modal_q="&modal=$smodal"; fi',
+      'case "$scen" in account-modal*) modal_q="&modal=account" ;; esac',
+      { what: 'restore the account-modal* name convention' },
+    ),
+    scenarios: RENAMED_BADCODE_FIXTURE,
+    async run(box) {
+      const r = await runShoot(box, {
+        env: { CHROME: box.chrome, OUT: box.out, PORT: String(await freePort()), SCEN: RENAMED_BADCODE },
+        budgetMs: 120_000,
+      });
+      if (r.code !== 0) return bad(`expected exit 0 on the renamed scenario, got code=${r.code} signal=${r.signal}`, r.out);
+      const pngs = fs.readdirSync(box.out).filter((f) => f.startsWith(`${RENAMED_BADCODE}-`) && f.endsWith('.png')).sort();
+      if (pngs.length !== 4) return bad(`expected 4 shots of ${RENAMED_BADCODE} (2 themes x 2 widths), found ${pngs.length}`, r.out);
+      for (const f of pngs) {
+        const url = (/^url=(.*)$/m.exec(fs.readFileSync(path.join(box.out, f), 'utf8')) || [])[1] || '';
+        if (!url.includes(`scen=${RENAMED_BADCODE}&`)) return bad(`${f}: the fake Chrome recorded no URL for this scenario: ${JSON.stringify(url)}`, r.out);
+        if (!/[?&]modal=account-2fa-badcode(&|#|$)/.test(url)) {
+          return bad(`${f}: shot WITHOUT its declared driver (modal=account-2fa-badcode) — url ${url}`, r.out);
+        }
+      }
+      return ok(r.out);
+    },
+  },
 ];
 
 // The happy path — the control that makes every RED above mean something. If
@@ -424,7 +484,7 @@ const main = async () => {
   const failures = [];
 
   const runOne = async (check, shootText, label) => {
-    const box = makeSandbox(shootText);
+    const box = makeSandbox(shootText, { scenarios: check.scenarios });
     try {
       const started = Date.now();
       const res = await check.run(box);

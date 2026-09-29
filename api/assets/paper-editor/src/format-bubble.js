@@ -119,6 +119,12 @@ export class FormatBubble {
     el.appendChild(this._mkBtn("bold", "B", "bp-paper-format__btn--bold", "Bold"));
     el.appendChild(this._mkBtn("italic", "I", "bp-paper-format__btn--italic", "Italic"));
     el.appendChild(this._mkBtn("underline", "U", "bp-paper-format__btn--underline", "Underline"));
+    el.appendChild(this._mkBtn("highlight", "H", "bp-paper-format__btn--highlight", "Highlight"));
+    el.appendChild(this._mkBtn("subscript", "x₂", "bp-paper-format__btn--subscript", "Subscript (Ctrl+,)"));
+    el.appendChild(this._mkBtn("superscript", "x²", "bp-paper-format__btn--superscript", "Superscript (Ctrl+.)"));
+    el.appendChild(this._mkBtn("align-left", "⇤", "bp-paper-format__btn--align-left", "Align left"));
+    el.appendChild(this._mkBtn("align-center", "≡", "bp-paper-format__btn--align-center", "Align centre"));
+    el.appendChild(this._mkBtn("align-right", "⇥", "bp-paper-format__btn--align-right", "Align right"));
     el.appendChild(this._mkBtn("strike", "S", "bp-paper-format__btn--strike", "Strikethrough"));
     el.appendChild(this._mkBtn("code", "</>", "bp-paper-format__btn--code", "Inline code"));
 
@@ -241,6 +247,29 @@ export class FormatBubble {
       case "underline":
         if (this._editor.can().toggleUnderline?.()) this._editor.chain().focus().toggleUnderline().run();
         break;
+      case "highlight":
+        if (this._editor.can().toggleHighlight?.()) this._editor.chain().focus().toggleHighlight().run();
+        break;
+      case "subscript":
+        if (this._editor.can().toggleSubscript?.()) this._editor.chain().focus().toggleSubscript().run();
+        break;
+      case "superscript":
+        if (this._editor.can().toggleSuperscript?.()) this._editor.chain().focus().toggleSuperscript().run();
+        break;
+      case "align-left":
+      case "align-center":
+      case "align-right": {
+        // Inside a table cell the buttons align the CELL (plan #26): a cell attribute the diff
+        // stores as `{ content, align }`; elsewhere the paragraph / heading as before.
+        const cell = this._cellAt();
+        if (cell) {
+          const value = name.slice(6);
+          this._editor.chain().focus().command(({ tr }) => { tr.setNodeMarkup(cell.pos, undefined, { ...cell.node.attrs, align: value === "left" ? null : value }); return true; }).run();
+          break;
+        }
+        if (this._editor.can().setTextAlign?.(name.slice(6))) this._editor.chain().focus().setTextAlign(name.slice(6)).run();
+        break;
+      }
       case "code":
         this._editor.chain().focus().toggleCode().run();
         break;
@@ -254,6 +283,16 @@ export class FormatBubble {
   // Open the inline link input (seeded with any existing href on the selection)
   // or close it if already open.
   // Public entry for the Mod+K shortcut: show the bubble for the current selection and open its link row.
+  // The table cell the selection sits in (body or head), or null.
+  _cellAt() {
+    const { $from } = this._editor.state.selection;
+    for (let d = $from.depth; d > 0; d--) {
+      const name = $from.node(d).type.name;
+      if (name === "bpTableCell" || name === "bpTableHeaderCell") return { pos: $from.before(d), node: $from.node(d) };
+    }
+    return null;
+  }
+
   openLink() {
     if (!this._el) this._build();
     this._show();
@@ -312,6 +351,14 @@ export class FormatBubble {
     set("italic", this._editor.isActive("italic"));
     set("strike", this._editor.isActive("strike"));
     set("underline", this._editor.isActive("underline"));
+    set("highlight", this._editor.isActive("highlight"));
+    set("subscript", this._editor.isActive("subscript"));
+    set("superscript", this._editor.isActive("superscript"));
+    const cell = this._cellAt();
+    const cellAlign = cell ? cell.node.attrs.align || null : null;
+    set("align-center", cell ? cellAlign === "center" : this._editor.isActive({ textAlign: "center" }));
+    set("align-right", cell ? cellAlign === "right" : this._editor.isActive({ textAlign: "right" }));
+    set("align-left", cell ? !cellAlign : (!this._editor.isActive({ textAlign: "center" }) && !this._editor.isActive({ textAlign: "right" })));
     set("code", this._editor.isActive("code"));
     // Link button stays pressed while its input row is open OR a link is active.
     set("link", this._linkOpen || this._editor.isActive("link"));

@@ -1038,16 +1038,21 @@ rc="$(BARKPARK_CLOUD_EGRESS_IPS=10.0.0.0/8 run_deploy 200 cidrsha)"
 check "CIDR: deploy still exit 0 (non-fatal)"     "[ '$rc' = '0' ]"
 check "CIDR: NOT written"                         "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
 check "CIDR: refused loudly"                      "grep -q 'WARN: BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+check "CIDR: the refusal NAMES the entry it refused" "grep -q \"REFUSED by the validator: entry '10.0.0.0/8'\" '$TMP/out.log'"
+check "CIDR: a refusal never reads as 'nothing supplied'" "! grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+check "CIDR: a refusal writes no placeholder"      "! grep -q '^# BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
 rm -rf "$TMP"
 setup_case
 rc="$(BARKPARK_CLOUD_EGRESS_IPS=barkpark.cloud run_deploy 200 hostsha)"
 check "hostname: NOT written (runtime.exs takes IPs only)" "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
 check "hostname: refused loudly"                  "grep -q 'WARN: BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+check "hostname: the refusal NAMES the entry"     "grep -q \"REFUSED by the validator: entry 'barkpark.cloud'\" '$TMP/out.log'"
 rm -rf "$TMP"
 # A mixed list must be refused WHOLE — one good hop does not license a bad one.
 setup_case
 rc="$(BARKPARK_CLOUD_EGRESS_IPS='203.0.113.7,notanip' run_deploy 200 mixedsha)"
 check "mixed list: refused whole (no partial write)" "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+check "mixed list: names the BAD entry, not the good one" "grep -q \"entry 'notanip'\" '$TMP/out.log' && ! grep -q \"entry '203.0.113.7'\" '$TMP/out.log'"
 rm -rf "$TMP"
 # A valid v4+v6 pair IS accepted (a CP that reaches instances over both).
 setup_case
@@ -1064,6 +1069,7 @@ check "absent: exit 0"                            "[ '$rc' = '0' ]"
 check "absent: no live line written"              "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
 check "absent: commented placeholder written"     "grep -q '^# BARKPARK_TRUSTED_PROXIES=203.0.113.7\$' '$APP/.env'"
 check "absent: gap logged loudly"                 "grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+check "absent: never reads as a refusal"          "! grep -q 'REFUSED by the validator' '$TMP/out.log' && grep -q 'nothing was refused' '$TMP/out.log'"
 # The placeholder must survive being SOURCED (the script does `set -a; . ./.env`)
 # and must not become a live value on the next deploy either.
 : > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
@@ -1074,6 +1080,214 @@ check "absent redeploy: still no live line"       "! grep -q '^BARKPARK_TRUSTED_
 check "absent redeploy: placeholder NOT re-appended (.env does not grow)" "[ \"\$(grep -c '^# BARKPARK_TRUSTED_PROXIES=' '$APP/.env')\" = '1' ]"
 check "absent redeploy: gap still logged (visible every deploy)" "grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
 rm -rf "$TMP"
+
+# Blank: SET but holding only separators/whitespace. That is "nothing supplied",
+# not "the validator refused an entry" — it takes the absent branch (placeholder +
+# the no-IPs WARN) and says the variable was set, so the two stay apart in a log.
+setup_case
+rc="$(BARKPARK_CLOUD_EGRESS_IPS=' , ' run_deploy 200 blankxffsha)"
+check "blank: exit 0"                             "[ '$rc' = '0' ]"
+check "blank: no live line written"               "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+check "blank: treated as EMPTY (placeholder + no-IPs WARN)" "grep -q '^# BARKPARK_TRUSTED_PROXIES=203.0.113.7\$' '$APP/.env' && grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS supplied' '$TMP/out.log'"
+check "blank: says it was SET but empty, and never reads as a refusal" "grep -q 'is set but holds no entries' '$TMP/out.log' && ! grep -q 'REFUSED by the validator' '$TMP/out.log'"
+rm -rf "$TMP"
+
+echo "== Case 16b: the egress validator gives ONE verdict whichever awk the host ships =="
+# task-0d0f4563784fa12f. The validator used to be an awk regex, and its verdict
+# was the HOST AWK's: its IPv4 arm needed the ERE interval {3}, and mawk 1.3.4
+# 20200120 (Ubuntu 22.04 / Debian 12), mawk 1.3.4 20240123 (Ubuntu 24.04) and
+# original-awk 20180827 all REFUSED 203.0.113.7 while accepting IPv6 (no interval
+# in that arm) — the list was never written. gawk, BSD awk and mawk 20250131+
+# accepted it, which is why a single-interpreter green (macOS, GitHub's gawk
+# runner) never saw it. Two arms:
+#   ARM 1 (behavioural, no awk at all): the validator functions are lifted out of
+#   the REAL script and run with a POISON awk first on PATH — every verdict must
+#   be right AND the poison must never be called.
+#   ARM 2 (the whole artifact under every awk this host can reach): each awk is
+#   planted as `awk` in the fake bin and the three outcomes are driven end to end
+#   — valid -> written, invalid -> refused BY NAME, blank -> refused as EMPTY. The
+#   per-awk verdicts print beside each awk's version string. Fixed check count
+#   (aggregated over awks) so the README count guard stays host-independent.
+EGV="$(mktemp -d)"
+sed -n '/^egress_ip[a-z0-9_]*() {/,/^}/p' "$SCRIPT" > "$EGV/fns.sh"
+check "egress arm1: all four validator functions lifted from the real script" \
+  "grep -q '^egress_ip_ok() {' '$EGV/fns.sh' && grep -q '^egress_ip4_ok() {' '$EGV/fns.sh' && grep -q '^egress_ip6_ok() {' '$EGV/fns.sh' && grep -q '^egress_ips_check() {' '$EGV/fns.sh'"
+mkdir -p "$EGV/poison"
+printf '#!/bin/sh\necho called >> "%s/poison.hit"\nexit 97\n' "$EGV" > "$EGV/poison/awk"
+chmod +x "$EGV/poison/awk"
+# want|input ; <TAB> becomes a literal tab. REFUSE(x) = refused NAMING x.
+cat > "$EGV/specimens" <<'SPEC'
+ACCEPT|203.0.113.7
+ACCEPT|198.51.100.9
+ACCEPT|203.0.113.7, 2a01:4f9::1
+ACCEPT|2a01:4f9::1
+ACCEPT|::1
+REFUSE(010.0.0.1)|010.0.0.1
+ACCEPT|<TAB>203.0.113.7 ,<TAB>198.51.100.9,
+REFUSE(not-an-ip)|not-an-ip
+REFUSE(10.0.0.0/8)|10.0.0.0/8
+REFUSE(barkpark.cloud)|barkpark.cloud
+REFUSE(notanip)|203.0.113.7,notanip
+REFUSE(256.1.1.1)|256.1.1.1
+REFUSE(1.2.3)|1.2.3
+REFUSE(1..2.3)|1..2.3
+REFUSE(fe80:::1)|fe80:::1
+REFUSE(99999999999999999999.1.1.1)|99999999999999999999.1.1.1
+EMPTY|
+EMPTY| , ,<TAB>
+SPEC
+egv_bad="$(PATH="$EGV/poison:$PATH" bash -c '
+  . "$1"; tab=$(printf "\t"); bad=""
+  while IFS="|" read -r want s; do
+    s="${s//<TAB>/$tab}"
+    out="$(egress_ips_check "$s")"; rc=$?
+    case $rc in 0) v=ACCEPT ;; 1) v="REFUSE($out)" ;; 2) v=EMPTY ;; *) v="rc=$rc" ;; esac
+    [ "$v" = "$want" ] || bad="$bad [$s: want $want got $v]"
+  done < "$2"
+  printf "%s" "$bad"' _ "$EGV/fns.sh" "$EGV/specimens")"
+check "egress arm1: every specimen verdict right with NO working awk ($(grep -c . "$EGV/specimens") specimens)${egv_bad:+ -$egv_bad}" "[ -z \"\$egv_bad\" ]"
+check "egress arm1: the POISON awk was never called (the verdict is bash's, not awk's)" "[ ! -e '$EGV/poison.hit' ]"
+
+# ARM 2. Every awk reachable here, de-duplicated by resolved path.
+egv_awks=""
+for egv_c in awk mawk gawk nawk original-awk /usr/bin/awk /opt/homebrew/bin/mawk /opt/homebrew/bin/gawk; do
+  egv_p="$(command -v "$egv_c" 2>/dev/null)" || continue
+  egv_r="$(cd "$(dirname "$egv_p")" && pwd -P)/$(basename "$egv_p")"
+  case " $egv_awks " in *" $egv_r "*) continue ;; esac
+  egv_awks="$egv_awks $egv_r"
+done
+egv_bb="$(command -v busybox 2>/dev/null || true)"
+egv_n=0; egv_valid_bad=""; egv_invalid_bad=""; egv_empty_bad=""
+for egv_a in $egv_awks ${egv_bb:+busybox}; do
+  if [ "$egv_a" = busybox ]; then
+    egv_ver="$("$egv_bb" 2>&1 </dev/null | sed -n 1p)"
+    egv_shim="exec '$egv_bb' awk \"\$@\""
+  else
+    egv_ver="$("$egv_a" -W version </dev/null 2>/dev/null | sed -n 1p)"
+    [ -n "$egv_ver" ] || egv_ver="$("$egv_a" --version </dev/null 2>/dev/null | sed -n 1p)"
+    egv_shim="exec '$egv_a' \"\$@\""
+  fi
+  egv_n=$((egv_n + 1))
+  # valid -> accepted and written
+  setup_case; printf '#!/bin/sh\n%s\n' "$egv_shim" > "$FAKE/awk"; chmod +x "$FAKE/awk"
+  BARKPARK_CLOUD_EGRESS_IPS='203.0.113.7, 2a01:4f9::1' run_deploy 200 egvok >/dev/null
+  if grep -q '^BARKPARK_TRUSTED_PROXIES=203.0.113.7, 2a01:4f9::1$' "$APP/.env"; then egv_v1=ACCEPT+WRITTEN; else egv_v1=NOT-WRITTEN; egv_valid_bad="$egv_valid_bad [$egv_ver]"; fi
+  rm -rf "$TMP"
+  # invalid -> refused BY NAME, nothing written
+  setup_case; printf '#!/bin/sh\n%s\n' "$egv_shim" > "$FAKE/awk"; chmod +x "$FAKE/awk"
+  BARKPARK_CLOUD_EGRESS_IPS='203.0.113.7,10.0.0.0/8' run_deploy 200 egvbad >/dev/null
+  if ! grep -q '^BARKPARK_TRUSTED_PROXIES=' "$APP/.env" && grep -q "REFUSED by the validator: entry '10.0.0.0/8'" "$TMP/out.log"; then egv_v2="REFUSED(10.0.0.0/8)"; else egv_v2=WRONG; egv_invalid_bad="$egv_invalid_bad [$egv_ver]"; fi
+  rm -rf "$TMP"
+  # blank -> refused as EMPTY, not as invalid
+  setup_case; printf '#!/bin/sh\n%s\n' "$egv_shim" > "$FAKE/awk"; chmod +x "$FAKE/awk"
+  BARKPARK_CLOUD_EGRESS_IPS=' , ' run_deploy 200 egvempty >/dev/null
+  if ! grep -q '^BARKPARK_TRUSTED_PROXIES=' "$APP/.env" && grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS supplied' "$TMP/out.log" && ! grep -q 'REFUSED by the validator' "$TMP/out.log"; then egv_v3=EMPTY; else egv_v3=WRONG; egv_empty_bad="$egv_empty_bad [$egv_ver]"; fi
+  rm -rf "$TMP"
+  echo "  awk: $egv_a [$egv_ver] -> valid=$egv_v1 invalid=$egv_v2 blank=$egv_v3"
+done
+check "egress arm2: at least one awk was reachable to drive the artifact under ($egv_n found)" "[ '$egv_n' -ge 1 ]"
+check "egress arm2: valid list ACCEPTED and WRITTEN under every awk${egv_valid_bad:+ - failed under:$egv_valid_bad}" "[ -z \"\$egv_valid_bad\" ]"
+check "egress arm2: invalid entry REFUSED BY NAME under every awk${egv_invalid_bad:+ - failed under:$egv_invalid_bad}" "[ -z \"\$egv_invalid_bad\" ]"
+check "egress arm2: blank list refused as EMPTY (not as invalid) under every awk${egv_empty_bad:+ - failed under:$egv_empty_bad}" "[ -z \"\$egv_empty_bad\" ]"
+rm -rf "$EGV"
+
+echo "== Case 16c: the egress validator answers with the RUNTIME's grammar (:inet.parse_address) =="
+# task-74d16d239fff7df7. runtime.exs raises at boot on any BARKPARK_TRUSTED_PROXIES
+# entry :inet.parse_address/1 refuses, so a validator verdict of ACCEPT on such an
+# entry writes a down instance. The IPv6 arm used to check SHAPE only and accepted
+# 1:2, 1::2::3 and a nine-group address; the IPv4 arm stripped leading zeros and
+# accepted 1.2.3.08 (octal to the runtime, refused).
+# Each row: RUNTIME verdict | VALIDATOR verdict wanted | specimen.
+#   RUNTIME is :inet.parse_address(String.to_charlist(s)) — recorded from real runs
+#   (Elixir 1.19.5 / OTP 28); when elixir is on PATH this case re-derives it live.
+#   AGREE rows must match exactly. STRICT rows are forms the runtime accepts but
+#   re-reads as a DIFFERENT address (BSD inet_aton shorthand/octal/hex, IPv6 zone
+#   ids): the validator refuses them on purpose, the safe direction.
+# MUTATION PROOF: put the old shape-only IPv6 arm back (hex digits + colons, no
+# ':::' -> accept) and the AGREE check reds naming 1:2, 1::2::3,
+# 1:2:3:4:5:6:7:8:9 and the other malformed rows; the boot-failure check reds too.
+AGR="$(mktemp -d)"
+sed -n '/^egress_ip[a-z0-9_]*() {/,/^}/p' "$SCRIPT" > "$AGR/fns.sh"
+cat > "$AGR/table" <<'SPEC'
+A|A|203.0.113.7
+A|A|2a01:4f9::1
+A|A|::1
+R|R|1:2
+R|R|1::2::3
+R|R|1:2:3:4:5:6:7:8:9
+A|A|1:2:3:4:5:6:7:8
+A|A|::ffff:203.0.113.7
+R|R|10.0.0.0/8
+R|R|256.1.1.1
+R|R|not-an-ip
+R|R|
+A|A|::
+A|A|0.0.0.0
+A|A|1:2:3:4:5:6:7::
+A|A|::1:2:3:4:5:6:7
+A|A|1:2:3:4:5:6:1.2.3.4
+A|A|FE80::ABCD
+R|R|1::2:3:4:5:6:7:8
+R|R|1:2:3:4:5:6:7::8
+R|R|1:2:3:4:5:6:7:1.2.3.4
+R|R|12345::1
+R|R|1:::2
+R|R|:1::2
+R|R|1::2:
+R|R|g::1
+R|R|::ffff:1.2.3.04
+R|R|::ffff:256.1.1.1
+R|R|1.2.3.08
+R|R|1.2.3.4.5
+R|R|1.2.3.
+STRICT|R|010.0.0.1
+STRICT|R|203.0.113.07
+STRICT|R|127.1
+STRICT|R|1
+STRICT|R|0x7f.1
+STRICT|R|fe80::1%eth0
+SPEC
+agr_out="$(bash -c '
+  . "$1"
+  while IFS="|" read -r rt want s; do
+    if egress_ip_ok "$s"; then v=A; else v=R; fi
+    printf "%s|%s|%s|%s\n" "$rt" "$want" "$v" "$s"
+  done < "$2"' _ "$AGR/fns.sh" "$AGR/table")"
+echo "  runtime | validator | specimen"
+while IFS="|" read -r rt _ v s; do
+  printf '  %-7s | %-9s | %s\n' "$rt" "$v" "'$s'"
+done <<<"$agr_out"
+agr_n="$(grep -c '^[AR]|' "$AGR/table")"; agr_s="$(grep -c '^STRICT|' "$AGR/table")"
+agr_bad=""; agr_strict_bad=""; agr_boot_bad=""
+while IFS="|" read -r rt _ v s; do
+  case "$rt" in
+    A|R) [ "$v" = "$rt" ] || agr_bad="$agr_bad [$s: runtime $rt validator $v]" ;;
+    STRICT) [ "$v" = R ] || agr_strict_bad="$agr_strict_bad [$s]" ;;
+  esac
+  [ "$rt" = R ] && [ "$v" = A ] && agr_boot_bad="$agr_boot_bad [$s]"
+done <<<"$agr_out"
+check "runtime-agreement: validator == :inet.parse_address on every AGREE specimen ($agr_n)${agr_bad:+ -$agr_bad}" "[ -z \"\$agr_bad\" ]"
+check "runtime-agreement: no specimen the runtime REFUSES is accepted (a write that fails boot)${agr_boot_bad:+ - accepted:$agr_boot_bad}" "[ -z \"\$agr_boot_bad\" ]"
+check "runtime-agreement: the $agr_s STRICT forms (runtime re-reads them as another address) are refused${agr_strict_bad:+ - accepted:$agr_strict_bad}" "[ -z \"\$agr_strict_bad\" ]"
+# The table names ONE parser. If runtime.exs stops calling it, the recorded column
+# no longer describes the consumer and this case must be re-derived.
+check "runtime-agreement: runtime.exs still parses each entry with :inet.parse_address (the table's parser)" \
+  "grep -q ':inet.parse_address(String.to_charlist(proxy))' '$HERE/../api/config/runtime.exs'"
+# Live re-derivation of the RUNTIME column where elixir exists (developer hosts);
+# the CI runner has no elixir, and the label says which column was checked.
+agr_live_bad=""; agr_live="RECORDED column only (no elixir on PATH)"
+if command -v elixir >/dev/null 2>&1; then
+  agr_live_out="$(cut -d'|' -f3- "$AGR/table" | elixir -e '
+    IO.stream(:stdio, :line) |> Enum.each(fn l ->
+      s = String.trim_trailing(l, "\n")
+      v = case :inet.parse_address(String.to_charlist(s)) do {:ok, _} -> "A"; _ -> "R" end
+      IO.puts(v) end)' 2>&1)"
+  agr_rec="$(cut -d'|' -f1 "$AGR/table" | sed 's/^STRICT$/A/')"
+  agr_live="re-derived LIVE under OTP $(elixir -e 'IO.write(:erlang.system_info(:otp_release))' 2>/dev/null)"
+  [ "$agr_live_out" = "$agr_rec" ] || agr_live_bad=" - live column differs from the recorded one: $(paste -d' ' <(printf '%s\n' "$agr_rec") <(printf '%s\n' "$agr_live_out") <(cut -d'|' -f3- "$AGR/table") | grep -v '^\(.\) \1 ' | tr '\n' ';')"
+fi
+check "runtime-agreement: the RUNTIME column is true ($agr_live)$agr_live_bad" "[ -z \"\$agr_live_bad\" ]"
+rm -rf "$AGR"
 
 echo "== Case 17: ADVANCE vs STALL — a deploy that reports SUCCESS without moving HEAD is now VISIBLE =="
 # THE FAILURE CLASS (D292): "deploy said SUCCESS while the box stayed one commit

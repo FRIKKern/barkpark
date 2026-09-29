@@ -187,22 +187,19 @@ defmodule Barkpark.Plugins.Media.StuckProcessingSweeperTest do
     # Moving this entry to config.exs (or the module back to host code) reds
     # here.
     test "a plugin-free boot registers NO sweeper cron entry" do
-      prev = Application.get_env(:barkpark, :plugins, :unset)
+      prev = Barkpark.PluginEnv.capture()
 
       on_exit(fn ->
-        case prev do
-          :unset -> Application.delete_env(:barkpark, :plugins)
-          v -> Application.put_env(:barkpark, :plugins, v)
-        end
+        Barkpark.PluginEnv.restore(prev)
       end)
 
       # Sanity arm: with Media loaded the entry IS collected — so the
       # plugins-off arm below is a real absence, not a vacuous one.
-      Application.put_env(:barkpark, :plugins, [Barkpark.Plugins.Media])
+      Barkpark.PluginEnv.put!([Barkpark.Plugins.Media])
 
       assert {"* * * * *", StuckProcessingSweeper} in Barkpark.Plugins.Registry.collect_oban_crontab()
 
-      Application.put_env(:barkpark, :plugins, [])
+      Barkpark.PluginEnv.put!([])
 
       crontab = Barkpark.Plugins.Registry.collect_oban_crontab()
 

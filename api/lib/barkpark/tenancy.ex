@@ -19,6 +19,7 @@ defmodule Barkpark.Tenancy do
   alias Barkpark.Content.Document
   alias Barkpark.Media
   alias Barkpark.Media.Storage.MediaFile
+  alias Barkpark.OwnedTables
   alias Barkpark.Tenancy.{Workspace, Project, Dataset, Membership, Organization}
   alias Barkpark.Tenancy.DefaultScopeCache
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
@@ -2124,8 +2125,21 @@ defmodule Barkpark.Tenancy do
     end
   end
 
+  # The function is installed by the cycle_fleet migrations. With cycle_fleet
+  # ON it is called unconditionally, so a missing function stays a loud error.
+  # With cycle_fleet OFF it is called only if it still exists: turning the
+  # capability off keeps its tables and rows, and those rows must still be
+  # removed before the documents they reference (task-d3ecc509d4ea227d).
+  @cycle_teardown_fn "barkpark_prepare_workspace_cycle_teardown(uuid)"
+
   defp prepare_workspace_cycle_teardown(ws_id) do
-    Repo.query!("SELECT barkpark_prepare_workspace_cycle_teardown($1)", [Ecto.UUID.dump!(ws_id)])
+    if Barkpark.Capability.enabled?(:cycle_fleet) or
+         OwnedTables.function_exists?(@cycle_teardown_fn) do
+      Repo.query!("SELECT barkpark_prepare_workspace_cycle_teardown($1)", [
+        Ecto.UUID.dump!(ws_id)
+      ])
+    end
+
     :ok
   end
 

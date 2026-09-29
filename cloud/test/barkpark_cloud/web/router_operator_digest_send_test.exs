@@ -10,8 +10,8 @@ defmodule BarkparkCloud.Web.RouterOperatorDigestSendTest do
   green on a broken gate:
 
     * §1 401 (no session) / 403 (a real, registered non-operator session) / 403
-      `allowlist: "unconfigured"` (the allowlist is EMPTY — the production state,
-      where fail-closed means admit nobody, never admit everybody). Every refusal
+      `allowlist: "unconfigured"` (the allowlist is EMPTY — the fail-closed
+      default, where fail-closed means admit nobody, never admit everybody). Every refusal
       arm asserts the negative that matters: `refute_receive {:email, _}` and
       zero `digest_runs` rows. A 403 that still sent the mail is a spam cannon
       with a polite status line, and only the mailbox assertion can see it.
@@ -172,7 +172,7 @@ defmodule BarkparkCloud.Web.RouterOperatorDigestSendTest do
     {user, team} = user_with_team()
     barkpark_fixture(team)
 
-    # The production state: PLATFORM_ADMIN_EMAILS unset. A gate that failed OPEN
+    # The fail-closed default: PLATFORM_ADMIN_EMAILS unset. A gate that failed OPEN
     # here would make this route reachable by every signed-in account on the
     # platform — the spam cannon this arm exists to refuse.
     Application.put_env(:barkpark_cloud, :platform_admin_emails, [])

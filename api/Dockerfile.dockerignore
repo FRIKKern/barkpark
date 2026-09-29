@@ -35,7 +35,7 @@ tooling
 # above hid it from the context and every compose-smoke build failed with
 # '"/tooling/pds": not found' for 15 h. Negations must follow the exclusion.
 !tooling/pds
-docs-site
+docs/site
 obsidian_example
 IndxData
 scaffy

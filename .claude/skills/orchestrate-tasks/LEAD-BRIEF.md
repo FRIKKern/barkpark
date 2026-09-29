@@ -89,6 +89,7 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    CODE, not the output: 64 = REFUSED, nothing ran (fix the argv); 2 = the suite RAN
    and tests FAILED (fix the code); 0 = green. Before 2026-09-20 a refusal also exited
    2, so `… || echo REFUSED` called a red suite a refusal (task-620ea822de73bf5e). Go: `go build ./... && go test ./internal/cli/...`.
+   Beside mix-test-strict.sh, any api/test edit also runs `bash scripts/unreachable-assert-message-check.sh --files <staged api/test files>` (the required Elixir gate's ratchet; the pre-commit hook runs it too, but a `--no-verify` commit skips it).
    `cc` on this Mac is a Claude Code shim: cgo/NIF builds die on a fake "unknown option" — use
    `CGO_ENABLED=0` for Go (as the Makefile does) and `CC=/usr/bin/clang` for mix when a NIF compiles.
    A change with a test proves red-without / green-with (mutation-prove it).
@@ -230,6 +231,15 @@ ONLY what this prints:
   session's pulse list IMPOSSIBLE BY CONSTRUCTION rather than merely reported — which is the
   remedy this brief chose, because an audit log of a silent removal is read only by someone
   who already suspects it happened.
+- **Takeover, FIRST command — when the predecessor's `status.*.md` is older than the last line
+  of its `pulse.*.log`:** `bash .claude/skills/orchestrate-tasks/helpers/lane-state.sh <lane>
+  FRIKKern/barkpark`. A pulse after the status write means the lead kept working after its last
+  snapshot: r10 (2026-09-11) closed five rows and opened six draft PRs it never recorded, and the
+  successor spent ~40 min re-deriving them. It prints LEDGER (in_progress rows claimed by
+  `lead-<lane>*`), PRS (via `lane-open-prs.sh`, each `Task:` trailer checked against LEDGER) and
+  WORKTREES (commits off `origin/main` or uncommitted files, excluding a branch whose PR GitHub
+  says MERGED). Exit 0 = every read succeeded; exit 2 = a `CANNOT READ` line, and that section is
+  INCOMPLETE, not empty. Plan from its output, not from the stale table.
 - **If you believe you INHERITED this lane, APPEND.** `open` prints an `INHERITED:` banner
   naming every predecessor file. Read them; write your own. NEVER rewrite one — a filename
   stops a name collision, it does not stop a successor that correctly believes itself the

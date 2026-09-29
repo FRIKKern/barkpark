@@ -132,10 +132,14 @@ export const TURN_INTO = [
 export class BlockHandle {
   // host: the <bp-paper-canvas> element (position: relative via CSS).
   // openSlash(): host callback that opens the slash menu at the caret.
-  constructor({ host, editor, openSlash }) {
+  // canSaveMaster(node) / saveMaster(node): optional paper-masters seam — when
+  // canSaveMaster answers true the menu offers "Save as master".
+  constructor({ host, editor, openSlash, canSaveMaster, saveMaster }) {
     this._host = host;
     this._editor = editor;
     this._openSlash = openSlash;
+    this._canSaveMaster = typeof canSaveMaster === "function" ? canSaveMaster : () => false;
+    this._saveMaster = typeof saveMaster === "function" ? saveMaster : () => false;
     this._index = -1;
     this._menu = null;
     this._drag = null;
@@ -303,6 +307,7 @@ export class BlockHandle {
       item("Duplicate", "⧉", "duplicate"),
       item("Move up", "↑", "up"),
       item("Move down", "↓", "down"),
+      this._canSaveMaster(node) ? item("Save as master", "★", "save-master") : "",
       item("Delete", "✕", "delete", "bp-block-menu__item--danger"),
     ].join("");
     menu.addEventListener("mousedown", (e) => e.preventDefault());
@@ -329,7 +334,12 @@ export class BlockHandle {
 
   _runAction(action, index) {
     if (action.startsWith("turn:")) { turnTopLevelInto(this._editor, index, action.slice(5)); return; }
-    if (action === "duplicate") duplicateTopLevel(this._editor, index);
+    if (action === "save-master") {
+      const node = index >= 0 && index < this._editor.state.doc.childCount
+        ? this._editor.state.doc.child(index)
+        : null;
+      if (node) this._saveMaster(node);
+    } else if (action === "duplicate") duplicateTopLevel(this._editor, index);
     else if (action === "up") moveTopLevel(this._editor, index, index - 1);
     else if (action === "down") moveTopLevel(this._editor, index, index + 1);
     else if (action === "delete") deleteTopLevel(this._editor, index);

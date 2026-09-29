@@ -33,6 +33,7 @@ import (
 
 	"github.com/FRIKKern/barkpark/internal/agent"
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
+	"github.com/FRIKKern/barkpark/internal/tokensource"
 )
 
 func main() {
@@ -71,7 +72,11 @@ func run(args []string) int {
 		return 2
 	}
 
-	token, err := readToken(*tokenFile)
+	// The token file is re-read on a 401, not only at start: provisioning
+	// supersede-mints agent.token on claim / stale-reclaim, and a read-once
+	// agent 401-loops until restarted. An unreadable or empty file at start is
+	// still a refusal to start, exactly as before.
+	tokens, err := tokensource.FromFile(*tokenFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "barkpark-agent: read token: %v\n", err)
 		return 1
@@ -113,10 +118,10 @@ func run(args []string) int {
 	fmt.Fprintf(os.Stderr, "barkpark-agent: health token %s\n", healthTokenSource)
 
 	a := &agent.Agent{
-		ControlURL: *controlURL,
-		Token:      token,
-		Interval:   *interval,
-		Runner:     agent.ExecRunner{},
+		ControlURL:  *controlURL,
+		TokenSource: tokens,
+		Interval:    *interval,
+		Runner:      agent.ExecRunner{},
 		// Space rides its OWN cadence and its OWN route — not the 60s beat
 		// (charter D58). Every probe is bounded and direct-argv (D59); each
 		// failure keeps its unmeasured sentinel rather than landing a partial
@@ -404,20 +409,6 @@ func resolveConsumerRoots(flagValue, envValue string) []string {
 		return roots
 	}
 	return agent.DefaultConsumerRoots
-}
-
-// readToken reads, trims, and validates the agent token from path. An empty
-// file is an error — a blank token would silently send unauthenticated reports.
-func readToken(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	tok := strings.TrimSpace(string(data))
-	if tok == "" {
-		return "", fmt.Errorf("token file %s is empty", path)
-	}
-	return tok, nil
 }
 
 // dfRootProbe reports root-filesystem used-percent via `df -P /`. It shells out

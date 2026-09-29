@@ -7,6 +7,7 @@ defmodule Barkpark.Media.Renditions do
   generated lazily on first request or eagerly after image upload.
   """
 
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Media
   alias Barkpark.Media.{Blobstore, ImageBackend}
   alias Barkpark.Media.Storage.MediaFile
@@ -98,7 +99,9 @@ defmodule Barkpark.Media.Renditions do
       if File.exists?(dest) do
         {:ok, rel}
       else
-        generate(file, preset, spec, dest, rel, profile)
+        # C083: a GET may write rendition bytes; a held instance refuses the
+        # generate (the cached rendition above still serves).
+        Door.admit(fn -> generate(file, preset, spec, dest, rel, profile) end)
       end
     else
       nil -> {:error, :unknown_preset}

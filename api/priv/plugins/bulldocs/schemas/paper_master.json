@@ -1,0 +1,13 @@
+{
+  "name": "paper_master",
+  "title": "Paper masters",
+  "icon": "copy",
+  "visibility": "private",
+  "fields": [
+    { "name": "title", "title": "Title", "type": "string", "surface": "body" },
+    { "name": "tier", "title": "Tier", "type": "select", "options": ["element", "widget", "section"], "surface": "sidebar" },
+    { "name": "block_type", "title": "Block type", "type": "string", "surface": "sidebar" },
+    { "name": "source_paper", "title": "Source paper", "type": "string", "surface": "sidebar" },
+    { "name": "source_block_id", "title": "Source block", "type": "string", "surface": "sidebar" }
+  ]
+}

@@ -64,6 +64,7 @@
 #   web-path-escape-check.sh --list-reads    # the resolved census
 #   web-path-escape-check.sh --print-set     # the declared globs
 #   web-path-escape-check.sh --match web     # changed paths on stdin -> true|false
+#   web-path-escape-check.sh --match web --null # …NUL-separated (`git diff -z`)
 #   web-path-escape-check.sh --selftest      # prove the ratchet can FAIL
 #
 # Env, for proof runs only (neither can weaken a real run — both retarget the
@@ -322,6 +323,33 @@ PY
   )
 }
 
+# ── --null: one path per NUL-terminated record (cch-bl-nul-native-path-matcher)
+# `git diff -z` ends every path with a NUL, and a path may hold a literal
+# NEWLINE. A LINE reader splits that path into two pseudo-paths before the
+# anchored ERE sees it: for a glob anchored at BOTH ends (`docs/cards/*.md`),
+# `docs/cards/a<LF>b.md` becomes `docs/cards/a` and `b.md`, neither matches,
+# and a path IN the set answers false. That was the dispatchers' old
+# `git diff -z … | tr '\0' '\n'`. Under --null each record stays ONE line: an
+# embedded newline is rewritten to \037 (US), a byte no declared glob names and
+# one that `.` and `[^/]` match exactly as they match a newline — so the
+# declared EREs are UNCHANGED and `^…$` anchors the WHOLE path. Without --null
+# stdin is newline-separated, as every other caller (scripts/which-gates.sh,
+# the harness's line fixtures) still writes it.
+#
+# MATCH-INPUT-NUL — the dispatchers grep for this token: a copy that predates
+# --null IGNORES the flag and reads the NUL stream as ONE line (a silent
+# false), so a pinned copy without it is refused, never trusted.
+match_input() {
+  local rec
+  if [ "$1" = null ]; then
+    while IFS= read -r -d '' rec || [ -n "$rec" ]; do
+      printf '%s\n' "${rec//$'\n'/$'\037'}"
+    done
+  else
+    cat
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # --match — the dispatcher's question
 # ---------------------------------------------------------------------------
@@ -331,9 +359,21 @@ PY
 # so a version skew between this file and the workflow costs a runner, never a
 # silent skip.
 match_set() {
-  local want="$1" ere
+  local want="$1" ere input
   if [ "$want" != "web" ]; then
     echo "web-path-escape-check: unknown path set '$want' (want web)" >&2
+    exit 2
+  fi
+  case "${2:-}" in
+    '') input=lines ;;
+    --null) input=null ;;
+    *)
+      echo "web-path-escape-check: unknown flag '${2}' (want --null)" >&2
+      exit 2
+      ;;
+  esac
+  if [ "$#" -gt 2 ]; then
+    echo "web-path-escape-check: unexpected argument '${3}' after --match" >&2
     exit 2
   fi
   ere="$(declared_globs | globs_to_ere)"
@@ -345,7 +385,7 @@ match_set() {
   # matches and a writer still holding bytes takes SIGPIPE, which `pipefail`
   # promotes over the match that DID occur (the house D37 rule).
   local changed
-  changed="$(cat)"
+  changed="$(match_input "$input")"
   if grep -Eq -- "$ere" <<<"$changed"; then printf 'true'; else printf 'false'; fi
   echo
 }
@@ -427,6 +467,19 @@ selftest() {
     [ "$out" = "true" ] && ok "$p -> true (a read the old ci.yml trigger missed)" ||
       no "$p -> '$out', wanted true"
   done
+  # --null (cch-bl-nul-native-path-matcher): ci.yml feeds `git diff -z`
+  # straight in. A path holding a NEWLINE is ONE record, in both directions.
+  printf '%s\0%s\0' docs/x.md "web/li"$'\n'"b/x.ts" >"$tmp/nul.in"
+  out="$("$0" --match web --null <"$tmp/nul.in")"
+  [ "$out" = "true" ] && ok "--null: web/li<LF>b/x.ts -> true" ||
+    no "--null: web/li<LF>b/x.ts -> '$out', wanted true"
+  printf '%s\0' docs/x.md "lighthouserc.json"$'\n'"foo" >"$tmp/nul.in"
+  out="$("$0" --match web --null <"$tmp/nul.in")"
+  [ "$out" = "false" ] && ok "--null: lighthouserc.json<LF>foo is ONE record -> false" ||
+    no "--null: lighthouserc.json<LF>foo -> '$out', wanted false (the matcher still splits records)"
+  out="$("$0" --match web --nul </dev/null 2>/dev/null)"; rc=$?
+  [ "$rc" = "2" ] && ok "--match web --nul (a typo) exits 2, prints no verdict" ||
+    no "--match web --nul exited $rc ('$out'), wanted 2"
   out="$(printf '%s\n' "api/lib/barkpark.ex" | "$0" --match web)"
   [ "$out" = "false" ] && ok "api/lib/barkpark.ex -> false" || no "api/lib/barkpark.ex -> '$out'"
   # An unknown set is a REFUSAL, never a verdict.
@@ -526,7 +579,8 @@ case "${1:---ratchet}" in
     exit 0
     ;;
   --match)
-    match_set "${2:-}"
+    shift
+    match_set "${1:-}" "${@:2}"
     exit 0
     ;;
   --selftest)
@@ -539,7 +593,7 @@ case "${1:---ratchet}" in
     ;;
   *)
     echo "web-path-escape-check: unknown argument '$1'" >&2
-    echo "usage: $0 [--ratchet|--list-reads|--print-set|--match web|--selftest]" >&2
+    echo "usage: $0 [--ratchet|--list-reads|--print-set|--match web [--null]|--selftest]" >&2
     exit 2
     ;;
 esac

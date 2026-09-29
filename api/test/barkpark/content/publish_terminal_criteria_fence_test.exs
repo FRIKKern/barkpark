@@ -18,7 +18,7 @@ defmodule Barkpark.Content.PublishTerminalCriteriaFenceTest do
   saying so is part of the proof:
 
     * a draft minted while the twin is OPEN and carrying `lifecycle_status:
-      "done"` is refused by `Writer.ensure_task_transition_legal/6` ("`done` is
+      "done"` is refused by `Tasks.ChangeGuards.transition_legal/6` ("`done` is
       reached only through the close primitive"), and one carrying `"open"`
       REOPENS the row on publish — which this fence exempts by design;
     * a draft minted while the twin is open carries the PRE-close claim map, and

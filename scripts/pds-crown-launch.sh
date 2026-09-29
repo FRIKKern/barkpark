@@ -33,7 +33,7 @@
 #     rounds up to 897 (D244's earlier refusal, with its NEGATIVE -7.55 MiB
 #     delta, was derived against that retired engine and no longer applies). It
 #     never LOWERS the floor below that derived law — the predicate tightens
-#     only. Full arithmetic: scripts/pds-w20-floor-derivation.md.
+#     only. Full arithmetic: docs/ledgers/pds-w20-floor-derivation.md.
 #   * It never splits the climb. `--all`, unsplit, once. `--only` runs touching
 #     rungs 2-6 are FORBIDDEN (W6-C).
 #   * It never writes to the real attempts counter or the real export lock. It
@@ -180,7 +180,7 @@ MAX_DRAWS="${PDS_LAUNCH_MAX_DRAWS:-360}"
 # spill engine (98.16 demand + 798.81 margin). Both the poll-predicate default
 # and the tighten-only guard-law move off the fossil 2200 together — moving one
 # without the other leaves the predicate defaulting to 2200 and the child
-# standing down forever. scripts/pds-w20-floor-derivation.md.
+# standing down forever. docs/ledgers/pds-w20-floor-derivation.md.
 MEM_FLOOR_MIB="${PDS_LAUNCH_MEM_FLOOR_MIB:-897}"
 MEM_FLOOR_LAW=897
 
@@ -712,7 +712,7 @@ arm_floor_summary() {
   info "poll floor  mem_floor_mib=$MEM_FLOOR_MIB — the launcher's poll predicate (:348)"
   info "harness flr full_export_min_mem_mb=${PDS_FULL_EXPORT_MIN_MEM_MB:-<UNSET>} — exported to the frozen harness's cond_b gate"
   if [ "$MEM_FLOOR_MIB" != 2200 ] || [ "${PDS_FULL_EXPORT_MIN_MEM_MB:-}" != 2200 ]; then
-    info "            DERIVED floor (PDS-D276/PDS-D277) — the fossil 2200 of the retired in-RAM engine no longer applies; see scripts/pds-w20-floor-derivation.md"
+    info "            DERIVED floor (PDS-D276/PDS-D277) — the fossil 2200 of the retired in-RAM engine no longer applies; see docs/ledgers/pds-w20-floor-derivation.md"
   fi
 }
 

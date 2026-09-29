@@ -59,21 +59,42 @@ defmodule Barkpark.PortableDoc.Render.CodeBlockLangParityTest do
     end
   end
 
-  test "the Elixir code composer is language-agnostic: lang / language / neither compose identically" do
-    # Every case shares one `value`, differing only in the language key
-    # (`lang`, the retired `language`, or none). If the composer read either
-    # key its output would differ across cases; it does not.
+  # The `:article` composer reads `lang` for ONE thing since Barkdown plan #27: it rides as a
+  # `data-lang` attribute on the <pre>, so the reader's client pass (/assets/bp-paper-code.js, the
+  # tokenizer the canvas uses) can paint tokens. The source is composed verbatim regardless, the
+  # retired `language` key is still never read, and the email arm reads neither key.
+  test "the Elixir code composer reads `lang` only as data-lang; `language` and none compose identically" do
     for style <- [:article, :email] do
       htmls =
         Enum.map(@cases, fn c -> Compose.compose_block(c["block"], style) end)
 
-      first = hd(htmls)
+      strip = fn composed ->
+        Map.update(composed, "html", nil, fn html ->
+          String.replace(html, ~r/ data-lang="[^"]*"/, "")
+        end)
+      end
+
+      first = strip.(hd(htmls))
 
       for {composed, i} <- Enum.with_index(htmls) do
-        assert composed == first,
+        assert strip.(composed) == first,
                "case #{i}: style #{inspect(style)} composed #{inspect(composed)} — " <>
-                 "differs from the lang-bearing case #{inspect(first)}; the Elixir code " <>
-                 "renderer must branch on NEITHER `lang` nor `language`"
+                 "differs (beyond data-lang) from the lang-bearing case #{inspect(first)}; the " <>
+                 "Elixir code renderer must branch on NEITHER `lang` nor `language` for its source"
+      end
+
+      # Only the case that spells `lang` carries the attribute — the retired alias never does.
+      for {c, composed} <- Enum.zip(@cases, htmls) do
+        html = Map.get(composed, "html", "")
+        lang = Map.get(c["block"], "lang")
+        has_lang? = is_binary(lang) and lang != ""
+
+        if style == :article and has_lang? do
+          assert html =~ ~s( data-lang="#{lang}"), "case #{c["name"]}: data-lang expected"
+        else
+          refute html =~ "data-lang",
+                 "case #{c["name"]} (#{inspect(style)}): data-lang must not appear"
+        end
       end
     end
   end

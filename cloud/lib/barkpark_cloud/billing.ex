@@ -1333,6 +1333,9 @@ defmodule BarkparkCloud.Billing do
       %Subscription{}}`.
     * NO live sub + ledger ALREADY USED (a prior trial, now torn down) → `{:error,
       :trial_used}`. A torn-down trial can never be re-granted; it 402s.
+    * the LOSER of a concurrent first launch (its claim matched nothing because
+      the winner's trial committed first) → `{:ok, :already_entitled}`, never
+      `:trial_used` — the claim and the grant are one transaction.
   """
   @spec start_trial(Team.t() | binary()) ::
           {:ok, Subscription.t() | :already_entitled}
@@ -1347,17 +1350,73 @@ defmodule BarkparkCloud.Billing do
 
       # A live-but-lapsed sub (past_due past grace, or an expired trial) is an
       # existing billing relationship — NOT eligible for a fresh free trial.
-      not is_nil(live_subscription(tid)) ->
-        {:error, :ineligible}
+      #
+      # ASK ENTITLEMENT AGAIN before refusing (task-14a9cad0f2d7fd8e). The
+      # `entitled?/1` read above and the `live_subscription/1` read here are two
+      # statements, not one snapshot. The twin of a racing double-click can
+      # commit its freshly granted trial BETWEEN them: this request then read
+      # "not entitled" before the grant and "has a live sub" after it, and
+      # answered `:ineligible` — go_live 402'd the paywall at a team whose trial
+      # had just started, before its twin reconcile could answer the 409. The
+      # sub it now sees IS that trial, so the second read says entitled. A
+      # genuinely lapsed sub (an expired trial, past_due past grace) still reads
+      # not entitled and still gets `:ineligible`.
+      between_trial_reads(tid) == :ok and not is_nil(live_subscription(tid)) ->
+        if entitled?(tid), do: {:ok, :already_entitled}, else: {:error, :ineligible}
 
       true ->
-        case claim_trial_window(tid) do
-          # Won the atomic claim + no live sub → land the team's first-ever trial.
-          {:ok, ends} -> insert_trial_subscription(tid, ends)
-          # The ledger was already stamped (a prior, torn-down trial) → no second.
-          :already_used -> {:error, :trial_used}
-        end
+        claim_and_grant_trial(tid)
     end
+  end
+
+  # TEST SEAM, inert in production: the one point where a racing twin's trial
+  # can land between `start_trial/1`'s two reads. A test puts a 1-arity fun under
+  # `{BarkparkCloud.Billing, :between_trial_reads}` in ITS OWN process dictionary
+  # to commit that twin deterministically; the fun is removed before it runs, so
+  # it fires at most once. Nothing in `lib/` puts that key (a test in
+  # `router_launch_flow_test.exs` greps for it), so in production this is one
+  # `Process.get/1` returning nil. Same pattern as `Cloudflare`'s process-scoped
+  # config.
+  defp between_trial_reads(tid) do
+    case Process.get({__MODULE__, :between_trial_reads}) do
+      fun when is_function(fun, 1) ->
+        Process.delete({__MODULE__, :between_trial_reads})
+        fun.(tid)
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
+  # The claim and the grant are ONE transaction (dwb-launch-flow-double-submit-
+  # test). They used to be two autocommitted statements, which broke the racing
+  # double-click on a team's FIRST launch: both requests reached this branch,
+  # one won the ledger claim, and the loser — reading `:already_used` — was
+  # answered `:trial_used`, so go_live 402'd the paywall at a team whose trial
+  # had just started. Inside one transaction the loser's conditional UPDATE
+  # blocks on the winner's row lock until the winner has committed BOTH the
+  # stamp and the `trial` row; it then matches nothing, and the re-read of
+  # `entitled?/1` sees the committed trial → `:already_entitled`. A ledger that
+  # was stamped by a PRIOR, torn-down trial still reads not-entitled → the
+  # `:trial_used` 402 stands. A failed grant rolls the stamp back with it, so a
+  # trial can no longer be burned without a subscription to show for it.
+  defp claim_and_grant_trial(tid) do
+    Repo.transaction(fn ->
+      case claim_trial_window(tid) do
+        # Won the atomic claim + no live sub → land the team's first-ever trial.
+        {:ok, ends} ->
+          case insert_trial_subscription(tid, ends) do
+            {:ok, sub} -> sub
+            {:error, reason} -> Repo.rollback(reason)
+          end
+
+        # Lost the claim to a concurrent first launch that has now committed
+        # its trial → the team IS entitled; nothing to start.
+        :already_used ->
+          if entitled?(tid), do: :already_entitled, else: Repo.rollback(:trial_used)
+      end
+    end)
   end
 
   # Stamp the ledger window if the team has never trialed, and return the

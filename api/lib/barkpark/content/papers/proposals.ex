@@ -47,6 +47,7 @@ defmodule Barkpark.Content.Papers.Proposals do
 
   alias Barkpark.Repo
   alias Barkpark.Content
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Content.{Document, DraftId, Edges, Encryption, Labels, WriteScope}
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.BlockOps
@@ -88,10 +89,13 @@ defmodule Barkpark.Content.Papers.Proposals do
     with :ok <- validate_source(source),
          :ok <- validate_ops(ops),
          %Document{} = pub <- get_scoped_paper(slug, dataset, opts) do
-      case Repo.transaction(fn -> propose_txn(pub, slug, ops, source, dataset, opts) end) do
-        {:ok, receipt} -> {:ok, receipt}
-        {:error, reason} -> {:error, reason}
-      end
+      # C083: the proposal transaction is a door (ingest propose).
+      Door.admit(fn ->
+        case Repo.transaction(fn -> propose_txn(pub, slug, ops, source, dataset, opts) end) do
+          {:ok, receipt} -> {:ok, receipt}
+          {:error, reason} -> {:error, reason}
+        end
+      end)
     else
       nil -> {:error, :not_found}
       {:error, _} = err -> err

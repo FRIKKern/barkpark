@@ -18,7 +18,8 @@ defmodule Barkpark.Tasks.DedupFallbackCapTest do
        falls back rather than run a gate that matches nothing and reports
        success), and
     2. a `Postgrex.Error` for a missing `<->` operator — an install without
-       `pg_trgm`.
+       `pg_trgm` (simulated by hiding the operator from `search_path`, see
+       `hide_pg_trgm!/0`).
 
   ## What reds each test
 
@@ -82,6 +83,24 @@ defmodule Barkpark.Tasks.DedupFallbackCapTest do
     )
   end
 
+  # `<->` is unqualified SQL, so Postgres resolves it through `search_path`, and
+  # pg_trgm installs it in `public`. A temp view named `documents` over
+  # `public.documents`, plus an EMPTY search_path, leaves the table reachable
+  # (pg_temp is searched first for relations) and the operator not (pg_temp is
+  # never searched for operators, pg_catalog does not have it). The query then
+  # raises the same 42883 a box without pg_trgm raises.
+  #
+  # It used to `DROP EXTENSION pg_trgm CASCADE` inside the sandbox txn. That is
+  # catalog DDL on the ONE shared test database, and a concurrent session using a
+  # pg_trgm function made it fail with XX000 "cache lookup failed for function"
+  # (main run 35980575238). Both objects here are private to this backend and
+  # transaction-scoped: the rollback at test end removes the view and the SET.
+  # Twin: `DedupTrgmAbsentTest.hide_pg_trgm!/0`.
+  defp hide_pg_trgm! do
+    Repo.query!("CREATE TEMP VIEW documents AS SELECT * FROM public.documents")
+    Repo.query!("SET LOCAL search_path TO ''")
+  end
+
   defp check(doc_id, opts) do
     Tasks.Dedup.check_new_task(
       "task",
@@ -129,11 +148,10 @@ defmodule Barkpark.Tasks.DedupFallbackCapTest do
 
   describe "the pg_trgm-unavailable fallback" do
     test "still finds an alphabetically-LATE duplicate with the KNN cap at 1", %{scope: scope} do
-      # A real install without the extension, reproduced inside the sandbox
-      # transaction: every `<->` then raises SQLSTATE 42883 and `fetch_rows/6`'s
-      # narrow rescue re-enters the unfiltered clause. CASCADE drops the GiST
-      # index with it; both come back on rollback.
-      Repo.query!("DROP EXTENSION IF EXISTS pg_trgm CASCADE")
+      # A box without the extension, as `fetch_rows/6` sees it: every `<->`
+      # raises SQLSTATE 42883 and the narrow rescue re-enters the unfiltered
+      # clause. See `hide_pg_trgm!/0` for why this no longer drops the extension.
+      hide_pg_trgm!()
 
       opts = Keyword.put(scope, :dedup_candidate_limit, 1)
 

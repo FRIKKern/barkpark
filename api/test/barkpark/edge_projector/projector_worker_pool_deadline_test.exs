@@ -20,7 +20,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPoolDeadlineTest do
 
   `deps/db_connection/lib/db_connection/connection_pool.ex:188-209` disconnects
   the connection at the checkout deadline (armed once at checkout,
-  `holder.ex:318`; the measured span INCLUDES QUEUE TIME), logging
+  `DBConnection.Holder` arms the checkout-deadline timer; the measured span INCLUDES QUEUE TIME), logging
   `client … timed out because it queued and checked out the connection for
   longer than Nms` — the exact line `api/lib/barkpark/repo.ex:277-280` quotes
   from a LIVE log naming `Barkpark.EdgeProjector.ProjectorWorker` at 15000ms.
