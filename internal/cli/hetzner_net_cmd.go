@@ -961,7 +961,7 @@ func runHetznerNetworkDelete(out *writer, g globals, args []string) int {
 }
 
 func runHetznerNetworkAddSubnet(out *writer, g globals, args []string) int {
-	const usage = "bp cloud hetzner network add-subnet <id|name> --type cloud|server|vswitch --network-zone <z> [--ip-range <cidr>]"
+	const usage = "bp cloud hetzner network add-subnet <id|name> --type cloud|vswitch --network-zone <z> [--ip-range <cidr>]"
 	a, err := parseHzArgs(args, []string{"type", "network-zone", "ip-range"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
@@ -970,10 +970,15 @@ func runHetznerNetworkAddSubnet(out *writer, g globals, args []string) int {
 		return useError(out, "usage", "want <id|name>, --type and --network-zone (usage: "+usage+")", exitUsage)
 	}
 	subnetType := hcloud.NetworkSubnetType(a.val("type"))
+	// "server" is the deprecated spelling of "cloud" (hcloud-go marks
+	// NetworkSubnetTypeServer deprecated); accept it, send "cloud".
+	if subnetType == "server" {
+		subnetType = hcloud.NetworkSubnetTypeCloud
+	}
 	switch subnetType {
-	case hcloud.NetworkSubnetTypeCloud, hcloud.NetworkSubnetTypeServer, hcloud.NetworkSubnetTypeVSwitch:
+	case hcloud.NetworkSubnetTypeCloud, hcloud.NetworkSubnetTypeVSwitch:
 	default:
-		return useError(out, "usage", fmt.Sprintf("invalid --type %q (want cloud|server|vswitch)", a.val("type")), exitUsage)
+		return useError(out, "usage", fmt.Sprintf("invalid --type %q (want cloud|vswitch)", a.val("type")), exitUsage)
 	}
 	subnet := hcloud.NetworkSubnet{Type: subnetType, NetworkZone: hcloud.NetworkZone(a.val("network-zone"))}
 	if r := a.val("ip-range"); r != "" {
@@ -1756,7 +1761,7 @@ USAGE
   bp cloud hetzner network get <id|name>
   bp cloud hetzner network create --name <n> --ip-range <cidr> [--label k=v]…
   bp cloud hetzner network delete <id|name> [--yes]
-  bp cloud hetzner network add-subnet <id|name> --type cloud|server|vswitch
+  bp cloud hetzner network add-subnet <id|name> --type cloud|vswitch
                                       --network-zone <z> [--ip-range <cidr>]
   bp cloud hetzner network delete-subnet <id|name> --ip-range <cidr>
   bp cloud hetzner network add-route <id|name> --destination <cidr> --gateway <ip>

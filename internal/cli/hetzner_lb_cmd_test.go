@@ -1198,3 +1198,21 @@ func TestHetznerCreateReceiptsNeverPrintABlankValue(t *testing.T) {
 		})
 	}
 }
+
+// TestHzPrimaryIPLocation pins the --datacenter compatibility alias: the API
+// (and hcloud-go v2.49) no longer accepts a datacenter on primary-ip create, so
+// the datacenter name is sent as its location.
+func TestHzPrimaryIPLocation(t *testing.T) {
+	cases := []struct{ dc, loc, want string }{
+		{"nbg1-dc3", "", "nbg1"},
+		{"fsn1-dc14", "", "fsn1"},
+		{"", "hel1", "hel1"},
+		{"", "", ""},
+		{"ash", "", "ash"},
+	}
+	for _, tc := range cases {
+		if got := hzPrimaryIPLocation(tc.dc, tc.loc); got != tc.want {
+			t.Errorf("hzPrimaryIPLocation(%q, %q) = %q, want %q", tc.dc, tc.loc, got, tc.want)
+		}
+	}
+}

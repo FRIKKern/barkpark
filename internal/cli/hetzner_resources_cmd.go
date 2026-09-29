@@ -2,7 +2,8 @@ package cli
 
 // hetzner_resources_cmd.go carries the non-server halves of `bp cloud hetzner`:
 // the ssh-key CRUD and the read-only discovery views (server-types, locations,
-// datacenters, images, isos, pricing), plus every help text of the namespace.
+// images, isos, pricing; datacenters is a deprecated alias for locations),
+// plus every help text of the namespace.
 // The server verbs and the shared plumbing (client/auth, parsing, tables,
 // action waiting) live in hetzner_cmd.go.
 
@@ -392,53 +393,14 @@ func runHetznerLocations(out *writer, g globals, args []string) int {
 	return exitOK
 }
 
+// runHetznerDatacenters is a deprecated alias for `locations`. Hetzner removes
+// GET /v1/datacenters after 2026-10-01 (HTTP 410 Gone) and hcloud-go v2.49
+// dropped Datacenter from servers and primary IPs; the location is the unit
+// every create now takes. The notice goes to stderr so -o json|yaml stdout
+// stays one parseable document (the `locations` shape).
 func runHetznerDatacenters(out *writer, g globals, args []string) int {
-	if g.help {
-		printHetznerHelp(out)
-		return exitOK
-	}
-	if _, err := hzDiscoveryArgs(args, nil, "bp cloud hetzner datacenters"); err != nil {
-		return useError(out, "usage", err.Error(), exitUsage)
-	}
-	c, ok := hetznerClient(out, g)
-	if !ok {
-		return exitAuth
-	}
-	dcs, err := c.HCloud().Datacenter.All(hetznerCtx())
-	if err != nil {
-		return hzFail(out, "list datacenters", err)
-	}
-	if out.output == "json" || out.output == "yaml" {
-		rows := make([]map[string]any, 0, len(dcs))
-		for _, d := range dcs {
-			row := map[string]any{
-				"id":          d.ID,
-				"name":        d.Name,
-				"description": d.Description,
-			}
-			if d.Location != nil {
-				row["location"] = d.Location.Name
-			}
-			rows = append(rows, row)
-		}
-		out.emitStructured(map[string]any{"datacenters": rows})
-		return exitOK
-	}
-	rows := make([][]string, 0, len(dcs))
-	for _, d := range dcs {
-		loc := ""
-		if d.Location != nil {
-			loc = d.Location.Name
-		}
-		rows = append(rows, []string{
-			strconv.FormatInt(d.ID, 10),
-			hzCell(d.Name),
-			hzCell(loc),
-			hzCell(d.Description),
-		})
-	}
-	renderHzTable(out, []string{"ID", "NAME", "LOCATION", "DESCRIPTION"}, rows)
-	return exitOK
+	out.errf("bp: 'datacenters' is deprecated — Hetzner retired the datacenters API; showing 'bp cloud hetzner locations' instead")
+	return runHetznerLocations(out, g, args)
 }
 
 func runHetznerImages(out *writer, g globals, args []string) int {
@@ -746,7 +708,7 @@ RESOURCES
                 "none" when it reported it and nothing is in stock)
   lb-types      the offered load-balancer types     (read-only)
   locations     the available locations             (read-only)
-  datacenters   the available datacenters           (read-only)
+  datacenters   deprecated alias for locations (the API retired datacenters)
   images        system images / snapshots / backups [--type snapshot|backup|system]
   isos          the attachable ISOs                 (read-only)
   pricing       the project's gross prices per server type and location
