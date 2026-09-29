@@ -41,11 +41,15 @@ defmodule Barkpark.Plugins.PreWriteTransformsTest do
     # The Forms plugin (task-71082f5541c13b53) declares one `:check` of its
     # own, for its two types only; plugins resolve in name order, so it comes
     # first and the Tasks pair keeps its relative order.
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "the Registry resolves exactly those two, in that order, under the default load order" do
       assert Registry.collect_pre_write_transforms() ==
                [{:check, Barkpark.Plugins.Forms.Contract, :validate} | @transform_order]
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "the kind check judges the TRANSFORMED attrs: a step's output is the next step's input" do
       probe = {:check, __MODULE__, :refuse_unless_resynced}
 
@@ -81,6 +85,8 @@ defmodule Barkpark.Plugins.PreWriteTransformsTest do
       assert PreWriteTransforms.run([], "task", attrs) == {:ok, attrs}
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "with Tasks out of the load order a task write stores its attrs untransformed: " <>
            "the brief is re-derived with Tasks in, and stored as sent with it out" do
       # CONTROL — Tasks loaded: both doors re-derive the brief.
@@ -108,6 +114,8 @@ defmodule Barkpark.Plugins.PreWriteTransformsTest do
       assert upserted.content["brief"] == sent_u["content"]["brief"]
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "with Tasks out of the load order the writer runs no kind check: a task with " <>
            "no content.kind is refused with Tasks in, and lands with it out" do
       no_kind = fn id ->

@@ -2,6 +2,9 @@ defmodule Barkpark.Quiz.StatsTest do
   @moduledoc "P6 hq-p6-observability: live room/player metrics + telemetry."
   use ExUnit.Case, async: false
 
+  # Plugins-off: the quiz plugin starts Barkpark.Quiz.RoomRegistry and the room supervisors
+  @moduletag :requires_plugins
+
   alias Barkpark.Quiz
   alias Barkpark.Quiz.Stats
 

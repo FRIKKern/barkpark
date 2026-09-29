@@ -23,6 +23,9 @@ defmodule Barkpark.Plugins.Github.DeleteRetireTest do
 
   # async: false — Auth is a singleton GenServer and we mutate Application env.
   use Barkpark.DataCase, async: false
+
+  # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+  @moduletag :requires_plugins
   use Oban.Testing, repo: Barkpark.Repo
 
   alias Barkpark.{Content, LabelFixtures, Tasks, TenancyFixtures}

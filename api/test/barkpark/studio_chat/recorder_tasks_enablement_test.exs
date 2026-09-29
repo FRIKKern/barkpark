@@ -16,6 +16,9 @@ defmodule Barkpark.StudioChat.RecorderTasksEnablementTest do
   """
   use Barkpark.DataCase, async: false
 
+  # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+  @moduletag :requires_plugins
+
   alias Barkpark.{Content, StudioChat, Tasks, Tenancy, TenancyFixtures}
   alias Barkpark.StudioChat.{Recorder, Runtime}
 

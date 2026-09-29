@@ -47,6 +47,8 @@ defmodule Barkpark.Plugins.PreWriteFencesTest do
       assert Barkpark.Plugins.Tasks.pre_write_fences() == @writer_order
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "the Registry resolves exactly those nine, in that order, under the default load order" do
       assert Registry.collect_pre_write_fences() == @writer_order
     end
@@ -63,6 +65,8 @@ defmodule Barkpark.Plugins.PreWriteFencesTest do
       assert Registry.collect_pre_write_fences() == []
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "with Tasks out of the load order the writer runs no Tasks fence: the " <>
            "draft-terminal witness write is refused with Tasks in, and lands with it out" do
       scope = seed_task_schema!()
@@ -83,6 +87,8 @@ defmodule Barkpark.Plugins.PreWriteFencesTest do
       assert doc.content["lifecycle_status"] == "cancelled"
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "with Tasks out of the load order the writer runs no birth guard: an " <>
            "off-vocabulary disposition birth is refused with Tasks in, and lands with it out" do
       scope = seed_task_schema!()
@@ -98,6 +104,8 @@ defmodule Barkpark.Plugins.PreWriteFencesTest do
       assert doc.content["disposition"] == "OPEN"
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "with Tasks out of the load order the writer runs no transition gate: an " <>
            "open -> done document write is refused with Tasks in, and lands with it out" do
       scope = seed_task_schema!()
@@ -120,6 +128,8 @@ defmodule Barkpark.Plugins.PreWriteFencesTest do
       assert doc.content["lifecycle_status"] == "done"
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "with Tasks out of the load order the writer runs no tombstone fence: a " <>
            "close_reason minted on an open row is refused with Tasks in, and lands with it out" do
       scope = seed_task_schema!()

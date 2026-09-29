@@ -19,6 +19,9 @@ defmodule Barkpark.Quiz.RoomRevealLeakTest do
   """
   use ExUnit.Case, async: true
 
+  # Plugins-off: the quiz plugin starts Barkpark.Quiz.RoomRegistry and the room supervisors
+  @moduletag :requires_plugins
+
   alias Barkpark.Quiz
 
   # A distinctive id, so `refute inspect(payload) =~ @marker` is a REAL

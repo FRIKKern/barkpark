@@ -289,6 +289,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
              )
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the Projects link survives into the built desk tree" do
       tree = Barkpark.Structure.build("projects_desk_probe")
 

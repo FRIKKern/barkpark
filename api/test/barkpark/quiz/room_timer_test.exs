@@ -6,6 +6,9 @@ defmodule Barkpark.Quiz.RoomTimerTest do
   """
   use ExUnit.Case, async: true
 
+  # Plugins-off: the quiz plugin starts Barkpark.Quiz.RoomRegistry and the room supervisors
+  @moduletag :requires_plugins
+
   alias Barkpark.Quiz
 
   # 100x the 50ms countdown armed below. See the comment at its assert_receive.

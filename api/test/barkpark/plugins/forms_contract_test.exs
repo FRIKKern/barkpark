@@ -158,6 +158,8 @@ defmodule Barkpark.Plugins.FormsContractTest do
       assert [_] = rows("form_submission", ws)
     end
 
+    # Plugins-off: the forms plugin owns its schemas and fences
+    @tag :requires_plugins
     test "an invalid submission written through the GENERIC door is refused and stores nothing",
          %{ws: ws, scope: scope} do
       bad = valid_content(%{"state" => "archived", "fields" => %{"x" => %{"deep" => 1}}})
@@ -175,6 +177,8 @@ defmodule Barkpark.Plugins.FormsContractTest do
       assert [] == rows("form_submission", ws)
     end
 
+    # Plugins-off: the forms plugin owns its schemas and fences
+    @tag :requires_plugins
     test "an oversized field map through the generic door stores nothing", %{ws: ws, scope: scope} do
       big = String.duplicate("x", Contract.limits().max_value_bytes + 1)
 
@@ -189,6 +193,8 @@ defmodule Barkpark.Plugins.FormsContractTest do
       assert [] == rows("form_submission", ws)
     end
 
+    # Plugins-off: the forms plugin owns its schemas and fences
+    @tag :requires_plugins
     test "an upsert that breaks a stored submission is refused and leaves it intact",
          %{ws: ws, scope: scope} do
       {:ok, doc} =

@@ -14,6 +14,9 @@ defmodule Barkpark.Quiz.SpawnBudgetTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  # Plugins-off: the quiz plugin starts Barkpark.Quiz.RoomRegistry and the room supervisors
+  @moduletag :requires_plugins
+
   import Barkpark.RateLimiterSandbox
 
   alias Barkpark.Quiz
