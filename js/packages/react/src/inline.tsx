@@ -266,6 +266,13 @@ export function glyphHtml(name: string): string {
   return `<span class="bp-g bp-g--${name}">${glyphChar(name)}</span>`
 }
 
+/** The DRAFT chip on a task-snapshot row (PDS-D749's draft label contract): a
+ * row carrying `draft === true` — and nothing else — gets the chip; a published
+ * row gets '' and stays byte-identical. Twin of components.ex draft_html/1. */
+export function draftHtml(r: Record<string, unknown>): string {
+  return r.draft === true ? '<span class="bp-draft">DRAFT</span> ' : ''
+}
+
 /* ── inline rendering (D4) ─────────────────────────────────────────────────────
  *
  * The type-keyed inline grammar folds ProseMirror-style text marks + first-class

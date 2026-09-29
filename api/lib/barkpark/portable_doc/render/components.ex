@@ -601,15 +601,14 @@ defmodule Barkpark.PortableDoc.Render.Components do
   silently dropped — the omit-empty layout used to have no `open` column at all,
   so `open` tasks vanished from the Studio/View board (bug-taskboard-drops-open-tasks).
 
-  NOT PAINTED YET — the row's `draft` marker. Since task-b258d691989c7a99,
-  `TaskResolver.row_from_task/1` carries `"draft" => true` on a row whose doc_id
-  spells `drafts.`, so this painter can finally SEE which cards are draft-only
-  twins (PDS-D749: "a draft row must be VISIBLY LABELLED on EVERY reader that can
-  show one"). It deliberately does not paint it here: this emitter is pinned
+  A DRAFT row is labelled. `TaskResolver.row_from_task/1` carries
+  `"draft" => true` on a row whose doc_id spells `drafts.` (task-b258d691989c7a99),
+  and PDS-D749 rules that "a draft row must be VISIBLY LABELLED on EVERY reader
+  that can show one", so each card, task-list row and roadmap lane paints
+  `draft_html/1`'s chip inside its title span. This emitter is pinned
   byte-for-byte to its JS twin `js/packages/react/src/blocks/taskboard.ts`
-  (charter D14) by the shared `<type>.golden.json` component-parity fixtures, so
-  painting a badge on ONE side would split the twin. The badge lands on BOTH
-  painters in one PR — which is why the data half ships alone and quiet.
+  (charter D14) by the pd-parity goldens, so the chip moved on BOTH painters in
+  one commit (task-0310f53709aca6de); a published row is byte-identical.
   """
   def task_board_html(block) when is_map(block) do
     rows = block |> get("snapshot") |> as_list()
@@ -663,7 +662,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
         meta_html = if meta == "", do: "", else: ~s|<div class="bp-bcard__m">#{meta}</div>|
 
-        ~s|<div class="bp-bcard">#{glyph_html(role)}<span class="bp-bcard__t">#{title}</span>#{meta_html}</div>|
+        ~s|<div class="bp-bcard">#{glyph_html(role)}<span class="bp-bcard__t">#{draft_html(r)}#{title}</span>#{meta_html}</div>|
       end)
       |> Enum.join("")
 
@@ -791,7 +790,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
             ~s|<span class="bp-rm__unplaced">#{@roadmap_lane_unplaced_copy}</span>|
           end
 
-        ~s|<div class="#{cls}"><span class="bp-rm__lbl">#{title}</span><div class="bp-rm__track">#{body}#{today}</div></div>|
+        ~s|<div class="#{cls}"><span class="bp-rm__lbl">#{draft_html(r)}#{title}</span><div class="bp-rm__track">#{body}#{today}</div></div>|
       end)
       |> Enum.join("")
 
@@ -1809,7 +1808,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
     ~s|<div class="bp-trow bp-trow--#{role}" style="padding-left:#{pad}px">| <>
       arrow <>
       glyph_html(role) <>
-      ~s|<span class="bp-trow__t">#{title}</span>| <>
+      ~s|<span class="bp-trow__t">#{draft_html(r)}#{title}</span>| <>
       meta_html <>
       ~s|</div>|
   end
@@ -1893,6 +1892,18 @@ defmodule Barkpark.PortableDoc.Render.Components do
   defp truthy("true"), do: true
   defp truthy(1), do: true
   defp truthy(_), do: false
+
+  # The DRAFT chip on a task-snapshot row (THE DRAFT LABEL CONTRACT,
+  # `Barkpark.Tasks.Board` / PDS-D749). `TaskResolver.row_from_task/1` carries
+  # `"draft" => true` on a draft-only row and NOTHING on a published one, so the
+  # chip keys off boolean `true` only — never `truthy/1`, whose "true"/1 arms
+  # would let a stray string paint a label the row never earned. A published row
+  # gets "" and its markup stays byte-identical. It rides INSIDE the title span
+  # (as the TUI's draftMark rides the title) so no layout slot moves. Twin:
+  # `draftHtml` in js/packages/react/src/inline.ts — same bytes.
+  defp draft_html(r) do
+    if get(r, "draft") == true, do: ~s|<span class="bp-draft">DRAFT</span> |, else: ""
+  end
 
   # A pnode's `source` coercion (RATIFIED): boolean `true` → an ORIGIN accent (the
   # `bp-pnode--src` border, existing origin signal); a non-empty STRING → a

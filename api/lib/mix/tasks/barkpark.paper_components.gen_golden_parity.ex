@@ -146,7 +146,11 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
       # task-board.golden.json, so ONE row proves the terminal lane renders —
       # last, with the manifest ✕ — on three surfaces at once. Dropping the lane
       # on any of them reds that surface's golden test, not a private twin.
-      %{"title" => "Abandoned spike", "status" => "cancelled"}
+      %{"title" => "Abandoned spike", "status" => "cancelled"},
+      # THE DRAFT CHIP'S SHARED PROOF (task-0310f53709aca6de): a draft-only row,
+      # spelled as TaskResolver.row_from_task/1 emits it. Its card projection
+      # carries `"draft" => true`; no other card carries the key.
+      %{"title" => "Unpublished draft row", "status" => "open", "draft" => true}
     ]
   }
 
@@ -538,11 +542,22 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
           "label" => label,
           "glyph_role" => role,
           "count" => length(rs),
-          "cards" => Enum.map(rs, fn r -> %{"title" => r |> Map.get("title") |> to_string()} end)
+          "cards" => Enum.map(rs, &board_card_projection/1)
         }
       end)
 
     %{"container_role" => "board", "columns" => columns}
+  end
+
+  # One card's projection. `draft` is the per-card slot for the DRAFT chip
+  # (PDS-D749, task-0310f53709aca6de): present, as `true`, ONLY on a card whose
+  # snapshot row carries `"draft" => true` (the presence rule
+  # `TaskResolver.row_from_task/1` uses), so every published card projects
+  # byte-identically to before the slot existed. Surfaces that paint the chip
+  # (the View emitter, @barkpark/react via web) assert it from here.
+  defp board_card_projection(r) do
+    card = %{"title" => r |> Map.get("title") |> to_string()}
+    if Map.get(r, "draft") == true, do: Map.put(card, "draft", true), else: card
   end
 
   # A board column header label: the canonical lowercase manifest label

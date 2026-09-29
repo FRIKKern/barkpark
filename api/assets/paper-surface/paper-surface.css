@@ -1596,6 +1596,10 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-bcard { display: flex; align-items: flex-start; gap: 0.4rem; background: var(--paper-bg); border: 1px solid var(--paper-chrome-border); border-radius: 7px; padding: 8px 10px; }
 .bp-paper-surface .bp-bcard__t { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--paper-ink); line-height: 1.35; overflow-wrap: anywhere; }
 .bp-paper-surface .bp-bcard__m { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+/* DRAFT chip on a draft-only task row (PDS-D749) — board card, task-list row and
+   roadmap lane all paint it inside their title span; same amber outline as the
+   Studio board's .bp-draft. */
+.bp-paper-surface .bp-draft { display: inline-block; vertical-align: 0.1em; font-family: var(--paper-font-mono); font-size: x-small; font-weight: 700; color: var(--st-warn); border: 1px solid var(--st-warn); border-radius: 3px; padding: 0 4px; }
 
 /* ── roadmap (author-dated phase/task bars) ── */
 .bp-paper-surface .bp-roadmap {
