@@ -348,7 +348,8 @@ config :barkpark, Barkpark.StudioChat.BlockedSweeper, enabled: false
 # Tests that ASSERT backpressure are unaffected: they pass an explicit
 # `managed_runtime_limit` in opts (opts win over app env, and an invalid 0 still
 # falls back to the module's own @default_limit 3), or they
-# `Application.put_env` their own cap per-test (chat_controller_test.exs:1571).
+# `Application.put_env` their own cap per-test (chat_controller_test.exs, test
+# "E2E capacity: a full admission pool answers 503 runtime_capacity + Retry-After").
 config :barkpark, Barkpark.StudioChat.RuntimeAdmission, max_managed_runtimes: 128
 
 # Site-deploy EXECUTOR (Barkpark.Sites.DeployRunner). Pin the classic in-process

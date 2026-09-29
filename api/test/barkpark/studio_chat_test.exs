@@ -134,8 +134,8 @@ defmodule Barkpark.StudioChatTest do
       assert [a1.seq, a2.seq, a3.seq] == [1, 2, 3]
       assert [b1.seq, b2.seq] == [1, 2]
 
-      assert Enum.map(StudioChat.list_messages(a.id), & &1.seq) == [1, 2, 3]
-      assert Enum.map(StudioChat.list_messages(b.id), & &1.seq) == [1, 2]
+      assert Enum.map(StudioChat.list_messages(a.id, :global), & &1.seq) == [1, 2, 3]
+      assert Enum.map(StudioChat.list_messages(b.id, :global), & &1.seq) == [1, 2]
     end
 
     test "a duplicate explicit seq cannot collide — seq is always reallocated" do
@@ -183,7 +183,7 @@ defmodule Barkpark.StudioChatTest do
             do: StudioChat.append_message(s, %{role: "user", source_markdown: "m#{i}"})
 
       assert Enum.all?(results, &match?({:ok, _}, &1))
-      assert StudioChat.list_messages(s.id) |> Enum.map(& &1.seq) == Enum.to_list(1..25)
+      assert StudioChat.list_messages(s.id, :global) |> Enum.map(& &1.seq) == Enum.to_list(1..25)
       assert StudioChat.get_session(s.id).message_count == 25
     end
 
@@ -295,7 +295,7 @@ defmodule Barkpark.StudioChatTest do
       new_input = %{"todos" => [%{"content" => "x", "status" => "completed"}]}
       assert {:ok, _} = StudioChat.update_tool_input(s.id, "tu_1", new_input)
 
-      row = StudioChat.list_messages(s.id) |> Enum.find(&(&1.role == "todo"))
+      row = StudioChat.list_messages(s.id, :global) |> Enum.find(&(&1.role == "todo"))
       assert row.metadata["input"] == new_input
     end
 
@@ -633,12 +633,12 @@ defmodule Barkpark.StudioChatTest do
       s = new_session()
       {:ok, _} = StudioChat.append_message(s, %{role: "user", source_markdown: "one"})
       {:ok, _} = StudioChat.append_message(s, %{role: "assistant", source_markdown: "two"})
-      assert length(StudioChat.list_messages(s.id)) == 2
+      assert length(StudioChat.list_messages(s.id, :global)) == 2
 
       assert {:ok, %Session{}} = StudioChat.delete_session(s.id)
       assert StudioChat.get_session(s.id) == nil
       # on_delete: :delete_all cascaded — no orphaned messages
-      assert StudioChat.list_messages(s.id) == []
+      assert StudioChat.list_messages(s.id, :global) == []
     end
 
     test "delete/archive/unarchive on a missing or non-UUID id are honest no-ops" do
@@ -880,7 +880,7 @@ defmodule Barkpark.StudioChatTest do
       assert {:error, :not_found} =
                StudioChat.update_approval_status(s.id, "req-1", "denied")
 
-      [persisted] = StudioChat.list_messages(s.id)
+      [persisted] = StudioChat.list_messages(s.id, :global)
       assert persisted.metadata["approval_status"] == "allowed"
       assert reload(s.id).pending_approvals == 0
     end
@@ -910,7 +910,7 @@ defmodule Barkpark.StudioChatTest do
       assert reload(s.id).pending_approvals == 0
 
       statuses =
-        StudioChat.list_messages(s.id)
+        StudioChat.list_messages(s.id, :global)
         |> Enum.filter(&(&1.role == "approval"))
         |> Enum.map(& &1.metadata["approval_status"])
         |> Enum.sort()
@@ -974,7 +974,7 @@ defmodule Barkpark.StudioChatTest do
       assert reload(s.id).pending_approvals == 0
 
       statuses =
-        StudioChat.list_messages(s.id)
+        StudioChat.list_messages(s.id, :global)
         |> Enum.filter(&(&1.role in ~w(approval question plan)))
         |> Enum.map(& &1.metadata["approval_status"])
         |> Enum.uniq()
@@ -1063,7 +1063,7 @@ defmodule Barkpark.StudioChatTest do
     end
 
     defp meta_for(session_id, tool_use_id) do
-      StudioChat.list_messages(session_id)
+      StudioChat.list_messages(session_id, :global)
       |> Enum.find(&(&1.metadata["tool_use_id"] == tool_use_id))
       |> Map.fetch!(:metadata)
     end
@@ -3689,15 +3689,34 @@ defmodule Barkpark.StudioChatTest do
       assert is_nil(unarchived.archived_at)
     end
 
-    test "back-compat: the default scope is :global — every legacy call site is unchanged" do
+    test "back-compat: get_session/list_sessions default to :global; list_messages takes it by name" do
       s = new_session()
       {:ok, _} = StudioChat.append_message(s, %{role: "user", source_markdown: "hi"})
 
-      # /1 + /2-limit legacy arities keep resolving globally.
       assert StudioChat.get_session(s.id).id == s.id
       assert Enum.any?(StudioChat.list_sessions(), &(&1.id == s.id))
-      assert length(StudioChat.list_messages(s.id)) == 1
-      assert length(StudioChat.list_messages(s.id, 1)) == 1
+      # list_messages has NO default scope (drafts.task-bb38ed88099c9723): the
+      # unscoped transcript read is asked for BY NAME, never inherited.
+      assert length(StudioChat.list_messages(s.id, :global)) == 1
+      assert length(StudioChat.list_messages(s.id, 1, :global)) == 1
+    end
+
+    test "list_messages fails CLOSED: no default scope, no unscoped limit form" do
+      s = new_session()
+      {:ok, _} = StudioChat.append_message(s, %{role: "user", source_markdown: "hi"})
+
+      # The 1-arity default (:global, unfiltered) is gone — a caller that forgets
+      # the scope no longer inherits an unscoped read of any session id.
+      refute function_exported?(StudioChat, :list_messages, 1)
+
+      # The legacy /2 integer-limit form applied NO scope; it is refused now, so a
+      # bounded read must go through the scoped /3.
+      assert_raise FunctionClauseError, fn -> StudioChat.list_messages(s.id, 1) end
+      assert_raise FunctionClauseError, fn -> StudioChat.list_messages(s.id, nil) end
+
+      # A foreign workspace scope still answers [] on both arities (the gate).
+      assert StudioChat.list_messages(s.id, Ecto.UUID.generate()) == []
+      assert StudioChat.list_messages(s.id, 1, Ecto.UUID.generate()) == []
     end
   end
 
