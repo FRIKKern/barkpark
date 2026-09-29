@@ -487,6 +487,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       {:ok, conn: conn}
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "loading bokbasen renders 5 typed inputs (no raw textarea)", %{conn: conn} do
       {:ok, view, _html} = live(conn, @settings_path)
 
@@ -505,6 +507,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       refute html =~ ~s(id="settings_json")
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "submitting the typed form persists via Settings.put", %{conn: conn} do
       {:ok, view, _html} = live(conn, @settings_path)
 
@@ -532,6 +536,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
               }} = Settings.reveal("bokbasen")
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "loading bokbasen masks secrets but shows URL + role plain", %{conn: conn} do
       Settings.put("bokbasen", %{
         "api_base" => "https://api.bokbasen.io",
@@ -555,6 +561,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert html =~ ~s(value="publisher")
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "rejects submit with missing required fields", %{conn: conn} do
       {:ok, view, _html} = live(conn, @settings_path)
 
@@ -577,6 +585,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert {:error, :not_found} = Settings.get("bokbasen")
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "save with untouched masked secrets preserves the stored credentials", %{conn: conn} do
       Settings.put("bokbasen", %{
         "api_base" => "https://api.bokbasen.io",
@@ -610,6 +620,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert stored["client_role"] == "distributor"
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "save with a newly typed secret persists the new value", %{conn: conn} do
       Settings.put("bokbasen", %{
         "api_base" => "https://api.bokbasen.io",
@@ -650,6 +662,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       {:ok, view: view, html: html}
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "lists installed plugins, each row carrying a default badge when no override exists",
          %{html: html} do
       assert html =~ ">Plugins<"
@@ -669,6 +683,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert html =~ "…Rest"
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "toggling a plugin persists into settings[\"plugins\"] and preserves the theme key",
          %{view: view} do
       ws = Barkpark.Tenancy.get_default_workspace()
@@ -690,6 +706,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert fresh.settings["theme"] == "evergreen"
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "a workspace override wins over the declaration default and drops the badge",
          %{conn: conn} do
       ws = Barkpark.Tenancy.get_default_workspace()
@@ -714,6 +732,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
              )
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "placement change persists to settings[\"plugins\"] and re-resolves via Enablement",
          %{view: view} do
       ws = Barkpark.Tenancy.get_default_workspace()
@@ -794,6 +814,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert html =~ ws_a.name
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "a scope switch FROM Settings lands on the NEW scope's Settings, and writes land there — not the old (D16)",
          %{conn: conn, ws_a: ws_a, proj_a: proj_a, ws_b: ws_b, proj_b: proj_b} do
       {:ok, view, _html} = live(conn, settings_url(ws_a, proj_a))
@@ -890,6 +912,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       {:ok, conn: conn}
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "an enabled plugin whose owned types are UNREGISTERED shows the 'no content types' truth",
          %{conn: conn} do
       # Remove EVERY globally-registered bulldocs schema for this test's scope,
@@ -916,6 +940,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       refute hint =~ "types registered, no documents yet"
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "an enabled plugin whose owned types are REGISTERED but document-less shows the softer truth",
          %{conn: conn} do
       # Ambient test DB: `paper` is registered globally with NO documents (empty

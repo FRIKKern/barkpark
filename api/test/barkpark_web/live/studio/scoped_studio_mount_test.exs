@@ -294,6 +294,8 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       :ok
     end
 
+    # Plugins-off: the media plugin (its Media Library :plugin_link row in the structure)
+    @tag :requires_plugins
     test "scoped Studio renders the Media Library link in the /d/ canonical shape", %{
       member_conn: conn,
       ws_a: ws_a,
