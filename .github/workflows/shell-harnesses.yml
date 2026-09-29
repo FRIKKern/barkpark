@@ -486,7 +486,7 @@ on:
       - "scripts/github-webhook-subscription-parity.test.sh"
       - "scripts/merge-gate-autostamp-liveness.sh"
       - "scripts/merge-gate-autostamp-liveness.test.sh"
-      - "api/lib/barkpark_web/controllers/github_webhook_controller.ex"
+      - "api/lib/barkpark/plugins/github/web/github_webhook_controller.ex"
       - "scripts/github-app-bootstrap.py"
       - "docs/ops/github-sync.md"
       # ── ORPHAN SWEEP II (CI gate-wiring wave, cgsiw-s3) ────────────────────
@@ -1210,7 +1210,7 @@ on:
       - "scripts/github-webhook-subscription-parity.test.sh"
       - "scripts/merge-gate-autostamp-liveness.sh"
       - "scripts/merge-gate-autostamp-liveness.test.sh"
-      - "api/lib/barkpark_web/controllers/github_webhook_controller.ex"
+      - "api/lib/barkpark/plugins/github/web/github_webhook_controller.ex"
       - "scripts/github-app-bootstrap.py"
       - "docs/ops/github-sync.md"
       # WEEKLY-CHANGELOG BACKFILL GUARD — mirrors the pull_request list above.
