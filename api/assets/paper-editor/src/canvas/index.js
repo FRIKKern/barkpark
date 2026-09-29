@@ -796,6 +796,7 @@ class BpPaperCanvas extends HTMLElement {
             }),
           ],
         }),
+        ownDomReadback,
         StarterKit.configure({
           // Same as ../index.js: heading levels 1–3, lists, history on.
           heading: { levels: [1, 2, 3] },
@@ -3851,6 +3852,29 @@ function readOnlyBlockText(block) {
   }
   return parts.join(" ").trim();
 }
+
+// ProseMirror reads the editor's OWN DOM back after native typing, and when it
+// cannot localise the change inside one textblock it re-parses from the parent,
+// reading each block element's inline `style` through the schema's style rules.
+// The pullquote paints the reader's role italic as `style="font-style:italic"` on
+// its <p>, so that re-parse turned the role styling into an Italic MARK over the
+// whole quote and saved it as data (task-7f5c6a3c94ab82cc). The editor paints
+// every italic mark it owns as <em>, so reading its own DOM needs no font-style
+// style rule. Drop those rules from the DOM-readback parser only; pasted and
+// dropped HTML keep the full schema parser (clipboardParser), where a Google Docs
+// `<span style="font-style:italic">` is still italic.
+const ownDomReadback = Extension.create({
+  name: "bpOwnDomReadback",
+  addProseMirrorPlugins() {
+    const schema = this.editor.schema;
+    const full = PMDOMParser.fromSchema(schema);
+    const readback = new PMDOMParser(
+      schema,
+      full.rules.filter((rule) => !(typeof rule.style === "string" && /^font-style\b/.test(rule.style))),
+    );
+    return [new Plugin({ props: { domParser: readback, clipboardParser: full } })];
+  },
+});
 
 if (!customElements.get("bp-paper-canvas")) {
   customElements.define("bp-paper-canvas", BpPaperCanvas);
