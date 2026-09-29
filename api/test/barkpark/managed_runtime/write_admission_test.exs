@@ -429,7 +429,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
         end)
       end
 
-    for writer <- writers, do: assert_receive({:ready, ^writer})
+    for writer <- writers, do: assert_receive({:ready, ^writer}, @sync_ms)
     {:ok, :closing, hold} = begin_hold(gate, "three-writers")
     assert {:ok, :closing, ^hold} = begin_hold(gate, "three-writers")
 
