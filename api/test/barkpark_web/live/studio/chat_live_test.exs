@@ -117,8 +117,12 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     # Recorders are server-owned (wave 4) and outlive the LiveView — reap them
     # at test end so a late frame can't hit the closed sandbox connection.
     on_exit(fn ->
-      Barkpark.StudioChat.RuntimeSupervisor
-      |> DynamicSupervisor.which_children()
+      # Guarded: with studio_chat off there is no RuntimeSupervisor, and a raise
+      # here would skip the env restores below (public_demo_studio leak).
+      if(Process.whereis(Barkpark.StudioChat.RuntimeSupervisor),
+        do: DynamicSupervisor.which_children(Barkpark.StudioChat.RuntimeSupervisor),
+        else: []
+      )
       |> Enum.each(fn
         {_, pid, _, _} when is_pid(pid) ->
           DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)
