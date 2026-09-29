@@ -10,6 +10,12 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.SyncDoorTest do
 
   @dataset "test"
 
+  # The pull worker reconnects asynchronously (a spawned stream process sends
+  # :connected), and each reconnect passes the door, which journals to DETS
+  # before replying. There is no sync point but the message, so the bound IS
+  # the contract: sized for a slow fsync under CI load, not ExUnit's 100ms.
+  @reconnect_ms 2_000
+
   setup do
     Process.flag(:trap_exit, true)
     previous = Application.get_env(:barkpark, :write_admission)
@@ -54,7 +60,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.SyncDoorTest do
       {:ok, "remote-#{event.doc_id}"}
     end
 
-    holder = hold(gate)
+    hold = hold(gate)
 
     {:ok, pid} =
       PushWorker.start_link(
@@ -83,8 +89,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.SyncDoorTest do
     assert state.attempt == 1
     assert Admission.status(gate).phase == :held
 
-    send(holder, :release)
-    assert_receive {:released, :ok}
+    release(gate, hold)
 
     # First admitted tick bootstraps to head, skipping every pre-open event.
     send(pid, :drain_tick)
@@ -96,9 +101,12 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.SyncDoorTest do
 
     e2 = insert_event!("b")
     send(pid, :drain_tick)
-    assert_receive {:pushed, id}
-    assert id == e2.id
+    # The tick runs inside handle_info (door checkout journals to DETS, then
+    # push_fun sends), so :sys.get_state returning means the push already
+    # happened — no race against a receive timeout.
     _ = :sys.get_state(pid)
+    assert_received {:pushed, id}
+    assert id == e2.id
     assert PushCursor.get(source, @dataset) == e2.id
     refute_received {:pushed, _}
     assert pre.id < e1.id
@@ -113,7 +121,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.SyncDoorTest do
       Process.sleep(:infinity)
     end
 
-    holder = hold(gate)
+    hold = hold(gate)
 
     {:ok, pid} =
       Worker.start_link(
@@ -128,40 +136,37 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.SyncDoorTest do
         backoff_fun: fn _ -> 0 end
       )
 
-    assert_receive {:connected, ref1, 0}
+    assert_receive {:connected, ref1, 0}, @reconnect_ms
     # The chunk is refused before parsing: the stream is torn down and reconnects.
-    assert_receive {:connected, ref2, 0}
+    assert_receive {:connected, ref2, 0}, @reconnect_ms
     assert ref1 != ref2
     assert :sys.get_state(pid).halted_reason == {:write_admission, :admission_closed}
 
-    send(holder, :release)
-    assert_receive {:released, :ok}
+    release(gate, hold)
 
     # After reopen the same keepalive applies cleanly and the stream stays up.
-    assert_receive {:connected, ref3, 0}
+    assert_receive {:connected, ref3, 0}, @reconnect_ms
     assert ref3 != ref2
     Process.sleep(50)
     assert %{stream: %{ref: ^ref3}, halted_reason: nil} = :sys.get_state(pid)
   end
 
+  # The test process owns the hold itself. begin_hold/reopen are synchronous
+  # calls that journal to DETS before replying, so there is no event to wait
+  # for: the old unlinked holder process re-published their replies as
+  # messages and raced them against assert_receive's 100ms default, which CI
+  # load outran (task-61201dc0c83b9a0c). A hold's owner only needs to be a
+  # live non-writer; the workers under test never inherit it (only writers
+  # are inherited through `$callers`), and a failed call now names itself
+  # instead of surfacing as "mailbox empty".
   defp hold(gate) do
-    parent = self()
+    assert {:ok, :held, ticket} =
+             Admission.begin_hold(gate, "switch", Admission.status(gate).generation)
 
-    holder =
-      spawn(fn ->
-        {:ok, :held, ticket} =
-          Admission.begin_hold(gate, "switch", Admission.status(gate).generation)
-
-        send(parent, :held)
-
-        receive do
-          :release -> send(parent, {:released, Admission.reopen(gate, ticket)})
-        end
-      end)
-
-    assert_receive :held
-    holder
+    ticket
   end
+
+  defp release(gate, ticket), do: assert(Admission.reopen(gate, ticket) == :ok)
 
   defp insert_event!(doc_id) do
     %MutationEvent{}
