@@ -1388,7 +1388,7 @@ function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
     }
     if (isTechnicalAtomNode(nextChild.type)) {
       return technicalNodeChanged(prevChild, nextChild)
-        ? technicalNodeToPatch(nextChild)
+        ? technicalNodeToPatch(nextChild, prevChild)
         : null;
     }
     return codeNodeChanged(prevChild, nextChild)
@@ -2817,13 +2817,21 @@ function technicalNodeToBlock(node, id) {
 // (Components.diff_html / filetree_html treat a missing and an empty metadata string
 // identically) and the canonical compare normalizes ""/null/absent equal, so the
 // cleared block still round-trips with zero spurious ops. Mirrors diagramNodeToPatch.
-function technicalNodeToPatch(node) {
+//
+// With the node the edit started from (prevNode), a metadata key rides only when its
+// value CHANGED, so a body edit never materializes file:"" / lang:"" / legend:"" keys
+// the author never wrote (the task-56bafb69a8a1f250 callout rule). A changed key is
+// still explicit, so a clear still lands. Without prevNode every key rides.
+function technicalNodeToPatch(node, prevNode = null) {
   const attrs = (node && node.attrs) || {};
+  const prevAttrs = (prevNode && prevNode.attrs) || null;
   const shape = technicalShapeForNode(node && node.type);
   const patch = {};
   patch[shape.body] = attrs[shape.body] || "";
   for (const key of shape.meta) {
-    patch[key] = attrs[key] == null ? "" : attrs[key];
+    const value = attrs[key] == null ? "" : attrs[key];
+    if (prevAttrs && (prevAttrs[key] == null ? "" : prevAttrs[key]) === value) continue;
+    patch[key] = value;
   }
   return patch;
 }
@@ -4575,7 +4583,7 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
           ops.push({
             op: "patch-block",
             id: entry.id,
-            patch: technicalNodeToPatch(entry.node),
+            patch: technicalNodeToPatch(entry.node, prevNode),
           });
         }
         continue;
