@@ -2054,13 +2054,18 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
       scrolls sideways. */
 .bp-paper-surface .bp-lineage { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
 .bp-paper-surface .bp-lineage__nodes { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); gap: 14px; border-top: 1px solid var(--paper-rule); overflow-x: auto; overscroll-behavior-x: contain; }
-.bp-paper-surface .bp-lineage__node { position: relative; padding-top: 9px; min-width: 0; }
+/* No marker: the generic `ol > li { list-style: decimal }` painted an ordinal in the
+   14px gap, inside the previous stop's column, where a long kicker ran into it. */
+.bp-paper-surface .bp-lineage__node { position: relative; padding-top: 9px; min-width: 0; list-style: none; }
 .bp-paper-surface .bp-lineage__node::before { content: ""; position: absolute; top: -1px; left: 0; width: 11px; height: 2px; background: var(--paper-accent); }
 .bp-paper-surface .bp-lineage__node--info::before { background: var(--bp-tone-info-fg); }
 .bp-paper-surface .bp-lineage__node--ok::before { background: var(--bp-tone-success-fg); }
 .bp-paper-surface .bp-lineage__node--warn::before { background: var(--bp-tone-warning-fg); }
 .bp-paper-surface .bp-lineage__node--danger::before { background: var(--bp-tone-danger-fg); }
-.bp-paper-surface .bp-lineage__overline { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); white-space: nowrap; }
+/* A kicker wraps inside its own column: a nowrap kicker longer than the column
+   ran under the next stop's kicker and title (the August Chronicle's
+   "31 AUG · PRODUCT FOUNDATIONS"; task-e7b990a88c9f8df0). */
+.bp-paper-surface .bp-lineage__overline { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); overflow-wrap: anywhere; }
 .bp-paper-surface .bp-lineage__node--info .bp-lineage__overline { color: var(--bp-tone-info-fg); }
 .bp-paper-surface .bp-lineage__node--ok .bp-lineage__overline { color: var(--bp-tone-success-fg); }
 .bp-paper-surface .bp-lineage__node--warn .bp-lineage__overline { color: var(--bp-tone-warning-fg); }

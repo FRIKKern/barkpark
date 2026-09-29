@@ -79,6 +79,24 @@ defmodule Barkpark.PortableDoc.Render.StylesheetTest do
              or Safari paints both "1." and the component's circled "1".
              """
     end
+
+    # task-e7b990a88c9f8df0: on the August Chronicle the lineage painted a stray
+    # "4." in the gap and a nowrap kicker ran into it and into the next stop.
+    test "lineage stops paint no ordinal and their kickers wrap inside the column" do
+      css = Stylesheet.css()
+
+      assert Regex.match?(
+               ~r/\.bp-paper-surface\s+\.bp-lineage__node\s*\{[^}]*list-style:\s*none;/s,
+               css
+             ),
+             "the generic `ol > li { list-style: decimal }` must not number lineage stops"
+
+      [overline] =
+        Regex.run(~r/\.bp-paper-surface\s+\.bp-lineage__overline\s*\{[^}]*\}/s, css)
+
+      refute overline =~ "nowrap", "a kicker longer than its column must wrap, not overflow"
+      assert overline =~ "overflow-wrap: anywhere"
+    end
   end
 
   describe "sinks embed the source" do
