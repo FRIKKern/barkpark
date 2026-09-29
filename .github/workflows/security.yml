@@ -525,6 +525,24 @@ jobs:
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           mix sobelow --skip --exit Low
 
+      - name: Baseline setdiff can lose (selftest first, then the reconcile step runs it bare)
+        id: s7
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        # task-97a63315d004caea. The reconcile step below already runs
+        # scripts/sobelow-baseline-setdiff.sh BARE (it records, it does not
+        # enforce); this is its disarm proof, the selftest-first half the two
+        # siblings (sobelow-inline-overlap-check.sh, sobelow-baseline-staleness-
+        # check.sh) already have. It stays at api/scripts/ -- the job's
+        # working-directory is api/, like every other script this job runs, and
+        # moving it would break the reconcile wiring for nothing. 11 cases,
+        # including an ADDED row buried in a reshuffle and the reordering_only
+        # LABEL arms that an exit-code-only fixture cannot see. BARE, never
+        # piped: a BSD-sed fault in this script once lived in stderr only.
+        if: always()
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/sobelow-baseline-setdiff.sh --selftest
+
       - name: Reconcile baseline on the pinned CI toolchain
         id: s3
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
@@ -590,7 +608,7 @@ jobs:
         if: always()
         env:
           STEP_OUTCOMES: ${{ toJSON(steps) }}
-          STEP_NAMES: "{\"s1\": \"Fetch deps\", \"s2\": \"Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)\", \"s3\": \"Reconcile baseline on the pinned CI toolchain\", \"s4\": \"Fresh-finding guard can lose (selftest first, like its two siblings below)\", \"s5\": \"Prove a fresh String.to_atom finding still reds\", \"s6\": \"Anchor-token table still matches the Sobelow detector modules\"}"
+          STEP_NAMES: "{\"s1\": \"Fetch deps\", \"s2\": \"Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)\", \"s3\": \"Reconcile baseline on the pinned CI toolchain\", \"s4\": \"Fresh-finding guard can lose (selftest first, like its two siblings below)\", \"s5\": \"Prove a fresh String.to_atom finding still reds\", \"s6\": \"Anchor-token table still matches the Sobelow detector modules\", \"s7\": \"Baseline setdiff can lose (selftest first, then the reconcile step runs it bare)\"}"
           JOB_NAME: "Sobelow static analysis (regression gate, baseline .sobelow-skips)"
           WORKFLOW_FILE: security.yml
           GITHUB_TOKEN: ${{ github.token }}
