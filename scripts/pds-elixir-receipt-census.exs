@@ -2559,9 +2559,12 @@ defmodule PDS.Census do
       attestation:
         "mutation: skip the audit insert — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs` — the test `ok:true means the secret is gone AND the delete audit row exists` — reds on the audit row",
     },
-    # barkpark_web/controllers/self_update_controller.ex:24
+    # barkpark_web/controllers/self_update_controller.ex:25
+    # Re-keyed (task-b4b2bb60b63e28ea): the head moved `_params` -> `params`
+    # (84801527 -> 59258468); expr_fp 68291924 is unmoved. UNJUDGED before and
+    # after, so no verdict is re-adopted for changed code.
     %{key: {"api/lib/barkpark_web/controllers/self_update_controller.ex",
-            "BarkparkWeb.SelfUpdateController.trigger/2", "84801527", "68291924"},
+            "BarkparkWeb.SelfUpdateController.trigger/2", "59258468", "68291924"},
       verdict: "UNJUDGED", basis: :unexamined},
     # barkpark_web/controllers/site_deploy_controller.ex:81
     %{key: {"api/lib/barkpark_web/controllers/site_deploy_controller.ex",
