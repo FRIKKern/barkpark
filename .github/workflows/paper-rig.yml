@@ -118,7 +118,13 @@ jobs:
       BARKPARK_CLOAK_KEY: ci-cloak-key-32-chars-padding-aaa
       PREVIEW_JWT_SECRET: ci-preview-jwt-secret-not-used-padding
     steps:
+      # The baseline JPEGs are Git LFS objects (task-8edf208dd6f16579). Only
+      # the re-capture arm diffs against them, so only that arm pulls the
+      # ~103 MB of pixels; every other run checks out pointers and spares the
+      # repo's LFS bandwidth. gate.sh reads baselines/*.report.json, not LFS.
       - uses: actions/checkout@v4
+        with:
+          lfs: ${{ (github.event_name == 'workflow_dispatch' && inputs.recapture) || contains(github.event.pull_request.labels.*.name, 'rig-recapture') }}
 
       # The image string is EVIDENCE, not decoration: the baselines are only
       # meaningful next to the image that produced them, and rig/README.md
