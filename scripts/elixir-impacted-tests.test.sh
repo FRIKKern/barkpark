@@ -526,7 +526,7 @@ else
 api/lib/barkpark/content/write_scope.ex
 api/lib/barkpark/plugins/bootstrap.ex
 api/lib/barkpark/plugins/tickets/thread.ex
-api/lib/mix/tasks/onix.import.ex
+api/lib/barkpark/plugins/onixedit/mix_tasks/onix.import.ex
 api/test/barkpark/audit_test.exs
 api/test/barkpark/content/graph_test.exs
 api/test/barkpark/content/mutation_echo_test.exs

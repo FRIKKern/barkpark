@@ -36,7 +36,8 @@ export function isWebLayerFile(file) {
 // feature from the command line — an entry-point, not a feature member. Path
 // detection is sufficient and robust (the directory is the Mix.Task convention).
 export function isMixTaskFile(file) {
-  return /^api\/lib\/mix\/tasks\//.test(file);
+  // lib/mix/tasks/, or a plugin's own mix_tasks/ dir (task-4a1e72163d614a13).
+  return /^api\/lib\/(mix\/tasks|barkpark\/plugins\/[^/]+\/mix_tasks)\//.test(file);
 }
 
 // OTP composition root: the `use Application` module whose start/2 assembles the

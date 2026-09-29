@@ -457,8 +457,13 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
 
     # Every `Mix.Tasks.…` module under api/lib whose CODE boots a narrowed tree.
     defp one_shot_task_modules do
-      Path.join(@test_root, "lib/mix/tasks/**/*.ex")
-      |> Path.wildcard()
+      # A plugin's own Mix tasks live in lib/barkpark/plugins/<plugin>/mix_tasks
+      # (task-4a1e72163d614a13) — the same population, whichever tree holds it.
+      [
+        Path.join(@test_root, "lib/mix/tasks/**/*.ex"),
+        Path.join(@test_root, "lib/barkpark/plugins/*/mix_tasks/**/*.ex")
+      ]
+      |> Enum.flat_map(&Path.wildcard/1)
       |> Enum.map(&{&1, strip_comments(File.read!(&1))})
       |> Enum.filter(fn {_path, src} -> src =~ @one_shot_boot_re end)
       |> Enum.flat_map(fn {_path, src} ->
@@ -913,15 +918,39 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
 
     @app_start ~S<Mix.Task.run("app.start")>
 
-    defp task_files do
-      @tasks_dir
-      |> File.ls!()
-      |> Enum.filter(&String.ends_with?(&1, ".ex"))
-      |> Enum.sort()
+    # The task population is lib/mix/tasks PLUS every plugin's own
+    # lib/barkpark/plugins/<plugin>/mix_tasks (task-4a1e72163d614a13): a plugin's
+    # operator tasks moved into its tree are still mix tasks, and a guard keyed
+    # on one directory would silently lose them. Keyed by basename, so a
+    # basename that appears in two dirs is refused rather than shadowed.
+    defp task_dirs do
+      [@tasks_dir | Path.wildcard(Path.join(@tasks_dir, "../../barkpark/plugins/*/mix_tasks"))]
+      |> Enum.map(&Path.expand/1)
     end
 
+    defp task_paths do
+      paths =
+        for dir <- task_dirs(),
+            file <- File.ls!(dir),
+            String.ends_with?(file, ".ex"),
+            into: %{},
+            do: {file, Path.join(dir, file)}
+
+      names =
+        Enum.flat_map(task_dirs(), &File.ls!/1) |> Enum.filter(&String.ends_with?(&1, ".ex"))
+
+      assert length(names) == map_size(paths),
+             "two mix task files share a basename across #{inspect(task_dirs())}"
+
+      paths
+    end
+
+    defp task_files, do: task_paths() |> Map.keys() |> Enum.sort()
+
+    defp task_path(file), do: Map.fetch!(task_paths(), file)
+
     defp calls_app_start?(file) do
-      @tasks_dir |> Path.join(file) |> File.read!() |> String.contains?(@app_start)
+      file |> task_path() |> File.read!() |> String.contains?(@app_start)
     end
 
     test "the guard is reading a real, non-empty task directory" do
@@ -990,8 +1019,8 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
       # the set must be non-empty.
       moved =
         Enum.filter(task_files(), fn file ->
-          @tasks_dir
-          |> Path.join(file)
+          file
+          |> task_path()
           |> File.read!()
           |> String.contains?("Barkpark.OneShot.boot!()")
         end)
