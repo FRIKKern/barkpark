@@ -14545,7 +14545,8 @@ defmodule BarkparkCloud.Web.Router do
     hetzner_base(m)
     |> hetzner_merge(%{
       type: hetzner_dig(m, ["server_type", "name"]),
-      location: hetzner_dig(m, ["datacenter", "location", "name"]),
+      # Top-level `location`: Hetzner removed server.datacenter on 2026-07-01.
+      location: hetzner_dig(m, ["location", "name"]),
       ipv4: hetzner_dig(m, ["public_net", "ipv4", "ip"]),
       created: Map.get(m, "created")
     })

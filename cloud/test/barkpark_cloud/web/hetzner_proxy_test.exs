@@ -506,14 +506,14 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
   }
 
   # A canned upstream that reproduces the golden fixture's one-per-kind estate.
-  # These are RAW Hetzner Cloud API shapes (nested server_type/datacenter/
+  # These are RAW Hetzner Cloud API shapes (nested server_type/location/
   # public_net, `servers`/`rules`/`services` arrays, images with a null name +
   # description handle) — the proxy must normalize them into the fixture rows.
   defp program_golden_upstream do
     HetznerFakeHttpClient.program(%{
       "/v1/servers" => ok_json(~s({"servers":[{"id":42,"name":"guerrilla","status":"running",
           "server_type":{"id":1,"name":"cax21"},
-          "datacenter":{"id":4,"name":"hel1-dc2","location":{"id":3,"name":"hel1"}},
+          "location":{"id":3,"name":"hel1"},
           "public_net":{"ipv4":{"ip":"192.0.2.10"}},
           "created":"2026-05-01T10:00:00Z"}]})),
       "/v1/volumes" =>

@@ -289,3 +289,38 @@ func TestHetznerServerTypesStockRenderSnapshot(t *testing.T) {
 		t.Errorf("table render drifted.\n got:\n%s\nwant:\n%s", stdout, want)
 	}
 }
+
+// TestHetznerDatacentersIsLocationsAlias pins the retirement of `datacenters`:
+// Hetzner removes GET /v1/datacenters after 2026-10-01, so the verb must read
+// GET /locations, emit the locations shape on stdout, and warn on stderr.
+func TestHetznerDatacentersIsLocationsAlias(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /locations", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"locations":[{"id":1,"name":"fsn1","description":"Falkenstein DC Park 1",
+			"country":"DE","city":"Falkenstein","network_zone":"eu-central"}]}`)
+	})
+	f.mux.HandleFunc("GET /datacenters", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 410, `{"error":{"code":"gone","message":"datacenters retired"}}`)
+	})
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "datacenters")
+	if code != exitOK {
+		t.Fatalf("datacenters exited %d, stderr: %s", code, stderr)
+	}
+	if f.count("GET", "/datacenters") != 0 {
+		t.Error("datacenters issued GET /datacenters — the endpoint is retired")
+	}
+	if !strings.Contains(stderr, "deprecated") || !strings.Contains(stderr, "locations") {
+		t.Errorf("stderr = %q, want a deprecation notice pointing at locations", stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("datacenters -o json emitted invalid JSON: %v\n%s", err, stdout)
+	}
+	locs, ok := payload["locations"].([]any)
+	if !ok || len(locs) != 1 {
+		t.Fatalf("payload = %v, want one location", payload)
+	}
+	if name := locs[0].(map[string]any)["name"]; name != "fsn1" {
+		t.Errorf("location name = %v, want fsn1", name)
+	}
+}
