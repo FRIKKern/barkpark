@@ -8075,6 +8075,49 @@ defmodule BarkparkCloud.Registry do
     }
   end
 
+  @doc """
+  THE TEAM-DRIFT CENSUS (task-69d84bc7f15c88d6): every site whose `team_id`
+  differs from its box's `team_id`.
+
+  `sites.team_id` is create-time-only (see `BarkparkCloud.Registry.Site`), so a
+  box moved between teams out of band leaves its sites on the old team and every
+  team-scoped site reader follows the stale column. No in-tree path moves a box,
+  so a correct fleet reads `[]`; a non-empty answer names each drifted site with
+  both team ids so an operator can re-stamp it.
+
+  Read-only. `site_ids:` narrows to those sites (tests scope to their fixtures).
+  """
+  @spec site_team_drift(keyword()) :: [
+          %{
+            site_id: binary(),
+            slug: String.t(),
+            site_team_id: binary(),
+            barkpark_id: binary(),
+            barkpark_team_id: binary()
+          }
+        ]
+  def site_team_drift(opts \\ []) do
+    base =
+      from(s in Site,
+        join: b in Barkpark,
+        on: b.id == s.barkpark_id,
+        where: s.team_id != b.team_id,
+        order_by: [asc: s.inserted_at, asc: s.id],
+        select: %{
+          site_id: s.id,
+          slug: s.slug,
+          site_team_id: s.team_id,
+          barkpark_id: b.id,
+          barkpark_team_id: b.team_id
+        }
+      )
+
+    case Keyword.get(opts, :site_ids) do
+      ids when is_list(ids) -> base |> where([s], s.id in ^ids) |> Repo.all()
+      _ -> Repo.all(base)
+    end
+  end
+
   @doc "List a Team's sites across all of its barkparks, newest first."
   @spec list_sites_for_team(Team.t() | binary()) :: [Site.t()]
   def list_sites_for_team(team) do
