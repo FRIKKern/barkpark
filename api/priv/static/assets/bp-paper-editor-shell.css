@@ -2208,6 +2208,37 @@ textarea.bp-paper-inline-text.bp-paper-link-ref-eyebrow-input { text-transform: 
 .bp-paper-link-ref-reason-input:focus-visible {
   outline: 2px solid var(--paper-accent); outline-offset: 3px;
 }
+/* In-place copy fields inside a reader box (steps title, terminal title and
+   footer): the field IS the reader text: same font, colour, tracking and
+   case, no chrome until focused. An empty slot the reader does not paint
+   stays zero-height (still focusable from its panel button) until focused. */
+.bp-paper-contextual-editor textarea.bp-paper-inline-text.bp-paper-inline-copy {
+  display: block; width: 100%; min-width: 0; box-sizing: border-box;
+  margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none;
+  background: transparent; color: inherit; font: inherit; letter-spacing: inherit;
+  word-spacing: inherit; text-transform: inherit; text-align: inherit;
+  resize: none; overflow: hidden; overflow-wrap: anywhere; outline-offset: 3px;
+}
+.bp-paper-contextual-editor textarea.bp-paper-inline-text.bp-paper-inline-copy--inline {
+  display: inline-block; width: auto; max-width: 100%; field-sizing: content;
+  vertical-align: baseline;
+}
+.bp-paper-contextual-editor textarea.bp-paper-inline-copy:focus-visible {
+  outline: 2px solid var(--paper-accent);
+}
+.bp-paper-contextual-editor textarea.bp-paper-inline-copy::placeholder {
+  color: var(--paper-ink-faint, var(--paper-ink-soft));
+}
+/* The closed "Configure terminal/steps" toggle sits above the block, not over
+   the terminal bar or the first step title that now take the caret. */
+.bp-paper-contextual-controls.bp-paper-contextual-controls--terminal:not([open]),
+.bp-paper-contextual-controls.bp-paper-contextual-controls--steps:not([open]) {
+  top: auto; bottom: 100%;
+}
+[data-paper-inline-copy-empty="true"]:not(:focus-within) {
+  height: 0; margin-block: 0 !important; padding-block: 0; border-block: 0;
+  overflow: hidden;
+}
 .bp-paper-figure-editor-frame > .bp-figcaption { position: relative; }
 [data-paper-figure-caption-empty="true"]:not(:focus-within) {
   height: 0; margin: 0;
