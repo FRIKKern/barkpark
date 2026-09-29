@@ -105,7 +105,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.Holder do
 
   def handle_call(:instance, _from, state) do
     case current() do
-      %{phase: phase} = status when phase in [:unconfigured, :unavailable] ->
+      %{phase: phase} when phase in [:unconfigured, :unavailable] ->
         {:reply, {:error, phase}, state}
 
       status ->
