@@ -103,6 +103,8 @@ defmodule BarkparkWeb.Studio.StudioPluginLinkEmptyStateTest do
   end
 
   describe "a nav_path terminating in a nested :plugin_link" do
+    # Plugins-off: the media plugin (its Media Library :plugin_link row in the structure)
+    @tag :requires_plugins
     test "renders NO unresolved-document notice — dead render and connected render alike",
          %{conn: conn} do
       {:ok, view, html} =

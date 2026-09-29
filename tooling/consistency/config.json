@@ -12,7 +12,7 @@
   "layeringRules": [
     {
       "name": "web-bypasses-context",
-      "appliesTo": ["api/lib/barkpark_web/**/*.ex"],
+      "appliesTo": ["api/lib/barkpark_web/**/*.ex", "api/lib/barkpark/plugins/*/web/**/*_controller.ex"],
       "exclude": ["**/router.ex", "**/endpoint.ex"],
       "forbid": "\\bRepo\\.",
       "message": "Web layer should call domain contexts, not Repo directly (skips tenancy/validation)."

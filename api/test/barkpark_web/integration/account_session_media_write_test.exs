@@ -154,6 +154,8 @@ defmodule BarkparkWeb.Integration.AccountSessionMediaWriteTest do
   end
 
   describe "PREMISE EXPERIMENT (task-a32e13e37527d261) — the write gate says yes, ensure_edit says no" do
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "an account-session member PATCHes an asset's metadata", %{
       conn: conn,
       ws: ws,

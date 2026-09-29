@@ -51,6 +51,8 @@ defmodule BarkparkWeb.Studio.StudioViewTaskResolveTest do
     doc
   end
 
+  # Plugins-off: the tasks plugin (Tasks.PaperResolver renders task-list query blocks)
+  @tag :requires_plugins
   test "view-mode stream resolves a task-list query into live rows (reader parity)", %{
     scope: scope
   } do

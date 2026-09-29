@@ -76,6 +76,8 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     published
   end
 
+  # Plugins-off: the tasks plugin (Tasks.PaperResolver renders task-list query blocks)
+  @tag :requires_plugins
   test "a task-list query renders live tasks, and a mutation updates the plan", %{
     conn: conn,
     scope: scope
@@ -190,6 +192,8 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     # survives twin-collapse by that function's own documented design. A
     # PUBLISHED paper's task block therefore handed an anonymous reader the
     # titles of tasks nobody published.
+    # Plugins-off: the tasks plugin (Tasks.PaperResolver renders task-list query blocks)
+    @tag :requires_plugins
     test "an anonymous reader of a published paper never sees a draft-only task",
          %{conn: conn, scope: scope} do
       epic = "epic-#{System.unique_integer([:positive])}"
@@ -229,6 +233,8 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     # Studio's `paper_stream_items/4`, which threads its session scope WITHOUT
     # `published_only` — that path must keep resolving draft tasks, or the gate
     # would have broken authoring instead of closing a leak.
+    # Plugins-off: the tasks plugin (Tasks.PaperResolver renders task-list query blocks)
+    @tag :requires_plugins
     test "the authorised author scope still resolves draft-only tasks", %{scope: scope} do
       epic = "epic-#{System.unique_integer([:positive])}"
       _draft = mk_task!("unpublished author draft", "open", epic, scope)

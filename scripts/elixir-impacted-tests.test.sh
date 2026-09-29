@@ -447,6 +447,27 @@ else
   ok "an unrelated controller test in the same directory stays out"
 fi
 
+# a PLUGIN-OWNED controller (lib/barkpark/plugins/<p>/web/) is a web surface
+# too: its contract tests stay under test/barkpark_web/controllers after the
+# move (task-4a1e72163d614a13), and RULE 3 must still find them.
+mkdir -p "$tmp/api4/lib/barkpark/plugins/gadgets/web"
+printf 'defmodule Barkpark.Widgets.Sprocket do\n  def spin(_), do: :ok\nend\n' >"$tmp/api4/lib/barkpark/widgets/sprocket.ex"
+printf 'defmodule BarkparkWeb.SprocketController do\n  alias Barkpark.Widgets.Sprocket\n  def create(c, _), do: Sprocket.spin(c)\nend\n' >"$tmp/api4/lib/barkpark/plugins/gadgets/web/sprocket_controller.ex"
+printf 'defmodule BarkparkWeb.SprocketWireTest do\n  use BarkparkWeb.ConnCase, async: true\nend\n' >"$tmp/api4/test/barkpark_web/controllers/sprocket_wire_test.exs"
+plug_out="$(printf 'api/lib/barkpark/widgets/sprocket.ex\n' | BP_IMPACTED_XREF_DIR="$tmp/api4" bash "$SEL" --select 2>/dev/null)"
+if is_all "$plug_out"; then
+  bad "a plugin-owned controller's contract test is selected" "the synthetic tree selected ALL"
+elif grep -qxF 'test/barkpark_web/controllers/sprocket_wire_test.exs' <<<"$plug_out"; then
+  ok "a plugin-owned controller (plugins/<p>/web/) still selects its contract test family"
+else
+  bad "a plugin-owned controller's contract test is selected" "not in the $(printf '%s\n' "$plug_out" | awk 'END{print NR}')-file selection"
+fi
+if grep -qxF 'test/barkpark_web/controllers/gizmo_wire_test.exs' <<<"$plug_out"; then
+  bad "the plugin-web hop selects only its own family" "gizmo_wire_test.exs was dragged in"
+else
+  ok "the plugin-web hop selects only its own family"
+fi
+
 # a lib module NO web surface names must add no web tests at all
 printf 'defmodule Barkpark.Widgets.Hermit do\nend\n' >"$tmp/api4/lib/barkpark/widgets/hermit.ex"
 herm_out="$(printf 'api/lib/barkpark/widgets/hermit.ex\n' | BP_IMPACTED_XREF_DIR="$tmp/api4" bash "$SEL" --select 2>/dev/null)"

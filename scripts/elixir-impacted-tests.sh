@@ -707,6 +707,12 @@ tests_naming_modules() {
 # stem shorter than 3 characters is dropped rather than globbed: `a_*_test.exs`
 # would be a directory scan wearing the shape of a rule.
 WEB_SURFACE_PREFIX='lib/barkpark_web/'
+# A PLUGIN'S OWN WEB LAYER is a web surface too (task-4a1e72163d614a13): its
+# controllers move into lib/barkpark/plugins/<plugin>/web/ with module names
+# unchanged, while their ConnCase contract tests stay where they were written,
+# under test/barkpark_web/controllers. Without this root a moved controller
+# stops being a caller RULE 3 can see, and the #17153 miss reopens for it.
+PLUGIN_WEB_ROOT='lib/barkpark/plugins/'
 
 web_surface_tests() {
   # module names on stdin; api-relative test paths on stdout
@@ -716,10 +722,34 @@ web_surface_tests() {
   # ONE grep for the whole module set, same reason as tests_naming_modules: a
   # per-module pass over lib/ would cost more than the tests it saves.
   callers="$(cd -- "$API_DIR" 2>/dev/null && printf '%s\n' "$mods" \
-    | grep -rlF -f - "$WEB_SURFACE_PREFIX" --include='*.ex' 2>/dev/null || true)"
+    | grep -rlF -f - "$WEB_SURFACE_PREFIX" "$PLUGIN_WEB_ROOT" --include='*.ex' 2>/dev/null \
+    | sed 's#//*#/#g' | grep -E "^${WEB_SURFACE_PREFIX}|^${PLUGIN_WEB_ROOT}[^/]+/web/" || true)"
   [ -n "$callers" ] || return 0
   while IFS= read -r c; do
     [ -n "$c" ] || continue
+    case "$c" in
+      "$PLUGIN_WEB_ROOT"*)
+        # a plugin web module: its family lives in the plugin's own test/…/web
+        # dir when it has one, else where the host's contract tests live.
+        stem="$(basename "$c" .ex)"
+        case "$stem" in
+          *_controller) stem="${stem%_controller}" ;;
+          *_live) stem="${stem%_live}" ;;
+          *_html) stem="${stem%_html}" ;;
+          *_json) stem="${stem%_json}" ;;
+        esac
+        [ "${#stem}" -ge 3 ] || continue
+        reldir="$(dirname "${c#lib/}")"
+        for d in "test/$reldir" test/barkpark_web/controllers test/barkpark_web/live; do
+          [ -d "$API_DIR/$d" ] || continue
+          (
+            cd -- "$API_DIR" 2>/dev/null || exit 0
+            find "$d" -maxdepth 1 -name "${stem}_test.exs" -o -maxdepth 1 -path "$d/${stem}_*_test.exs" 2>/dev/null || true
+          )
+        done
+        continue
+        ;;
+    esac
     reldir="${c#lib/}"
     reldir="$(dirname "$reldir")"
     stem="$(basename "$c" .ex)"

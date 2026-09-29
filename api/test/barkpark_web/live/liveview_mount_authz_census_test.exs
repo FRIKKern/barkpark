@@ -252,6 +252,8 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
       assert {:ok, _view, _html} = live(as(conn, admin), path)
     end
 
+    # Plugins-off: the onixedit plugin registered (the /_plugins/onixedit/settings route resolves it)
+    @tag :requires_plugins
     test "PluginSettingsLive denies anon + wrong-role, admin mounts", ctx do
       %{conn: conn, admin_raw: admin, junior_raw: junior} = ctx
       path = "/w/default/p/default/d/production/studio/_plugins/onixedit/settings"
@@ -290,6 +292,8 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
       assert {:ok, _view, _html} = live(as(conn, admin), "/studio/tmux")
     end
 
+    # Plugins-off: the studio_chat capability (the /studio/chat routes and StudioChat.RuntimeSupervisor)
+    @tag :requires_plugins
     test "ChatLive denies anon + wrong-role; admin mounts with a runtime enabled", ctx do
       %{conn: conn, admin_raw: admin, junior_raw: junior} = ctx
 
@@ -315,6 +319,8 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
     # existed in lib/), guarded by
     # pds_w42_chatlive_flat_lifecycle_global_test.exs and, for the
     # user-session principal, chat_live_user_session_tenancy_test.exs.
+    # Plugins-off: the studio_chat capability (the /studio/chat routes and StudioChat.RuntimeSupervisor)
+    @tag :requires_plugins
     test "ChatLive flat: an admin token BOUND to another workspace still mounts", ctx do
       %{conn: conn} = ctx
 
@@ -347,6 +353,8 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
     # its lifecycle writes may touch is confined to the Default workspace plus
     # NULL-owned legacy rows, proved by
     # `BarkparkWeb.Studio.ChatLiveUserSessionTenancyTest` ("K3").
+    # Plugins-off: the studio_chat capability (the /studio/chat routes and StudioChat.RuntimeSupervisor)
+    @tag :requires_plugins
     test "ChatLive flat: a USER-SESSION admin (no :api_token) is its own principal class", ctx do
       %{conn: conn} = ctx
 
@@ -415,6 +423,8 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
       assert {:ok, _view, _html} = live(as(conn, owner), path)
     end
 
+    # Plugins-off: the studio_chat capability (the /studio/chat-hosts route)
+    @tag :requires_plugins
     test "ChatHostsLive denies anon + member-only, owner mounts", ctx do
       %{conn: conn, ws: ws, owner_raw: owner, member_raw: member} = ctx
       path = "/w/#{ws.slug}/p/default/studio/chat-hosts"
@@ -435,6 +445,8 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
     # `{ChatLive, :admin_studio}` is covered in the ADMIN tier above and rides a
     # global-permission gate; this pair rides the target-workspace gate. Both
     # rows are true of the same module, which is why the key is the pair.
+    # Plugins-off: the studio_chat capability (the /studio/chat routes and StudioChat.RuntimeSupervisor)
+    @tag :requires_plugins
     test "ChatLive scoped denies anon + member-only + a ws-bound-elsewhere admin, owner mounts",
          ctx do
       %{conn: conn, ws: ws, owner_raw: owner, member_raw: member} = ctx
@@ -543,10 +555,14 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
       assert {:ok, _view, _html} = live(anon(conn), "/finder")
     end
 
+    # Plugins-off: the quiz plugin (Barkpark.Quiz.RoomRegistry behind /quiz)
+    @tag :requires_plugins
     test "QuizHostLive mounts anonymously by PIN — public presenter", %{conn: conn} do
       assert {:ok, _view, _html} = live(anon(conn), "/quiz/host/9100001")
     end
 
+    # Plugins-off: the quiz plugin (Barkpark.Quiz.RoomRegistry behind /quiz)
+    @tag :requires_plugins
     test "QuizPlayLive mounts anonymously by PIN — public player", %{conn: conn} do
       assert {:ok, _view, _html} = live(anon(conn), "/quiz/play/9100002")
     end

@@ -15,6 +15,9 @@ defmodule BarkparkWeb.BulldocsLiveTasksEnablementTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  # Plugins-off: the tasks plugin (Tasks.PaperResolver renders task-list query blocks)
+  @moduletag :requires_plugins
+
   import Phoenix.LiveViewTest
 
   alias Barkpark.{Content, Tasks, Tenancy, TenancyFixtures}

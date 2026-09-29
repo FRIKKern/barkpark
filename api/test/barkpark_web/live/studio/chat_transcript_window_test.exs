@@ -96,6 +96,8 @@ defmodule BarkparkWeb.Studio.ChatTranscriptWindowTest do
   end
 
   describe "large-session reopen evidence (N=2000)" do
+    # Plugins-off: the studio_chat capability (StudioChat.RuntimeSupervisor / SessionRegistry and the /studio/chat routes)
+    @tag :requires_plugins
     test "the capped heap is smaller and the reopened LiveView remains interactive", %{conn: conn} do
       session = seed_large_session(@large_session_size)
 

@@ -122,8 +122,8 @@
    },
    {
     "path": "api/priv/static/assets/bp-paper-editor-shell.css",
-    "count": 144,
-    "note": "The Beta paper-editor rule run extracted byte-for-byte from root.html.heex; its type literals are that file's former residue, moved not minted, and sweep on the same schedule. Link preview adds one non-text viewport clamp (100vw minus 16px safe edge), not a type/reading measure; its font sizes and line heights consume the chrome ladder."
+    "count": 147,
+    "note": "The Beta paper-editor rule run extracted byte-for-byte from root.html.heex; its type literals are that file's former residue, moved not minted, and sweep on the same schedule. Link preview adds one non-text viewport clamp (100vw minus 16px safe edge), not a type/reading measure; its font sizes and line heights consume the chrome ladder. RAISED 144 -> 147 by task-b02fa9b19cbe1327: the canvas block-gutter rules (grip 14px, menu group 10px, menu glyph 11px) are mirrored byte-for-byte from paper-editor styles.css, moved not minted. /papers loads only this shell, so without them the handle rendered in flow and shifted the page; the --text-* chrome ladder is not emitted on the Bulldocs layout, so a var() here would resolve to nothing."
    },
    {
     "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",

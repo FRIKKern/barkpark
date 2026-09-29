@@ -15,6 +15,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperLinkedMastersTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  # Plugins-off: the bulldocs plugin (paper masters and linked instances)
+  @moduletag :requires_plugins
+
   import Phoenix.LiveViewTest
 
   alias Barkpark.Content

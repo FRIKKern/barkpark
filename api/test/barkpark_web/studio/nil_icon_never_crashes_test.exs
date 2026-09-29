@@ -253,6 +253,8 @@ defmodule BarkparkWeb.Studio.NilIconNeverCrashesTest do
   end
 
   describe "the emitters no longer produce nil" do
+    # Plugins-off: at least one registered plugin (the Plugins tier needs a plugin_group_node)
+    @tag :requires_plugins
     test "plugin_group_node emits a real, drawable icon — on a clean DB" do
       # `gating: :none` is RESOLUTION mode, the tree PaneBuilder falls back to
       # when a nav segment is absent from the gated display — which is exactly

@@ -74,7 +74,7 @@
 #   elixir scripts/pds-elixir-receipt-census.exs --citations # STDOUT: every evidence citation RESOLVED BY CONTENT, TSV: path, line, block fingerprint, marker
 #   elixir scripts/pds-elixir-receipt-census.exs --routed-rows # PROPOSE paste-ready @routed_excluded rows for every undisposed member; NEVER writes
 #   elixir scripts/pds-elixir-receipt-census.exs --emission-shapes # census the OUTSIDE population: every emission shape the `ok: true` lens does NOT see,
-#        over api/lib/barkpark_web/controllers/** — json/2 partitioned ok/error/BARE by an AST
+#        over the controller layer (barkpark_web/controllers/** + plugins/*/web/*_controller.ex) — json/2 partitioned ok/error/BARE by an AST
 #        read of the actual argument, plus put_status(2xx), send_resp(2xx), redirect/2, render
 #        and put_flash(:info). ADVISORY over the population (no count reds); reds only on its
 #        own integrity. Prints the ARRIVAL RULE, because a TOTAL over this population is unsound.
@@ -2827,15 +2827,15 @@ defmodule PDS.Census do
         why:
           "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 118018566 -> 21327746; head_hash 116314994 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
-    # barkpark_web/controllers/tickets_controller.ex:93
-    %{key: {"api/lib/barkpark_web/controllers/tickets_controller.ex",
+    # barkpark/plugins/tickets/web/tickets_controller.ex:93 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/tickets/web/tickets_controller.ex",
             "BarkparkWeb.TicketsController.index_own/2", "13011616", "113191402"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/tickets_controller.ex:169
-    %{key: {"api/lib/barkpark_web/controllers/tickets_controller.ex",
+    # barkpark/plugins/tickets/web/tickets_controller.ex:169 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/tickets/web/tickets_controller.ex",
             "BarkparkWeb.TicketsController.inbox/2", "102026838", "113191402"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/tickets_controller.ex:263
+    # barkpark/plugins/tickets/web/tickets_controller.ex:263 (lineref-ok: path re-pointed by the plugin move)
     #
     # THE FILING'S REASON FOR LEAVING THIS UNBOUGHT IS REFUTED BY THE TREE (PDS w36
     # crit 2). The wave-36 row deferred it as ~60-80 lines "in a different call
@@ -2846,7 +2846,7 @@ defmodule PDS.Census do
     # `operator_conn/2`, `file_ticket/3`, a registered ticket schema) was already
     # there. The differential cost ~50 lines in the file's own style, and the
     # exclusion never had to be named as a reason.
-    %{key: {"api/lib/barkpark_web/controllers/tickets_controller.ex",
+    %{key: {"api/lib/barkpark/plugins/tickets/web/tickets_controller.ex",
             "BarkparkWeb.TicketsController.render_ticket/3", "77961612", "114383917"},
       verdict: "PROVEN", basis: :end_to_end,
       evidence:
@@ -5528,7 +5528,20 @@ defmodule PDS.Census do
   # NO such gate; it PRINTS the arrival rule so whoever builds one cannot build a total by
   # accident. What it DOES red on is its own integrity: an empty corpus (exit 2), a file it
   # cannot parse, a partition that does not add up, or the fixture above (exit 1).
-  @emission_glob "api/lib/barkpark_web/controllers/**/*.ex"
+  #
+  # THE CONTROLLER LAYER, WHEREVER IT LIVES (task-4a1e72163d614a13). A plugin's controllers
+  # move into its own tree (api/lib/barkpark/plugins/<plugin>/web/), module names unchanged.
+  # A glob over barkpark_web/controllers/** alone would DROP each moved file from this
+  # population without a word, which reads as sites going missing. So the corpus is the
+  # host controllers dir PLUS every plugin-owned `*_controller.ex` / `*_html.ex` under a
+  # plugin's web/ dir — the same files, counted whichever tree holds them. LiveViews under
+  # plugins/*/web stay out: this is the controller population, not the web layer.
+  @emission_globs [
+    "api/lib/barkpark_web/controllers/**/*.ex",
+    "api/lib/barkpark/plugins/*/web/**/*_controller.ex",
+    "api/lib/barkpark/plugins/*/web/**/*_html.ex"
+  ]
+  @emission_glob Enum.join(@emission_globs, " + ")
 
   # THE PARSER FIXTURE. Four sites, four different shapes, and the FIRST one is the
   # nested-paren case the task names by hand: a body whose own parens close twice must
@@ -5557,7 +5570,7 @@ defmodule PDS.Census do
     emission_banner()
     emission_prove_parser!()
 
-    files = Path.wildcard(@emission_glob) |> Enum.sort()
+    files = @emission_globs |> Enum.flat_map(&Path.wildcard/1) |> Enum.uniq() |> Enum.sort()
 
     if files == [] do
       p("REFUSED: EMPTY EMISSION CORPUS — #{@emission_glob} matched no file under #{File.cwd!()}.")
@@ -14386,7 +14399,7 @@ defmodule PDS.Census do
       exit: 0,
       expect: [
         "CALLER-CREDIT AUDIT",
-        "barkpark_web/controllers/tickets_controller.ex:263",
+        "barkpark/plugins/tickets/web/tickets_controller.ex:263",
         "caller(s) reach a write: BarkparkWeb.TicketsController.",
         "AMBIGUOUS — no evidence here selects one of them"
       ],
@@ -14455,7 +14468,7 @@ defmodule PDS.Census do
     # ---------------------------------------------- the EMISSION-SHAPE arm (wave 38)
     #
     # THESE FOUR RUN OVER THE `:repo` CORPUS, NOT THE SYNTHETIC ONE, AND THEY HAVE TO.
-    # `--emission-shapes` censuses api/lib/barkpark_web/controllers/**, which the synthetic
+    # `--emission-shapes` censuses the controller layer (@emission_globs), which the synthetic
     # tree does not hold at all — over `:full` the arm would refuse an EMPTY CORPUS at exit 2
     # and every mutant below would "red" for a reason that has nothing to do with the mutation
     # (PDS-D541, the same reason ROSTER-VERDICT-FRESH runs against the repo).

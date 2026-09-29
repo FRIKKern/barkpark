@@ -19,6 +19,9 @@ defmodule BarkparkWeb.Studio.McpChipReplayCapTest do
 
   use Barkpark.DataCase, async: false
 
+  # Plugins-off: the studio_chat capability (StudioChat.RuntimeSupervisor / SessionRegistry and the /studio/chat routes)
+  @moduletag :requires_plugins
+
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
   alias BarkparkWeb.Studio.ChatToolRenderer

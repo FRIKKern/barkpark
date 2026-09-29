@@ -96,6 +96,8 @@ defmodule BarkparkWeb.Studio.PaperTaskPreviewSeamTest do
     refute view_html =~ ctx.title
   end
 
+  # Plugins-off: the tasks plugin (Tasks.PaperResolver renders task-list query blocks)
+  @tag :requires_plugins
   test "tasks enabled: the editor preview renders the query's rows (control)", ctx do
     assert PaperTaskSeam.resolver(ctx.ws.id) == Barkpark.Tasks.PaperResolver
 

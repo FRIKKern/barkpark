@@ -102,6 +102,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperMastersTest do
 
   defp blocks(slug), do: Content.paper_blocks(slug, @dataset)
 
+  # Plugins-off: the bulldocs plugin (paper masters and linked instances)
+  @tag :requires_plugins
   test "save a section as a master, then insert it from the picker as a detached copy",
        %{conn: conn, slug: slug, paper: paper} do
     view = open(conn, slug)
@@ -210,6 +212,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperMastersTest do
     assert [_only_the_seeded_one] = Masters.list_for_paper(paper)
   end
 
+  # Plugins-off: the bulldocs plugin (paper masters and linked instances)
+  @tag :requires_plugins
   test "a master from another workspace is neither listed nor insertable",
        %{conn: conn, slug: slug, paper: paper} do
     other_ws = Barkpark.TenancyFixtures.create_workspace!()
