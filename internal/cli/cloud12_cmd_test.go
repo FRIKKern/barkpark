@@ -1625,7 +1625,7 @@ func TestParseLaunchArgsProviderIsOpaque(t *testing.T) {
 // by end-of-args, must now fail with the flag-needs-a-value error instead of
 // silently swallowing the follower. This is the fails-before-fix case.
 func TestParseLoginArgsFlagShapedValueRejected(t *testing.T) {
-	valueFlags := []string{"--email", "--password", "--device-poll", "--url"}
+	valueFlags := []string{"--email", "--password", "--device-poll", "--url", "--team"}
 	followers := append([]string{""}, loginKnownFlags...) // "" stands for end-of-args
 	for _, vf := range valueFlags {
 		for _, follower := range followers {
@@ -1640,7 +1640,7 @@ func TestParseLoginArgsFlagShapedValueRejected(t *testing.T) {
 				name = vf + "_end_of_args"
 			}
 			t.Run(name, func(t *testing.T) {
-				_, _, _, _, _, _, err := parseLoginArgs(args)
+				_, err := parseLoginArgs(args)
 				if err == nil {
 					t.Fatalf("parseLoginArgs(%v) = nil error, want %q needs a value", args, vf)
 				}
@@ -1655,12 +1655,12 @@ func TestParseLoginArgsFlagShapedValueRejected(t *testing.T) {
 // TestParseLoginArgsLegitValueStillParses: the guard must not reject a value
 // that merely starts with "-" but isn't a flag this parser knows.
 func TestParseLoginArgsLegitValueStillParses(t *testing.T) {
-	email, password, _, _, _, _, err := parseLoginArgs([]string{"--email", "a@b.com", "--password", "-secret"})
+	la, err := parseLoginArgs([]string{"--email", "a@b.com", "--password", "-secret"})
 	if err != nil {
 		t.Fatalf("parseLoginArgs: %v", err)
 	}
-	if email != "a@b.com" || password != "-secret" {
-		t.Fatalf("parseLoginArgs = (%q,%q), want (a@b.com,-secret)", email, password)
+	if la.email != "a@b.com" || la.password != "-secret" {
+		t.Fatalf("parseLoginArgs = (%q,%q), want (a@b.com,-secret)", la.email, la.password)
 	}
 }
 

@@ -362,4 +362,36 @@ defmodule Barkpark.Audit.ExportTest do
              } = shape
     end
   end
+
+  # drafts.task-4605300be4869578: the tenant-blind list door is gone
+  # (list_active_sinks/0 had zero callers) and list_sinks/1 has a scoped arm.
+  describe "list_sinks/1 — tenant scoping" do
+    test "workspace_id: returns only that tenant's sinks; the bare call stays instance-wide" do
+      other = Ecto.UUID.generate()
+
+      {:ok, mine} =
+        Export.create_sink(%{name: "mine", url: "https://a.example/in", workspace_id: @ws})
+
+      {:ok, theirs} =
+        Export.create_sink(%{name: "theirs", url: "https://b.example/in", workspace_id: other})
+
+      scoped = Export.list_sinks(workspace_id: @ws) |> Enum.map(& &1.id)
+      assert mine.id in scoped
+      refute theirs.id in scoped
+
+      all = Export.list_sinks() |> Enum.map(& &1.id)
+      assert mine.id in all and theirs.id in all
+    end
+
+    test "a nil workspace_id matches nothing, never everything" do
+      {:ok, _} =
+        Export.create_sink(%{name: "any", url: "https://c.example/in", workspace_id: @ws})
+
+      assert Export.list_sinks(workspace_id: nil) == []
+    end
+
+    test "the dead instance-wide list_active_sinks/0 door is gone" do
+      refute function_exported?(Export, :list_active_sinks, 0)
+    end
+  end
 end

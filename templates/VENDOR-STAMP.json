@@ -18,10 +18,10 @@
       "source": "js/packages/react",
       "tarball": "barkpark-react.tgz",
       "version": "1.0.0-preview.1",
-      "source_digest": "sha256:9c5598621ee98efd50e9e1b4604fcf0f109fe26be306fd23239fd933bee35a4e",
-      "tarball_digest": "sha256:f04a504b361c1adab996e6861b471443e7483e2ac7f4d3d93b1ca9fdd1523547",
-      "cut_at": "2026-09-24",
-      "cut_from_commit": "f2528db1291aa40c05d41e8cabf7c44cb751a481"
+      "source_digest": "sha256:2ea646511e05c5d23a98f59b50f57d602f59557a02576df30d2b961f31ac52f2",
+      "tarball_digest": "sha256:3275688f8fed39018527e81337f4861e63592f48a6d1b82eae6931fadfa39b49",
+      "cut_at": "2026-09-29",
+      "cut_from_commit": "97ac74f50b5dac7a0fe1da94ea06945bc00e037b"
     }
   }
 }

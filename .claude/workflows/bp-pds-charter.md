@@ -2,7 +2,7 @@
 
 > NOTE ON THIS PATH: this filename is the rotating epic-cycle charter SLOT and has carried
 > earlier epics. The prior occupant — **Studio Space-Priority Desk** (decided 2026-07-19) — is
-> preserved verbatim at `.claude/workflows/bp-studio-space-priority-desk-charter.md`. Do NOT
+> preserved verbatim at `.claude/workflows/bp-studio-space-priority-charter.md`. Do NOT
 > read this file for studio-desk history. This slot is now the memory of the
 > **Personal Development Server (PDS)** epic.
 >

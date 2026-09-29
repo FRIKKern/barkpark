@@ -17,7 +17,7 @@ package cli
 //	                           primary-ip | placement-group | certificate | dns
 //	                           (the PR3 resources — hetzner_net_cmd.go,
 //	                           hetzner_lb_cmd.go, hetzner_dns_cmd.go)
-//	bp cloud hetzner server-types | locations | datacenters | images | isos |
+//	bp cloud hetzner server-types | locations | images | isos |
 //	                           pricing | lb-types (read-only discovery)
 //	bp cloud hetzner storage   bucket · object — the S3 data plane
 //	                           (PR4 — hetzner_storage_cmd.go, S3 credentials)
@@ -530,14 +530,12 @@ func hzServerRow(s *hcloud.Server) map[string]any {
 	return row
 }
 
-// hzServerLocation prefers the non-deprecated Location, falling back to the
-// datacenter's location for older payloads.
+// hzServerLocation names the server's location. hcloud-go v2.49 removed the
+// Server.Datacenter fallback (the API dropped the field on 2026-07-01), so
+// Location is the only source.
 func hzServerLocation(s *hcloud.Server) string {
 	if s.Location != nil {
 		return s.Location.Name
-	}
-	if s.Datacenter != nil && s.Datacenter.Location != nil {
-		return s.Datacenter.Location.Name
 	}
 	return ""
 }

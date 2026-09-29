@@ -15215,3 +15215,54 @@ and the prod population is unmeasured from this lane (D614(b)). D614(d) forbids 
 cancelled population; this rule does the complement — it keeps the population *out of* the alarm while counting
 it in the census, and it is correct at zero and at any non-zero value, so it does not rot when a preview site or
 a prebuilt-release site makes the population real.
+
+### D622 — 2026-09-29 — `deployments` STAYS UNBOUNDED, BY RULING, NOT BY OMISSION. THE CENSUS READS ANY PINNED WINDOW OVER THE WHOLE HISTORY, THE TABLE GROWS ~100 ROWS A DAY, AND A BOUND WOULD MAKE `--from` SILENTLY LIE. A REVISIT TRIGGER IS NAMED.
+
+Answers `dr-bl-deployments-table-grows-forever` (wave 4 found `deployments` covered by no retention arm and no
+reaper; `StaleDeploymentReaper` only transitions claim states). The ruling is the second arm that row allows: an
+explicit decision that unbounded is correct, with the growth rate measured.
+
+**THE MEASUREMENT (2026-09-29, lane-c-0929, read-only, operator census `GET /v1/operator/deploy-ledger/census`,
+fleet scope, all environments — `census/3`'s `scoped` has no environment predicate).** `completeness.audited` per
+pinned window:
+
+| window | rows |
+|---|---|
+| 2020-01-01 .. 2026-07-01 | 0 |
+| 2026-07-01 .. 2026-08-01 | 20,513 |
+| 2026-08-01 .. 2026-09-01 | 16,992 |
+| 2026-09-01 .. 2026-09-29 | 2,687 (~96/day) |
+| 2026-09-15 .. 2026-09-29 | 507 (~36/day) |
+| **all history, 2026-01-01 .. 2026-09-29** | **40,192** |
+
+July/August are the box-busy refusal storm (every 409 a row; D9 deferrals from 2026-08-05); September is the
+steady state. At the September rate the table adds ~35k rows a year — the whole table today is smaller than one
+month of the July storm, and it is not in the measured size leaders (`mutation_events` 1.53 GB and `revisions`
+1.33 GB, both on guerrilla's CONTENT db, a different box).
+
+**WHY UNBOUNDED IS CORRECT HERE, and not merely cheap.**
+
+1. **The census reads ANY pinned window (D3).** `census/3`, `delivery/3` and the `/v1/*/deploy-ledger/census`
+   routes take a caller-pinned `from..to` with no floor. A reaper deleting rows older than N days makes every
+   window with `from` older than the horizon report over a SHORTER population than it claims — the exact silent
+   shrink D3 forbids — and nothing in the envelope says so (`completeness` audits the same `scoped` query, so it
+   would balance on the truncated set).
+2. **The comparisons are history-shaped.** `ClassContinuity` (D265) compares a window to its immediately-prior
+   equal-length window; the vocabulary boundaries (#9615, #10248) and their `first_observed_row` twins are what make
+   a straddling window refusable. A bound moves the twins exactly the way the site-delete cascade already did
+   (`first_observed_row` slid +28m15s when site `search` was deleted — "never refuse on a number a DELETE can move").
+3. **The deletion that already exists is the site cascade, and it is scoped.** `deployments.site_id` is
+   `on_delete: :delete_all`; `Registry.delete_site/1` removes a deleted site's history. That is a tenancy
+   deletion, not retention, and this ruling does not change it.
+
+**WHAT WOULD REVERSE THIS (the revisit trigger).** Any of: (a) the all-history count passes **1,000,000 rows**;
+(b) a census fold (`group_by site_id, stage, status, failure_reason`) is measured slow enough to matter on the
+operator route; (c) the table appears in a measured top-five of the control-plane database by size. A bound that
+ships then MUST do both halves at once: prune, and make the census REFUSE (named reason, not a smaller number) any
+window whose `from` precedes the retention horizon — the D3 law in code, not in a comment.
+
+**THE GUARD.** `AgentRetentionWorker` — the file that owns every other append-only table's retention in cloud/ —
+names `deployments` as deliberately excluded, pointing here, and
+`cloud/test/barkpark_cloud/workers/agent_retention_worker_test.exs` pins *"deployments are NOT pruned — they are
+unbounded by ruling"*: a year-old `failed` row survives a full `perform/1`. A retention arm added there without
+revisiting this entry reds.

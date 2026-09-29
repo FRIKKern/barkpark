@@ -667,7 +667,7 @@ defmodule BarkparkCloud.Sites.Deploy do
   that cannot act on the outcome must at least SAY it did not happen.
   """
   @spec start_reported(Deployment.t()) ::
-          {:ok, :started | :live | :failed | :deferred} | {:error, term()}
+          {:ok, :started | :live | :failed | :deferred | :deferred_unrecorded} | {:error, term()}
   def start_reported(%Deployment{id: id}), do: starter().start(id)
 
   @doc """
@@ -677,13 +677,16 @@ defmodule BarkparkCloud.Sites.Deploy do
   the box's real reason — never an invented one).
 
   Returns `{:ok, :live}`, `{:ok, :failed}`, `{:ok, :deferred}` (the box was busy —
-  this row is settled and a rebuild has been re-queued), or `{:error, reason}`
+  this row is settled and a rebuild has been re-queued), `{:ok, :deferred_unrecorded}`
+  (the rebuild WAS re-queued but the fenced `deferred` write lost its CAS, so no
+  counted deferral row exists — see `defer/4`), or `{:error, reason}`
   when the row could not even be claimed (already claimed / gone). Never raises: a
   crash here would leave a claimed row, which the reaper sweeps — but an honest
   `failed` with the reason is strictly better, so every outbound error is mapped
   to one.
   """
-  @spec run(binary()) :: {:ok, :live | :failed | :deferred} | {:error, term()}
+  @spec run(binary()) ::
+          {:ok, :live | :failed | :deferred | :deferred_unrecorded} | {:error, term()}
   def run(deployment_id) when is_binary(deployment_id) do
     with %Deployment{} = deployment <- Registry.get_deployment(deployment_id),
          %Site{} = site <- Registry.get_site(deployment.site_id),
@@ -1721,7 +1724,7 @@ defmodule BarkparkCloud.Sites.Deploy do
 
     cond do
       Deployment.prebuilt?(deployment) ->
-        fail(ctx, reason <> " — re-run the upload once the in-flight deploy finishes")
+        fail(ctx, prebuilt_refusal_reason(reason))
 
       prior >= max_consecutive_deferrals(cause) - 1 ->
         # THE ABANDONMENT STAMPS ITS OWN COLUMNS (deploy-reliability W28, S6).
@@ -1876,23 +1879,52 @@ defmodule BarkparkCloud.Sites.Deploy do
             # The narration rides the SAME branch: the pre-existing info line
             # states "deferred … N in a row", which is a count read off the very
             # write that just lost — true only when the CAS held.
-            case deferral_write do
-              {:ok, _updated} ->
-                Logger.info(
-                  "site deploy deferred for site #{site.id} (#{prior + 1} in a row, #{cause}): rebuild re-queued"
-                )
+            #
+            # THE OUTCOME SAYS SO TOO (ccpca-bl-deploy-defer-cas-loss-counting).
+            # The fence refused the row, so no durable write can be fabricated
+            # here — but `{:ok, :deferred}` claimed a counted deferral that does
+            # not exist. The lost-CAS arm now answers `{:ok, :deferred_unrecorded}`
+            # and emits a `[:barkpark_cloud, :sites, :deploy, :deferral_unrecorded]`
+            # telemetry event carrying the depth/bound/cause the row never got, so
+            # the un-counted deferral is countable somewhere other than prose.
+            outcome =
+              case deferral_write do
+                {:ok, _updated} ->
+                  Logger.info(
+                    "site deploy deferred for site #{site.id} (#{prior + 1} in a row, #{cause}): rebuild re-queued"
+                  )
 
-              {:error, cas_error} ->
-                Logger.error(
-                  "site deploy deferral for deployment #{ctx.id} (site #{site.id}) " <>
-                    "could not be recorded (fenced write #{inspect(cas_error)}): the rebuild WAS re-queued, " <>
-                    "but the row never became deferred and deferral_depth / deferral_bound / deferral_cause " <>
-                    "were never written — this deferral is invisible to every deferral census and to the post-door rate"
-                )
-            end
+                  :deferred
+
+                {:error, cas_error} ->
+                  Logger.error(
+                    "site deploy deferral for deployment #{ctx.id} (site #{site.id}) " <>
+                      "could not be recorded (fenced write #{inspect(cas_error)}): the rebuild WAS re-queued, " <>
+                      "but the row never became deferred and deferral_depth / deferral_bound / deferral_cause " <>
+                      "were never written — this deferral is invisible to every deferral census and to the post-door rate"
+                  )
+
+                  safely(fn ->
+                    :telemetry.execute(
+                      [:barkpark_cloud, :sites, :deploy, :deferral_unrecorded],
+                      %{count: 1},
+                      %{
+                        deployment_id: ctx.id,
+                        site_id: site.id,
+                        deferral_depth: prior + 1,
+                        deferral_bound: bound,
+                        deferral_cause: cause,
+                        box_refusal_code: box_code,
+                        cas_error: cas_error
+                      }
+                    )
+                  end)
+
+                  :deferred_unrecorded
+              end
 
             BarkparkCloud.Events.broadcast(site.team_id, "deployments")
-            {:ok, :deferred}
+            {:ok, outcome}
 
           {:error, enqueue_error} ->
             # THE PROMISE COULD NOT BE MADE, so this is not a deferral — it is
@@ -1943,6 +1975,21 @@ defmodule BarkparkCloud.Sites.Deploy do
   def abandonment_reason(reason, rounds, cause) do
     reason <>
       " — and it has now refused #{rounds} rebuilds in a row for this site, #{terminal_verdict(cause)}"
+  end
+
+  @doc """
+  The terminal sentence of a PREBUILT deploy a busy box refused: the box's own
+  refusal plus the human action, because nothing on the fleet will retry it.
+
+  PUBLIC ON PURPOSE, for the same reason as `abandonment_reason/3`: the ledger
+  names this row `PREBUILT_REFUSED_409` (a lost publish) by reading this exact
+  clause at the END of the raw `failure_reason`, and `deploy_ledger_test.exs`
+  builds its fixture through this function, so a reword reds at edit time
+  instead of silently folding the row back into `BOX_BUSY_409`.
+  """
+  @spec prebuilt_refusal_reason(String.t()) :: String.t()
+  def prebuilt_refusal_reason(reason) when is_binary(reason) do
+    reason <> " — re-run the upload once the in-flight deploy finishes"
   end
 
   # The deferral's NAMED cause for the round BEING CREATED, from the same
@@ -3181,7 +3228,8 @@ defmodule BarkparkCloud.Sites.Deploy.Starter do
   outcome; `{:error, reason}` means nothing is building and nothing recorded it.
   """
   @callback start(binary()) ::
-              {:ok, :started | :live | :failed | :deferred} | {:error, term()}
+              {:ok, :started | :live | :failed | :deferred | :deferred_unrecorded}
+              | {:error, term()}
 end
 
 defmodule BarkparkCloud.Sites.Deploy.TaskStarter do

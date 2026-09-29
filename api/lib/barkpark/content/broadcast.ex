@@ -394,6 +394,29 @@ defmodule Barkpark.Content.Broadcast do
     e -> Logger.warning("audit emit crashed for #{doc.doc_id}: #{inspect(e)}")
   end
 
+  @doc """
+  Fan a document-shaped webhook out through the SAME seam `tap_broadcast/7`
+  uses (`maybe_dispatch_webhook/7`: the listener muzzle, transaction deferral,
+  then `Webhooks.Dispatcher.dispatch_async/7`), for a caller that must announce
+  a document WITHOUT writing it — `Tasks.PaperRefresh` announcing a paper whose
+  task query a task transition changed. `event_id` must be a real
+  `mutation_events.id` (the delivery dedup key); `opts` carries
+  `:workspace_id` / `:project_id` for webhook selection and sync-tags.
+  """
+  @spec dispatch_webhook(
+          String.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          map() | nil,
+          integer(),
+          keyword()
+        ) :: term()
+  def dispatch_webhook(dataset, action, type, doc_id, document, event_id, opts \\ [])
+      when is_integer(event_id) do
+    maybe_dispatch_webhook(dataset, action, type, doc_id, document, event_id, opts)
+  end
+
   # Defer if we're inside a transaction; broadcast immediately otherwise.
   defp maybe_broadcast(topic, msg) do
     if Repo.in_transaction?() do

@@ -406,6 +406,13 @@ describe("Discord slash commands — Ed25519 webhook + onSlashCommand funnel", (
       channelId: "chan-gw-456",
       guildId: "guild-gw-888",
       options: { data: [] },
+      // Fields every real discord.js ChatInputCommandInteraction carries and that
+      // @chat-adapter/discord >=4.41 reads while rebuilding the webhook-shaped
+      // payload (normalizeGatewayInteractionBase): appPermissions is a
+      // PermissionsBitField, entitlements a Collection (.map), locale a string.
+      appPermissions: { bitfield: 0n },
+      entitlements: [],
+      locale: "en-US",
       channel: { id: "chan-gw-456", type: 0 },
       user: {
         id: "user-gw-2",

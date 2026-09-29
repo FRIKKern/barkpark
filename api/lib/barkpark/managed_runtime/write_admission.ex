@@ -117,7 +117,16 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
   @impl true
   def handle_call(:status, _from, state) do
     view = Map.take(state.record, [:instance_id, :phase, :generation, :operation, :sequence])
-    {:reply, Map.merge(view, %{boot: state.boot, pending: length(state.record.pending)}), state}
+    live = Enum.count(state.writers, fn {pid, _} -> Process.alive?(pid) end)
+
+    {:reply,
+     Map.merge(view, %{
+       boot: state.boot,
+       pending: length(state.record.pending),
+       # Admitted writers whose owner process is alive: recovery is refused while any remain.
+       writers: live,
+       dead_writers: map_size(state.writers) - live
+     }), state}
   end
 
   def handle_call({:checkout, callers}, {owner, _}, state) do

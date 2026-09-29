@@ -76,13 +76,27 @@ defmodule Barkpark.Audit.Export do
     %ExportSink{} |> ExportSink.changeset(attrs) |> Repo.insert()
   end
 
-  @doc "List all sinks."
-  @spec list_sinks() :: [ExportSink.t()]
-  def list_sinks, do: Repo.all(from s in ExportSink, order_by: [asc: s.name])
+  @doc """
+  List sinks, name-ordered.
 
-  @doc "List active (non-disabled) sinks."
-  @spec list_active_sinks() :: [ExportSink.t()]
-  def list_active_sinks, do: Repo.all(from s in ExportSink, where: s.active == true)
+  TENANCY. `audit_export_sinks` carries `workspace_id`, and a sink's `url` +
+  `secret` are one tenant's SIEM credentials. The bare call is INSTANCE-WIDE on
+  purpose — its one caller is the internal flush loop below, which must see every
+  tenant's sinks. Any caller acting FOR a tenant (an HTTP door, a console) must
+  pass `workspace_id:` so it can never inherit that instance-wide read by
+  default; a nil or non-binary `workspace_id:` matches nothing rather than
+  everything.
+  """
+  @spec list_sinks(keyword()) :: [ExportSink.t()]
+  def list_sinks(opts \\ []) do
+    base = from(s in ExportSink, order_by: [asc: s.name])
+
+    case Keyword.fetch(opts, :workspace_id) do
+      :error -> Repo.all(base)
+      {:ok, ws} when is_binary(ws) -> Repo.all(from s in base, where: s.workspace_id == ^ws)
+      {:ok, _unscoped} -> []
+    end
+  end
 
   @doc """
   The sinks this tick should attempt: every active sink, PLUS every

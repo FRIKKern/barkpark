@@ -608,6 +608,10 @@ defmodule Barkpark.Content do
       when is_binary(mutation),
       do: Broadcast.broadcast_document_mutation(doc, mutation, opts)
 
+  @doc "See `Barkpark.Content.Broadcast.dispatch_webhook/7`."
+  defdelegate dispatch_webhook(dataset, action, type, doc_id, document, event_id, opts \\ []),
+    to: Broadcast
+
   # ── Search (extracted → Content.Search) ───────────────────────────────────
 
   @doc "Search documents by title using the QueryPipeline. Returns `{docs, count, meta}`."
