@@ -7742,6 +7742,11 @@ defmodule BarkparkCloud.Registry do
   THEN the incumbent is revoked, BY ID, in the OLD scope — never before the
   persist, so there is no instant at which the row names a dead credential.
 
+  A content-bound site that had NO content-publish secret (created without a
+  dataset) gets one minted in that same write, and its box webhook registered
+  best-effort after it — a rebind never leaves the site in the `:absent` mint gap
+  `publish_trigger/1` reports.
+
   Returns `{:ok, site, :ok | :error | :none}` (the third element is the
   incumbent's fate: confirmed dead / could not confirm / there was none), or
   `{:error, changeset}` with NOTHING changed and the old credential untouched.
@@ -7765,9 +7770,63 @@ defmodule BarkparkCloud.Registry do
       ])
       |> Map.put(:read_token_encrypted, encrypt_read_token(plaintext))
 
-    case site |> Site.content_binding_changeset(attrs) |> Repo.update() do
-      {:ok, rebound} -> {:ok, rebound, revoke_rebound_incumbent(site, incumbent)}
-      {:error, changeset} -> {:error, changeset}
+    fresh_secret = rebind_content_secret(site, attrs)
+
+    changeset =
+      case fresh_secret do
+        nil ->
+          Site.content_binding_changeset(site, attrs)
+
+        secret ->
+          site
+          |> Site.content_binding_changeset(attrs)
+          |> Ecto.Changeset.put_change(:content_webhook_secret_encrypted, Vault.encrypt(secret))
+      end
+
+    case Repo.update(changeset) do
+      {:ok, rebound} ->
+        revoked = revoke_rebound_incumbent(site, incumbent)
+        register_rebound_content_webhook(site, rebound, fresh_secret)
+        {:ok, rebound, revoked}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  # THE MINT GAP'S LAST PRODUCER (task-132be3a027100a1d). A content-bound site
+  # created WITHOUT a dataset mints nothing (`maybe_mint_content_secret/1` has
+  # nothing to bind), so when this rebind later binds one the site became
+  # content-bound with NO content-publish secret: its receiver 404s every
+  # delivery and the hourly reconciler can never repair it (it reveals, never
+  # mints). The rebind is the owner's explicit request to bind content, so it
+  # owes the trigger exactly as create does — minted in the SAME row write as the
+  # binding, through the one generator. NEVER rotates: a site that already has a
+  # secret keeps it (rotating would break the box row carrying the old one).
+  defp rebind_content_secret(%Site{} = site, attrs) do
+    dataset = Map.get(attrs, :bootstrap_dataset)
+
+    if site.kind in @content_bound_kinds and is_binary(dataset) and dataset != "" and
+         is_nil(site.content_webhook_secret_encrypted) do
+      new_content_secret()
+    end
+  end
+
+  # The box half, best-effort and never raising — the row is already committed.
+  # A fresh secret registers exactly as the operator mint does. An EXISTING
+  # secret whose dataset moved registers a row in the NEW dataset (webhooks are
+  # dataset-scoped on the box) instead of waiting up to an hour for the
+  # reconciler; both run in `:reconcile` mode, so a row that exists is left alone.
+  defp register_rebound_content_webhook(_before, %Site{} = rebound, secret)
+       when is_binary(secret),
+       do: register_minted_content_webhook(rebound, secret)
+
+  defp register_rebound_content_webhook(%Site{} = before, %Site{} = rebound, nil) do
+    if before.bootstrap_dataset != rebound.bootstrap_dataset and
+         publish_trigger(rebound) == :present do
+      reconcile_one_content_webhook(rebound)
+    else
+      :noop
     end
   end
 
