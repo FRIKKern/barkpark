@@ -105,7 +105,7 @@ func TestDeviceLoginFlowStoresToken(t *testing.T) {
 	w := newWriter(&stdout, &stderr)
 	w.output = "table" // isTTY stays false (buffer) → no browser/enter prompt
 
-	if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp on test"); err != nil {
+	if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp on test", ""); err != nil {
 		t.Fatalf("runDeviceLoginFlow: %v\nstderr:\n%s", err, stderr.String())
 	}
 	if ds.startHits.Load() != 1 {
@@ -156,7 +156,7 @@ func TestDeviceLoginFlowJSONEnvelopeCleanStdout(t *testing.T) {
 	w := newWriter(&stdout, &stderr)
 	w.output = "json"
 
-	if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp on test"); err != nil {
+	if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp on test", ""); err != nil {
 		t.Fatalf("runDeviceLoginFlow: %v", err)
 	}
 	var env map[string]any
@@ -209,7 +209,7 @@ func TestDeviceLoginSlowDownBacksOff(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
 	w.output = "table"
-	if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+	if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp", ""); err != nil {
 		t.Fatalf("runDeviceLoginFlow: %v", err)
 	}
 	if len(sleeps) < 2 {
@@ -248,7 +248,7 @@ func TestDeviceLoginDenialExitsAuth(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
 	w.output = "table"
-	err := runDeviceLoginFlow(w, cfg, srv.URL, "bp")
+	err := runDeviceLoginFlow(w, cfg, srv.URL, "bp", "")
 	if err == nil {
 		t.Fatal("denial must be an error")
 	}
@@ -281,7 +281,7 @@ func TestDeviceLoginTimeoutExitsAuth(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
 	w.output = "table"
-	err := runDeviceLoginFlow(w, cfg, srv.URL, "bp")
+	err := runDeviceLoginFlow(w, cfg, srv.URL, "bp", "")
 	if !asDeviceAuthError(err) {
 		t.Fatalf("timeout should be a deviceAuthError; got %T: %v", err, err)
 	}
@@ -328,7 +328,7 @@ func TestDeviceLoginSurvivesTransientPollError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
 	w.output = "table"
-	if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+	if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp", ""); err != nil {
 		t.Fatalf("a transient 500 must NOT abort the interactive flow: %v\nstderr:\n%s", err, stderr.String())
 	}
 	// The flow rode past the blip: poll 1 (pending), poll 2 (500, retried), poll 3
@@ -368,7 +368,7 @@ func TestDeviceLoginRefusalAbortsWithNoRetry(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
 	w.output = "table"
-	err := runDeviceLoginFlow(w, cfg, srv.URL, "bp")
+	err := runDeviceLoginFlow(w, cfg, srv.URL, "bp", "")
 	if !asDeviceAuthError(err) {
 		t.Fatalf("a refusal must be a terminal deviceAuthError; got %T: %v", err, err)
 	}
@@ -406,7 +406,7 @@ func TestDeviceLoginAllErrorsCannotSpinForever(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
 	w.output = "table"
-	err := runDeviceLoginFlow(w, cfg, srv.URL, "bp")
+	err := runDeviceLoginFlow(w, cfg, srv.URL, "bp", "")
 	if !asDeviceAuthError(err) {
 		t.Fatalf("an all-error server must terminate with the timeout deviceAuthError; got %T: %v", err, err)
 	}
@@ -448,7 +448,7 @@ func TestDeviceLoginPersistFailureAbortsHonestly(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
 	w.output = "table"
-	err := runDeviceLoginFlow(w, cfg, srv.URL, "bp")
+	err := runDeviceLoginFlow(w, cfg, srv.URL, "bp", "")
 	if err == nil {
 		t.Fatal("a failed SaveConfig after approval must surface an error")
 	}
@@ -511,7 +511,7 @@ func TestDeviceLoginReceiptNamesBoundAccount(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		w := newWriter(&stdout, &stderr)
 		w.output = "table"
-		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp", ""); err != nil {
 			t.Fatalf("runDeviceLoginFlow: %v\nstderr:\n%s", err, stderr.String())
 		}
 		// The minted bearer — and only it — rode the /v1/me identity probe.
@@ -537,7 +537,7 @@ func TestDeviceLoginReceiptNamesBoundAccount(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		w := newWriter(&stdout, &stderr)
 		w.output = "json"
-		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp", ""); err != nil {
 			t.Fatalf("runDeviceLoginFlow: %v", err)
 		}
 		var env map[string]any
@@ -565,7 +565,7 @@ func TestDeviceLoginReceiptNamesBoundAccount(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		w := newWriter(&stdout, &stderr)
 		w.output = "table"
-		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp", ""); err != nil {
 			t.Fatalf("teamless login must not fail: %v", err)
 		}
 		out := stdout.String()
@@ -593,7 +593,7 @@ func TestDeviceLoginReceiptDegradesOnMeFailure(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		w := newWriter(&stdout, &stderr)
 		w.output = "table"
-		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp", ""); err != nil {
 			t.Fatalf("a failed /v1/me must NOT fail the login: %v", err)
 		}
 		// The session still persisted — the login succeeded end to end.
@@ -618,7 +618,7 @@ func TestDeviceLoginReceiptDegradesOnMeFailure(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		w := newWriter(&stdout, &stderr)
 		w.output = "json"
-		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+		if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp", ""); err != nil {
 			t.Fatalf("runDeviceLoginFlow: %v", err)
 		}
 		var env map[string]any
@@ -666,7 +666,7 @@ func TestDeviceLoginReceiptNeverPrintsBearer(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			w := newWriter(&stdout, &stderr)
 			w.output = output
-			if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp"); err != nil {
+			if err := runDeviceLoginFlow(w, cfg, srv.URL, "bp", ""); err != nil {
 				t.Fatalf("runDeviceLoginFlow: %v", err)
 			}
 			// The bearer DID ride the identity probe…

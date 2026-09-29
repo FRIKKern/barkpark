@@ -2,6 +2,7 @@ package cloudclient
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -27,7 +28,7 @@ func TestDeviceStartDecodesPair(t *testing.T) {
 		}`)
 	})
 
-	ds, err := c.DeviceStart(context.Background(), "bp on laptop")
+	ds, err := c.DeviceStart(context.Background(), "bp on laptop", "")
 	if err != nil {
 		t.Fatalf("DeviceStart: %v", err)
 	}
@@ -58,11 +59,48 @@ func TestDeviceStartOmitsEmptyClientName(t *testing.T) {
 		gotBody = readJSON(t, r)
 		_, _ = io.WriteString(w, `{"device_code":"d","user_code":"AAAA-BBBB","verification_uri":"https://x/device","interval":5,"expires_in":600}`)
 	})
-	if _, err := c.DeviceStart(context.Background(), ""); err != nil {
+	if _, err := c.DeviceStart(context.Background(), "", ""); err != nil {
 		t.Fatalf("DeviceStart: %v", err)
 	}
 	if _, present := gotBody["client_name"]; present {
 		t.Fatalf("empty client_name must be omitted; got %v", gotBody)
+	}
+	if _, present := gotBody["team_id"]; present {
+		t.Fatalf("empty team_id must be omitted (an unbound login); got %v", gotBody)
+	}
+}
+
+// TestDeviceStartSendsTeamID: a non-empty teamID rides the body as team_id —
+// the binding the control plane honours (only a member of that team may approve).
+func TestDeviceStartSendsTeamID(t *testing.T) {
+	const team = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+	var gotBody map[string]any
+	c := newFake(t, "", func(w http.ResponseWriter, r *http.Request) {
+		gotBody = readJSON(t, r)
+		_, _ = io.WriteString(w, `{"device_code":"d","user_code":"AAAA-BBBB","verification_uri":"https://x/device","interval":5,"expires_in":600}`)
+	})
+	if _, err := c.DeviceStart(context.Background(), "bp", team); err != nil {
+		t.Fatalf("DeviceStart: %v", err)
+	}
+	if gotBody["team_id"] != team {
+		t.Fatalf("team_id = %v, want %s", gotBody["team_id"], team)
+	}
+}
+
+// TestDeviceStartInvalidTeamIsRefusal: a 422 invalid_team surfaces as a
+// *CloudRefusal carrying the code, so the CLI can name the bad --team value.
+func TestDeviceStartInvalidTeamIsRefusal(t *testing.T) {
+	c := newFake(t, "", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = io.WriteString(w, `{"error":"invalid_team"}`)
+	})
+	_, err := c.DeviceStart(context.Background(), "bp", "7c9e6679-7425-40de-944b-e07fc1f90ae7")
+	var ref *CloudRefusal
+	if !errors.As(err, &ref) {
+		t.Fatalf("want *CloudRefusal, got %T %v", err, err)
+	}
+	if ref.HTTPStatus != http.StatusUnprocessableEntity || ref.Code != "invalid_team" {
+		t.Fatalf("refusal = %d %q, want 422 invalid_team", ref.HTTPStatus, ref.Code)
 	}
 }
 
@@ -73,7 +111,7 @@ func TestDeviceStartSurfacesRateLimit(t *testing.T) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = io.WriteString(w, `{"error":"rate_limited"}`)
 	})
-	_, err := c.DeviceStart(context.Background(), "bp")
+	_, err := c.DeviceStart(context.Background(), "bp", "")
 	if err == nil {
 		t.Fatal("expected an error on 429")
 	}

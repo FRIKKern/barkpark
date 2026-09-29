@@ -992,13 +992,20 @@ type DevicePollResult struct {
 // DeviceStart opens a device-authorization session via POST /v1/auth/device/start
 // (charter decision 10). It is UNauthed — there is no token yet — mirroring
 // Login. clientName is a human label for the pending grant ("bp on <hostname>")
-// shown on the approve page; it is sent only when non-empty. A 200 decodes the
-// code pair + poll interval the caller renders and polls with; a non-2xx surfaces
-// the control plane's honest error verbatim (e.g. a 429 rate-limit).
-func (c *Client) DeviceStart(ctx context.Context, clientName string) (DeviceStartResp, error) {
+// shown on the approve page; it is sent only when non-empty. teamID (a team
+// UUID, sent only when non-empty) binds the login to that team: only a member
+// may approve it (an outsider's approve is refused 403 team_mismatch and the
+// grant stays pending), and the minted session answers with that team. A 200
+// decodes the code pair + poll interval the caller renders and polls with; a
+// non-2xx surfaces the control plane's honest error verbatim (e.g. a 429
+// rate-limit, or 422 invalid_team when teamID names no existing team).
+func (c *Client) DeviceStart(ctx context.Context, clientName, teamID string) (DeviceStartResp, error) {
 	req := map[string]string{}
 	if clientName != "" {
 		req["client_name"] = clientName
+	}
+	if teamID != "" {
+		req["team_id"] = teamID
 	}
 	status, body, err := c.do(ctx, "POST", "/v1/auth/device/start", false, req)
 	if err != nil {
