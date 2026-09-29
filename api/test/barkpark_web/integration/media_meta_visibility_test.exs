@@ -82,6 +82,8 @@ defmodule BarkparkWeb.Integration.MediaMetaVisibilityTest do
   end
 
   describe "GET /media/:id/meta — field-visibility gate" do
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "anonymous meta on a PRIVATE asset is refused (403), matching the bytes path",
          %{conn: conn} do
       created = upload_asset(conn)
@@ -104,6 +106,8 @@ defmodule BarkparkWeb.Integration.MediaMetaVisibilityTest do
       cleanup(created)
     end
 
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "positive control: authorized meta on a PRIVATE asset is still 200", %{conn: conn} do
       created = upload_asset(conn)
       id = created["result"]["id"]

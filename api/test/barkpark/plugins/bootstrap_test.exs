@@ -97,6 +97,8 @@ defmodule Barkpark.Plugins.BootstrapTest do
       assert book.fields != []
     end
 
+    # Plugins-off: the onixedit plugin (its book schema is what register_all_schemas installs)
+    @tag :requires_plugins
     test "is idempotent — second call does not duplicate the book row" do
       assert {:ok, n1} = Bootstrap.register_all_schemas()
       assert {:ok, n2} = Bootstrap.register_all_schemas()
@@ -206,6 +208,8 @@ defmodule Barkpark.Plugins.BootstrapTest do
       :ok
     end
 
+    # Plugins-off: the onixedit plugin (its book schema is what register_all_schemas installs)
+    @tag :requires_plugins
     test "returns book schema in the SDK envelope", %{conn: conn} do
       body =
         conn

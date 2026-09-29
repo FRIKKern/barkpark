@@ -263,6 +263,8 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
       cleanup(created)
     end
 
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "a PRIVATE asset's presigned URL signs the file arm's no-store policy", %{conn: conn} do
       created = upload!(conn)
       id = created["result"]["id"]

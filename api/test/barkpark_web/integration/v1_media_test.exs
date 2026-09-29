@@ -215,6 +215,8 @@ defmodule BarkparkWeb.Integration.V1MediaTest do
   end
 
   describe "PATCH /v1/media/:dataset/:id" do
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "patches mediaAsset metadata", %{conn: conn} do
       created =
         conn

@@ -40,6 +40,9 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+  @moduletag :requires_plugins
+
   import Barkpark.TenancyFixtures
 
   alias Barkpark.{Accounts, Auth, Content, Media, Tenancy}

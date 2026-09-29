@@ -68,6 +68,8 @@ defmodule BarkparkWeb.Integration.V1MediaUploadReceiptTest do
   end
 
   describe "POST /v1/media/:dataset/upload — metadata inline" do
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "altText, caption and tags land in ONE call", %{conn: conn} do
       body =
         conn
