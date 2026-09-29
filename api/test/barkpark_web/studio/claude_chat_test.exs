@@ -959,6 +959,48 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       assert_receive {:claude_chat_error, :buffer_overflow, _tail}, 100
     end
 
+    # ── both close sites END the child (task-aa975de15eff4e6b) ───────────────
+    #
+    # Closing the port closes the CLI's stdin and sends it NO signal. A CLI
+    # that ignores EOF (this stub: `exec sleep 30` never reads stdin and never
+    # writes, so it cannot die to SIGPIPE either) survived both close sites.
+    # They now go through `Barkpark.PortReaper.reap/1`; revert either one to a
+    # bare `Port.close/1` and its test reds while the port still reads closed.
+    defp eof_ignoring_port do
+      port =
+        Port.open({:spawn_executable, System.find_executable("bash")}, [
+          :binary,
+          args: ["-c", "exec sleep 30"]
+        ])
+
+      {:os_pid, os_pid} = Port.info(port, :os_pid)
+      on_exit(fn -> Barkpark.Test.OsProcess.kill(os_pid) end)
+      {port, os_pid}
+    end
+
+    test "terminate/2 ENDS the CLI's OS process, not just the port" do
+      {port, os_pid} = eof_ignoring_port()
+
+      assert :ok = ClaudeSession.terminate(:normal, %{port: port})
+
+      assert Barkpark.Test.OsProcess.gone_within?(os_pid),
+             "claude CLI #{os_pid} survived terminate/2"
+    end
+
+    test "the buffer-overflow close ENDS the CLI's OS process, not just the port" do
+      {port, os_pid} = eof_ignoring_port()
+      chunk = String.duplicate("x", ClaudeChat.max_buffer_bytes() + 1)
+      state = %{port: port, buffer: "", sink: self(), stderr_path: nil}
+
+      assert {:stop, :normal, %{port: nil}} =
+               ClaudeSession.handle_info({port, {:data, chunk}}, state)
+
+      assert_receive {:claude_chat_error, :buffer_overflow, _tail}, 100
+
+      assert Barkpark.Test.OsProcess.gone_within?(os_pid),
+             "claude CLI #{os_pid} survived the buffer-overflow close"
+    end
+
     # Bounded poll (10ms x rounds) for the capture file's creation.
     defp await_file(_path, 0), do: false
 

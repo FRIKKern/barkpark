@@ -44,6 +44,15 @@ if config_env() == :prod do
     config :barkpark_cloud, :audit_retention_days, String.to_integer(days)
   end
 
+  # The control plane's own EGRESS address(es) — comma-separated BARE IPs, the
+  # same value deploy.yml passes instance-deploy.sh as BARKPARK_CLOUD_EGRESS_IPS
+  # (the CP_HOST secret). Sent on every self-update trigger so a self-updating
+  # box backfills BARKPARK_TRUSTED_PROXIES too (task-b4b2bb60b63e28ea).
+  # Registry.self_update_body/0 validates it; unset, the trigger body stays {}.
+  if egress = System.get_env("BARKPARK_CLOUD_EGRESS_IPS") do
+    config :barkpark_cloud, :cloud_egress_ips, egress
+  end
+
   # Billing (cloud-5): in prod, route money through the real Stripe gateway. The
   # LIVE secret key + the per-plan price ids are HUMAN task cloud-17 — but the
   # control plane must not BOOT in prod without a key wired, so we raise here

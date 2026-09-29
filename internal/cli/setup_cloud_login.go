@@ -77,7 +77,7 @@ var cloudSetupDeviceLogin = func(out *writer) (*Config, error) {
 	// URL + code browser approve as bare `bp login`. runDeviceLoginFlow saves the
 	// config itself (0600) and prints its own success surface.
 	if deviceRequested(false, "", "") {
-		if derr := runDeviceLoginFlow(out, cfg, base, deviceClientName()); derr != nil {
+		if derr := runDeviceLoginFlow(out, cfg, base, deviceClientName(), ""); derr != nil {
 			return nil, derr
 		}
 		return cfg, nil

@@ -35,7 +35,7 @@ func TestDeviceLoginBrowserOpenFailureFallsBackToCopyLink(t *testing.T) {
 	w.isTTY = true // force the interactive Enter → open-browser path
 
 	var err error
-	withStdin(t, "\n", func() { err = runDeviceLoginFlow(w, cfg, srv.URL, "bp on test") })
+	withStdin(t, "\n", func() { err = runDeviceLoginFlow(w, cfg, srv.URL, "bp on test", "") })
 	if err != nil {
 		t.Fatalf("a browser-open failure must not fail the login: %v\nstderr:\n%s", err, stderr.String())
 	}

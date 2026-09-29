@@ -67,5 +67,15 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapterHTTPTest do
              )
   end
 
+  # task-455ede261044ef0b: a raise inside Req (here: a host-less URL, which Req
+  # rejects with ArgumentError) must come back as an error tuple. Under the old
+  # LINKED Task.async it arrived as an exit signal that killed this process
+  # before any assertion could run.
+  test "a raise inside the request is an error tuple and leaves the caller alive" do
+    assert {:error, :http_request_crashed} = BoundedHTTP.get("http://", [])
+    assert Process.alive?(self())
+    refute_received {:EXIT, _, _}
+  end
+
   defp url(bypass, path), do: "http://127.0.0.1:#{bypass.port}#{path}"
 end

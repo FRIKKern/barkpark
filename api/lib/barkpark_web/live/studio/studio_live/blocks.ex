@@ -55,14 +55,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
             else: validate_block_patch(block, source)
 
         case resolver do
-          {:ok, patch} -> {:ok, %{"op" => "patch-block", "id" => id, "patch" => patch}}
-          {:error, reason} -> {:error, {:source_validation, reason}}
+          {:ok, patch} ->
+            {:ok,
+             %{"op" => "patch-block", "id" => id, "patch" => drop_unauthored_blanks(patch, block)}}
+
+          {:error, reason} ->
+            {:error, {:source_validation, reason}}
         end
 
       nil ->
         {:error, :block_not_found}
     end
   end
+
+  # A block form submits EVERY control it renders, so a save of one field used to
+  # write the other controls' blank defaults as keys the author never set (video
+  # `loop: false`, field-number `min/max/step: nil` and `unit: ""`;
+  # task-56bafb69a8a1f250). A blank value for a key the stored block does not
+  # carry says nothing the absent key does not already say: drop it. A key the
+  # block already carries is kept, so clearing an authored value still lands.
+  @doc false
+  def drop_unauthored_blanks(patch, block) when is_map(patch) and is_map(block) do
+    Map.reject(patch, fn {key, value} ->
+      not Map.has_key?(block, key) and value in [nil, "", false, []]
+    end)
+  end
+
+  def drop_unauthored_blanks(patch, _block), do: patch
 
   defp exact_card_title_form?(source),
     do: MapSet.new(Map.keys(source)) == MapSet.new(["block_id", "card-title"])

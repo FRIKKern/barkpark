@@ -1610,6 +1610,13 @@ TRUNC_UNJUDGED=0
 # by name with the run it names, subtracted from the WRONG denominator, and put
 # through reason() so the run lands in rc 2 (SILENCE) and still pages.
 UNREADABLE_ALIBI=0
+# Rows that PROVE the run page itself was STALE (task-c784a708903323c1): each
+# names a run id ABOVE the page maximum, was written BEFORE the watermark, and
+# its run really exists (its job list answered). Run ids are allocated in
+# creation order, so a fresh page could not have left that run off. These go
+# through reason(), so the run lands in rc 2 COULD NOT READ, never rc 1 WRONG.
+STALE_PAGE_ROWS=0
+STALE_PAGE_TOP=0
 # Rows whose stated deliverer IS a real delivering run, but whose own
 # `first_seen_at` falls OUTSIDE that run's created..updated span — the shape a
 # self-reported id cannot rule out on its own
@@ -1786,6 +1793,35 @@ elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
           continue
         fi
       fi
+      # ── A STALE PAGE CANNOT MANUFACTURE A GHOST EITHER ──────────────────
+      # (task-c784a708903323c1.) The mirror of arm (ii): an id ABOVE the page
+      # maximum on a row written BEFORE the watermark. On a fresh page that is
+      # impossible — the run existed before we sampled the listing, and ids are
+      # allocated in creation order, so it would be on page 1. Live runs
+      # 36524401199/36524410886 read a page whose newest run was ~16h old
+      # (span 35964868969..36427949185) and accused 11 rows written by the day's
+      # later deploys; 50 minutes later a fresh page read them all green.
+      #
+      # The row's run id is self-reported, so being above the maximum is not on
+      # its own proof of anything — a genuinely orphaned row names a run that
+      # does not exist ((w3) in the harness). The discriminator is EXISTENCE,
+      # read directly: the run's own job list answers. A run that exists and is
+      # absent from a page that should hold it convicts the PAGE, not the row.
+      # A run whose job list does not answer falls through and is judged as
+      # before.
+      case "$run" in
+        ''|-|*[!0-9]*) ;;
+        *)
+          if [ "$MAX_RUN_ID" -gt 0 ] && [ "$run" -gt "$MAX_RUN_ID" ] && [ "$rowat" -gt 0 ] && [ "$rowat" -lt "$WATERMARK_FLOOR" ]; then
+            run_delivers_cached "$run"
+            if [ "$?" != "2" ]; then
+              STALE_PAGE_ROWS=$((STALE_PAGE_ROWS + 1))
+              [ "$run" -gt "$STALE_PAGE_TOP" ] && STALE_PAGE_TOP="$run"
+              reason "row $sha: its delivering run $run EXISTS (its job list answered) and is ABOVE the run page's maximum id $MAX_RUN_ID, yet the row was written before the watermark ${RUNLIST_ISO} — the deploy.yml run page was STALE (span ${MIN_RUN_ID}..${MAX_RUN_ID}), so this row can be neither alibied nor accused from it"
+              continue
+            fi
+          fi ;;
+      esac
       # ── A TRUNCATED PAGE CANNOT MANUFACTURE A GHOST ─────────────────────
       # The page is bounded at 100 runs. When it filled without reaching the
       # window start, a row naming a run id BELOW the page minimum names a run
@@ -2083,6 +2119,10 @@ if [ "$INFLIGHT_EXPIRED" -gt 0 ]; then
   done < "$WORK/inflight-expired.txt"
   say ""
 fi
+if [ "$STALE_PAGE_ROWS" -gt 0 ]; then
+  say "STALE-RUN-PAGE: ${STALE_PAGE_ROWS} crown row(s) name an EXISTING deploy.yml run above the page's maximum id ${MAX_RUN_ID} (newest named: ${STALE_PAGE_TOP}) and were written before the watermark ${RUNLIST_ISO}. Run ids are allocated in creation order, so the page (span ${MIN_RUN_ID}..${MAX_RUN_ID}) was STALE when the API served it. The run list could not be read as it was, so these rows are counted in neither direction, never counted clean, and this run exits 2 COULD NOT READ — not WRONG."
+  say ""
+fi
 if [ "$TRUNC_UNJUDGED" -gt 0 ]; then
   say "TRUNCATED-UNJUDGEABLE: ${TRUNC_UNJUDGED} crown row(s) name a delivering run older than the oldest run on the truncated page (minimum id ${MIN_RUN_ID}). A run that fell off a bounded page is not a ghost, so they are an UNREADABLE condition by name — counted in neither direction, never counted clean, and this run exits 2."
   say ""
@@ -2130,7 +2170,7 @@ fi
 # watermark excluded, and rows a truncated page made unjudgeable, are printed
 # above with their own counts — an exemption has to be a denominator a reader
 # can subtract, never a quieter one.
-JUDGED_ROWS=$((ROWS_EXAMINED - INFLIGHT_ROWS - TRUNC_UNJUDGED - UNREADABLE_ALIBI - ALIBI_INTERVAL_UNREADABLE))
+JUDGED_ROWS=$((ROWS_EXAMINED - INFLIGHT_ROWS - TRUNC_UNJUDGED - STALE_PAGE_ROWS - UNREADABLE_ALIBI - ALIBI_INTERVAL_UNREADABLE))
 [ "$JUDGED_ROWS" -lt 0 ] && JUDGED_ROWS=0
 if [ "$WRONG" -gt 0 ]; then
   say "WRONG: ${WRONG} of ${JUDGED_ROWS} crown row(s) examined ($(pct "$WRONG" "$JUDGED_ROWS")) were written by no delivering run:"
@@ -2165,7 +2205,7 @@ fi
 
 if [ "$BEHIND" -gt 0 ] || [ "$WRONG" -gt 0 ] || [ "$SERVING_RED" -gt 0 ] || [ "$GRACED_RED" -gt 0 ]; then
   say ""
-  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${JUDGED_ROWS} rows, serving-unrecorded=${SERVING_RED}, graced-unrecorded=${GRACED_RED}, predates-writer=${PREDATES}/${DELIVERING}, written-in-flight=${INFLIGHT_ROWS}/${ROWS_EXAMINED}, written-in-flight-expired=${INFLIGHT_EXPIRED}, truncated-unjudgeable=${TRUNC_UNJUDGED}, unreadable-alibi=${UNREADABLE_ALIBI}, alibi-window=${ALIBI_WINDOW_WRONG}, alibi-interval-unreadable=${ALIBI_INTERVAL_UNREADABLE}, reader=$(reader_answered), re-ask-list=${STATE_STATE}."
+  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${JUDGED_ROWS} rows, serving-unrecorded=${SERVING_RED}, graced-unrecorded=${GRACED_RED}, predates-writer=${PREDATES}/${DELIVERING}, written-in-flight=${INFLIGHT_ROWS}/${ROWS_EXAMINED}, written-in-flight-expired=${INFLIGHT_EXPIRED}, truncated-unjudgeable=${TRUNC_UNJUDGED}, stale-run-page=${STALE_PAGE_ROWS}, unreadable-alibi=${UNREADABLE_ALIBI}, alibi-window=${ALIBI_WINDOW_WRONG}, alibi-interval-unreadable=${ALIBI_INTERVAL_UNREADABLE}, reader=$(reader_answered), re-ask-list=${STATE_STATE}."
   exit 1
 fi
 

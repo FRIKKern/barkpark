@@ -620,6 +620,72 @@ defmodule BarkparkCloud.Registry do
     result
   end
 
+  @doc """
+  THE PROD-DUPLICATE HOSTNAME CENSUS (task-b51e13714022da8f) — the audit the
+  `add_domain_cross_site_uniqueness` migration deferred to and nobody wrote.
+
+  Every hostname that more than one OWNER serves, read straight off the owning
+  columns (`sites.domains`, `barkparks.url`, `barkparks.custom_host`) — never off
+  `hostname_claims`, because a pre-existing collision is exactly the host the
+  claim backfills SKIPPED, so the claims table holds only one side of it. Each
+  column is keyed through `hostname_claim_key/1`, the normaliser live claims use,
+  so the census and the claim doors agree on what "the same host" means.
+
+  An owner is `{kind, id}`: a box whose url and custom_host key to the same host
+  is ONE owner, not a duplicate. Returns rows sorted by host:
+
+      %{host:, cross_team: boolean, teams: [team_id],
+        holders: [%{kind: "site" | "barkpark", id:, slug:, team_id:, column:}]}
+
+  `cross_team: true` is the fact the reclaim decision turns on: a hostname two
+  TEAMS hold. READ-ONLY; it writes and repairs nothing. Run it with
+  `mix barkpark_cloud.duplicate_hostnames` (or, on a release,
+  `bin/barkpark_cloud eval "BarkparkCloud.Registry.duplicate_hostname_census() |> IO.inspect(limit: :infinity)"`).
+  """
+  @spec duplicate_hostname_census() :: [map()]
+  def duplicate_hostname_census do
+    site_holders =
+      from(s in Site, select: {s.id, s.slug, s.team_id, s.domains})
+      |> Repo.all()
+      |> Enum.flat_map(fn {id, slug, team_id, domains} ->
+        for host <- (domains || []) |> Enum.map(&hostname_claim_key/1) |> Enum.uniq(),
+            host != nil,
+            do: {host, %{kind: "site", id: id, slug: slug, team_id: team_id, column: "domains"}}
+      end)
+
+    box_holders =
+      from(b in Barkpark, select: {b.id, b.slug, b.team_id, b.url, b.custom_host})
+      |> Repo.all()
+      |> Enum.flat_map(fn {id, slug, team_id, url, custom_host} ->
+        for {column, value} <- [{"url", url}, {"custom_host", custom_host}],
+            host = hostname_claim_key(value),
+            host != nil,
+            do: {host, %{kind: "barkpark", id: id, slug: slug, team_id: team_id, column: column}}
+      end)
+
+    (site_holders ++ box_holders)
+    |> Enum.group_by(fn {host, _} -> host end, fn {_, holder} -> holder end)
+    |> Enum.flat_map(fn {host, holders} ->
+      holders = Enum.uniq_by(holders, &{&1.kind, &1.id})
+
+      if length(holders) > 1 do
+        teams = holders |> Enum.map(& &1.team_id) |> Enum.uniq()
+
+        [
+          %{
+            host: host,
+            cross_team: length(teams) > 1,
+            teams: teams,
+            holders: Enum.sort_by(holders, &{&1.kind, &1.id})
+          }
+        ]
+      else
+        []
+      end
+    end)
+    |> Enum.sort_by(& &1.host)
+  end
+
   # The `"url"` claims on `host` held by OTHER barkparks whose row STILL shows
   # that url host, read BEFORE the pre-check. If the pre-check then answers
   # "free", it walked every such row and judged it abandoned, so these holders
@@ -3038,6 +3104,28 @@ defmodule BarkparkCloud.Registry do
   row the other path already moved (the guard matches zero rows). Returns
   `%{reaped: n, failed: m}`; an empty sweep returns `%{reaped: 0, failed: 0}` and
   never raises.
+
+  `pending` HAS NO AGE-BASED TIMEOUT, BY DECISION (ccpca-bl-pending-provision-no-
+  timeout, 2026-09-29). This sweep reads `claimed` rows only, so a `pending` job
+  whose kind has no running worker waits for one indefinitely. That is chosen,
+  not missed:
+
+    * A pending job with no claimant means the provisioner is DOWN. That is an
+      infrastructure outage, and the job keeps a live claim path: the moment a
+      worker returns it is claimed and runs. A timeout would turn every job queued
+      during an outage into a terminal `failed` the owner must re-create by hand,
+      i.e. it converts a recoverable delay into user-visible failures in bulk.
+    * The sweep covers EVERY kind. A timed-out `deprovision` would leave a billed
+      server running with nothing left to tear it down, which is strictly worse
+      than a teardown that runs late.
+    * The claimed-state edges above already bound every job a worker actually
+      touched (`max_provision_attempts/0`), so "pending forever" is reachable only
+      while no worker of that kind exists at all.
+
+  Revisit if the provisioner gains a legitimately-absent kind (a kind with no
+  worker by design): that kind would need its own terminal edge, scoped to it.
+  The pin: `stale_provision_job_reaper_test.exs` "a pending job days old is NOT
+  failed or touched by the sweep".
   """
   @spec reap_stale_provision_jobs() :: %{reaped: non_neg_integer(), failed: non_neg_integer()}
   def reap_stale_provision_jobs do
@@ -5465,7 +5553,40 @@ defmodule BarkparkCloud.Registry do
 
   def trigger_self_update(bp, _opts), do: do_trigger_self_update(bp)
 
-  defp do_trigger_self_update(bp), do: relay_admin_post(bp, "/v1/admin/self-update")
+  defp do_trigger_self_update(bp),
+    do: relay_admin_post(bp, "/v1/admin/self-update", self_update_body())
+
+  @doc """
+  The body of every self-update trigger (task-b4b2bb60b63e28ea): the control
+  plane's own egress address(es) as `cloud_egress_ips`, so a box that
+  self-updates backfills `BARKPARK_TRUSTED_PROXIES` exactly as a CD deploy does
+  (deploy.yml passes `BARKPARK_CLOUD_EGRESS_IPS='<CP_HOST>'` to
+  instance-deploy.sh; the self-update path had nothing to pass).
+
+  Read from `config :barkpark_cloud, :cloud_egress_ips` (runtime env
+  `BARKPARK_CLOUD_EGRESS_IPS` — the same name and value the provisioner env
+  already carries). Sent ONLY when every entry is a bare IP: a CIDR, a hostname
+  or a malformed entry sends nothing (`%{}`, the pre-change body), never a value
+  the box's runtime.exs would refuse at boot. The box validates again.
+  """
+  @spec self_update_body() :: map()
+  def self_update_body do
+    raw = Application.get_env(:barkpark_cloud, :cloud_egress_ips)
+
+    entries =
+      if is_binary(raw),
+        do: raw |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")),
+        else: []
+
+    if entries != [] and Enum.all?(entries, &bare_ip_address?/1),
+      do: %{"cloud_egress_ips" => Enum.join(entries, ",")},
+      else: %{}
+  end
+
+  defp bare_ip_address?(entry) do
+    not String.contains?(entry, "/") and
+      match?({:ok, _}, :inet.parse_strict_address(String.to_charlist(entry)))
+  end
 
   @doc """
   Trigger a blue/green ROLLBACK run on a live instance: `POST
@@ -7742,6 +7863,11 @@ defmodule BarkparkCloud.Registry do
   THEN the incumbent is revoked, BY ID, in the OLD scope — never before the
   persist, so there is no instant at which the row names a dead credential.
 
+  A content-bound site that had NO content-publish secret (created without a
+  dataset) gets one minted in that same write, and its box webhook registered
+  best-effort after it — a rebind never leaves the site in the `:absent` mint gap
+  `publish_trigger/1` reports.
+
   Returns `{:ok, site, :ok | :error | :none}` (the third element is the
   incumbent's fate: confirmed dead / could not confirm / there was none), or
   `{:error, changeset}` with NOTHING changed and the old credential untouched.
@@ -7765,9 +7891,63 @@ defmodule BarkparkCloud.Registry do
       ])
       |> Map.put(:read_token_encrypted, encrypt_read_token(plaintext))
 
-    case site |> Site.content_binding_changeset(attrs) |> Repo.update() do
-      {:ok, rebound} -> {:ok, rebound, revoke_rebound_incumbent(site, incumbent)}
-      {:error, changeset} -> {:error, changeset}
+    fresh_secret = rebind_content_secret(site, attrs)
+
+    changeset =
+      case fresh_secret do
+        nil ->
+          Site.content_binding_changeset(site, attrs)
+
+        secret ->
+          site
+          |> Site.content_binding_changeset(attrs)
+          |> Ecto.Changeset.put_change(:content_webhook_secret_encrypted, Vault.encrypt(secret))
+      end
+
+    case Repo.update(changeset) do
+      {:ok, rebound} ->
+        revoked = revoke_rebound_incumbent(site, incumbent)
+        register_rebound_content_webhook(site, rebound, fresh_secret)
+        {:ok, rebound, revoked}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  # THE MINT GAP'S LAST PRODUCER (task-132be3a027100a1d). A content-bound site
+  # created WITHOUT a dataset mints nothing (`maybe_mint_content_secret/1` has
+  # nothing to bind), so when this rebind later binds one the site became
+  # content-bound with NO content-publish secret: its receiver 404s every
+  # delivery and the hourly reconciler can never repair it (it reveals, never
+  # mints). The rebind is the owner's explicit request to bind content, so it
+  # owes the trigger exactly as create does — minted in the SAME row write as the
+  # binding, through the one generator. NEVER rotates: a site that already has a
+  # secret keeps it (rotating would break the box row carrying the old one).
+  defp rebind_content_secret(%Site{} = site, attrs) do
+    dataset = Map.get(attrs, :bootstrap_dataset)
+
+    if site.kind in @content_bound_kinds and is_binary(dataset) and dataset != "" and
+         is_nil(site.content_webhook_secret_encrypted) do
+      new_content_secret()
+    end
+  end
+
+  # The box half, best-effort and never raising — the row is already committed.
+  # A fresh secret registers exactly as the operator mint does. An EXISTING
+  # secret whose dataset moved registers a row in the NEW dataset (webhooks are
+  # dataset-scoped on the box) instead of waiting up to an hour for the
+  # reconciler; both run in `:reconcile` mode, so a row that exists is left alone.
+  defp register_rebound_content_webhook(_before, %Site{} = rebound, secret)
+       when is_binary(secret),
+       do: register_minted_content_webhook(rebound, secret)
+
+  defp register_rebound_content_webhook(%Site{} = before, %Site{} = rebound, nil) do
+    if before.bootstrap_dataset != rebound.bootstrap_dataset and
+         publish_trigger(rebound) == :present do
+      reconcile_one_content_webhook(rebound)
+    else
+      :noop
     end
   end
 
@@ -8014,6 +8194,49 @@ defmodule BarkparkCloud.Registry do
       cf_cert_path: site.cf_cert_path,
       cf_key_path: site.cf_key_path
     }
+  end
+
+  @doc """
+  THE TEAM-DRIFT CENSUS (task-69d84bc7f15c88d6): every site whose `team_id`
+  differs from its box's `team_id`.
+
+  `sites.team_id` is create-time-only (see `BarkparkCloud.Registry.Site`), so a
+  box moved between teams out of band leaves its sites on the old team and every
+  team-scoped site reader follows the stale column. No in-tree path moves a box,
+  so a correct fleet reads `[]`; a non-empty answer names each drifted site with
+  both team ids so an operator can re-stamp it.
+
+  Read-only. `site_ids:` narrows to those sites (tests scope to their fixtures).
+  """
+  @spec site_team_drift(keyword()) :: [
+          %{
+            site_id: binary(),
+            slug: String.t(),
+            site_team_id: binary(),
+            barkpark_id: binary(),
+            barkpark_team_id: binary()
+          }
+        ]
+  def site_team_drift(opts \\ []) do
+    base =
+      from(s in Site,
+        join: b in Barkpark,
+        on: b.id == s.barkpark_id,
+        where: s.team_id != b.team_id,
+        order_by: [asc: s.inserted_at, asc: s.id],
+        select: %{
+          site_id: s.id,
+          slug: s.slug,
+          site_team_id: s.team_id,
+          barkpark_id: b.id,
+          barkpark_team_id: b.team_id
+        }
+      )
+
+    case Keyword.get(opts, :site_ids) do
+      ids when is_list(ids) -> base |> where([s], s.id in ^ids) |> Repo.all()
+      _ -> Repo.all(base)
+    end
   end
 
   @doc "List a Team's sites across all of its barkparks, newest first."

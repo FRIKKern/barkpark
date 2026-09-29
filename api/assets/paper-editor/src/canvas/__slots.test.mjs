@@ -130,10 +130,15 @@ check("editing a slot-form callout body → one patch-block preserving tone+titl
 
   const p = patches[0].patch;
   assert.deepEqual(p.content, [{ type: "text", value: "edited" }], "new body inline in patch");
-  assert.equal(p.tone, "warning", "tone preserved");
-  assert.equal(p.title, "Heads up", "title preserved");
-  assert.equal(p.collapsible, true, "collapsible preserved");
-  assert.equal(p.collapsed, true, "collapsed preserved");
+  // A body edit patches only the body; patch-block is a shallow merge, so the
+  // stored chrome survives untouched (task-56bafb69a8a1f250).
+  assert.deepEqual(Object.keys(p), ["content"], "only the body rides the patch");
+  const stored = server.find((b) => b.id === "c-1");
+  const merged = { ...stored, ...p };
+  assert.equal(merged.tone, "warning", "tone preserved");
+  assert.equal(merged.title, "Heads up", "title preserved");
+  assert.equal(merged.collapsible, true, "collapsible preserved");
+  assert.equal(merged.collapsed, true, "collapsed preserved");
 });
 
 // ── (d) EMPTY-BODY FIDELITY — content:[] and an empty slot both omit node.content

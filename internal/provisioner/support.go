@@ -1229,24 +1229,37 @@ func supportParseMint(body []byte) (token, tokenID string) {
 	if err := json.Unmarshal(body, &m); err != nil {
 		return "", ""
 	}
-	layers := []map[string]any{m}
+	type layer struct {
+		wrapper string
+		m       map[string]any
+	}
+	layers := []layer{{"", m}}
 	for _, wrapper := range []string{"support_token", "token", "doc", "data"} {
 		if sub, ok := m[wrapper].(map[string]any); ok {
-			layers = append(layers, sub)
+			layers = append(layers, layer{wrapper, sub})
 		}
 	}
-	for _, layer := range layers {
+	for _, l := range layers {
 		if token == "" {
 			for _, k := range []string{"token", "secret", "value", "bearer"} {
-				if s, ok := layer[k].(string); ok && strings.TrimSpace(s) != "" {
+				if s, ok := l.m[k].(string); ok && strings.TrimSpace(s) != "" {
 					token = s
 					break
 				}
 			}
 		}
 		if tokenID == "" {
-			for _, k := range []string{"token_id", "id"} {
-				if s, ok := layer[k].(string); ok && strings.TrimSpace(s) != "" {
+			// A bare "id" is accepted ONLY inside a support_token-shaped wrapper
+			// (pdf-w1-tokenid-orphan-reconcile). Anywhere else it may be an
+			// unrelated id (a request id, a doc id) and would satisfy the blank-id
+			// guard with the WRONG id, i.e. a fleet_token_id that revokes nothing.
+			// "token_id" names the token everywhere and is accepted in every layer.
+			idKeys := []string{"token_id"}
+			if l.wrapper == "support_token" {
+				idKeys = append(idKeys, "id")
+			}
+			for _, k := range idKeys {
+				if s, ok := l.m[k].(string); ok && strings.TrimSpace(s) != "" {
 					tokenID = s
 					break
 				}

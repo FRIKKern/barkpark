@@ -193,6 +193,51 @@ defmodule BarkparkCloud.Web.RouterSiteRebindTest do
       refute is_nil(row.content_binding_checked_at)
     end
 
+    test "a site created WITHOUT a dataset gets its content-publish secret minted and its box webhook registered on rebind" do
+      # task-132be3a027100a1d: the rebind was the last door that produced a
+      # content-bound site with a bound dataset and NO secret — a site whose
+      # receiver 404s every publish and that the hourly reconciler can never
+      # repair (it reveals secrets, it never mints them).
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      n = System.unique_integer([:positive])
+
+      {:ok, site} =
+        Registry.create_site(bp, %{
+          name: "Bare #{n}",
+          slug: "bare-#{n}",
+          kind: "static",
+          framework: "astro"
+        })
+
+      assert Registry.publish_trigger(site) == :not_applicable
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_NEW"})}},
+        "/w/acme/p/blog/v1/data/query/production/post" =>
+          {:ok, %{status: 200, body: ~s({"result":{"count":1,"total":2,"documents":[{}]}})}},
+        # The box holds no webhook in the new dataset yet; the same path answers
+        # the registering POST.
+        "/v1/webhooks/production" => {:ok, %{status: 200, body: ~s({"webhooks":[]})}}
+      })
+
+      conn =
+        call(
+          :patch,
+          "/v1/sites/#{site.id}",
+          %{workspace: "acme", project: "blog", dataset: "production"},
+          login_token(user)
+        )
+
+      assert conn.status == 200
+      row = Registry.get_site(site.id)
+      assert row.bootstrap_dataset == "production"
+      refute is_nil(row.content_webhook_secret_encrypted)
+      assert Registry.publish_trigger(row) == :present
+      assert requested?(:post, "/v1/webhooks/production")
+    end
+
     test "a dataset-only rebind revokes the INCUMBENT id, not the same-label replacement" do
       # THE HAZARD: workspace/project are unchanged, so both the incumbent and the
       # replacement carry `site-read-<slug>` in ONE scope for the width of the

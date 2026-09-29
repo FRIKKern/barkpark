@@ -316,4 +316,33 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorkerTest do
     assert {:ok, %{events_deleted: 0, tokens_deleted: 0, samples_deleted: 0}} =
              perform_job(AgentRetentionWorker, %{})
   end
+
+  ## 7. `deployments` is NOT a retention table — unbounded BY RULING (charter D622).
+
+  test "deployments are NOT pruned — they are unbounded by ruling, so the census can read any pinned window" do
+    team = team_fixture()
+    bp = barkpark_fixture(team)
+    n = System.unique_integer([:positive])
+    {:ok, site} = Registry.create_site(bp, %{name: "S #{n}", slug: "s-#{n}"})
+
+    # A year old — older than every retention window this worker owns (14 / 30 /
+    # 180 days). Inserted as a STRUCT because `Deployment.changeset/2` does not
+    # cast `status` (the DeployLedgerTest idiom).
+    old = days_ago(365)
+
+    row =
+      Repo.insert!(%BarkparkCloud.Registry.Deployment{
+        site_id: site.id,
+        status: "failed",
+        environment: "production",
+        failure_reason: "the build did not finish in time",
+        inserted_at: old,
+        updated_at: old
+      })
+
+    assert {:ok, summary} = perform_job(AgentRetentionWorker, %{})
+    # The worker reports no deployments arm at all, and the row survives.
+    refute Enum.any?(Map.keys(summary), &(&1 |> Atom.to_string() |> String.contains?("deploy")))
+    assert Repo.get(BarkparkCloud.Registry.Deployment, row.id)
+  end
 end
