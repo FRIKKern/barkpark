@@ -1529,6 +1529,13 @@ textarea.bp-canvas-island__input { resize: vertical; }
   position: relative; inset: auto; width: 100%; max-width: none;
 }
 .bp-paper-notes-config > .bp-paper-contextual-panel { max-height: none; overflow: visible; }
+/* Every other editable fleet kind (tasks, task-board, pipeline, charts, duel, …)
+   rides the same out-of-flow disclosure: hover never moves a block below it. */
+.bp-paper-contextual-controls.bp-paper-fleet-config { top: auto; bottom: 100%; }
+.bp-paper-contextual-controls.bp-paper-fleet-config[open] {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-paper-fleet-config > .bp-paper-contextual-panel { max-height: none; overflow: visible; }
 /* PM list items require a paragraph; reader items carry inline text. */
 .bp-paper-editor-body li > p { margin: 0; }
 /* No authored article palette: retain the browser's legacy paragraph rhythm. */
