@@ -208,9 +208,14 @@ export class BlockHandle {
     const r = dom.getBoundingClientRect();
     const h = this._host.getBoundingClientRect();
     const line = Math.min(parseFloat(getComputedStyle(dom).lineHeight) || 24, r.height);
+    // The gutter sits LEFT of the block's text, never over it: a handle clamped onto
+    // the text start would take the click aimed at a block's first word. Where no
+    // gutter exists (the block starts within 52px of the viewport edge — a phone),
+    // there is no handle; the slash menu and the keyboard still add blocks.
+    if (r.left - 52 < 0) { this.hide(); return; }
     this._el.style.display = "flex";
     this._el.style.top = `${r.top - h.top + this._host.scrollTop + Math.max(0, (line - 22) / 2)}px`;
-    this._el.style.left = `${Math.max(0, r.left - h.left - 52)}px`;
+    this._el.style.left = `${r.left - h.left - 52}px`;
   }
 
   _add() {
