@@ -620,6 +620,72 @@ defmodule BarkparkCloud.Registry do
     result
   end
 
+  @doc """
+  THE PROD-DUPLICATE HOSTNAME CENSUS (task-b51e13714022da8f) — the audit the
+  `add_domain_cross_site_uniqueness` migration deferred to and nobody wrote.
+
+  Every hostname that more than one OWNER serves, read straight off the owning
+  columns (`sites.domains`, `barkparks.url`, `barkparks.custom_host`) — never off
+  `hostname_claims`, because a pre-existing collision is exactly the host the
+  claim backfills SKIPPED, so the claims table holds only one side of it. Each
+  column is keyed through `hostname_claim_key/1`, the normaliser live claims use,
+  so the census and the claim doors agree on what "the same host" means.
+
+  An owner is `{kind, id}`: a box whose url and custom_host key to the same host
+  is ONE owner, not a duplicate. Returns rows sorted by host:
+
+      %{host:, cross_team: boolean, teams: [team_id],
+        holders: [%{kind: "site" | "barkpark", id:, slug:, team_id:, column:}]}
+
+  `cross_team: true` is the fact the reclaim decision turns on: a hostname two
+  TEAMS hold. READ-ONLY; it writes and repairs nothing. Run it with
+  `mix barkpark_cloud.duplicate_hostnames` (or, on a release,
+  `bin/barkpark_cloud eval "BarkparkCloud.Registry.duplicate_hostname_census() |> IO.inspect(limit: :infinity)"`).
+  """
+  @spec duplicate_hostname_census() :: [map()]
+  def duplicate_hostname_census do
+    site_holders =
+      from(s in Site, select: {s.id, s.slug, s.team_id, s.domains})
+      |> Repo.all()
+      |> Enum.flat_map(fn {id, slug, team_id, domains} ->
+        for host <- (domains || []) |> Enum.map(&hostname_claim_key/1) |> Enum.uniq(),
+            host != nil,
+            do: {host, %{kind: "site", id: id, slug: slug, team_id: team_id, column: "domains"}}
+      end)
+
+    box_holders =
+      from(b in Barkpark, select: {b.id, b.slug, b.team_id, b.url, b.custom_host})
+      |> Repo.all()
+      |> Enum.flat_map(fn {id, slug, team_id, url, custom_host} ->
+        for {column, value} <- [{"url", url}, {"custom_host", custom_host}],
+            host = hostname_claim_key(value),
+            host != nil,
+            do: {host, %{kind: "barkpark", id: id, slug: slug, team_id: team_id, column: column}}
+      end)
+
+    (site_holders ++ box_holders)
+    |> Enum.group_by(fn {host, _} -> host end, fn {_, holder} -> holder end)
+    |> Enum.flat_map(fn {host, holders} ->
+      holders = Enum.uniq_by(holders, &{&1.kind, &1.id})
+
+      if length(holders) > 1 do
+        teams = holders |> Enum.map(& &1.team_id) |> Enum.uniq()
+
+        [
+          %{
+            host: host,
+            cross_team: length(teams) > 1,
+            teams: teams,
+            holders: Enum.sort_by(holders, &{&1.kind, &1.id})
+          }
+        ]
+      else
+        []
+      end
+    end)
+    |> Enum.sort_by(& &1.host)
+  end
+
   # The `"url"` claims on `host` held by OTHER barkparks whose row STILL shows
   # that url host, read BEFORE the pre-check. If the pre-check then answers
   # "free", it walked every such row and judged it abandoned, so these holders
