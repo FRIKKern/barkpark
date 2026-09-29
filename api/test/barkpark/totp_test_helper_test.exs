@@ -8,7 +8,14 @@ defmodule Barkpark.TotpTestHelperTest do
   sleep and the flake went away" is the failure mode one step down from the one
   being fixed here.
   """
-  use ExUnit.Case, async: true
+  # async: false because the able-to-fail test below plants
+  # test/support/__ratchet_probe_*.exs and deletes it again. Other async tree
+  # scanners (on_exit_ref_collision, pds_write_verb_seam,
+  # rate_limit_test_conn_scope) can wildcard the probe and then fail to
+  # File.read! it after it is gone. That race hit 3 tests in
+  # core-without-owned-tables run 36639129842. Sync modules run only after
+  # every async module has finished, so none of those scanners can overlap it.
+  use ExUnit.Case, async: false
 
   import Barkpark.TotpTestHelper
 
