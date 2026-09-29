@@ -1,6 +1,9 @@
 defmodule BarkparkWeb.CycleFleetControllerTest do
   use BarkparkWeb.ConnCase, async: false
 
+  # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+  @moduletag :requires_plugins
+
   import Barkpark.TenancyFixtures
   import Ecto.Query
 

@@ -259,6 +259,8 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
       end
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "a plugin-link row wears the same label + hover-reveal chevron vocabulary as sibling nav rows",
          %{conn: conn} = ctx do
       # sup-w4 row-state ladder: the plugin nav row (<a class="pane-item

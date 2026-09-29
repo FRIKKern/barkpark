@@ -176,6 +176,8 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
   end
 
   describe "checkout" do
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "checkout and undo-checkout flow", %{conn: conn, other_token: other_token} do
       created = upload_asset(conn)
       id = created["result"]["id"]
@@ -218,6 +220,8 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
     # admin token still force-releases. Reverting `admin?/1` to the write fold
     # reds the first of the three and only the first — the refusal is the
     # behaviour that changed.
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "a write-only token is REFUSED the release of another editor's lock", %{
       conn: conn,
       other_token: other_token
@@ -259,6 +263,8 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
       cleanup(created)
     end
 
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "a write-only token releases its OWN lock", %{conn: conn, other_token: other_token} do
       created = upload_asset(conn)
       id = created["result"]["id"]
@@ -282,6 +288,8 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
       cleanup(created)
     end
 
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "an admin token force-releases another editor's lock", %{
       conn: conn,
       other_token: other_token
@@ -308,6 +316,8 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
       cleanup(created)
     end
 
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "checked-out asset blocks metadata edit for other editors", %{
       conn: conn,
       other_token: other_token

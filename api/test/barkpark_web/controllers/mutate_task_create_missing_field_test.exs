@@ -104,6 +104,8 @@ defmodule BarkparkWeb.MutateTaskCreateMissingFieldTest do
     refute Map.has_key?(result["document"], "brief")
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "a create + publish WITHOUT a brief is a 409 naming content.brief" do
     id = uniq("briefless-publish")
 
@@ -120,6 +122,8 @@ defmodule BarkparkWeb.MutateTaskCreateMissingFieldTest do
     refute message =~ "unknown error"
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "a create WITHOUT a title is a 409 naming the title" do
     id = uniq("titleless-create")
 
@@ -135,6 +139,8 @@ defmodule BarkparkWeb.MutateTaskCreateMissingFieldTest do
     refute message =~ "unknown error"
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "a create WITHOUT kind and lifecycle_status is a 422 naming both" do
     id = uniq("contentless-create")
 

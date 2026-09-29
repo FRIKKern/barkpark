@@ -120,6 +120,8 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
   end
 
   describe "virtual collections" do
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "virtual filter resolves matching assets", %{conn: conn} do
       collection =
         create_collection!(%{
@@ -317,6 +319,8 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
   end
 
   describe "relations" do
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "outbound and inbound relation graph", %{conn: conn} do
       first = upload_asset(conn)
       second = upload_asset(conn)

@@ -188,6 +188,8 @@ defmodule BarkparkWeb.Integration.V1MediaSearchTest do
     # (`?kind=image`) instead of `facet.kind=`, the kind facet must NOT collapse
     # to just "image" — it should still report every kind, while the hits stay
     # filtered to image.
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "top-level ?kind= does not collapse the kind facet", %{conn: conn} do
       image = upload_as(conn, "top-level-kind.png", "image/png")
       doc = upload_as(conn, "top-level-doc.pdf", "application/pdf")

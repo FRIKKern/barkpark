@@ -22,6 +22,8 @@ defmodule BarkparkWeb.FlatTreeDeprecationTest do
   @link_rel "; rel=\"successor-version\""
 
   describe "router walk" do
+    # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+    @tag :requires_plugins
     test "every mirrored flat route answers Deprecation: true + its successor Link, no Sunset" do
       mirrored = mirrored_flat_routes()
 

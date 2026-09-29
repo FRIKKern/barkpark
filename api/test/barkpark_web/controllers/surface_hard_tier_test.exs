@@ -53,6 +53,8 @@ defmodule BarkparkWeb.SurfaceHardTierTest do
       assert Application.get_env(:barkpark, @flag, false) == false
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a surface-less create under the epic PASSES and logs the warn line",
          %{conn: conn} do
       log =
@@ -70,6 +72,8 @@ defmodule BarkparkWeb.SurfaceHardTierTest do
       refute Map.has_key?(task_content("cchs4-off-absent"), "surface")
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "SECOND EPIC: a surface-less create under #{@instruments_epic} PASSES and logs " <>
            "the same warn line",
          %{conn: conn} do
@@ -86,6 +90,8 @@ defmodule BarkparkWeb.SurfaceHardTierTest do
       refute Map.has_key?(task_content("cchs32-off-absent"), "surface")
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the off-vocabulary refusal still offers the omit-surface escape", %{conn: conn} do
       resp = file_row(conn, "cchs4-off-offvocab", %{"surface" => "dashboard"})
 
@@ -101,6 +107,8 @@ defmodule BarkparkWeb.SurfaceHardTierTest do
       :ok
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a surface-less create under parent_id #{@epic} is REFUSED 422", %{conn: conn} do
       log =
         capture_log([level: :warning], fn ->
@@ -121,6 +129,8 @@ defmodule BarkparkWeb.SurfaceHardTierTest do
       assert missing?("cchs4-on-absent")
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "SECOND EPIC: with the flag on, a surface-less create under " <>
            "#{@instruments_epic} is REFUSED too — the tier is part of the same guard",
          %{conn: conn} do
@@ -134,6 +144,8 @@ defmodule BarkparkWeb.SurfaceHardTierTest do
       assert missing?("cchs32-on-absent")
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a BLANK surface is absent too", %{conn: conn} do
       assert_surface_refusal(file_row(conn, "cchs4-on-blank", %{"surface" => "   "}))
       assert missing?("cchs4-on-blank")
@@ -151,6 +163,8 @@ defmodule BarkparkWeb.SurfaceHardTierTest do
       assert create_row(conn, "cchs4-on-noparent", %{}).status == 200
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the off-vocabulary refusal no longer advertises the omit escape", %{conn: conn} do
       resp = file_row(conn, "cchs4-on-offvocab", %{"surface" => "dashboard"})
 
@@ -160,6 +174,8 @@ defmodule BarkparkWeb.SurfaceHardTierTest do
       assert message =~ "also refuses an undeclared surface"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "an update that STRIPS a declared surface is refused", %{conn: conn} do
       assert file_row(conn, "cchs4-on-strip", %{"surface" => "console"}).status == 200
 
@@ -172,6 +188,8 @@ defmodule BarkparkWeb.SurfaceHardTierTest do
       assert task_content("cchs4-on-strip")["surface"] == "console"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "an update that RE-PARENTS a bare row under the epic is refused", %{conn: conn} do
       # Born ADJUDICATED, so the adoption fence (a reparent of an unjudged row
       # is refused for its own reason) is out of the way and the 422 below can

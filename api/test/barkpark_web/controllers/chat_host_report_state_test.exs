@@ -10,6 +10,9 @@ defmodule BarkparkWeb.ChatHostReportStateTest do
   """
   use BarkparkWeb.ConnCase, async: true
 
+  # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+  @moduletag :requires_plugins
+
   import Ecto.Query
 
   alias Barkpark.ChatHosts

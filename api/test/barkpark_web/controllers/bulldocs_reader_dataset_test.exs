@@ -1,6 +1,9 @@
 defmodule BarkparkWeb.BulldocsReaderDatasetTest do
   use BarkparkWeb.ConnCase, async: true
 
+  # Plugins-off: the bulldocs plugin owns the paper schema, its fences and its routes
+  @moduletag :requires_plugins
+
   import Phoenix.LiveViewTest
   import Barkpark.TenancyFixtures
 

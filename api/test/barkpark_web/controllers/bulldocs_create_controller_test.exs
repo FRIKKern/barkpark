@@ -28,6 +28,8 @@ defmodule BarkparkWeb.BulldocsCreateControllerTest do
     |> post("/v1/plugins/bulldocs/papers/#{payload["slug"]}/create", payload)
   end
 
+  # Plugins-off: the bulldocs plugin owns the paper schema, its fences and its routes
+  @tag :requires_plugins
   test "creates once and preserves the complete published row on a collision", %{conn: conn} do
     payload = body("insert-only-published")
     receipt = json_response(create(conn, payload), 201)

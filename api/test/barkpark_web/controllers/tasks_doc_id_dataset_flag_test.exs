@@ -159,6 +159,8 @@ defmodule BarkparkWeb.TasksDocIdDatasetFlagTest do
       end
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "it reaches the WIRE: GET /v1/capabilities serves the flag on task.get", %{conn: conn} do
       # The CLI reads the SERVED manifest, not `cli_commands/0`. RED on
       # origin/main: `flags` was `[]` on this envelope too.

@@ -571,6 +571,8 @@ defmodule BarkparkWeb.MutateControllerTest do
     # no longer licenses an ILLEGAL transition (`any → done` is reached only
     # through the close primitive). The escape remains live for LEGAL terminal
     # transitions — see the `blocked` rev-escape test below, which stays 200.
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "D7a supersede: a revision precondition no longer licenses an illegal open → done patch",
          %{conn: conn} do
       create_task(conn, "guard-cas")
@@ -762,6 +764,8 @@ defmodule BarkparkWeb.MutateControllerTest do
       :ok
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a criteria-clearing publish over /v1/data/mutate answers 422 validation_failed " <>
            "with the acceptance_criteria message, and the stamp survives the HTTP read-back",
          %{conn: conn} do
@@ -1731,6 +1735,8 @@ defmodule BarkparkWeb.MutateControllerTest do
       }
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "an unflagged MERGE-GATED criterion puts a warning ON THE RESPONSE, not just the journal",
          %{conn: conn} do
       resp =
@@ -1783,6 +1789,8 @@ defmodule BarkparkWeb.MutateControllerTest do
   describe "filing-law door guard (cch-w28, D307/D331)" do
     @epic "cloud-console-hardening-epic"
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "an OFF-VOCABULARY surface on a create under the epic is REFUSED 422", %{conn: conn} do
       resp = file_row(conn, "cchw28-offvocab", %{"surface" => "dashboard"})
 
@@ -1800,6 +1808,8 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert missing?("cchw28-offvocab")
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "EXACT CASE: a differently-cased term is off-vocabulary too", %{conn: conn} do
       resp = file_row(conn, "cchw28-cased", %{"surface" => "Console"})
 
@@ -1853,6 +1863,8 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert task_content("cchw28-no-parent")["surface"] == "dashboard"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a `drafts.`-prefixed parent_id cannot dodge the guard", %{conn: conn} do
       resp =
         create_row(conn, "cchw28-draft-parent", %{
@@ -1872,6 +1884,8 @@ defmodule BarkparkWeb.MutateControllerTest do
     # against the route, and every arm below answers 200 on the birth-only
     # tree.
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the PATCH that carries an off-vocabulary surface onto a live epic row is REFUSED",
          %{conn: conn} do
       assert file_row(conn, "cchw29-live", %{"surface" => "console"}).status == 200
@@ -1888,6 +1902,8 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert task_content("cchw29-live")["surface"] == "console"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "create BARE, patch the surface, publish: the term never reaches the published row",
          %{conn: conn} do
       # The publish wall (label spine + tag registry) is a separate door; satisfy
@@ -1977,6 +1993,8 @@ defmodule BarkparkWeb.MutateControllerTest do
 
     @instruments_epic "cch-instruments-epic"
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "SECOND EPIC: an off-vocabulary create under cch-instruments-epic is REFUSED " <>
            "with the first parent's error, word for word but the slug",
          %{conn: conn} do
@@ -2010,6 +2028,8 @@ defmodule BarkparkWeb.MutateControllerTest do
       end
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "SECOND EPIC: a `drafts.`-prefixed parent_id cannot dodge the guard", %{conn: conn} do
       resp =
         file_under(conn, "drafts." <> @instruments_epic, "cchs32-draft-parent", %{
@@ -2020,6 +2040,8 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert missing?("cchs32-draft-parent")
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "SECOND EPIC: a GRANDFATHERED prose-surface row passes an unchanged update; " <>
            "patching the prose itself is refused",
          %{conn: conn} do
@@ -2057,6 +2079,8 @@ defmodule BarkparkWeb.MutateControllerTest do
     # Measured on the pre-guard tree: 201 for an epic filing with an
     # off-vocabulary surface. This is that window, closed.
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the LEGACY create door refuses an off-vocabulary epic filing (was 201)",
          %{conn: conn} do
       resp = legacy_file(conn, "cchw28-legacy-offvocab", %{"surface" => "dashboard"})

@@ -114,6 +114,8 @@ defmodule BarkparkWeb.StatusControllerTest do
       Enum.map(rows, fn [v] -> v end)
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "an anonymous caller gets the enabled-plugin COUNT, never the names" do
       plugins = Barkpark.Plugins.Registry.all()
       # Precondition: with zero plugins registered the name check below is vacuous.

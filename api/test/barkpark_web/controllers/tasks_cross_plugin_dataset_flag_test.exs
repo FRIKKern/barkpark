@@ -57,6 +57,8 @@ defmodule BarkparkWeb.TasksCrossPluginDatasetFlagTest do
         String.contains?(path, ":doc_id")
 
   describe "the escaping command" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "session.link-task declares the dataset flag on the ASSEMBLED manifest" do
       # RED on origin/main: flags were ["add"].
       cmd = Enum.find(assembled(), &(&1[:id] == "session.link-task"))
@@ -77,6 +79,8 @@ defmodule BarkparkWeb.TasksCrossPluginDatasetFlagTest do
       assert cmd[:noun] == "session"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "it reaches the WIRE: GET /v1/capabilities serves it", %{conn: conn} do
       body = authed(conn) |> get("/v1/capabilities") |> json_response(200)
 
@@ -90,6 +94,8 @@ defmodule BarkparkWeb.TasksCrossPluginDatasetFlagTest do
   end
 
   describe "the predicate, applied over the assembled manifest" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "EVERY /v1/tasks/:doc_id command declares it, whichever plugin declared it" do
       cmds = assembled()
       by_route = Enum.filter(cmds, &task_doc_id?(&1[:http][:path_template]))
@@ -111,6 +117,8 @@ defmodule BarkparkWeb.TasksCrossPluginDatasetFlagTest do
              "these /v1/tasks/:doc_id commands declare no dataset flag: #{inspect(missing)}"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "POSITIVE CONTROL: the eleven tasks-plugin verbs still carry it, exactly once" do
       cmds = assembled()
 
@@ -125,6 +133,8 @@ defmodule BarkparkWeb.TasksCrossPluginDatasetFlagTest do
       end
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "IDEMPOTENCE: an already-declaring command is left verbatim" do
       # task.ready / task.events declare their own dataset flag by hand. Running
       # the rule over them (which assembly does, on top of the tasks plugin's

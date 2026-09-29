@@ -132,6 +132,8 @@ defmodule BarkparkWeb.PluginTokenBucketWriteGateTest do
   # ── The control: a write token still adopts (the gate is not a blanket refusal) ─
 
   describe "controls — what the gate must NOT change" do
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "a `write` token still adopts a src:github intake task (200, state flips)",
          %{conn: conn, scope: scope} do
       task = open_intake_task!(scope)

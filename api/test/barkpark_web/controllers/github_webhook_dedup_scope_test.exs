@@ -158,6 +158,8 @@ defmodule BarkparkWeb.GithubWebhookDedupScopeTest do
   end
 
   describe "the intake dedup gate scans the backlog the webhook write lands in" do
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "UNSET intake workspace: the seeded look-alike is still seen and the issue is REFUSED",
          %{scope: scope} do
       seed_lookalike!(scope)
@@ -182,6 +184,8 @@ defmodule BarkparkWeb.GithubWebhookDedupScopeTest do
              "a duplicate row was BORN despite a seeded look-alike"
     end
 
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "SET intake workspace: the same delivery is refused (positive control)", %{
       scope: scope,
       workspace: ws

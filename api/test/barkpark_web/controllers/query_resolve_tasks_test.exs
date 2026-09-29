@@ -87,6 +87,8 @@ defmodule BarkparkWeb.QueryResolveTasksTest do
     slug
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "index: ?resolve=tasks turns a query block into a snapshot block", %{
     conn: conn,
     scope: scope
@@ -140,6 +142,8 @@ defmodule BarkparkWeb.QueryResolveTasksTest do
     refute Map.has_key?(block, "snapshot")
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "show: single-doc route resolves; pinned snapshots pass through", %{
     conn: conn,
     scope: scope
@@ -169,6 +173,8 @@ defmodule BarkparkWeb.QueryResolveTasksTest do
     assert kept["snapshot"] == pinned
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "fail-closed: a foreign workspace's tasks never resolve into the rows", %{
     conn: conn,
     scope: scope

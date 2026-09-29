@@ -90,6 +90,8 @@ defmodule BarkparkWeb.Integration.V1MediaProcessingTest do
   end
 
   describe "POST /v1/media/:dataset/processing/:id/callback" do
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "external processor marks asset ready", %{conn: conn} do
       created =
         conn
@@ -121,6 +123,8 @@ defmodule BarkparkWeb.Integration.V1MediaProcessingTest do
       Assets.delete_for_blob(id, "production")
     end
 
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "SVG upload makes no rendition and logs no 'Failed to find load'", %{conn: conn} do
       # Real Vix stays selected here — the gate must skip SVG BEFORE reaching it.
       log =
@@ -149,6 +153,8 @@ defmodule BarkparkWeb.Integration.V1MediaProcessingTest do
       refute log =~ "Failed to find load"
     end
 
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "raster upload whose entire rendition set fails is marked failed, not ready",
          %{conn: conn} do
       swap_backend(FailBackend)
