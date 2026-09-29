@@ -347,13 +347,9 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapter do
       end)
     end
 
-    defp close_command_port(port) do
-      Port.close(port)
-    rescue
-      _ -> :ok
-    catch
-      _, _ -> :ok
-    end
+    # A command that outlived its timeout is by definition not exiting on its
+    # own; reap it rather than orphan it (task-aa975de15eff4e6b).
+    defp close_command_port(port), do: Barkpark.PortReaper.reap(port)
 
     defp normalize_headers(headers) do
       Map.new(headers, fn {name, value} ->

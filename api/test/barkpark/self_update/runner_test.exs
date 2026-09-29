@@ -139,6 +139,34 @@ defmodule Barkpark.SelfUpdate.RunnerTest do
       assert status.exit_code == -2
       refute Runner.running?()
     end
+
+    # task-aa975de15eff4e6b: the deadline fires BECAUSE the child is misbehaving,
+    # and closing the port sends it no signal. This child (`exec sleep 30`) cannot
+    # notice EOF or die to SIGPIPE, so it is gone only if the watchdog SIGNALLED
+    # it. Revert `close_port/1` to a bare `Port.close/1` and this reds while the
+    # run still reads :done / -2.
+    test "the watchdog ENDS the child's OS process, not just the port" do
+      pid_file =
+        Path.join(System.tmp_dir!(), "su-runner-pid-#{System.unique_integer([:positive])}")
+
+      on_exit(fn -> File.rm(pid_file) end)
+
+      put_cfg(
+        enabled: true,
+        command: {"bash", ["-c", "echo $$ > #{pid_file}; exec sleep 30"]},
+        run_deadline_ms: 300
+      )
+
+      assert Runner.trigger() == {:ok, :started}
+      os_pid = Barkpark.Test.OsProcess.read_pid_file(pid_file)
+      assert is_integer(os_pid)
+      on_exit(fn -> Barkpark.Test.OsProcess.kill(os_pid) end)
+
+      assert %{state: :done, exit_code: -2} = await_done()
+
+      assert Barkpark.Test.OsProcess.gone_within?(os_pid),
+             "self-update child #{os_pid} survived the run deadline"
+    end
   end
 
   describe "trigger_rollback/0 single-flight" do
