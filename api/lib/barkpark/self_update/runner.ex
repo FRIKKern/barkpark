@@ -455,7 +455,7 @@ defmodule Barkpark.SelfUpdate.Runner do
   defp command_for(_self_update),
     do: Keyword.get(config(), :command, @default_command)
 
-  defp open_port(mode, env \\ []) do
+  defp open_port(mode, env) do
     {exe, args} = command_for(mode)
 
     case System.find_executable(exe) do
