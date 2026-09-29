@@ -3038,6 +3038,28 @@ defmodule BarkparkCloud.Registry do
   row the other path already moved (the guard matches zero rows). Returns
   `%{reaped: n, failed: m}`; an empty sweep returns `%{reaped: 0, failed: 0}` and
   never raises.
+
+  `pending` HAS NO AGE-BASED TIMEOUT, BY DECISION (ccpca-bl-pending-provision-no-
+  timeout, 2026-09-29). This sweep reads `claimed` rows only, so a `pending` job
+  whose kind has no running worker waits for one indefinitely. That is chosen,
+  not missed:
+
+    * A pending job with no claimant means the provisioner is DOWN. That is an
+      infrastructure outage, and the job keeps a live claim path: the moment a
+      worker returns it is claimed and runs. A timeout would turn every job queued
+      during an outage into a terminal `failed` the owner must re-create by hand,
+      i.e. it converts a recoverable delay into user-visible failures in bulk.
+    * The sweep covers EVERY kind. A timed-out `deprovision` would leave a billed
+      server running with nothing left to tear it down, which is strictly worse
+      than a teardown that runs late.
+    * The claimed-state edges above already bound every job a worker actually
+      touched (`max_provision_attempts/0`), so "pending forever" is reachable only
+      while no worker of that kind exists at all.
+
+  Revisit if the provisioner gains a legitimately-absent kind (a kind with no
+  worker by design): that kind would need its own terminal edge, scoped to it.
+  The pin: `stale_provision_job_reaper_test.exs` "a pending job days old is NOT
+  failed or touched by the sweep".
   """
   @spec reap_stale_provision_jobs() :: %{reaped: non_neg_integer(), failed: non_neg_integer()}
   def reap_stale_provision_jobs do
