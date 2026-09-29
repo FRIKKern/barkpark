@@ -1635,6 +1635,32 @@
         });
         return true;
       };
+      // A PaperFieldBlock form (form[data-paper-field-flush]) writes the whole
+      // value of the one block it renders, and no other editor surface holds
+      // that block. When this page's own save lands on either side of such a
+      // form, a draft elsewhere that was authored on exactly the revision the
+      // save started from cannot overlap it: advance that draft's base to the
+      // acknowledged revision. Without this, typing a field and then a heading
+      // sends the heading on a base the author's own field save superseded and
+      // the server refuses it as a conflict (task-e9205d55fc79976e). Any echo
+      // this page does not own keeps the conservative path: nothing advances.
+      coordinator._advanceFieldFormPeers = (entry) => {
+        if (entry.ifRev == null || confirmedRevision == null ||
+            entry.documentKey !== documentKey) return;
+        const externalRevisionPending = quarantinedEchoes.some((echo) =>
+          (!echo.documentKey || echo.documentKey === entry.documentKey) &&
+          echo.requestId !== entry.requestId && echo.rev !== confirmedRevision);
+        if (externalRevisionPending) return;
+        const fieldForm = (source) => source?.matches?.("form[data-paper-field-flush]") === true;
+        for (const [source, record] of sources) {
+          if (source === entry.source || !record.dirty ||
+              record.documentKey !== entry.documentKey ||
+              record.authoredRev !== entry.ifRev ||
+              source.matches?.(".bp-paper-edit-form[phx-change]") ||
+              (!fieldForm(entry.source) && !fieldForm(source))) continue;
+          record.authoredRev = confirmedRevision;
+        }
+      };
       coordinator._advanceFallbackDrafts = (entry) => {
         let unsafe = null;
         for (const [source, record] of sources) {
@@ -2394,6 +2420,7 @@
                 echo.apply?.("own");
               }
             }
+            coordinator._advanceFieldFormPeers(entry);
             coordinator._reviewQuarantinedReloadConflict();
             if (!conflict) {
               advanceFocusedReferenceCopySibling(entry);
@@ -4838,9 +4865,57 @@
           this._dirty = true;
           this._exitCoordinator?.markDirty(this.el);
         };
+        // The PaperFieldBlock form owns its autosave. LiveView's window-level
+        // phx-change binding would send an UNCORRELATED `inner-change` per
+        // keystroke: the server persists it, the canvas echo then carries a
+        // revision no queued mutation owns, and the coordinator — seeing this
+        // form dirty — reads the author's own save as "changed elsewhere",
+        // pausing every later save (task-e9205d55fc79976e). Stop that binding and
+        // send one debounced, correlated `inner-flush` through the mutation
+        // queue instead, so each field save advances the confirmed revision.
+        this._autosaveTimer = null;
+        this._scheduleAutosave = () => {
+          clearTimeout(this._autosaveTimer);
+          const rawDelay = this.el.getAttribute("phx-debounce");
+          const delay = /^\d+$/.test(rawDelay || "") ? Number(rawDelay) : 400;
+          this._autosaveTimer = setTimeout(() => {
+            this._autosaveTimer = null;
+            if (!this._dirty || !this.el.isConnected) return;
+            if (this._pendingSaves.size) {
+              // One save at a time from this form: the next one carries the
+              // whole form, so wait for the one in flight and send after it.
+              Promise.allSettled([...this._pendingSaves]).then(() => {
+                if (this._dirty && !this._autosaveTimer) this._scheduleAutosave();
+              });
+              return;
+            }
+            this._dirty = false;
+            this._pushForm();
+          }, delay);
+        };
+        const formSnapshot = () => {
+          try {
+            return JSON.stringify([...new FormData(this._paperForm)]);
+          } catch (_) {
+            return null;
+          }
+        };
+        this._lastFormSnapshot = this._paperForm ? formSnapshot() : null;
+        const ownFormChange = (event) => {
+          event.stopPropagation();
+          // A text field's blur `change` repeats the value its `input` events
+          // already carried; a second save of the same value would only mint a
+          // revision other drafts were not authored against.
+          const snapshot = formSnapshot();
+          if (event.type === "change" && snapshot != null &&
+              snapshot === this._lastFormSnapshot) return;
+          this._lastFormSnapshot = snapshot;
+          trackFormChange();
+          this._scheduleAutosave();
+        };
         if (this._ownsPaperForm) {
-          this._onFormInput = trackFormChange;
-          this._onFormChange = trackFormChange;
+          this._onFormInput = ownFormChange;
+          this._onFormChange = ownFormChange;
           this.el.addEventListener("input", this._onFormInput);
           this.el.addEventListener("change", this._onFormChange);
           this._onPaperFieldSaveResult = (payload) => {
@@ -4962,6 +5037,8 @@
           // A nested picker bridge mirrors its hidden input; the hook mounted
           // on the surrounding PaperFieldBlock form owns the correlated save.
           if (this._paperForm && !this._ownsPaperForm) return;
+          clearTimeout(this._autosaveTimer);
+          this._autosaveTimer = null;
           if (!this._pendingSaves.size && this._fieldMutationEntries.length) {
             this._trackSave(
               this._exitCoordinator.retryMutation(this._fieldMutationEntries[0]),
@@ -4978,6 +5055,8 @@
         this.el.addEventListener("bp-flush-pending", this._onFlushPending);
       },
       destroyed() {
+        clearTimeout(this._autosaveTimer);
+        this._autosaveTimer = null;
         bpReleasePaperExitCoordinator(this);
         this.el.removeEventListener("bp-change", this._on);
         this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
