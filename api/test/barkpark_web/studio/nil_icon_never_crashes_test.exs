@@ -79,6 +79,8 @@ defmodule BarkparkWeb.Studio.NilIconNeverCrashesTest do
   end
 
   describe "the Plugins tier destination" do
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "/studio/plugins renders on a clean DB — the plugin-group nil icon was STRUCTURAL",
          %{conn: conn} do
       # No fixtures on purpose: `plugin_group_node/2` emitted `icon: nil`

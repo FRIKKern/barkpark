@@ -7,6 +7,9 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
   """
   use ExUnit.Case, async: false
 
+  # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+  @moduletag :requires_plugins
+
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.StudioChat.Provider.Claude.Session, as: ClaudeSession
