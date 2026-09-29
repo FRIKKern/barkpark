@@ -398,6 +398,7 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
       case Path.basename(path) do
         "stats-inline.js" -> without_stats_reader_queries(source)
         "cards-inline.js" -> without_cards_reader_queries(source)
+        "notes-inline.js" -> without_notes_reader_queries(source)
         _ -> source
       end
     end)
@@ -440,6 +441,31 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
       ~s|querySelector(key === "title" ? ".bp-card__t" : ".bp-card__d")|
     ]
     |> Enum.reduce(source, &String.replace(&2, &1, "readerQuery()"))
+  end
+
+  # Native Notes editing (notes-inline.js) decorates the SERVER-painted rows the
+  # same way; these four exact read-only queries are not HTML producers.
+  defp without_notes_reader_queries(source) do
+    [
+      ~s|querySelector(".bp-notes")|,
+      ~s|matches(".bp-note")|,
+      ~s|querySelector(":scope > .bp-note__k")|,
+      ~s|querySelector(":scope > .bp-note__d")|
+    ]
+    |> Enum.reduce(source, &String.replace(&2, &1, "readerQuery()"))
+  end
+
+  test "§3 native Notes queries never exempt markup producers" do
+    assert without_notes_reader_queries(~s|cell.querySelector(":scope > .bp-note__k")|) ==
+             "cell.readerQuery()"
+
+    for producer <- [
+          ~s|body.innerHTML = '<div class="bp-notes"></div>'|,
+          ~s|span.className = "bp-note__t"|,
+          ~s|cell.setAttribute("class", "bp-note__d")|
+        ] do
+      assert without_notes_reader_queries(producer) == producer
+    end
   end
 
   test "§3 native legacy Cards queries never exempt markup producers" do
