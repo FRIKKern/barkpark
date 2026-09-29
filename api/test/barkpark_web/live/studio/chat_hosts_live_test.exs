@@ -1,6 +1,9 @@
 defmodule BarkparkWeb.Studio.ChatHostsLiveTest do
   use BarkparkWeb.ConnCase, async: false
 
+  # Plugins-off: the studio_chat capability (ChatHosts enrollment under /studio chat hosts)
+  @moduletag :requires_plugins
+
   import Barkpark.TenancyFixtures
   import Phoenix.LiveViewTest
 

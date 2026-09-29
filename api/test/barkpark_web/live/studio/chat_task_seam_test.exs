@@ -27,6 +27,9 @@ defmodule BarkparkWeb.Studio.ChatTaskSeamTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  # Plugins-off: the studio_chat capability (StudioChat.RuntimeSupervisor / SessionRegistry and the /studio/chat routes)
+  @moduletag :requires_plugins
+
   import Phoenix.LiveViewTest
   import Barkpark.AccountsFixtures, only: [register_user: 1]
 
