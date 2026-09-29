@@ -47,6 +47,19 @@
 #
 #     mix test --include requires_vips
 #
+# task-ba5085862f3da4e4 — a test that needs a plugin or capability ON carries
+# `@moduletag :requires_plugins` (or `@tag` / `@describetag`), with a one-line
+# `# Plugins-off:` comment naming what it needs. The tag is NOT excluded here:
+# the default run has every plugin on and runs it. The weekly
+# core-without-owned-tables workflow runs the suite with every plugin and
+# capability off and `--exclude requires_plugins`, and must print 0 failures:
+#
+#     BARKPARK_PLUGINS=, BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet,epic_fleet \
+#       mix test --exclude requires_plugins
+#
+# A core test that fails there because a FIXTURE assumes a plugin gets its
+# fixture fixed, not the tag. Tests whose subject is an owned table carry
+# `@tag :owned_tables` instead (see Mix.Tasks.Barkpark.CoreWithoutOwnedTables).
 ExUnit.start(
   exclude: [
     :bokbasen_integration,
