@@ -102,6 +102,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
     end
   end
 
+  # criteria-progress (PaperEditor's contextual editor): each painted row label
+  # (data_viz.ex criteria_progress_html/1 paints one row per map row, its label
+  # trimmed) writes the panel field `criterion-<i>-label`. A label the reader
+  # would repaint differently (not a trimmed, non-empty string) stays
+  # read-only, and the one aggregate "Total" row of detail "total" is never
+  # wired.
+  def painted_copy_attrs(%{"type" => "criteria-progress"} = block, id) do
+    rows = Map.get(block, "rows")
+
+    names =
+      rows
+      |> List.wrap()
+      |> Enum.with_index()
+      |> Enum.filter(fn {row, _} -> is_map(row) end)
+      |> Enum.map(fn {row, index} ->
+        label = Map.get(row, "label")
+
+        if is_binary(label) and label != "" and label == String.trim(label),
+          do: "criterion-#{index}-label",
+          else: ""
+      end)
+
+    if not is_list(rows) or Map.get(block, "detail") == "total" or Enum.all?(names, &(&1 == "")) do
+      %{}
+    else
+      %{
+        "id" => "criteria-progress-preview-" <> id,
+        "phx-hook" => "BarkparkPaperPaintedCopy",
+        "data-painted-copy" => ".bp-criteria-progress__l",
+        "data-painted-copy-names" => Enum.join(names, ","),
+        "data-painted-copy-form" => "criteria-progress-form-" <> id,
+        "data-painted-copy-label" => "Criterion label"
+      }
+    end
+  end
+
   def painted_copy_attrs(_block, _id), do: %{}
 
   defp technical_label("diff"), do: "diff"

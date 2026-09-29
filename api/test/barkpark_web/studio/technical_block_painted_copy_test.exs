@@ -52,6 +52,37 @@ defmodule BarkparkWeb.Studio.TechnicalBlockPaintedCopyTest do
     end
   end
 
+  test "criteria-progress wires each painted row label to its panel field" do
+    block = %{
+      "id" => "cp",
+      "type" => "criteria-progress",
+      "rows" => [
+        %{"label" => "Survey", "met" => 2, "total" => 5},
+        "legacy",
+        %{"label" => " padded ", "met" => 1, "total" => 1},
+        %{"label" => "File tasks", "met" => 5, "total" => 5}
+      ]
+    }
+
+    attrs = TechnicalBlockEditor.painted_copy_attrs(block, "cp")
+    assert attrs["phx-hook"] == "BarkparkPaperPaintedCopy"
+    assert attrs["data-painted-copy-form"] == "criteria-progress-form-cp"
+
+    # One name per painted row (map rows only); a label the reader repaints
+    # trimmed stays read-only (empty name) so an edit can never drop its spaces.
+    assert attrs["data-painted-copy-names"] == "criterion-0-label,,criterion-3-label"
+
+    painted = Render.render_block(block, %{style: :article})
+
+    assert painted
+           |> LazyHTML.from_fragment()
+           |> LazyHTML.query(attrs["data-painted-copy"])
+           |> Enum.count() == 3
+
+    assert TechnicalBlockEditor.painted_copy_attrs(Map.put(block, "detail", "total"), "cp") == %{},
+           "the aggregate Total row is derived, never wired"
+  end
+
   test "other technical types and a footnote with nothing painted get no wiring" do
     for block <- [
           %{"id" => "d", "type" => "diff", "diff" => "+x"},

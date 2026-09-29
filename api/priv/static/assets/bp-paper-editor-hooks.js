@@ -5199,11 +5199,14 @@
       this.el.removeEventListener("beforeinput", this._beforeInput);
     },
     _decorate() {
-      const names = (this.el.dataset.paintedCopyNames || "").split(",").filter(Boolean);
+      // One name per painted row; an empty name leaves that row read-only.
+      const raw = this.el.dataset.paintedCopyNames || "";
+      const names = raw ? raw.split(",") : [];
       const hosts = [...this.el.querySelectorAll(this.el.dataset.paintedCopy || ":not(*)")];
-      if (!names.length || hosts.length !== names.length) return;
+      if (!names.some(Boolean) || hosts.length !== names.length) return;
       const label = this.el.dataset.paintedCopyLabel || "Text";
       hosts.forEach((host, index) => {
+        if (!names[index]) return;
         host.contentEditable = "plaintext-only";
         host.setAttribute("role", "textbox");
         host.setAttribute("aria-label", `${label} ${index + 1}`);

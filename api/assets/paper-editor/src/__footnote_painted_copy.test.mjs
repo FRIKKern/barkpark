@@ -67,5 +67,15 @@ hook._held = null;
 hook.updated();
 assert.equal(el.querySelector("li").getAttribute("contenteditable"), null);
 hook.destroyed();
+
+// An empty name leaves its painted row read-only; the others still edit.
+el.innerHTML = readerRows("First.", "Third.");
+el.dataset.paintedCopyNames = ",note-3-text";
+const partial = { ...window.BarkparkPaperEditorHooks.BarkparkPaperPaintedCopy, el };
+partial.mounted();
+hosts = [...el.querySelectorAll("li")];
+assert.equal(hosts[0].getAttribute("contenteditable"), null, "an unnamed row stays read-only");
+assert.equal(hosts[1].contentEditable, "plaintext-only");
+partial.destroyed();
 window.close();
 console.log("footnote painted copy: rows edit in place, write their own note field, survive a focused patch; mismatches refused");

@@ -31,6 +31,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   alias Barkpark.PortableDoc.Render.{Compose, Figures, SectionLayout}
   alias Barkpark.PortableDoc.Render.Components, as: RenderComponents
   alias BarkparkWeb.Studio.StudioLive.Blocks
+  alias BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
   alias Phoenix.LiveView.JS
 
@@ -3443,7 +3444,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
       <% "criteria-progress" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-criteria-progress-contextual-editor">
-          <div class="bp-paper-contextual-preview" data-test-id="paper-criteria-progress-preview">
+          <div
+            class="bp-paper-contextual-preview"
+            data-test-id="paper-criteria-progress-preview"
+            {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}
+          >
             <%= raw(Render.render_block(@block, %{style: :article})) %>
           </div>
           <details id={"criteria-progress-controls-" <> @id} class="bp-paper-contextual-controls"
