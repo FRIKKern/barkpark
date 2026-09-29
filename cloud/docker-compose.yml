@@ -82,6 +82,12 @@ x-control-plane: &control_plane
     # refuses the node at boot rather than silently serving ours.
     - PLATFORM_BASE_DOMAIN
     - TEMPLATES_REPO_URL
+    # task-b4b2bb60b63e28ea follow-up: the control plane's own egress IP(s),
+    # sent on every self-update trigger so a self-updating box backfills
+    # BARKPARK_TRUSTED_PROXIES. Passthrough-only and optional — unset keeps the
+    # trigger body `{}`. Without this bare line the CONTAINER never sees a value
+    # set in .env, and every self-update silently goes out without it.
+    - BARKPARK_CLOUD_EGRESS_IPS
     # Mail (notifications-email): defaults point at the bundled `postfix`
     # sidecar below (self-hosted, no third-party provider). SMTP_USERNAME/
     # PASSWORD are passthrough-only, shared with the postfix service's own

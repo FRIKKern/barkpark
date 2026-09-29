@@ -24,6 +24,37 @@
 
 // ── portable-doc inline tree  →  flat TipTap text nodes ────────────────────
 
+// A text leaf's string the way the reader coerces it (inline.ex coerce_text_value):
+// binaries pass, numbers stringify, anything else is empty.
+function coerceInlineText(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+
+// One entry of a text leaf's flat `marks` array (the ProseMirror-style spelling the
+// reader folds in inline.ex apply_mark/3) → the TipTap mark the canvas edits. A mark
+// the canvas has no editor for returns null and is left out of the projection.
+function flatMarkToTiptap(mark) {
+  const type = mark && typeof mark === "object" ? mark.type : null;
+  switch (type) {
+    case "bold": case "strong": return { type: "bold" };
+    case "italic": case "em": return { type: "italic" };
+    case "underline": return { type: "underline" };
+    case "highlight": return { type: "highlight" };
+    case "sub": return { type: "subscript" };
+    case "sup": return { type: "superscript" };
+    case "strike": case "s": case "strikethrough": return { type: "strike" };
+    case "code": return { type: "code" };
+    case "link": {
+      const href = (mark.attrs && typeof mark.attrs.href === "string" && mark.attrs.href) ||
+        (typeof mark.href === "string" ? mark.href : "");
+      return { type: "link", attrs: { href } };
+    }
+    default: return null;
+  }
+}
+
 // Walk one portable-doc inline node, accumulating active marks, and push the
 // resulting flat TipTap text nodes into `out`.
 function inlineToTiptapNodes(node, marks, out) {
@@ -31,10 +62,15 @@ function inlineToTiptapNodes(node, marks, out) {
 
   switch (node.type) {
     case "text": {
-      const text = node.value || "";
+      // The reader dual-reads `value` || legacy `text` (inline.ex compose_inline) and
+      // applies a flat `marks` array; read both the same way so the canvas shows — and a
+      // touched block keeps — what the reader paints.
+      const text = coerceInlineText(node.value) || coerceInlineText(node.text);
       if (text.length === 0) return;
+      const own = Array.isArray(node.marks) ? node.marks.map(flatMarkToTiptap).filter(Boolean) : [];
+      const all = [...marks, ...own];
       const tnode = { type: "text", text };
-      if (marks.length) tnode.marks = marks.map((m) => ({ ...m }));
+      if (all.length) tnode.marks = all.map((m) => ({ ...m }));
       out.push(tnode);
       return;
     }
@@ -55,7 +91,10 @@ function inlineToTiptapNodes(node, marks, out) {
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
       return;
     }
-    case "strikethrough": {
+    // `strike` / `s` are reader-accepted spellings of strikethrough (inline.ex, inline.go).
+    case "strikethrough":
+    case "strike":
+    case "s": {
       const next = [...marks, { type: "strike" }];
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
       return;
@@ -958,6 +997,12 @@ function comparableListInline(content) {
       next.text = "\n";
     }
     if (!next.marks?.length) delete next.marks;
+    // The Link extension decorates a mounted link mark with its render defaults
+    // (target/rel/class); only `href` is PortableDoc (markToPd reads nothing else).
+    // Compare on href alone so an untouched carrier with a link still matches its
+    // source and is kept verbatim instead of being re-serialized.
+    else next.marks = next.marks.map((mark) => mark?.type === "link"
+      ? { type: "link", attrs: { href: (mark.attrs && mark.attrs.href) || "" } } : mark);
     const previous = out[out.length - 1];
     if (previous?.type === "text" && next.type === "text" && jsonEqual(previous.marks, next.marks)) {
       previous.text += next.text;

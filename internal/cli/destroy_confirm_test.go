@@ -23,7 +23,9 @@ const destroyManifestJSON = `{
   "server": {"name": "test", "base_url": "http://replaced"},
   "nouns": [
     {"name": "token", "summary": "Tokens."},
-    {"name": "workspace", "summary": "Tenancy."}
+    {"name": "workspace", "summary": "Tenancy."},
+    {"name": "access", "summary": "Airdrop grants."},
+    {"name": "ticket-key", "summary": "Ticket keys."}
   ],
   "commands": [
     {"id":"token.ls","noun":"token","verb":"ls","summary":"Token inventory.",
@@ -47,7 +49,30 @@ const destroyManifestJSON = `{
      "auth_tier":"scoped_admin",
      "args":[{"name":"principal_ref","required":true,"type":"string","summary":"E-mail or id."}],
      "flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,
-     "default_output":"minimal","scoped_prefix":"/w/:workspace_slug/p/:project_slug"}
+     "default_output":"minimal","scoped_prefix":"/w/:workspace_slug/p/:project_slug"},
+    {"id":"access.show","noun":"access","verb":"show","summary":"Read one airdrop grant.",
+     "http":{"method":"GET","path_template":"/v1/access/:id"},
+     "auth_tier":"read",
+     "args":[{"name":"id","required":true,"type":"string","summary":"Grant id."}],
+     "flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,
+     "default_output":"json"},
+    {"id":"access.revoke","noun":"access","verb":"revoke","summary":"Revoke an airdrop grant by id (idempotent; grantor or admin).",
+     "http":{"method":"DELETE","path_template":"/v1/access/:id"},
+     "auth_tier":"scoped_admin",
+     "args":[{"name":"id","required":true,"type":"string","summary":"Grant id."}],
+     "flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,
+     "default_output":"minimal"},
+    {"id":"ticket-key.ls","noun":"ticket-key","verb":"ls","summary":"List ticket keys.",
+     "http":{"method":"GET","path_template":"/v1/plugins/tickets/keys"},
+     "auth_tier":"admin","args":[],"flags":[],
+     "writes":false,"batch":false,"paginated":false,"dry_run":false,
+     "default_output":"table"},
+    {"id":"ticket-key.revoke","noun":"ticket-key","verb":"revoke","summary":"Revoke a key (indistinguishable from missing = 401 on use).",
+     "http":{"method":"DELETE","path_template":"/v1/plugins/tickets/keys/:id"},
+     "auth_tier":"admin",
+     "args":[{"name":"id","required":true,"type":"string","summary":"Key id."}],
+     "flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,
+     "default_output":"minimal"}
   ]
 }`
 
@@ -86,6 +111,12 @@ func newDestroyHarness(t *testing.T) *destroyHarness {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/v1/members"):
 			w.WriteHeader(status)
 			_, _ = w.Write([]byte(h.members))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/access/"+testGrantID:
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(testGrantBody))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/plugins/tickets/keys":
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(testTicketKeysBody))
 		default:
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"revoked":{"id":"ac8ff595-deff-4c51-b251-0d05e8414184"}}`))
@@ -587,5 +618,94 @@ func TestCommandReadsPlaceholderSeesTheScopedPrefix(t *testing.T) {
 	flat := manifest.Command{HTTP: manifest.HTTP{Method: "DELETE", PathTemplate: "/v1/thing/:id"}}
 	if commandReadsPlaceholder(flat, "workspace_slug", "workspace", "ws") {
 		t.Error("claimed a flat command reads a workspace placeholder it does not have")
+	}
+}
+
+const (
+	testGrantID        = "5b0e7c1a-2f4d-4e8a-9c1b-7d3e2a6f9b10"
+	testGrantBody      = `{"grant":{"id":"5b0e7c1a-2f4d-4e8a-9c1b-7d3e2a6f9b10","grantee_email":"reviewer@example.com","capabilities":["read","comment"],"dataset":"production","type":"post","doc_id":"launch-notes","claimed_at":"2026-09-20T10:00:00Z","revoked_at":null}}`
+	testTicketKeyID    = "9d4c2b1e-6a7f-4c3d-8e2b-1f0a9c8d7e6b"
+	testTicketKeysBody = `{"keys":[{"id":"9d4c2b1e-6a7f-4c3d-8e2b-1f0a9c8d7e6b","name":"support-widget","dataset":"production","status":"active","last_used_at":"2026-09-28T08:00:00Z"}]}`
+)
+
+// newUnscopedDestroyHarness is the harness with NO stated -w/-p: access and
+// ticket-key routes advertise no scoped_prefix, and the CLI refuses to carry a
+// stated scope onto a route that cannot honour it.
+func newUnscopedDestroyHarness(t *testing.T) *destroyHarness {
+	h := newDestroyHarness(t)
+	h.ctx.WorkspaceExplicit = false
+	h.ctx.ProjectExplicit = false
+	return h
+}
+
+// task-0495a21db5e4ad41: access.revoke and ticket-key.revoke are credential
+// destroys of the token.revoke class (opaque id, instant 401 for whoever holds
+// it) and were ungated. The harness target is 127.0.0.1 — not prod — which is
+// exactly the case the prod write-guard never covers: only registry membership
+// gates it. Each preview must name the THING, not echo the id.
+func TestCredentialRevokesAreGatedAndNamed(t *testing.T) {
+	cases := []struct {
+		noun, id, deletePath, readPath string
+		wantNamed                      []string
+	}{
+		{"access", testGrantID, "DELETE /v1/access/" + testGrantID, "GET /v1/access/" + testGrantID,
+			[]string{"reviewer@example.com", "read,comment", "launch-notes"}},
+		{"ticket-key", testTicketKeyID, "DELETE /v1/plugins/tickets/keys/" + testTicketKeyID, "GET /v1/plugins/tickets/keys",
+			[]string{"support-widget", "production", "active"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.noun+"/non-tty refuses and sends nothing", func(t *testing.T) {
+			h := newUnscopedDestroyHarness(t)
+			forceNonTTY(t)
+
+			code, stdout, stderr := h.runDestroy(globals{}, tc.noun, "revoke", tc.id)
+
+			if code == exitOK {
+				t.Errorf("exit = %d (ok) — an unconfirmed %s revoke must not succeed", code, tc.noun)
+			}
+			if h.sent(tc.deletePath) {
+				t.Errorf("the DELETE was sent without confirmation; requests seen: %v", h.seen)
+			}
+			if !strings.Contains(stderr, "--yes") {
+				t.Errorf("refusal never names --yes:\n%s", stderr)
+			}
+			if !h.sent(tc.readPath) {
+				t.Errorf("preview never read %q; requests seen: %v", tc.readPath, h.seen)
+			}
+			for _, want := range tc.wantNamed {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("preview omits %q — the operator is confirming a string, not a decision:\n%s", want, stderr)
+				}
+			}
+			if strings.Contains(stdout, tc.wantNamed[0]) {
+				t.Errorf("preview leaked onto stdout:\n%s", stdout)
+			}
+		})
+		t.Run(tc.noun+"/--yes proceeds and still previews", func(t *testing.T) {
+			h := newUnscopedDestroyHarness(t)
+			forceNonTTY(t)
+
+			code, _, stderr := h.runDestroy(globals{yes: true}, tc.noun, "revoke", tc.id)
+
+			if code != exitOK {
+				t.Errorf("exit = %d with --yes, want %d", code, exitOK)
+			}
+			if !h.sent(tc.deletePath) {
+				t.Errorf("--yes did not reach the API; requests seen: %v", h.seen)
+			}
+			if !strings.Contains(stderr, tc.wantNamed[0]) {
+				t.Errorf("--yes silenced the preview:\n%s", stderr)
+			}
+		})
+		t.Run(tc.noun+"/interactive n aborts", func(t *testing.T) {
+			h := newUnscopedDestroyHarness(t)
+			forceTTYAnswer(t, "n\n")
+
+			code, _, _ := h.runDestroy(globals{}, tc.noun, "revoke", tc.id)
+
+			if code == exitOK || h.sent(tc.deletePath) {
+				t.Errorf("answer n: exit=%d sent=%v — nothing may be sent", code, h.sent(tc.deletePath))
+			}
+		})
 	}
 }

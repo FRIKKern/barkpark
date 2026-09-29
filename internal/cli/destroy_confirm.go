@@ -84,6 +84,12 @@ type destroyTarget struct {
 	lookupKey   string   // envelope key holding the rows, e.g. "tokens"
 	lookupMatch []string // row fields the arg value may match, in order
 	previewCols []string // row fields to show first, in order
+	// lookupByRef passes the victim's ref as the lookup command's positional
+	// arg (a SHOW verb) instead of reading a whole list. For a noun whose list
+	// verb cannot run bare — `access ls` requires --workspace_id, which a revoke
+	// by grant id does not carry — the show verb is the only read that can
+	// name the thing. lookupKey then holds ONE object, not an array.
+	lookupByRef bool
 }
 
 // destroyTargets is the registry. Keyed on manifest command ID so a server that
@@ -114,11 +120,41 @@ var destroyTargets = map[string]destroyTarget{
 		lookupMatch: []string{"identity", "email", "principal_id", "id"},
 		previewCols: []string{"identity", "principal_type", "role"},
 	},
+	// Irreversible, the same class as token.revoke: an airdrop grant is a
+	// credential (a claimed link bound to an account), and the id is an opaque
+	// UUID. `access ls` needs --workspace_id, so the preview reads the grant
+	// itself through `access show <id>` — what dies is WHO holds WHAT where.
+	// Like every entry here this gate is operation-keyed: the prod write-guard
+	// (run.go) is keyed on the TARGET being prod, so without registry
+	// membership a revoke against a local or production:false instance would
+	// skip confirmation entirely.
+	"access.revoke": {
+		kind:        "access grant",
+		argName:     "id",
+		lookupNoun:  "access",
+		lookupVerb:  "show",
+		lookupKey:   "grant",
+		lookupMatch: []string{"id"},
+		lookupByRef: true,
+		previewCols: []string{"grantee_email", "capabilities", "workspace_id", "project_id", "dataset", "type", "doc_id", "single_use", "expires_at", "claimed_at", "revoked_at"},
+	},
+	// Irreversible, and its own summary names the blast radius: a revoked
+	// ticket key is indistinguishable from a missing one, so every client
+	// holding it starts 401ing. Resolved through `ticket-key ls`.
+	"ticket-key.revoke": {
+		kind:        "ticket key",
+		argName:     "id",
+		lookupNoun:  "ticket-key",
+		lookupVerb:  "ls",
+		lookupKey:   "keys",
+		lookupMatch: []string{"id"},
+		previewCols: []string{"name", "dataset", "status", "last_used_at", "expires_at", "revoked_at"},
+	},
 }
 
 // destroyRefArgs re-resolves cmd's positional args so the gate can name the
 // same target the request will. It reports gated=false — and does no work —
-// for every command that is not in the registry, which is all but two of them.
+// for every command that is not in the registry, which is all but four of them.
 //
 // It re-runs splitArgs/bindArgs rather than threading the map out of
 // buildManifestRequest because both are PURE: they read only the declared arg
@@ -291,7 +327,11 @@ func destroyPreview(g globals, ctx manifest.Context, m *manifest.Manifest, targe
 	lg.yes = true
 	lg.dryRun = false
 	lg.all = false
-	status, body, err := execManifestCommand(lg, ctx, m, *lookup, nil)
+	var tail []string
+	if target.lookupByRef {
+		tail = []string{ref}
+	}
+	status, body, err := execManifestCommand(lg, ctx, m, *lookup, tail)
 	if err != nil {
 		return head + " — could not read the inventory to show its identity: " + err.Error()
 	}
@@ -320,7 +360,13 @@ func findDestroyRow(body []byte, target destroyTarget, ref string) (map[string]a
 		return nil, false
 	}
 	var rows []map[string]any
-	if json.Unmarshal(raw, &rows) != nil {
+	if target.lookupByRef {
+		var one map[string]any
+		if json.Unmarshal(raw, &one) != nil || one == nil {
+			return nil, false
+		}
+		rows = []map[string]any{one}
+	} else if json.Unmarshal(raw, &rows) != nil {
 		return nil, false
 	}
 	for _, row := range rows {
