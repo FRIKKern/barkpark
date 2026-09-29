@@ -108,12 +108,12 @@ defmodule BarkparkWeb.WriteAdmissionBlockOpsTest do
     {:ok, post} = Content.get_document("drafts.held-ops-post", "post", "test")
     {:ok, :held, hold} = hold(gate, "switch")
 
-    build_conn()
+    scoped_conn()
     |> as(@ingest)
     |> post("/v1/plugins/bulldocs/papers/held-ops-paper/ops", Jason.encode!(append("one", "one")))
     |> refused!()
 
-    build_conn()
+    scoped_conn()
     |> as(@ingest)
     |> post(
       "/v1/plugins/bulldocs/papers/held-ops-paper/ops",
@@ -121,7 +121,7 @@ defmodule BarkparkWeb.WriteAdmissionBlockOpsTest do
     )
     |> refused!()
 
-    build_conn()
+    scoped_conn()
     |> as("held-ops-write")
     |> post(
       "/v1/data/doc/test/post/held-ops-post/ops",
@@ -138,7 +138,7 @@ defmodule BarkparkWeb.WriteAdmissionBlockOpsTest do
     release(hold)
 
     resp =
-      build_conn()
+      scoped_conn()
       |> as(@ingest)
       |> post(
         "/v1/plugins/bulldocs/papers/held-ops-paper/ops",
