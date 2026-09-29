@@ -426,6 +426,18 @@ defmodule Barkpark.Tasks.TtlSweeper do
           previous_rev: previous_rev
         )
 
+        # A reap is a status transition (in_progress → open) a paper's task
+        # board renders — the same webhook refresh the CAS verbs get
+        # (tlv-bl-web-task-cache-bust). Off-path and fail-open.
+        Barkpark.Tasks.PaperRefresh.notify([
+          %{
+            doc: doc,
+            kind: @event_task_lease_expired,
+            event_id: event_id,
+            previous_rev: previous_rev
+          }
+        ])
+
         :swept
 
       {:ok, outcome} ->
