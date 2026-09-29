@@ -1359,7 +1359,7 @@ function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
         : null;
     }
     return calloutNodeChanged(prevChild, nextChild)
-      ? calloutNodeToPatch(nextChild)
+      ? calloutNodeToPatch(nextChild, prevChild)
       : null;
   }
   if (cls.isCard) {
@@ -1559,16 +1559,43 @@ function calloutNodeToBlock(node, id) {
 // collapsed:false round-trips byte-identically (compose.ex), and title:null is
 // dropped by compose maybe_put. The INSERT path (calloutNodeToBlock) correctly
 // OMITS absent fields — only the patch is explicit, so removals actually land.
-function calloutNodeToPatch(node) {
+//
+// With the node the edit started from (prevNode), a field rides the patch only when
+// its value CHANGED: a body edit must not materialize `collapsible:false` /
+// `collapsed:false` / `title:null` keys the author never wrote (task-56bafb69a8a1f250).
+// A changed field is still explicit, so an expand, a title clear or a collapsible-off
+// still lands. Without prevNode every field rides, as before.
+function calloutNodeToPatch(node, prevNode = null) {
   const block = calloutNodeToBlock(node, null);
   const attrs = (node && node.attrs) || {};
-  return {
+  const full = {
     tone: block.tone,
     content: block.content,
     title: attrs.title == null ? null : attrs.title,
     collapsible: attrs.collapsible === true,
     collapsed: attrs.collapsed === true,
   };
+  if (!prevNode) return full;
+  const prevAttrs = prevNode.attrs || {};
+  const before = {
+    tone: prevAttrs.tone || "info",
+    content: canonicalJSON(prevNode.content || null),
+    title: prevAttrs.title == null ? null : prevAttrs.title,
+    collapsible: prevAttrs.collapsible === true,
+    collapsed: prevAttrs.collapsed === true,
+  };
+  const after = {
+    tone: attrs.tone || "info",
+    content: canonicalJSON(node.content || null),
+    title: full.title,
+    collapsible: full.collapsible,
+    collapsed: full.collapsed,
+  };
+  const patch = {};
+  for (const key of Object.keys(full)) {
+    if (before[key] !== after[key]) patch[key] = full[key];
+  }
+  return patch;
 }
 
 // True when a callout node's body OR chrome changed (an interior edit). We
@@ -4491,7 +4518,7 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
         ops.push({
           op: "patch-block",
           id: entry.id,
-          patch: calloutNodeToPatch(entry.node),
+          patch: calloutNodeToPatch(entry.node, prevNode),
         });
       }
       continue;
