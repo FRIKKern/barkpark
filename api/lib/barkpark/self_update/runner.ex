@@ -408,20 +408,12 @@ defmodule Barkpark.SelfUpdate.Runner do
 
   defp run_deadline_ms, do: Keyword.get(config(), :run_deadline_ms, @default_run_deadline_ms)
 
-  # Closing a `{:spawn_executable, _}` port closes the pipe fds and sends the child
-  # NO signal — it terminates only a program that exits on stdin EOF or dies to
-  # SIGPIPE, which is most but not all of them (GH #6681 proved the gap on the
-  # Codex runtime, where `Session.reap_port/1` now SIGKILLs the pid after the
-  # close). This watchdog has the same hole for a self-update child that ignores
-  # EOF; reaping here is filed, not done. Tolerate an already-closed port
-  # (ArgumentError) so the watchdog never crashes the Runner.
-  defp close_port(port) do
-    Port.close(port)
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
-  end
+  # The deadline fires precisely BECAUSE the child is misbehaving, so closing the
+  # port alone (which sends it no signal) left it running with its pipes closed.
+  # `Barkpark.PortReaper.reap/1` reads the pid, closes, then SIGKILLs it
+  # (task-aa975de15eff4e6b); it never raises, so the watchdog never crashes the
+  # Runner.
+  defp close_port(port), do: Barkpark.PortReaper.reap(port)
 
   defp initial_state do
     # `mode` records which verb the current/last run is — defaults to
