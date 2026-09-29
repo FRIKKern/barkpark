@@ -17,8 +17,8 @@ defmodule BarkparkWeb.SelfUpdateController do
   alias Barkpark.SelfUpdate.Runner
   alias BarkparkWeb.ErrorResponse
 
-  def trigger(conn, _params) do
-    case Runner.trigger() do
+  def trigger(conn, params) do
+    case Runner.trigger(env: egress_env(params)) do
       {:ok, :started} ->
         conn
         |> put_status(:accepted)
@@ -40,6 +40,31 @@ defmodule BarkparkWeb.SelfUpdateController do
           message: "self-update runner failed to start — check the server logs"
         })
     end
+  end
+
+  # task-b4b2bb60b63e28ea. The control plane sends its own egress address(es) as
+  # `cloud_egress_ips` so the self-update run hands `BARKPARK_CLOUD_EGRESS_IPS` to
+  # instance-deploy.sh, which backfills `BARKPARK_TRUSTED_PROXIES` the same way
+  # the CD path does. Validated HERE to the shape runtime.exs accepts — a
+  # comma-separated list of BARE IP addresses (a CIDR, a hostname, or any
+  # malformed entry refuses the WHOLE value, which is then simply not passed:
+  # the update still runs, and instance-deploy.sh logs its own no-IPs WARN).
+  # The route is admin-gated, so only the admin-token holder can supply it.
+  @doc false
+  @spec egress_env(map()) :: [{String.t(), String.t()}]
+  def egress_env(%{"cloud_egress_ips" => raw}) when is_binary(raw) do
+    entries = raw |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+
+    if entries != [] and Enum.all?(entries, &bare_ip?/1),
+      do: [{"BARKPARK_CLOUD_EGRESS_IPS", Enum.join(entries, ",")}],
+      else: []
+  end
+
+  def egress_env(_params), do: []
+
+  defp bare_ip?(entry) do
+    not String.contains?(entry, "/") and
+      match?({:ok, _}, :inet.parse_strict_address(String.to_charlist(entry)))
   end
 
   @doc """

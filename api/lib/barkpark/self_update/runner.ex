@@ -147,8 +147,10 @@ defmodule Barkpark.SelfUpdate.Runner do
   @doc """
   Start the configured update command. Single-flight; never raises.
   """
-  @spec trigger() :: {:ok, :started} | {:error, :already_running | :disabled | :start_failed}
-  def trigger, do: safe_call({:trigger, :self_update}, {:error, :disabled})
+  @spec trigger(keyword()) ::
+          {:ok, :started} | {:error, :already_running | :disabled | :start_failed}
+  def trigger(opts \\ []),
+    do: safe_call({:trigger, :self_update, Keyword.get(opts, :env, [])}, {:error, :disabled})
 
   @doc """
   Start the configured rollback command as an async `Port`, SHARING the same
@@ -299,7 +301,13 @@ defmodule Barkpark.SelfUpdate.Runner do
   end
 
   @impl true
-  def handle_call({:trigger, mode}, _from, state) do
+  def handle_call({:trigger, mode}, from, state),
+    do: handle_call({:trigger, mode, []}, from, state)
+
+  # `env` is extra environment for THIS run's command only (task-b4b2bb60b63e28ea:
+  # the control plane's egress address, so instance-deploy.sh can backfill
+  # BARKPARK_TRUSTED_PROXIES on a self-updating box exactly as the CD path does).
+  def handle_call({:trigger, mode, env}, _from, state) do
     cond do
       not enabled?() ->
         {:reply, {:error, :disabled}, state}
@@ -308,7 +316,7 @@ defmodule Barkpark.SelfUpdate.Runner do
         {:reply, {:error, :already_running}, state}
 
       true ->
-        case open_port(mode) do
+        case open_port(mode, env) do
           {:ok, port} ->
             # Watchdog: force-close a run that outlives the deadline so `running?`
             # can't wedge true (and block every future trigger) until a BEAM restart.
@@ -439,7 +447,7 @@ defmodule Barkpark.SelfUpdate.Runner do
   defp command_for(_self_update),
     do: Keyword.get(config(), :command, @default_command)
 
-  defp open_port(mode) do
+  defp open_port(mode, env) do
     {exe, args} = command_for(mode)
 
     case System.find_executable(exe) do
@@ -450,7 +458,15 @@ defmodule Barkpark.SelfUpdate.Runner do
         port =
           Port.open(
             {:spawn_executable, path},
-            [:binary, :exit_status, :stderr_to_stdout, {:line, 4096}, args: args, cd: run_cd()]
+            [
+              :binary,
+              :exit_status,
+              :stderr_to_stdout,
+              {:line, 4096},
+              args: args,
+              cd: run_cd(),
+              env: Enum.map(env, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
+            ]
           )
 
         {:ok, port}

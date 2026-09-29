@@ -5553,7 +5553,40 @@ defmodule BarkparkCloud.Registry do
 
   def trigger_self_update(bp, _opts), do: do_trigger_self_update(bp)
 
-  defp do_trigger_self_update(bp), do: relay_admin_post(bp, "/v1/admin/self-update")
+  defp do_trigger_self_update(bp),
+    do: relay_admin_post(bp, "/v1/admin/self-update", self_update_body())
+
+  @doc """
+  The body of every self-update trigger (task-b4b2bb60b63e28ea): the control
+  plane's own egress address(es) as `cloud_egress_ips`, so a box that
+  self-updates backfills `BARKPARK_TRUSTED_PROXIES` exactly as a CD deploy does
+  (deploy.yml passes `BARKPARK_CLOUD_EGRESS_IPS='<CP_HOST>'` to
+  instance-deploy.sh; the self-update path had nothing to pass).
+
+  Read from `config :barkpark_cloud, :cloud_egress_ips` (runtime env
+  `BARKPARK_CLOUD_EGRESS_IPS` — the same name and value the provisioner env
+  already carries). Sent ONLY when every entry is a bare IP: a CIDR, a hostname
+  or a malformed entry sends nothing (`%{}`, the pre-change body), never a value
+  the box's runtime.exs would refuse at boot. The box validates again.
+  """
+  @spec self_update_body() :: map()
+  def self_update_body do
+    raw = Application.get_env(:barkpark_cloud, :cloud_egress_ips)
+
+    entries =
+      if is_binary(raw),
+        do: raw |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")),
+        else: []
+
+    if entries != [] and Enum.all?(entries, &bare_ip_address?/1),
+      do: %{"cloud_egress_ips" => Enum.join(entries, ",")},
+      else: %{}
+  end
+
+  defp bare_ip_address?(entry) do
+    not String.contains?(entry, "/") and
+      match?({:ok, _}, :inet.parse_strict_address(String.to_charlist(entry)))
+  end
 
   @doc """
   Trigger a blue/green ROLLBACK run on a live instance: `POST
