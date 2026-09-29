@@ -738,6 +738,12 @@
 .bp-paper-editor-body .bp-cols__c > :first-child { margin-top: 0; }
 /* Nested columns use their section cell, not the page-wide evidence band. */
 .bp-paper-editor-body .bp-section__cell .bp-cols { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
+/* A column cell is an authored boundary: every band-taking block inside it
+   (paper-links chapters/timeline, figure, video, diagram, diff, filetree,
+   asciicast, stats, chart) uses the cell, not the page-wide evidence band, so it
+   cannot paint over the sibling column. Edit nests paper surfaces inside the
+   cell that re-derive the band from the default tokens, so they reset too. */
+.bp-paper-editor-body .bp-cols__c, .bp-paper-editor-body .bp-cols__c .bp-paper-surface, .bp-paper-editor-body .bp-cols__c .bp-paper-body { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
 /* S2 layout-engine: section grid — the hand-copied mirror of the single-source
  * .bp-paper-surface .bp-section__grid rules (paper-surface.css) for the STANDALONE
  * embedder bundle (no .bp-paper-surface ancestor). In Studio the canvas mounts

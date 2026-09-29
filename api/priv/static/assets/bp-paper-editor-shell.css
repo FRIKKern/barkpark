@@ -856,6 +856,12 @@
     @media (max-width: 720px) { .bp-paper-editor-body .bp-cols { grid-template-columns: 1fr; } }
     /* Nested columns use their section cell, not the page-wide evidence band. */
     .bp-paper-editor-body .bp-section__cell .bp-cols { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
+    /* A column cell is an authored boundary: every band-taking block inside it
+       (paper-links chapters/timeline, figure, video, diagram, diff, filetree,
+       asciicast, stats, chart) uses the cell, not the page-wide evidence band, so it
+       cannot paint over the sibling column. Edit nests paper surfaces inside the
+       cell that re-derive the band from the default tokens, so they reset too. */
+    .bp-paper-editor-body .bp-cols__c, .bp-paper-editor-body .bp-cols__c .bp-paper-surface, .bp-paper-editor-body .bp-cols__c .bp-paper-body { --bp-evidence-width: 100%; --bp-evidence-pull: 0px; }
     /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF
        the .bp-table* selectors so it never leaks into the parity comparison). The
        control rails reveal on hover so an idle table reads byte-identically to /papers. */

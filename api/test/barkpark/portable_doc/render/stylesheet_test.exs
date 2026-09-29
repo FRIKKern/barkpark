@@ -97,6 +97,23 @@ defmodule Barkpark.PortableDoc.Render.StylesheetTest do
       refute overline =~ "nowrap", "a kicker longer than its column must wrap, not overflow"
       assert overline =~ "overflow-wrap: anywhere"
     end
+
+    # task-5d3528ca0c883c6c: a chapters/timeline paper-links block in a columns cell
+    # read the page-wide evidence band (1180px, margin-inline -300px in a 577px cell)
+    # and painted over the sibling column. The cell resets the band for every block.
+    test "a columns cell resets the evidence band for the blocks inside it" do
+      css = Stylesheet.css()
+
+      [rule] =
+        Regex.run(
+          ~r/\.bp-paper-surface \.bp-cols__c, \.bp-paper-surface \.bp-cols__c \.bp-paper-surface, \.bp-paper-surface \.bp-cols__c \.bp-paper-body\s*\{[^}]*\}/,
+          css
+        ) || [nil]
+
+      assert rule, "missing the .bp-cols__c evidence-band reset"
+      assert rule =~ "--bp-evidence-width: 100%;"
+      assert rule =~ "--bp-evidence-pull: 0px;"
+    end
   end
 
   describe "sinks embed the source" do
