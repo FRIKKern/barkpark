@@ -132,7 +132,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.PaperLinksReferenceCopyPatchTest do
              Blocks.paper_link_reference_copy_admission(
                paper_links([authored_ref(%{"title" => "Before"})]),
                0,
-               "eyebrow"
+               "meta"
              )
   end
 
@@ -189,7 +189,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.PaperLinksReferenceCopyPatchTest do
       {paper_links([first]), Map.put(base, "paper-link-ref-index", "00")},
       {paper_links([first]), Map.put(base, "paper-link-ref-index", "1")},
       {paper_links([first]), Map.put(base, "paper-link-ref-slug", "other")},
-      {paper_links([first]), Map.put(base, "paper-link-ref-field", "eyebrow")},
+      {paper_links([first]), Map.put(base, "paper-link-ref-field", "meta")},
       {paper_links([first]), Map.put(base, "paper-link-ref-value", 42)},
       {paper_links([first]), Map.put(base, "extra", "forged")},
       {paper_links([Map.put(first, "prefer_authored_copy", false)]), base},

@@ -123,7 +123,7 @@
     if (keys.length !== PAPER_LINK_REFERENCE_COPY_KEYS.length ||
         keys.some((key, index) => key !== PAPER_LINK_REFERENCE_COPY_KEYS[index]) ||
         PAPER_LINK_REFERENCE_COPY_KEYS.some((key) => typeof value[key] !== "string") ||
-        !["title", "description"].includes(value["paper-link-ref-field"])) return null;
+        !["title", "description", "eyebrow"].includes(value["paper-link-ref-field"])) return null;
     return value;
   }
 

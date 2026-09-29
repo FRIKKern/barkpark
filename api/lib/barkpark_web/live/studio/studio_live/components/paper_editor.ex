@@ -1814,6 +1814,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           :description_admission,
           paper_link_ref_field_admission(assigns.block, card.index, "description")
         )
+        |> Map.put(
+          :eyebrow_admission,
+          paper_link_ref_field_admission(assigns.block, card.index, "eyebrow")
+        )
       end)
 
     assigns =
@@ -1988,6 +1992,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           assigns.card.description_admission
         )
       )
+      |> assign(
+        :eyebrow_dom_id,
+        paper_link_ref_field_dom_id(
+          "eyebrow",
+          assigns.block["id"],
+          assigns.card.index,
+          Map.get(assigns.card, :eyebrow_admission)
+        )
+      )
 
     ~H"""
     <div
@@ -2005,7 +2018,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         href={@card.href}
         aria-label={"Open paper: " <> @card.title}
       ><span class="bp-paper-link-open-label">Open paper</span></a>
-      <%= raw(@card.before_title_html) %>
+      <.paper_link_ref_eyebrow
+        :if={Map.get(@card, :eyebrow_text)}
+        block={@block}
+        card={@card}
+        dom_id={@eyebrow_dom_id}
+      />
+      <%= if !Map.get(@card, :eyebrow_text), do: raw(@card.before_title_html) %>
       <.paper_link_ref_title block={@block} card={@card} dom_id={@title_dom_id} />
       <.paper_link_ref_description block={@block} card={@card} dom_id={@description_dom_id} />
       <%= raw(@card.after_copy_html) %>
@@ -2047,6 +2066,46 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         source={@card.title_source}
         authored={@card.title_authored?}
         placeholder={@card.title}
+      />
+    </div>
+    """
+  end
+
+  attr(:block, :map, required: true)
+  attr(:card, :map, required: true)
+  attr(:dom_id, :string, default: nil)
+
+  # The eyebrow over a chapters/timeline card: the reader's own <span> box (same
+  # style string), its authored text a paint button over the canonical form, like
+  # the title and description. A timeline's generated "Edition" default stays
+  # plain text; the form still lets an author type the first eyebrow there.
+  defp paper_link_ref_eyebrow(assigns) do
+    ~H"""
+    <div
+      class="bp-paper-link-ref-eyebrow-owner"
+      data-paper-link-ref-eyebrow-default={is_nil(@card.eyebrow) && "true"}
+      style={@card.eyebrow_style}
+    >
+      <span class="bp-paper-link-ref-eyebrow-paint-wrapper">
+        <button
+          :if={@card.eyebrow && @card.eyebrow_admission}
+          type="button"
+          phx-click={JS.focus(to: "#" <> @dom_id)}
+          aria-label={"Edit related paper eyebrow: " <> @card.eyebrow_text}
+          aria-controls={@dom_id}
+          data-paper-link-ref-eyebrow-paint
+        ><%= @card.eyebrow_text %></button>
+        <span :if={!@card.eyebrow || !@card.eyebrow_admission}><%= @card.eyebrow_text %></span>
+      </span>
+      <.paper_link_ref_form
+        :if={@card.eyebrow_admission}
+        block={@block}
+        card={@card}
+        dom_id={@dom_id}
+        field="eyebrow"
+        source={@card.eyebrow_source}
+        authored={not is_nil(@card.eyebrow)}
+        placeholder={@card.eyebrow_text}
       />
     </div>
     """

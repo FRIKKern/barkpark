@@ -26,6 +26,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   @code_emphasis_tones ~w(comment offending fixed)
   @paper_link_ref_form_keys ~w(block_id paper-link-ref-field paper-link-ref-guard paper-link-ref-index paper-link-ref-slug paper-link-ref-value)
   @paper_link_ref_guard_max_bytes 16 * 1024
+  # Authored per-reference copy a paper-links card paints and Edit edits in place.
+  # The guard identity excludes exactly these, so a DOM id stays stable while typing.
+  @paper_link_ref_copy_fields ~w(title description eyebrow)
 
   @doc false
   def block_form_source(params), do: Map.drop(params, ["if_rev", "request_id"])
@@ -170,7 +173,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
         field
       )
       when is_list(refs) and is_integer(index) and index >= 0 and
-             field in ["title", "description"] do
+             field in @paper_link_ref_copy_fields do
     with {:ok, admission} <- paper_link_reference_copy_admission(block, index),
          ref when is_map(ref) and not is_struct(ref) <- Enum.at(refs, index),
          true <- paper_link_ref_copy_field_representable?(ref, field) do
@@ -185,7 +188,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   @doc false
   def paper_link_ref_guard(ref) when is_map(ref) and not is_struct(ref) do
-    identity = Map.drop(ref, ["title", "description"])
+    identity = Map.drop(ref, @paper_link_ref_copy_fields)
 
     with {:ok, encoded} <- Jason.encode(identity),
          true <- byte_size(encoded) <= @paper_link_ref_guard_max_bytes,
@@ -210,7 +213,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   defp resolve_paper_link_ref_form(%{"type" => "paper-links"} = block, source) do
     with true <- Enum.sort(Map.keys(source)) == @paper_link_ref_form_keys,
          {:ok, index} <- canonical_paper_link_ref_index(source["paper-link-ref-index"]),
-         field when field in ["title", "description"] <- source["paper-link-ref-field"],
+         field when field in @paper_link_ref_copy_fields <- source["paper-link-ref-field"],
          {:ok, %{slug: slug, guard: expected_guard}} <-
            paper_link_reference_copy_admission(block, index, field),
          true <- source["paper-link-ref-slug"] === slug,
