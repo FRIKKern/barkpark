@@ -52,7 +52,7 @@ interface BoardProjection {
     label: string;
     glyph_role: string;
     count: number;
-    cards: Array<{ title: string }>;
+    cards: Array<{ title: string; draft?: true }>;
   }>;
 }
 
@@ -567,7 +567,10 @@ test("web task-board RENDER realizes every projection column (role order · labe
     // Ordered card titles — presence AND order within the column segment.
     let prev = -1;
     for (const card of col.cards) {
-      const marker = `<span class="bp-bcard__t">${card.title}</span>`;
+      // The projection's per-card `draft` slot (task-0310f53709aca6de): the
+      // canonical render paints the DRAFT chip inside a draft card's title span.
+      const chip = card.draft === true ? `<span class="bp-draft">DRAFT</span> ` : "";
+      const marker = `<span class="bp-bcard__t">${chip}${card.title}</span>`;
       const idx = seg.indexOf(marker);
       assert.ok(
         idx >= 0,

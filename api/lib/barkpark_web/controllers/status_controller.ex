@@ -52,6 +52,9 @@ defmodule BarkparkWeb.StatusController do
       # The sha is the identity; `version`'s trailing segment is only a
       # commits-since-tag distance. Public + unauthenticated on purpose.
       commit: health.commit,
+      # cloud | solo | app as the installing door declared it (BARKPARK_SHAPE,
+      # `Barkpark.Shape`); null when no door declared one. Never guessed.
+      shape: health.shape,
       # Inventory of this node. DISCLOSURE (task-fe88bf2ed4df476d): anonymous
       # callers could NOT read which plugins are enabled before this field —
       # anonymous /v1/capabilities projects every plugin-sourced command and

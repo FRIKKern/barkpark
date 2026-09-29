@@ -48,6 +48,7 @@ defmodule Barkpark.Status do
       open_incidents: length(incidents),
       version: safe(fn -> Barkpark.BuildInfo.version() end, "unknown"),
       commit: commit(),
+      shape: Barkpark.Shape.current(),
       migrations: migrations,
       plugins_enabled: if(is_list(plugins), do: length(plugins)),
       uptime_seconds: node_uptime_seconds(),

@@ -1424,7 +1424,7 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
       # Each half persisted exactly ONE assistant row, which is what makes the
       # consumer's narrow suppression applicable to both.
       assistant_rows =
-        sid |> StudioChat.list_messages() |> Enum.count(&(&1.role == "assistant"))
+        sid |> StudioChat.list_messages(:global) |> Enum.count(&(&1.role == "assistant"))
 
       assert assistant_rows == 2
     end
@@ -1456,7 +1456,7 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
       frames = collect_stable()
       assert reasons(frames) == ["settled"]
 
-      rows = sid |> StudioChat.list_messages() |> Enum.count(&(&1.role == "assistant"))
+      rows = sid |> StudioChat.list_messages(:global) |> Enum.count(&(&1.role == "assistant"))
 
       assert rows == 2,
              "two text blocks in one frame persist two rows for one turn — the ambiguous batch"
@@ -1489,7 +1489,10 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
          }}
       )
 
-      assert Enum.any?(StudioChat.list_messages(sid), &(&1.source_markdown == "durable answer"))
+      assert Enum.any?(
+               StudioChat.list_messages(sid, :global),
+               &(&1.source_markdown == "durable answer")
+             )
     end
 
     test "after a fault, NO further stable frames are emitted for that turn",

@@ -76,9 +76,9 @@ defmodule BarkparkWeb.Studio.ChatTranscriptWindowTest do
       end
 
       # Sanity: the unbounded arity-1 still returns everything (other callers rely on it).
-      assert length(StudioChat.list_messages(session.id)) == total
+      assert length(StudioChat.list_messages(session.id, :global)) == total
 
-      windowed = StudioChat.list_messages(session.id, 10)
+      windowed = StudioChat.list_messages(session.id, 10, :global)
 
       assert length(windowed) == 10
       seqs = Enum.map(windowed, & &1.seq)
@@ -91,7 +91,7 @@ defmodule BarkparkWeb.Studio.ChatTranscriptWindowTest do
       for i <- 1..5,
           do: StudioChat.append_message(session, %{role: "user", source_markdown: "m#{i}"})
 
-      assert length(StudioChat.list_messages(session.id, 0)) == 5
+      assert length(StudioChat.list_messages(session.id, 0, :global)) == 5
     end
   end
 
@@ -99,10 +99,10 @@ defmodule BarkparkWeb.Studio.ChatTranscriptWindowTest do
     test "the capped heap is smaller and the reopened LiveView remains interactive", %{conn: conn} do
       session = seed_large_session(@large_session_size)
 
-      {full_us, full} = :timer.tc(fn -> StudioChat.list_messages(session.id) end)
+      {full_us, full} = :timer.tc(fn -> StudioChat.list_messages(session.id, :global) end)
 
       {capped_us, capped} =
-        :timer.tc(fn -> StudioChat.list_messages(session.id, @window) end)
+        :timer.tc(fn -> StudioChat.list_messages(session.id, @window, :global) end)
 
       full_bytes = :erlang.external_size(full)
       capped_bytes = :erlang.external_size(capped)

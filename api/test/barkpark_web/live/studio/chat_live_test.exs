@@ -1909,7 +1909,10 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # …the row persists immediately with metadata.queued=true (words are never
       # deferred — the frame is dispatched right away, the binary buffers it).
       sid = store_id(view)
-      queued_rows = StudioChat.list_messages(sid) |> Enum.filter(&(&1.metadata["queued"] == true))
+
+      queued_rows =
+        StudioChat.list_messages(sid, :global) |> Enum.filter(&(&1.metadata["queued"] == true))
+
       assert [%{source_markdown: "second turn"}] = queued_rows
     end
 
@@ -1958,7 +1961,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "⧗ queued"
       assert html =~ "not enabled on this host"
       # …and NO orphan chat_messages row (persist is gated on a dispatched frame).
-      assert StudioChat.list_messages(store_id(view)) == []
+      assert StudioChat.list_messages(store_id(view), :global) == []
     end
 
     test "a queued user row replays as a plain ❯ prompt — the badge is chrome, never stored",
@@ -2432,7 +2435,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       sid = store_id(view)
 
       user_msg =
-        sid |> StudioChat.list_messages() |> Enum.find(&(&1.role == "user"))
+        sid |> StudioChat.list_messages(:global) |> Enum.find(&(&1.role == "user"))
 
       assert [ptr] = user_msg.metadata["attachments"]
       assert ptr["media_type"] == "image/png"
@@ -2464,7 +2467,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "data:image/png;base64,"
 
       user_msg =
-        view |> store_id() |> StudioChat.list_messages() |> Enum.find(&(&1.role == "user"))
+        view |> store_id() |> StudioChat.list_messages(:global) |> Enum.find(&(&1.role == "user"))
 
       refute Map.has_key?(user_msg.metadata, "attachments"),
              "a refused payload must not land a pointer on the message row"
@@ -2677,7 +2680,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert path == "/studio/chat/#{sid}"
 
       # the user message is persisted (source markdown, D7)
-      roles = StudioChat.list_messages(sid) |> Enum.map(&{&1.role, &1.source_markdown})
+      roles = StudioChat.list_messages(sid, :global) |> Enum.map(&{&1.role, &1.source_markdown})
       assert {"user", "hello there"} in roles
     end
 
@@ -3078,7 +3081,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # …and it is PERSISTED, not just in-memory (survives a crash / reopen)
       assert StudioChat.get_session(sid).pending_approvals == 1
 
-      rows = StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "approval"))
+      rows = StudioChat.list_messages(sid, :global) |> Enum.filter(&(&1.role == "approval"))
       assert [%{metadata: %{"approval_status" => "pending", "request_id" => "req-live"}}] = rows
     end
 
@@ -3105,7 +3108,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html = render_click(element(view, ~s(button[phx-click=approve][phx-value-rid=req-live])))
       assert html =~ "✓ allowed"
       # the store agrees with the screen: the terminal state is persisted…
-      approval = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
+      approval = StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.role == "approval"))
       assert approval.metadata["approval_status"] == "allowed"
       # …and the pending count dropped, so the sidebar pill is no longer "needs you"
       assert StudioChat.get_session(sid).pending_approvals == 0
@@ -3130,7 +3133,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # the flip is PERSISTED: reopening again cannot revive the dead card
       assert StudioChat.get_session(sid).pending_approvals == 0
 
-      approval = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
+      approval = StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.role == "approval"))
       assert approval.metadata["approval_status"] == "canceled"
     end
   end
@@ -3457,7 +3460,12 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # …and the stamp lands on the SHARED row, not just this socket — the same
       # persisted paper_id/paper_url a TUI-origin allow produces, which is what
       # makes the two origins converge instead of diverge.
-      row = Enum.find(StudioChat.list_messages(sid), &(&1.metadata["request_id"] == "plan-pub"))
+      row =
+        Enum.find(
+          StudioChat.list_messages(sid, :global),
+          &(&1.metadata["request_id"] == "plan-pub")
+        )
+
       assert row.metadata["paper_id"] == slug
       assert row.metadata["paper_url"] == "/papers/#{slug}"
     end
@@ -4222,7 +4230,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "reading the charter"
 
       # The store collapsed to a single todo row too (Recorder-owned, D39).
-      todos = StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "todo"))
+      todos = StudioChat.list_messages(sid, :global) |> Enum.filter(&(&1.role == "todo"))
       assert length(todos) == 1
     end
 
@@ -5473,7 +5481,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       # the store never holds the 100 KB body — the cap is untouched
       row =
-        StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["tool_use_id"] == "toolu_x"))
+        StudioChat.list_messages(sid, :global)
+        |> Enum.find(&(&1.metadata["tool_use_id"] == "toolu_x"))
 
       assert String.length(row.metadata["output"]) == 4_000
       refute match?({:ok, _}, Jason.decode(row.metadata["output"]))
@@ -6816,13 +6825,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert has_element?(viewB, ~s(button[phx-click=approve][phx-value-rid=req-answer]))
       assert StudioChat.get_session(sid).pending_approvals == 1
 
-      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
+      row = StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.role == "approval"))
       assert row.metadata["approval_status"] == "pending"
 
       # …and answering THROUGH the adopted pid resolves it end-to-end
       render_click(element(viewB, ~s(button[phx-click=approve][phx-value-rid=req-answer])))
 
-      approval = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
+      approval = StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.role == "approval"))
       assert approval.metadata["approval_status"] == "allowed"
       assert StudioChat.get_session(sid).pending_approvals == 0
     end
@@ -7179,7 +7188,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # dispatched frame — the session row exists but carries zero messages).
       sid = store_id(view)
       assert is_binary(sid)
-      assert StudioChat.list_messages(sid) == []
+      assert StudioChat.list_messages(sid, :global) == []
     end
 
     test "the composer is server-bound: value tracks the draft while typing and clears on send",

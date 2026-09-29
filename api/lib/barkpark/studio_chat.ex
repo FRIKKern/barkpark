@@ -338,23 +338,22 @@ defmodule Barkpark.StudioChat do
   `chat_messages` carries no `owner_workspace_id` of its own, so the scope gate
   is the PARENT session's visibility: a workspace-scoped caller that cannot see
   the session (foreign / `:global` owner) gets `[]` — fail-closed, never a
-  foreign tenant's transcript. `:global` (default) is unfiltered. A `pos_integer`
-  second arg is the LEGACY limit form (see the 3-arity for a scoped limit).
-  """
-  @spec list_messages(String.t(), :global | binary() | pos_integer()) :: [Message.t()]
-  def list_messages(session_id, scope_or_limit \\ :global)
+  foreign tenant's transcript. `:global` is unfiltered.
 
+  THE SCOPE HAS NO DEFAULT, ON PURPOSE (drafts.task-bb38ed88099c9723). It used
+  to default to `:global`, and a `pos_integer` second arg was a legacy limit
+  form that applied no scope either. Every caller was fenced by a door above it
+  (`ChatController.fetch_scoped/2`), but a future caller that forgot the door
+  would have inherited an unscoped read of any session id. So the unscoped read
+  is now asked for BY NAME (`:global`), and a bounded read goes through the
+  scoped 3-arity. Anything else is a `FunctionClauseError`, not a silent read.
+  """
+  @spec list_messages(String.t(), :global | binary()) :: [Message.t()]
   def list_messages(session_id, :global), do: do_messages_all(session_id)
 
   def list_messages(session_id, ws) when is_binary(ws) do
     if scoped_session_visible?(session_id, ws), do: do_messages_all(session_id), else: []
   end
-
-  def list_messages(session_id, limit) when is_integer(limit) and limit > 0 do
-    do_messages_last(session_id, limit)
-  end
-
-  def list_messages(session_id, limit) when is_integer(limit), do: do_messages_all(session_id)
 
   @doc """
   List the LAST `limit` messages of a session (ascending `seq`), within `scope`.

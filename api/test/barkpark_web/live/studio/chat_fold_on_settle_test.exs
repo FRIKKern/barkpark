@@ -46,7 +46,7 @@ defmodule BarkparkWeb.Studio.ChatFoldOnSettleTest do
   end
 
   defp meta_for(session_id, tool_use_id) do
-    StudioChat.list_messages(session_id)
+    StudioChat.list_messages(session_id, :global)
     |> Enum.find(&(&1.metadata["tool_use_id"] == tool_use_id))
     |> Map.fetch!(:metadata)
   end
@@ -199,7 +199,10 @@ defmodule BarkparkWeb.Studio.ChatFoldOnSettleTest do
       tool_row(s, "t-wire")
       StudioChat.settle_tool_rows(s.id, StudioChat.turn_settle_stamp(%{duration_ms: 192_000}))
 
-      row = StudioChat.list_messages(s.id) |> Enum.find(&(&1.metadata["tool_use_id"] == "t-wire"))
+      row =
+        StudioChat.list_messages(s.id, :global)
+        |> Enum.find(&(&1.metadata["tool_use_id"] == "t-wire"))
+
       json = ChatController.message_json(row)
 
       assert json.metadata["turn_settled"] == true

@@ -312,3 +312,40 @@ func TestRunOnceEnableApplyNilFuncIsNoOp(t *testing.T) {
 		t.Error("claimed=true with a nil EnableApply, want false")
 	}
 }
+
+// TestSetShapeCloudStepReplacesAndIsIdempotent EXECUTES the shape step (real
+// bash, temp file) over an env that already says solo (deploy.sh's default on
+// a warm-baked image): the result is exactly one BARKPARK_SHAPE=cloud line,
+// unchanged by a re-run, with unrelated keys untouched.
+func TestSetShapeCloudStepReplacesAndIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "app.env")
+	if err := os.WriteFile(envFile, []byte("PHX_HOST=acme.barkpark.cloud\nBARKPARK_SHAPE=solo\nPHX_SCHEME=https\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	step := setShapeCloudStep(envFile)
+	runAttachScript(t, step)
+	runAttachScript(t, step)
+
+	env, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(env), "BARKPARK_SHAPE="); got != 1 {
+		t.Errorf("BARKPARK_SHAPE= appears %d times, want exactly 1:\n%s", got, env)
+	}
+	if !strings.Contains(string(env), "BARKPARK_SHAPE=cloud\n") || strings.Contains(string(env), "BARKPARK_SHAPE=solo") {
+		t.Errorf("shape was not replaced with cloud:\n%s", env)
+	}
+	if !strings.Contains(string(env), "PHX_HOST=acme.barkpark.cloud") || !strings.Contains(string(env), "PHX_SCHEME=https") {
+		t.Errorf("unrelated env keys were disturbed:\n%s", env)
+	}
+	info, err := os.Stat(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("env file mode = %v, want 0600 kept (the step rewrites in place)", info.Mode().Perm())
+	}
+}

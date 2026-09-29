@@ -17,6 +17,7 @@ import {
   capitalize,
   roleOf,
   glyphHtml,
+  draftHtml,
   glyphChar,
   labelForRole,
   LEGEND_ROLES,
@@ -73,7 +74,7 @@ function boardCol(role: string, label: string, rows: Block[]): string {
       const title = escapeHtml(str(m.title))
       const meta = priorityHtml(m.priority) + criteriaHtml(m.criteria)
       const metaHtml = meta === '' ? '' : `<div class="bp-bcard__m">${meta}</div>`
-      return `<div class="bp-bcard">${glyphHtml(rowRole)}<span class="bp-bcard__t">${title}</span>${metaHtml}</div>`
+      return `<div class="bp-bcard">${glyphHtml(rowRole)}<span class="bp-bcard__t">${draftHtml(m)}${title}</span>${metaHtml}</div>`
     })
     .join('')
   return `<div class="bp-board__col bp-board__col--${role}"><div class="bp-board__head"><span class="bp-board__label">${label}</span><span class="bp-board__count">${rows.length}</span></div><div class="bp-board__cards">${cards}</div></div>`
@@ -133,7 +134,7 @@ function rowHtml(r: Block): string {
     `<div class="bp-trow bp-trow--${role}" style="padding-left:${pad}px">` +
     arrow +
     glyphHtml(role) +
-    `<span class="bp-trow__t">${title}</span>` +
+    `<span class="bp-trow__t">${draftHtml(r)}${title}</span>` +
     metaHtml +
     `</div>`
   )

@@ -142,6 +142,10 @@ load_env() {
   export DATABASE_URL
   export PORT
   export PHX_HOST
+  # This door installs a Solo box (docs/contracts/product-era.md). A value in
+  # ~/.barkpark/.env still wins; status.json reports it (Barkpark.Shape).
+  BARKPARK_SHAPE="${BARKPARK_SHAPE:-solo}"
+  export BARKPARK_SHAPE
 }
 
 # ── server lifecycle ─────────────────────────────────────────────────────────
