@@ -94,6 +94,8 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
   end
 
   describe "folder collections" do
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "membership and assets listing", %{conn: conn} do
       collection = create_collection!(%{title: "Hero shots"})
       created = upload_asset(conn)
@@ -148,6 +150,8 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
   end
 
   describe "share links" do
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "public share token lists collection assets", %{conn: conn} do
       collection = create_collection!(%{title: "Shared set"})
       created = upload_asset(conn)
