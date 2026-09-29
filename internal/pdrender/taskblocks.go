@@ -856,6 +856,22 @@ func (roadmapRenderer) Render(b Block, ctx RenderCtx) []string {
 		return []string{ctx.Theme.Dim.Render("No roadmap items.")}
 	}
 
+	// NOT ONE row has geometry: the timeline would be N identical full-width
+	// bars. Say so, and list the items instead (the Elixir twin's degrade).
+	{
+		_, _, span := roadmapSpan(b.Attrs)
+		anyPlaced := false
+		for _, r := range rows {
+			if roadmapPlaceable(r, span) {
+				anyPlaced = true
+				break
+			}
+		}
+		if !anyPlaced {
+			return roadmapUnplacedRows(b, ctx)
+		}
+	}
+
 	w := clampWidth(ctx.Width)
 	var out []string
 
@@ -909,9 +925,74 @@ func (roadmapRenderer) Render(b Block, ctx RenderCtx) []string {
 	todayCell := roadmapTodayCell(b.Attrs, blockStart, blockEnd, haveSpan, track)
 
 	for _, r := range rows {
-		out = append(out, roadmapLane(r, ctx, labelW, track, todayCell, ticks, blockStart, blockEnd, haveSpan))
+		if roadmapPlaceable(r, haveSpan) {
+			out = append(out, roadmapLane(r, ctx, labelW, track, todayCell, ticks, blockStart, blockEnd, haveSpan))
+		} else {
+			out = append(out, roadmapUnplacedLane(r, ctx, labelW, track))
+		}
 	}
 	return out
+}
+
+// The two cannot-place strings. They are the Elixir View emitter's
+// Components.roadmap_unplaced_copy/0 and roadmap_lane_unplaced_copy/0, and an
+// Elixir test reads these literals (and the JS twin's) so the three surfaces
+// cannot drift apart: api/test/barkpark/portable_doc/render/
+// roadmap_unplaced_copy_lock_test.exs.
+const (
+	roadmapUnplacedCopy     = "No schedule to place these items on."
+	roadmapLaneUnplacedCopy = "not scheduled"
+)
+
+// roadmapPlaceable reports whether a row's position is READ from a source field
+// or would be invented by the clamp. Exactly two sources count, as on the
+// Elixir twin (components.ex roadmap_placeable?/2): DATE RAILS (the block has a
+// span AND the row carries its own parseable start+end) or AUTHOR PCT (a NUMBER
+// in `left` or `width`). A live-query roadmap row (title/status/priority, no
+// schedule field) has neither, and roadmapLeftWidth would clamp it to a
+// full-width bar identical to every other such lane.
+func roadmapPlaceable(r map[string]any, haveSpan bool) bool {
+	if haveSpan {
+		_, ok1 := parseISODate(attrStr(r, "start"))
+		_, ok2 := parseISODate(attrStr(r, "end"))
+		if ok1 && ok2 {
+			return true
+		}
+	}
+	return isNumber(r["left"]) || isNumber(r["width"])
+}
+
+// isNumber is Elixir's is_number/1: a numeric JSON value, never a numeric-looking
+// string (toFloat would accept "40", which the Elixir twin does not).
+func isNumber(v any) bool {
+	switch v.(type) {
+	case float64, float32, int, int64, int32:
+		return true
+	}
+	return false
+}
+
+// roadmapUnplacedRows renders the all-unplaced degrade: the cannot-place notice,
+// then the ITEMS through the task-list renderer, because "cannot place them" is
+// not a licence to drop rows the author asked for (components.ex roadmap_html/1).
+func roadmapUnplacedRows(b Block, ctx RenderCtx) []string {
+	out := []string{ctx.Theme.Dim.Render(roadmapUnplacedCopy)}
+	list := Block{Type: "tasks", Attrs: map[string]any{"snapshot": b.Attrs["snapshot"]}}
+	return append(out, taskListRenderer{}.Render(list, ctx)...)
+}
+
+// roadmapUnplacedLane draws a lane whose row has no geometry: the label, then
+// the bordered track holding the "not scheduled" marker instead of a bar.
+func roadmapUnplacedLane(r map[string]any, ctx RenderCtx, labelW, track int) string {
+	title := sanitizeText(strings.TrimSpace(attrStr(r, "title")))
+	labelStyle := ctx.Theme.Body
+	if attrBool(r, "phase_row") {
+		labelStyle = ctx.Theme.Body.Bold(true)
+	}
+	marker := ctx.Theme.Dim.Render(padOrTruncate(roadmapLaneUnplacedCopy, track))
+	rail := ctx.Theme.Dim.Render("│")
+	joined := joinColumns([][]string{{labelStyle.Render(padOrTruncate(title, labelW))}, {rail + marker + rail}}, []int{labelW, track + 2}, 1)
+	return firstLine(joined)
 }
 
 // laneMarks carries the per-row glyph-layer inputs renderTrack resolves by
