@@ -9,6 +9,8 @@
 # in the ABSENT run, green in the PRESENT run, and stays that way on a rerun of
 # its file. It also exits 1 when either run printed no ExUnit summary line.
 # Tests already red with the tables present are not its subject.
+# A second step then runs the suite with plugins off and `--exclude
+# requires_plugins`, which must print 0 failures (task-ba5085862f3da4e4).
 #
 # WHY WEEKLY AND NOT A PR CHECK (task-19428fc715804f49). Two full suite runs
 # take about 40 minutes. Main's ruling on #20401: it is NOT a PR gate and must
@@ -142,6 +144,24 @@ jobs:
           set -o pipefail
           mix test.core_without_owned_tables 2>&1 | tee core-without-owned-tables.log
 
+      # THE PLUGINS-OFF CORE SUITE (task-ba5085862f3da4e4). Every plugin and
+      # capability off, owned tables PRESENT, and the tests that need a plugin
+      # excluded by tag: `@moduletag` / `@tag :requires_plugins`. Must print 0
+      # failures. This is also the census: a NEW test that needs a plugin but
+      # carries no tag fails here, so the core suite stays a tag exclusion, not a
+      # file-name guess. `mix test` (the alias) creates and migrates the job's
+      # own barkpark_test database; the differential above dropped only its two.
+      # test/barkpark_web/live is left out until its modules are tagged — that
+      # folder is the remaining work on task-ba5085862f3da4e4.
+      - name: Core suite with plugins off (tagged plugin tests excluded)
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          mapfile -t files < <(find test -name '*_test.exs' -not -path 'test/barkpark_web/live/*' | sort)
+          BARKPARK_PLUGINS=, \
+          BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet,epic_fleet \
+            mix test --exclude requires_plugins "${files[@]}" 2>&1 | tee plugins-off-core.log
+
       # The two counts are the run's record: PRESENT and ABSENT summary lines,
       # the newly-red tally, and every confirmed NEWLY RED test.
       - name: Both counts into the step summary
@@ -158,6 +178,14 @@ jobs:
               echo '(no [core-without-owned-tables] lines — the run aborted before the task reported)'
             fi
             echo '```'
+            echo '### Core suite with plugins off (--exclude requires_plugins)'
+            echo '```'
+            if [ -f plugins-off-core.log ] && grep -E '^(Result:|Failed:|Finished in)' plugins-off-core.log; then
+              :
+            else
+              echo '(no ExUnit summary — the plugins-off core step did not finish)'
+            fi
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the logs
@@ -169,6 +197,7 @@ jobs:
           # System.tmp_dir(), which is /tmp on the runner.
           path: |
             api/core-without-owned-tables.log
+            api/plugins-off-core.log
             /tmp/core_without_owned_tables_*/
           if-no-files-found: warn
           retention-days: 14
@@ -200,4 +229,8 @@ jobs:
             `@tag :owned_tables` if its subject IS that table.
             Reproduce: cd api && mix test.core_without_owned_tables <test path>
             A red before the differential step (deps, apt, compile) is the venue.
+            A red in `Core suite with plugins off` is a test that fails with every
+            plugin off and carries no `:requires_plugins` tag: tag it if its
+            subject is a plugin, fix its fixture if it is core. Reproduce:
+            cd api && BARKPARK_PLUGINS=, BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet,epic_fleet mix test --exclude requires_plugins <test path>
         run: bash scripts/file-ci-failure-issue.sh
