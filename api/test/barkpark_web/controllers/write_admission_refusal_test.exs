@@ -59,7 +59,7 @@ defmodule BarkparkWeb.WriteAdmissionRefusalTest do
     conn: conn,
     gate: gate
   } do
-    holder = hold(gate)
+    hold = hold(gate)
 
     resp = conn |> authed() |> post("/v1/schemas/test", Jason.encode!(@schema))
     assert resp.status == 503
@@ -74,30 +74,25 @@ defmodule BarkparkWeb.WriteAdmissionRefusalTest do
     resp = conn |> authed() |> get("/v1/schemas/test")
     assert resp.status == 200
 
-    send(holder, :release)
-    assert_receive {:released, :ok}
+    release(gate, hold)
 
     resp = conn |> authed() |> post("/v1/schemas/test", Jason.encode!(@schema))
     assert resp.status in 200..299, resp.resp_body
     assert Admission.status(gate).pending == 0
   end
 
+  # The test process owns the hold. begin_hold/reopen are synchronous calls
+  # that journal to DETS before replying; a spawned holder re-published those
+  # replies as messages raced against assert_receive's 100ms default, which
+  # CI load outran (main run 36574063509, task-5381a4e7a1724185). The owner
+  # only needs to be a live non-writer: the test process holds no admission
+  # while the hold begins, and nothing it spawns inherits the hold.
   defp hold(gate) do
-    parent = self()
+    assert {:ok, :held, ticket} =
+             Admission.begin_hold(gate, "switch", Admission.status(gate).generation)
 
-    holder =
-      spawn(fn ->
-        {:ok, :held, ticket} =
-          Admission.begin_hold(gate, "switch", Admission.status(gate).generation)
-
-        send(parent, :held)
-
-        receive do
-          :release -> send(parent, {:released, Admission.reopen(gate, ticket)})
-        end
-      end)
-
-    assert_receive :held
-    holder
+    ticket
   end
+
+  defp release(gate, ticket), do: assert(Admission.reopen(gate, ticket) == :ok)
 end

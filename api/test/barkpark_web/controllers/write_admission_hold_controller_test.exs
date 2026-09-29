@@ -4,6 +4,13 @@ defmodule BarkparkWeb.WriteAdmissionHoldControllerTest do
   # advances the generation so the old capability refuses.
   use BarkparkWeb.ConnCase, async: false
 
+  # A spawned writer/holder reports the reply of a DETS-journaled GenServer
+  # call (checkout, checkin, begin_hold, reopen) or its own death as a message;
+  # that message is the only sync point, so the bound is the contract. Sized
+  # for a slow fsync under CI load, not ExUnit's 100ms default, which reddened
+  # main (run 36574063509, task-5381a4e7a1724185). It only costs time on a red.
+  @sync_ms 5_000
+
   alias Barkpark.Auth
   alias Barkpark.ManagedRuntime.WriteAdmission, as: Admission
   alias Barkpark.ManagedRuntime.WriteAdmission.Holder
@@ -195,7 +202,7 @@ defmodule BarkparkWeb.WriteAdmissionHoldControllerTest do
         receive do: (:die -> :ok)
       end)
 
-    assert_receive :admitted
+    assert_receive :admitted, @sync_ms
     resp = conn |> as(@admin) |> post(@path, Jason.encode!(%{"operation" => "switch"}))
     assert resp.status == 202, resp.resp_body
     assert Jason.decode!(resp.resp_body)["phase"] == "closing"

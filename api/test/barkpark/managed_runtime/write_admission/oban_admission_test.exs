@@ -3,6 +3,13 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.ObanAdmissionTest do
   # the ordered hold pauses queues before closing admission (C083 slice 3).
   use ExUnit.Case, async: false
 
+  # A spawned writer/holder reports the reply of a DETS-journaled GenServer
+  # call (checkout, checkin, begin_hold, reopen) or its own death as a message;
+  # that message is the only sync point, so the bound is the contract. Sized
+  # for a slow fsync under CI load, not ExUnit's 100ms default, which reddened
+  # main (run 36574063509, task-5381a4e7a1724185). It only costs time on a red.
+  @sync_ms 5_000
+
   alias Barkpark.ManagedRuntime.WriteAdmission, as: Admission
   alias Barkpark.ManagedRuntime.WriteAdmission.{ObanAdmission, Operation}
 
@@ -60,7 +67,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.ObanAdmissionTest do
         end
       end)
 
-    assert_receive {:started, ^pid}
+    assert_receive {:started, ^pid}, @sync_ms
     _ = gate_owner
     pid
   end
@@ -74,7 +81,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.ObanAdmissionTest do
     assert Admission.status(gate).phase == :closing
 
     send(pid, :finish)
-    assert_receive {:finished, ^pid}
+    assert_receive {:finished, ^pid}, @sync_ms
     assert Admission.status(gate).pending == 0
     assert Admission.status(gate).phase == :held
 
@@ -86,14 +93,14 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.ObanAdmissionTest do
     pid = job(gate, :exception)
     {:ok, :closing, _hold} = Operation.hold("switch")
     send(pid, :finish)
-    assert_receive {:finished, ^pid}
+    assert_receive {:finished, ^pid}, @sync_ms
     assert Admission.status(gate).phase == :recovery_required
   end
 
   test "a job that raises while open is an ordinary failure", %{gate: gate} do
     pid = job(gate, :exception)
     send(pid, :finish)
-    assert_receive {:finished, ^pid}
+    assert_receive {:finished, ^pid}, @sync_ms
     assert Admission.status(gate).phase == :open
     assert Admission.status(gate).pending == 0
   end
@@ -111,7 +118,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.ObanAdmissionTest do
         job(gate, :stop)
         |> then(fn pid ->
           send(pid, :finish)
-          assert_receive {:finished, ^pid}
+          assert_receive {:finished, ^pid}, @sync_ms
         end)
       end)
 

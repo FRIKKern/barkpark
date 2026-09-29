@@ -1,5 +1,12 @@
 defmodule Barkpark.ManagedRuntime.WriteAdmission.DoorTest do
   use ExUnit.Case, async: false
+
+  # A spawned writer/holder reports the reply of a DETS-journaled GenServer
+  # call (checkout, checkin, begin_hold, reopen) or its own death as a message;
+  # that message is the only sync point, so the bound is the contract. Sized
+  # for a slow fsync under CI load, not ExUnit's 100ms default, which reddened
+  # main (run 36574063509, task-5381a4e7a1724185). It only costs time on a red.
+  @sync_ms 5_000
   alias Barkpark.ManagedRuntime.WriteAdmission, as: Admission
   alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
@@ -95,7 +102,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.DoorTest do
         end)
       end)
 
-    assert_receive :admitted
+    assert_receive :admitted, @sync_ms
 
     {:ok, :closing, _hold} =
       Admission.begin_hold(gate, "switch", Admission.status(gate).generation)
@@ -123,13 +130,21 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.DoorTest do
   defp restore(nil), do: Application.delete_env(:barkpark, :write_admission)
   defp restore(previous), do: Application.put_env(:barkpark, :write_admission, previous)
 
-  defp await_phase(gate, phase, attempts \\ 100)
-  defp await_phase(gate, phase, 0), do: assert(Admission.status(gate).phase == phase)
+  # Poll to the same @sync_ms deadline as the message waits, not a fixed 500ms.
+  defp await_phase(gate, phase),
+    do: await_phase(gate, phase, System.monotonic_time(:millisecond) + @sync_ms)
 
-  defp await_phase(gate, phase, attempts) do
-    if Admission.status(gate).phase != phase do
-      Process.sleep(5)
-      await_phase(gate, phase, attempts - 1)
+  defp await_phase(gate, phase, deadline) do
+    cond do
+      Admission.status(gate).phase == phase ->
+        :ok
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        assert Admission.status(gate).phase == phase
+
+      true ->
+        Process.sleep(5)
+        await_phase(gate, phase, deadline)
     end
   end
 end

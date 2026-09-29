@@ -1,5 +1,13 @@
 defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
   use ExUnit.Case, async: false
+
+  # A spawned writer/holder reports the reply of a DETS-journaled GenServer
+  # call (checkout, checkin, begin_hold, reopen) or its own death as a message;
+  # that message is the only sync point, so the bound is the contract. Sized
+  # for a slow fsync under CI load, not ExUnit's 100ms default, which reddened
+  # main (run 36574063509, task-5381a4e7a1724185). It only costs time on a red.
+  @sync_ms 5_000
+
   alias Barkpark.ManagedRuntime.WriteAdmission, as: Admission
 
   setup do
@@ -52,13 +60,13 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
         end
       end)
 
-    assert_receive {:admitted, ^writer}
+    assert_receive {:admitted, ^writer}, @sync_ms
     assert {:ok, :closing, hold} = begin_hold(gate, "operation-1")
     assert {:error, :admission_closed} = Admission.checkout(gate)
     assert false == Admission.held?(gate, hold)
     assert {:error, :invalid_hold} = Admission.reopen(gate, hold)
     send(writer, :settle)
-    assert_receive {:settled, :ok}
+    assert_receive {:settled, :ok}, @sync_ms
     assert true == Admission.held?(gate, hold)
     assert :ok = Admission.reopen(gate, hold)
     assert {:error, :invalid_hold} = Admission.reopen(gate, hold)
@@ -88,14 +96,14 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
         end
       end)
 
-    assert_receive {:admitted, ^writer}
+    assert_receive {:admitted, ^writer}, @sync_ms
     {:ok, :closing, hold} = begin_hold(gate, "nested")
     send(writer, :nest)
-    assert_receive {:duplicate, {:error, :invalid_ticket}}
+    assert_receive {:duplicate, {:error, :invalid_ticket}}, @sync_ms
     assert false == Admission.held?(gate, hold)
     assert Admission.status(gate).pending == 1
     send(writer, :settle)
-    assert_receive {:settled, :ok}
+    assert_receive {:settled, :ok}, @sync_ms
     assert true == Admission.held?(gate, hold)
   end
 
@@ -141,7 +149,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
         end
       end)
 
-    assert_receive :admitted
+    assert_receive :admitted, @sync_ms
     {:ok, :closing, hold} = begin_hold(gate, "lost-writer")
     send(writer, :die)
     await_phase(gate, :recovery_required)
@@ -168,7 +176,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
         end
       end)
 
-    assert_receive :held
+    assert_receive :held, @sync_ms
     send(owner, :die)
     await_phase(gate, :recovery_required)
     assert {:error, :admission_closed} = Admission.checkout(gate)
@@ -187,7 +195,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
         receive do: (:die -> :ok)
       end)
 
-    assert_receive :held
+    assert_receive :held, @sync_ms
 
     assert {:error, :not_in_recovery} =
              Admission.recover(gate, Admission.status(gate).generation, 0)
@@ -220,9 +228,9 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
     end
 
     dead = writer.()
-    assert_receive :admitted
+    assert_receive :admitted, @sync_ms
     alive = writer.()
-    assert_receive :admitted
+    assert_receive :admitted, @sync_ms
     {:ok, :closing, _} = begin_hold(gate, "switch")
     send(dead, :die)
     await_phase(gate, :recovery_required)
@@ -260,7 +268,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
         end)
       end
 
-    if writer, do: assert_receive(:admitted)
+    if writer, do: assert_receive(:admitted, @sync_ms)
 
     hold =
       if phase != :open do
@@ -270,7 +278,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
 
     ref = Process.monitor(gate)
     Process.exit(gate, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^gate, :killed}
+    assert_receive {:DOWN, ^ref, :process, ^gate, :killed}, @sync_ms
     next = restart(journal)
     assert Admission.status(next).phase == :recovery_required
     assert {:error, :admission_closed} = Admission.checkout(next)
@@ -421,19 +429,19 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
         end)
       end
 
-    for writer <- writers, do: assert_receive({:ready, ^writer})
+    for writer <- writers, do: assert_receive({:ready, ^writer}, @sync_ms)
     {:ok, :closing, hold} = begin_hold(gate, "three-writers")
     assert {:ok, :closing, ^hold} = begin_hold(gate, "three-writers")
 
     for writer <- Enum.take(writers, 2) do
       send(writer, :settle)
-      assert_receive {:settled, ^writer, :ok}
+      assert_receive {:settled, ^writer, :ok}, @sync_ms
       assert false == Admission.held?(gate, hold)
     end
 
     last = List.last(writers)
     send(last, :settle)
-    assert_receive {:settled, ^last, :ok}
+    assert_receive {:settled, ^last, :ok}, @sync_ms
     assert true == Admission.held?(gate, hold)
   end
 
@@ -482,7 +490,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
 
     ref = Process.monitor(gate)
     assert {:error, :journal_unavailable} = Admission.checkout(gate)
-    assert_receive {:DOWN, ^ref, :process, ^gate, _}
+    assert_receive {:DOWN, ^ref, :process, ^gate, _}, @sync_ms
     next = restart(journal)
     assert Admission.status(next).pending == 0
     # No ticket was returned and no work began. This is not settlement of an
@@ -503,7 +511,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
 
     ref = Process.monitor(gate)
     assert {:error, :journal_unavailable} = Admission.checkin(gate, ticket)
-    assert_receive {:DOWN, ^ref, :process, ^gate, _}
+    assert_receive {:DOWN, ^ref, :process, ^gate, _}, @sync_ms
     next = restart(journal)
     assert Admission.status(next).phase == :recovery_required
     assert Admission.status(next).pending == 1
@@ -526,14 +534,14 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
         end
       end)
 
-    assert_receive :joined
+    assert_receive :joined, @sync_ms
     # One journaled root, two admitted processes.
     assert Admission.status(gate).pending == 1
     assert {:error, :children_pending} = Admission.checkin(gate, root)
     {:ok, :closing, _hold} = begin_hold_from_other_process(gate, "with-child")
     assert Admission.status(gate).phase == :closing
     send(child, :settle)
-    assert_receive {:child_settled, :ok}
+    assert_receive {:child_settled, :ok}, @sync_ms
     assert Admission.status(gate).pending == 1
     assert :ok = Admission.checkin(gate, root)
     assert Admission.status(gate).phase == :held
@@ -572,10 +580,10 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
         end
       end)
 
-    assert_receive :admitted
+    assert_receive :admitted, @sync_ms
     {:ok, :closing, hold} = begin_hold(gate, "failing-drain")
     send(writer, :fail)
-    assert_receive {:settled, :ok}
+    assert_receive {:settled, :ok}, @sync_ms
     assert Admission.status(gate).phase == :recovery_required
     assert Admission.status(gate).pending == 0
     assert false == Admission.held?(gate, hold)
@@ -594,11 +602,11 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
         receive do: (:die -> :ok)
       end)
 
-    assert_receive :admitted
+    assert_receive :admitted, @sync_ms
     assert Admission.status(gate).pending == 1
     ref = Process.monitor(writer)
     send(writer, :die)
-    assert_receive {:DOWN, ^ref, :process, ^writer, _}
+    assert_receive {:DOWN, ^ref, :process, ^writer, _}, @sync_ms
     await_pending(gate, 0)
     assert Admission.status(gate).phase == :open
 
@@ -612,10 +620,10 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
         receive do: (:die -> :ok)
       end)
 
-    assert_receive :joined
+    assert_receive :joined, @sync_ms
     ref = Process.monitor(child)
     send(child, :die)
-    assert_receive {:DOWN, ^ref, :process, ^child, _}
+    assert_receive {:DOWN, ^ref, :process, ^child, _}, @sync_ms
     # The root is still admitted, so its journal entry stays.
     assert Admission.status(gate).pending == 1
     assert :ok = Admission.checkin(gate, root)
@@ -680,13 +688,22 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
     if Process.alive?(gate), do: GenServer.stop(gate)
   end
 
-  defp await_phase(gate, phase, attempts \\ 100)
-  defp await_phase(gate, phase, 0), do: assert(Admission.status(gate).phase == phase)
+  # The gate reaches recovery by handling a :DOWN and journaling it; poll to the
+  # same @sync_ms deadline as the message waits, not a fixed 500ms budget.
+  defp await_phase(gate, phase),
+    do: await_phase(gate, phase, System.monotonic_time(:millisecond) + @sync_ms)
 
-  defp await_phase(gate, phase, attempts) do
-    if Admission.status(gate).phase != phase do
-      Process.sleep(5)
-      await_phase(gate, phase, attempts - 1)
+  defp await_phase(gate, phase, deadline) do
+    cond do
+      Admission.status(gate).phase == phase ->
+        :ok
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        assert Admission.status(gate).phase == phase
+
+      true ->
+        Process.sleep(5)
+        await_phase(gate, phase, deadline)
     end
   end
 end
