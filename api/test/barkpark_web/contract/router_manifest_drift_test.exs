@@ -100,6 +100,23 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
   # state WHY — "no verb yet" is not a reason, it is the defect this guard
   # exists to find, and such a route belongs in @filed_gaps instead.
   @not_a_cli_surface %{
+    # ── Managed write admission (Barkdown C083) ────────────────────────────
+    # The trusted hold endpoint is consumed by Barkdown's migration runner over
+    # HTTP while it owns the profile's runtime lease; the capability it returns
+    # is bound to that operation and its boot. A `bp` verb would let a person
+    # hold or reopen an instance from a laptop, outside any owned operation, so
+    # this surface is deliberately not a CLI verb.
+    {"GET", "/v1/admin/write-admission"} =>
+      "managed write-admission view — Barkdown's runner, not a CLI verb",
+    {"POST", "/v1/admin/write-admission/hold"} =>
+      "managed hold — owned by Barkdown's switch operation, not a CLI verb",
+    {"GET", "/v1/admin/write-admission/hold/:*"} =>
+      "managed hold status — capability-bound, not a CLI verb",
+    {"DELETE", "/v1/admin/write-admission/hold/:*"} =>
+      "managed hold reopen — capability-bound, not a CLI verb",
+    {"POST", "/v1/admin/write-admission/recover"} =>
+      "managed explicit recovery — operator asserts reconciliation from Barkdown, not a CLI verb",
+
     # ── CORS preflight ─────────────────────────────────────────────────────
     # An OPTIONS probe a browser sends before the real request. There is no
     # operator intent behind it and nothing to render.

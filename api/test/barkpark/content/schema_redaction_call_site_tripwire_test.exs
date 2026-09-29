@@ -106,6 +106,8 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
       "feeds the fail-CLOSED Highlighter, not Envelope",
     "barkpark_web/controllers/schema_controller.ex:show" =>
       "serves the schema itself; a miss is a 404, not a render",
+    "barkpark_web/controllers/document_ops_controller.ex:apply_op" =>
+      "presence check before a block-op write; a miss is a 404, the schema is never rendered",
     "mix/tasks/barkpark.workspace.provision_schemas.ex:survey_one" =>
       "mix task copying schema rows between scopes (source read + target existence/provenance probe)",
     "barkpark/content.ex:get_schema" => "the facade delegate — this IS the raw lookup",

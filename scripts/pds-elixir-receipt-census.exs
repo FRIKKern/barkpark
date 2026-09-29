@@ -697,8 +697,32 @@ defmodule PDS.Census do
     # the `derived` half of this census's own D448-DRIFT-REFUSES line, run from the repo
     # root on this commit's tree, lens unchanged. Engine printed live by that run:
     #   Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
-    write: 56,
-    read: 31,
+    #
+    # RE-DERIVED AGAIN 2026-09-28 at codex/write-admission-slice2 (Barkdown C083 slice 2,
+    # BlockOps and media doors): write-routed 56 -> 54 and read-routed 31 -> 33. Fronting
+    # every `Papers.BlockOps` entry with `WriteAdmission.Door.admit/1` inserted the same ONE
+    # closure hop as slice 1 did for Writer, this time between the ingest controller and
+    # `upsert_blocks_doc`'s row write. TWO receipts can no longer reach a write verb inside
+    # the depth-6 budget and land in the READ class — `--sites` diffed against origin/main
+    # (c35d45aaf) names them, both in barkpark_web/controllers/bulldocs_ingest_controller.ex:
+    #   BulldocsIngestController.sync/2            [WRITE d6] -> [READ]
+    #   BulldocsIngestController.ingest_session/2  [WRITE d6] -> [READ]
+    # and the depth sweep shows the same sites at [WRITE d6] one hop deeper, so they did not
+    # fall out of the route relation. `textual` (115), `ast` (106), `phantom` (9), `consumer`
+    # (4), `emitted` (102) and `unrouted` (15) all read `==` in the same run. Same ruling as
+    # the two entries above: the hop stays, the door is one place. DERIVED BY THE INSTRUMENT,
+    # not typed: the `derived` half of this census's own D448-DRIFT-REFUSES line, run from the
+    # repo root on this commit's tree, lens unchanged. Engine printed live by that run:
+    #   Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
+    #
+    # RE-DERIVED AGAIN 2026-09-28 at codex/write-admission-slice4 (Barkdown C083 slice 4, the task
+    # board door): write-routed 54 -> 52 and read-routed 33 -> 35. `Tasks.Internal.fenced_content_write/4`
+    # and `insert_mutation_event!/1` now pass through `WriteAdmission.Door.admit!/1`, the same ONE
+    # closure hop as the earlier entries, between every task verb and the fenced `Repo.update_all`;
+    # two task-verb receipts land in the READ class at depth 6. Same ruling: the hop stays, the door is
+    # one place. Engine printed live by that run: Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
+    write: 52,
+    read: 35,
     unrouted: 15
   }
 
@@ -776,7 +800,11 @@ defmodule PDS.Census do
   # and collapsing it (collapse_draft_twin/5 deleted), so the longest write chain lost
   # two hops and the table went flat at 10 — write 78 / read 15 / unrouted 3, identical
   # at 12/14/16. Read off the run, not typed; ROUTE-DEPTH-IS-CLOSURE reds if it moves.
-  @route_depth 10
+  # RE-DERIVED 2026-09-28 (10 -> 12): Tasks.Internal.fenced_content_write/4 and
+  # insert_mutation_event!/1 now pass through WriteAdmission.Door.admit!/1 (Barkdown C083
+  # slice 4), so every task-verb write chain gained the door's closure hops and the
+  # table goes flat at 12 — write 83 / read 16 / unrouted 3, identical at 14/16.
+  @route_depth 12
   @sweep [1, 2, 3, 4, 5, 6]
 
   # DEPTHS PAST THE CENSUS DEPTH, MEASURED RATHER THAN ASSERTED. The claim "the route
@@ -1016,6 +1044,12 @@ defmodule PDS.Census do
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint, :status_only_receipt},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim, :status_only_receipt},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback, :status_only_receipt},
+    # C083 trusted hold endpoint (2026-09-29): both render the Holder's view of the
+    # coordinator (phase, generation, boot) — a bound value, no `ok: true` literal, no
+    # roster anchor — which is exactly what `status_only_receipt` names.
+    {:post, "/v1/admin/write-admission/hold", "BarkparkWeb.WriteAdmissionController", :hold, :status_only_receipt},
+    {:delete, "/v1/admin/write-admission/hold/:capability", "BarkparkWeb.WriteAdmissionController", :reopen, :status_only_receipt},
+    {:post, "/v1/admin/write-admission/recover", "BarkparkWeb.WriteAdmissionController", :recover, :status_only_receipt},
     # SiteDeployController.trigger IS DISPOSED IN WRITING, NOT SILENTLY (PDS-D554/PDS-D566).
     # IT IS THE ONE MEMBER A BFS AT DEPTHS 2..12 RECOVERS OUT OF EVERY EXCLUDED ROW, and
     # it stays in `status_only_receipt` with this comment rather than being moved, because
@@ -1092,6 +1126,7 @@ defmodule PDS.Census do
     {:post, "/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results", "BarkparkWeb.CycleFleetController", :create_result, :status_only_receipt},
     {:post, "/v1/cycles/:epic_id/:wave_id/open", "BarkparkWeb.CycleFleetController", :open, :status_only_receipt},
     {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
+    {:post, "/v1/data/doc/:dataset/:type/:doc_id/ops", "BarkparkWeb.DocumentOpsController", :apply_op, :status_only_receipt},
     {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
@@ -1157,6 +1192,7 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/open", "BarkparkWeb.CycleFleetController", :admit_open_release_gate, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/rollback", "BarkparkWeb.CycleFleetController", :rollback, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/ops", "BarkparkWeb.DocumentOpsController", :apply_op, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
@@ -1287,6 +1323,9 @@ defmodule PDS.Census do
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint} => {"BarkparkWeb.AccessController.mint/2", 1, "83944541"},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim} => {"BarkparkWeb.AccessController.claim/2", 2, "9774625"},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback} => {"BarkparkWeb.SelfUpdateController.rollback/2", 1, "123741443"},
+    {:post, "/v1/admin/write-admission/hold", "BarkparkWeb.WriteAdmissionController", :hold} => {"BarkparkWeb.WriteAdmissionController.hold/2", 2, "111003360"},
+    {:delete, "/v1/admin/write-admission/hold/:capability", "BarkparkWeb.WriteAdmissionController", :reopen} => {"BarkparkWeb.WriteAdmissionController.reopen/2", 1, "39928"},
+    {:post, "/v1/admin/write-admission/recover", "BarkparkWeb.WriteAdmissionController", :recover} => {"BarkparkWeb.WriteAdmissionController.recover/2", 2, "76331147"},
     {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger} => {"BarkparkWeb.SiteDeployController.trigger/2", 1, "51850737"},
     {:post, "/v1/admin/workspaces/:slug/reinstate", "BarkparkWeb.WorkspaceReinstateController", :create} => {"BarkparkWeb.WorkspaceReinstateController.create/2", 1, "25110011"},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create} => {"BarkparkWeb.AppTokenController.create/2", 1, "77961954"},
@@ -1315,6 +1354,7 @@ defmodule PDS.Census do
     {:post, "/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results", "BarkparkWeb.CycleFleetController", :create_result} => {"BarkparkWeb.CycleFleetController.create_result/2", 1, "59839797"},
     {:post, "/v1/cycles/:epic_id/:wave_id/open", "BarkparkWeb.CycleFleetController", :open} => {"BarkparkWeb.CycleFleetController.open/2", 1, "76612497"},
     {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal} => {"BarkparkWeb.CycleFleetController.seal/2", 1, "42433904"},
+    {:post, "/v1/data/doc/:dataset/:type/:doc_id/ops", "BarkparkWeb.DocumentOpsController", :apply_op} => {"BarkparkWeb.DocumentOpsController.apply_op/2", 1, "55899917"},
     {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate} => {"BarkparkWeb.MutateController.mutate/2", 2, "26705772"},
     {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore} => {"BarkparkWeb.HistoryController.restore/2", 1, "109652942"},
     {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym} => {"BarkparkWeb.SearchController.create_search_synonym/2", 1, "12081343"},
@@ -1356,6 +1396,7 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/open", "BarkparkWeb.CycleFleetController", :admit_open_release_gate} => {"BarkparkWeb.CycleFleetController.admit_open_release_gate/2", 1, "114476231"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/rollback", "BarkparkWeb.CycleFleetController", :rollback} => {"BarkparkWeb.CycleFleetController.rollback/2", 1, "3466593"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal} => {"BarkparkWeb.CycleFleetController.seal/2", 1, "42433904"},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/ops", "BarkparkWeb.DocumentOpsController", :apply_op} => {"BarkparkWeb.DocumentOpsController.apply_op/2", 1, "55899917"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate} => {"BarkparkWeb.MutateController.mutate/2", 2, "26705772"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore} => {"BarkparkWeb.HistoryController.restore/2", 1, "109652942"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym} => {"BarkparkWeb.SearchController.create_search_synonym/2", 1, "12081343"},

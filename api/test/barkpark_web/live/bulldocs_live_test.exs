@@ -612,6 +612,35 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       assert view.pid == pid_before
     end
 
+    test "a canvas BATCH frame (no fragment_html) re-reads the paper instead of blanking the block",
+         %{conn: conn} do
+      seed_block_paper()
+
+      {:ok, view, html} = live(conn, "/papers/#{@block_slug}")
+      assert html =~ "First block streamed."
+      pid_before = view.pid
+
+      # The continuous canvas saves through the BATCH seam, which broadcasts one
+      # frame with op_kind: :batch and fragment_html: nil. A View-mode reader
+      # used to stream that nil fragment over the block — it rendered empty.
+      ops = [
+        %{
+          "op" => "patch-block",
+          "id" => "b-intro",
+          "patch" => %{"content" => [%{"type" => "text", "value" => "First block BATCHED."}]}
+        }
+      ]
+
+      {:ok, _receipt} = Content.apply_paper_block_ops(@block_slug, ops)
+      rendered = render(view)
+
+      assert rendered =~ ~s(data-block-id="b-intro")
+      assert rendered =~ "First block BATCHED."
+      refute rendered =~ "First block streamed."
+      # No remount.
+      assert view.pid == pid_before
+    end
+
     test "rev-gap recovery: a delta whose rev skips ahead triggers a full refetch",
          %{conn: conn} do
       seed_block_paper()

@@ -7,15 +7,15 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc client — 2026-09-12 baseline reland (studio-r14): 24717 B -> 24950 B (+233); diffuse PortableDoc drift across #17684 #17729 #17759 #17966 landed after the #17667 baseline-move without a bump; 300 B headroom",
+  "name": "PortableDoc client — 2026-09-23 baseline move (infra-r22, task-91f607c88e350dcf): 24950 B -> 25500 B (+550); FIVE named feature PRs, measured per source file by pnpm census, not drift: #18485 typed table cols (blocks/table.ts 923 -> 1548 raw, +625), #18038 code-block line-emphasis ranges + #18097 verdict tones (blocks/core.ts 23657 -> 24275 raw, +618), #18054 lineage clock strip + #18097 stat verdict (blocks/dataviz.ts 15763 -> 15995 raw, +232), #18092 status-vocab generation (net +27: inline.tsx -900, status-vocab.gen.ts +927); 300 B headroom",
   "path": "dist/index.mjs",
-  "limit": "25.25 KB",
+  "limit": "25.8 KB",
   "gzip": true
  },
  {
-  "name": "RSC server — 2026-09-12 baseline reland (studio-r14): 23702 B -> 23940 B (+238); same diffuse PortableDoc drift through the server entry; 260 B headroom",
+  "name": "RSC server — 2026-09-23 baseline move (infra-r22, task-91f607c88e350dcf): 23940 B -> 24482 B (+542); the same five feature PRs through the server entry; 298 B headroom",
   "path": "dist/server.mjs",
-  "limit": "24.2 KB",
+  "limit": "24.78 KB",
   "gzip": true
  },
  {
@@ -35,9 +35,9 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc subpath — 2026-09-12 baseline reland (studio-r14): 20780 B -> 21017 B (+237); same diffuse PortableDoc drift through the PortableDoc subpath; 283 B headroom",
+  "name": "PortableDoc subpath — 2026-09-23 baseline move (infra-r22, task-91f607c88e350dcf): 21017 B -> 21580 B (+563); the same five feature PRs through the PortableDoc subpath; 300 B headroom",
   "path": "dist/portable-doc.mjs",
-  "limit": "21.3 KB",
+  "limit": "21.88 KB",
   "gzip": true
  }
 ]

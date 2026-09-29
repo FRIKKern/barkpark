@@ -41,14 +41,14 @@
    min-width: 0 ....................... THE OTHER HALF, on the flex/grid PARENT.
      A flex item and a grid track both floor at their content's min-content, so
      a wrap on the child without this on the parent yields a SPILL, not a wrap.
-     64 of this file's 71 `min-width` declarations are this escape, and none of
+     67 of this file's 74 `min-width` declarations are this escape, and none of
      them had a written ruling until this block.
 
    EVERY COUNT ABOVE IS DERIVED, WITH ITS COUNTING RULE, because a census quoted
    without one is how two irreconcilable numbers get cited as a pair: comments
    STRIPPED, then declarations counted — 9 `word-break` (4 break-word, 5
-   break-all), 71 `min-width` (75 occurrences less the FOUR that are `@media
-   (min-width: …)` preludes, which are not declarations at all), and 36
+   break-all), 74 `min-width` (78 occurrences less the FOUR that are `@media
+   (min-width: …)` preludes, which are not declarations at all), and 38
    `overflow-wrap`. The raw line greps are higher, and are deliberately NOT
    quoted here: this block and the per-site comments name the properties in
    prose, so any raw-grep figure counts its own paragraph and moves whenever a
@@ -145,10 +145,11 @@
   --primary-hsl: 151.96 71.81% 29.22%;
   --ring-hsl: 163 42% 30%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 151.96 71.81% 29.22%;
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
+  --ok-hsl: 142 72% 26%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(151.96 71.81% 23.22%);
+  --ok-strong: hsl(142 72% 20%);
   --provider-hetzner: #c4123a;
   --provider-azure: #0f6cbd;
   /* Motion (decision 29) — durations + easing + the --t shorthand. Theme-
@@ -192,10 +193,11 @@
   --primary-hsl: 152.92 60% 52.94%;
   --ring-hsl: 152.92 60% 52.94%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 152.92 60% 52.94%;
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
+  --ok-hsl: 142 52% 52%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(152.92 60% 60.94%);
+  --ok-strong: hsl(142 52% 60%);
   --provider-hetzner: #f0728a;
   --provider-azure: #4aa3e0;
 }
@@ -218,10 +220,7 @@ html[data-bp-theme="evergreen"] {
   --primary-hsl: 151.96 71.81% 29.22%;
   --ring-hsl: 163 42% 30%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 151.96 71.81% 29.22%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(151.96 71.81% 23.22%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
 }
 html[data-bp-theme="evergreen"][data-theme="dark"] {
   --primary: hsl(152.92 60% 52.94%);
@@ -230,10 +229,7 @@ html[data-bp-theme="evergreen"][data-theme="dark"] {
   --primary-hsl: 152.92 60% 52.94%;
   --ring-hsl: 152.92 60% 52.94%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 152.92 60% 52.94%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(152.92 60% 60.94%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
 }
 html[data-bp-theme="charple"] {
   --primary: hsl(282.39 44.23% 40.78%);
@@ -242,10 +238,7 @@ html[data-bp-theme="charple"] {
   --primary-hsl: 282.39 44.23% 40.78%;
   --ring-hsl: 282.39 44.23% 48.78%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 282.39 44.23% 40.78%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(282.39 44.23% 34.78%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
 }
 html[data-bp-theme="charple"][data-theme="dark"] {
   --primary: hsl(282.56 58.11% 70.98%);
@@ -254,10 +247,7 @@ html[data-bp-theme="charple"][data-theme="dark"] {
   --primary-hsl: 282.56 58.11% 70.98%;
   --ring-hsl: 282.56 58.11% 70.98%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 282.56 58.11% 70.98%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(282.56 58.11% 78.98%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
 }
 html[data-bp-theme="ember"] {
   --primary: hsl(19.33 71.29% 40.98%);
@@ -266,10 +256,7 @@ html[data-bp-theme="ember"] {
   --primary-hsl: 19.33 71.29% 40.98%;
   --ring-hsl: 19.33 71.29% 48.98%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 19.33 71.29% 40.98%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(19.33 71.29% 34.98%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
 }
 html[data-bp-theme="ember"][data-theme="dark"] {
   --primary: hsl(19.01 75.53% 63.14%);
@@ -278,10 +265,7 @@ html[data-bp-theme="ember"][data-theme="dark"] {
   --primary-hsl: 19.01 75.53% 63.14%;
   --ring-hsl: 19.01 75.53% 63.14%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 19.01 75.53% 63.14%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(19.01 75.53% 71.14%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
 }
 html[data-bp-theme="fjord"] {
   --primary: hsl(191.6 80.95% 28.82%);
@@ -290,10 +274,7 @@ html[data-bp-theme="fjord"] {
   --primary-hsl: 191.6 80.95% 28.82%;
   --ring-hsl: 191.6 80.95% 36.82%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 191.6 80.95% 28.82%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(191.6 80.95% 22.82%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
 }
 html[data-bp-theme="fjord"][data-theme="dark"] {
   --primary: hsl(193.27 62.43% 64.51%);
@@ -302,10 +283,7 @@ html[data-bp-theme="fjord"][data-theme="dark"] {
   --primary-hsl: 193.27 62.43% 64.51%;
   --ring-hsl: 193.27 62.43% 64.51%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 193.27 62.43% 64.51%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(193.27 62.43% 72.51%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
 }
 html[data-bp-theme="iris"] {
   --primary: hsl(248.75 63.72% 55.69%);
@@ -314,10 +292,7 @@ html[data-bp-theme="iris"] {
   --primary-hsl: 248.75 63.72% 55.69%;
   --ring-hsl: 248.75 63.72% 62%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 248.75 63.72% 55.69%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(248.75 63.72% 49.69%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
 }
 html[data-bp-theme="iris"][data-theme="dark"] {
   --primary: hsl(248.87 100% 77.45%);
@@ -326,10 +301,7 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --primary-hsl: 248.87 100% 77.45%;
   --ring-hsl: 248.87 100% 77.45%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 248.87 100% 77.45%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(248.87 100% 85.45%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
 }
 /* Motion collapses when the user asks for it (decision 29). Only the token
    durations go to 0 — spinner keyframes keep their literal duration because
@@ -1148,7 +1120,7 @@ select.form-input {
    shrink, so nothing was bought at the kind row's expense.
    GR11/GR25: `.fleet-status` is a WRAPPER (the vocabulary :2499 uses); no
    quarantined pill family is edited here. */
-.fleet-status { flex: 0 0 auto; min-width: 116px; display: flex; align-items: center; max-width: 100%; }
+.fleet-status { flex: 0 0 auto; min-width: 116px; display: flex; align-items: center; max-width: min(100%, 28rem); }
 .fleet-main { min-width: 0; flex: 1; }
 /* cch-w21-s3 — THE TWO FLEET-ROW TEXT LINES ARE BOUNDED BY THE SAME ONE-WORD
    DECLARATION EACH, FOLDED IN PLACE (no new rule head, no new @media).
@@ -1667,10 +1639,14 @@ select.form-input {
   cursor: pointer;
 }
 .size-opt:hover { border-color: var(--dim); }
-/* GR22: --primary-soft retired (this was its sole consumer) — the selected tint
-   reads --ok-soft, the same accent channel/alpha by GR6 law (the --ok family
-   TRACKS accent.primary), so the bytes painted are identical. */
-.size-opt:has(.size-opt-radio:checked) { border-color: var(--primary); background: var(--ok-soft); }
+/* GR22 retired --primary-soft here and borrowed --ok-soft, on the GR6 premise
+   that the --ok family TRACKS accent.primary so the bytes painted are identical.
+   cch DEFECT-A broke that premise: --ok is now one semantic green at every
+   accent. A SELECTED size is a BRAND state, not a success state, so the borrow
+   is reversed rather than repointed — --primary-soft is emitted again, same
+   channel and the same per-theme alpha the borrow relied on, and the bytes
+   painted here are once more identical to what GR22 shipped. */
+.size-opt:has(.size-opt-radio:checked) { border-color: var(--primary); background: var(--primary-soft); }
 .size-opt-radio { flex: 0 0 auto; accent-color: var(--primary); }
 .size-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .size-opt-name { font-size: 13px; font-weight: 600; color: var(--text); }
@@ -3372,7 +3348,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 /* …and failure SNAPS (0ms) — a break is never eased in (ladder snap law). */
 .new-step.failed .new-step-dot,
 .new-step.failed .new-step-label { transition: none; }
-.new-step.done .new-step-dot { background: var(--ok); border-color: var(--ok); } /* done glyph = mint (--ok tracks the accent, GR6) */
+.new-step.done .new-step-dot { background: var(--ok); border-color: var(--ok); } /* done glyph = the SUCCESS green; --ok stopped tracking the accent at cch DEFECT-A */
 /* The active dot IS the per-phase loading bar: a conic ring filled by --p
    (stepRingProgress over the phase's expected duration, ticked in place every
    second). Registered as a <percentage> so the fill animates smoothly between
@@ -3958,12 +3934,36 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    40vh cap and the 13px legibility floor at equal specificity. */
 
 /* ============================================================ STATUS PILL
-   The single semantic status affordance (charter decision 6): one dot + label
-   + optional detail, coloured by the --ok/--info/--warn/--danger token roles.
-   Replaces the old multi-badge soup in the fleet row and instance-detail
-   header. Token-driven so it adapts to both themes; the [data-theme="dark"]
-   block below tunes the soft-tint strength on the darker surface. */
+   The single semantic status affordance (charter decision 6), emitted only by
+   statusMetaPill() in app.js. TWO PARTS, and the split is the point:
+     .status-pill-chip    the capsule — dot + label, one line, 24px, never wraps
+     .status-pill-detail  the WHY — muted prose beside the chip, wrapping in
+                          its own column; nothing draws a border around it
+   The outer .status-pill is a layout row and paints nothing. The detail used
+   to sit INSIDE the capsule: a two-clause reason ("1 commits behind main ·
+   release-tag grade still reads current") painted a 100-350px-tall tinted
+   balloon around a bold word and a paragraph, on the front screen, in every
+   card, and in the instance rail. Moving the prose out of the chrome removed
+   that shape everywhere at once — and with it the five per-host wrap recipes
+   (.attention-row / .detail-rail / .fleet-status / .instance-card-head /
+   .detail-title-row) that existed to keep the balloon's text inside its
+   capsule, plus the E14 parity check that policed their agreement: a check
+   for a shape that no longer exists. Token-driven so it adapts to both
+   themes; the [data-theme="dark"] block below lifts the tints. */
 .status-pill {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0 8px; /* no row gap: a detail that drops under the chip starts on the next 24px line, nothing more */
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--text);
+  white-space: normal;
+  max-width: 100%;
+  min-width: 0;
+}
+.status-pill-chip {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -3972,10 +3972,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border: 1px solid var(--border);
   border-radius: var(--pill);
   background: var(--muted-surface);
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text);
   white-space: nowrap;
+  flex: 0 0 auto;
   max-width: 100%;
   min-width: 0;
 }
@@ -3985,92 +3983,47 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   background: var(--dim);
   flex: 0 0 auto;
 }
-.status-pill-label { font-weight: 600; flex: 0 0 auto; }
+/* The label never wraps inside the capsule; it may ellipse only when its host
+   is narrower than the chip itself (a squeezed lead column). */
+.status-pill-label { font-weight: 600; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The prose column. Content-sized (`flex-basis: auto`, `min-width: 0`), so a
+   short detail ("v0.9.2") sits beside the chip even in a narrow lead column,
+   and a long one shrinks and wraps beside the chip as a hanging column. A
+   wrapping HOST (card head, title row) puts the whole pill on its own line
+   first, because the pill's basis is its full sentence — so the column beside
+   the chip is never narrower than the host minus one chip. (A rem floor was
+   tried and refused: a percentage `min()` resolves against the pill's OWN
+   width, so "v0.9.2" dropped under its chip in exactly the hosts that had room.) `anywhere`, not `break-word`: this is a MACHINE string
+   (`bp.provision_error` verbatim — a Postgres :text column with no length
+   validation, possibly ONE unbroken token), and only `anywhere` lowers the
+   min-content width the flex track reads, which is what stops a single token
+   dragging the page sideways. The line-height is the row's 24px, inherited:
+   every line of prose is exactly one chip tall, so line one centres on the
+   chip with NO top offset — a padding here would be vertical waste the
+   tight-fit height bound (overflow-guard W21) rightly refuses. */
 .status-pill-detail {
   color: var(--muted-text);
+  flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  /* cch-w23-s1 — ONE DECLARATION, FOLDED INTO THE EXISTING HEAD. This detail is
-     `bp.provision_error` verbatim (`statusOf`, app.js: kind "failed" returns
-     `detail: bp.provision_error`) and NOTHING between the worker socket and
-     this box bounds it: provision_jobs.error is a POSTGRES :text column
-     (migration 20260702130000_provision_job_error_to_text.exs, `modify :error,
-     :text`) and ProvisionJob.changeset carries ZERO validate_length.
-     THE DEFECT IS TOKEN SHAPE, NOT LENGTH, so a length cap is the WRONG remedy
-     (D267, and it inverts what cch-w21-bl-status-pill-detail-fed-by-uncapped-
-     error asked for): driven on the cruel fixture, 512 word-broken characters
-     are clean at every width while 512 characters in ONE UNBROKEN TOKEN took
-     #overview to documentElement.scrollWidth 3860 against a 320px viewport
-     (the detail itself 3754/170) and #fleet to 3856/320 — a cap loose enough to
-     keep a real capture readable still lets one token paint 3754px, and one
-     tight enough to stop the token shreds the capture.
-     `anywhere` rather than `break-word` for the same reason `.site-meta .mono`
-     (:1631) takes it: this is a MACHINE string, not prose, and only `anywhere`
-     lowers the box's min-content contribution — which is the property the
-     flex/grid track actually reads, and therefore the only one that stops the
-     PAGE being dragged sideways. Measured after: every host lands 3754 -> its
-     own box, page 320/320.
-     NO WRAP COMPANION IS AUTHORED ON THE THREE DESCENDANT OVERRIDES, and that
-     is a MEASUREMENT, not a shortcut. `.attention-row` (:3391), `.fleet-status`
-     (:6018) and `.instance-card-head` (:6097) rewrite ONLY the visibility pair
-     (`overflow: visible` plus the ellipsis property beside it) and NONE of them
-     sets `overflow-wrap`, so this
-     one declaration reaches the same element inside all three scopes and a
-     companion there would change ZERO pixels, which makes it a sentence rather
-     than a remedy. Re-driven per scope on `fleet-cruel-content` with EVERY
-     `.status-pill-detail` iterated and its wrapper scope named (not
-     `querySelector` — the fifth clause: a guard whose selector cannot reach the
-     defect is green by construction), light theme, at 320/390/620/900/1000:
-       .fleet-status       detail 3754/170 -> 170/170 @320, 3754/240 -> 240/240 @390
-       .attention-row      detail 3754/170 -> 170/170 @320, 3754/372 -> 372/372 @900
-       .instance-card-head detail 3754/164 -> 164/164 @320, 3754/496 -> 496/496 @900
-     Every host is fixed and there is nothing left to refuse — but ONE of them
-     needed a second declaration OUTSIDE this block to make the wrap bind at all:
-     see `.fleet-status`'s `max-width: 100%` at :983 and the note there.
-
-     ───────────────────────────────────────────────────────────────────────
-     console-r21m DEFECT-I — FILED AS "THE STATUS PILL HAS NO LENGTH CAP AND
-     BALLOONS TO SIX LINES". IT STAYS, AND THE REASON IS D267 ABOVE, RE-READ
-     AT origin/main d5bea4de9 RATHER THAN REMEMBERED.
-     The accent-matrix re-review (2026-09-20, `fleet-cruel-content`) is
-     looking at `overflow-wrap: anywhere` WORKING. The detail it saw is
-     `bp.provision_error` verbatim — a machine capture with no ceiling
-     anywhere between the worker socket and this box — and before cch-w23-s1
-     the SAME string painted 3754px THROUGH its own box and dragged
-     #overview to a documentElement.scrollWidth of 3860 against a 320px
-     viewport. Six lines inside the card is the remedy's own output: the
-     string is now inside the box it belongs to, at every width, in every
-     one of the three descendant scopes measured above.
-     THE FILED REMEDY — a length cap — IS THE ONE D267 ADJUDICATED AND
-     REFUSED, on measurement rather than taste: a 1648-char WORD-BROKEN
-     capture is completely clean at 320 and 390, while 512 characters in ONE
-     UNBROKEN TOKEN takes the page to 3555/320. The defect is TOKEN SHAPE,
-     not length, so any cap loose enough to keep a real capture readable
-     still lets one token paint through, and any cap tight enough to stop
-     the token truncates the only diagnostic the operator has for a failed
-     provision. A cap would therefore trade a bounded, ugly six lines for a
-     shredded error message AND an unfixed page-drag — strictly worse on
-     both axes.
-     THE REAL RESIDUAL IS VERTICAL, NOT HORIZONTAL, AND IT IS NOT THIS
-     BLOCK'S: a six-line detail is a long string rendered honestly. Bounding
-     the pill's HEIGHT (a line clamp with the full text still reachable) is a
-     separate remedy with a separate cost — it hides the tail of an error —
-     and it is not what the row asked for. Filing it as its own row is the
-     honest disposition; overturning D267 by stealth inside an F/H fix is
-     not. NO BYTES CHANGE HERE, deliberately. */
   overflow-wrap: anywhere;
+  text-align: left;
 }
-.status-pill-detail::before { content: "·"; margin-right: 6px; color: var(--dim); }
-.status-pill--ok { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); }
+/* ONE host lets the capsule grow a second line: the site rail's value column
+   is narrower than a three-word state at 900-1024 (driven: 81px of column for
+   the 130px "No content binding"), and an ELLIPSED state word is a state
+   nobody can read. The label keeps an 18px line inside the taller chip; the
+   24px row line-height stays for the prose everywhere else. */
+.detail-rail .status-pill-chip { height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; white-space: normal; }
+.detail-rail .status-pill-label { white-space: normal; overflow: visible; text-overflow: clip; line-height: var(--leading-base); }
+.status-pill--ok .status-pill-chip { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); }
 .status-pill--ok .status-pill-dot { background: var(--ok); }
-.status-pill--info { background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.28); }
+.status-pill--info .status-pill-chip { background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.28); }
 .status-pill--info .status-pill-dot { background: var(--info); }
-.status-pill--warn { background: var(--warn-soft); border-color: hsl(var(--warn-hsl) / 0.3); }
+.status-pill--warn .status-pill-chip { background: var(--warn-soft); border-color: hsl(var(--warn-hsl) / 0.3); }
 .status-pill--warn .status-pill-dot { background: var(--warn); }
-.status-pill--danger { background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.28); }
+.status-pill--danger .status-pill-chip { background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.28); }
 .status-pill--danger .status-pill-dot { background: var(--danger); }
-.status-pill--neutral { background: var(--muted-surface); border-color: var(--border); }
+.status-pill--neutral .status-pill-chip { background: var(--muted-surface); border-color: var(--border); }
 .status-pill--neutral .status-pill-dot { background: var(--dim); }
 /* SHAPE VARIANTS (gr-backlog-d24). The five roles above carry HUE; these two
    carry the two chip SHAPES the retired `.dep-*` family owned and the role set
@@ -4088,15 +4041,15 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    `--ok`/`--danger` (only 19deg apart under the ember identity, D143) are both
    wrong for a stop nobody needs to act on. `--dim` on `--surface` is gated in
    CONTRAST_PAIRS. */
-.status-pill--hollow { background: transparent; }
+.status-pill--hollow .status-pill-chip { background: transparent; }
 /* The hollow chip gave up its tinted ground, so the HUE has to move into the
    label or the state loses its voice entirely — this is the one place the
    family's `--text` label is overridden, and only for the role that composes
    with --hollow today. `--warn-strong` on `--surface` is gated in
    CONTRAST_PAIRS (the transparent ground is why this rule owes a pair the
    filled variant does not). */
-.status-pill--warn.status-pill--hollow { color: var(--warn-strong); }
-.status-pill--stopped {
+.status-pill--warn.status-pill--hollow .status-pill-chip { color: var(--warn-strong); }
+.status-pill--stopped .status-pill-chip {
   background: transparent;
   border-style: dashed;
   border-color: rgba(var(--cc-line-rgb), 0.28);
@@ -4104,10 +4057,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .status-pill--stopped .status-pill-dot { background: var(--dim); }
 /* dark-theme refinement: lift the role tints for legibility on the dark surface */
-[data-theme="dark"] .status-pill--ok { background: hsl(var(--ok-hsl) / 0.22); }
-[data-theme="dark"] .status-pill--info { background: hsl(var(--info-hsl) / 0.22); }
-[data-theme="dark"] .status-pill--warn { background: hsl(var(--warn-hsl) / 0.22); }
-[data-theme="dark"] .status-pill--danger { background: hsl(var(--danger-hsl) / 0.22); }
+[data-theme="dark"] .status-pill--ok .status-pill-chip { background: hsl(var(--ok-hsl) / 0.22); }
+[data-theme="dark"] .status-pill--info .status-pill-chip { background: hsl(var(--info-hsl) / 0.22); }
+[data-theme="dark"] .status-pill--warn .status-pill-chip { background: hsl(var(--warn-hsl) / 0.22); }
+[data-theme="dark"] .status-pill--danger .status-pill-chip { background: hsl(var(--danger-hsl) / 0.22); }
 
 /* ============================================================ SETTINGS MENU
    RETIRED (cch-w14-s2). This block styled a pre-v4 TOPBAR dropdown — `.nav-menu`
@@ -4176,8 +4129,24 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .attention-name:hover { color: var(--primary); }
-.attention-reason { font-size: 13px; color: var(--muted-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The reason is the row's WHY and the pill beside it is chip-only (statusPill
+   with detail:false), so this column is the ONE place the sentence prints —
+   it wraps rather than ellipsing ("release-ta…" told nobody anything).
+   `anywhere` because a provision_error is a machine string that can be one
+   unbreakable token. */
+.attention-reason { font-size: 13px; color: var(--muted-text); line-height: var(--leading-sm); overflow-wrap: anywhere; }
 .attention-acts { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+/* A GROUPED row: several boxes sharing one info-level reason ("Update
+   available · 3 commits behind main") collapse into one row — the shared chip,
+   "N instances" where a name would be, the reason once, then every member as
+   its own link. Warn/danger rows are never grouped (attentionGroups). */
+.attention-row--group { align-items: flex-start; }
+.attention-row--group .status-pill { margin-top: 1px; }
+.attention-group-names { display: flex; flex-wrap: wrap; gap: 2px 12px; min-width: 0; margin-top: 2px; }
+.attention-group-name { font-size: var(--text-xs); font-weight: 500; color: var(--muted-text); overflow-wrap: anywhere; }
+.attention-group-name:hover { color: var(--primary); }
+/* A chip carrying a hover note says so. */
+.status-pill-chip[title] { cursor: help; }
 
 /* GR65 tablet stack, revived by GR109. STACK, don't just wrap: `.attention-main`
    is flex:1 min-width:0, so a mere flex-wrap lets it collapse instead of
@@ -4196,78 +4165,6 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .attention-row .attention-main { align-self: stretch; }
 }
 
-/* ═════════════════ W20-S6 THE ATTENTION QUEUE SAYS WHY, ALL THE WAY DOWN
-   THE DEFECT, DRIVEN on merged-main bytes with the route pinned
-   `?scen=mixed-fleet#overview`: `.attention-row .status-pill-detail` rendered
-   139 of 237px of "Payment failed — subscription past due" at 320 — 41.4% of
-   the money message unrendered — while row[0] in the SAME DOM at the SAME
-   instant read 170/245 (30.6%). It clips at 320/360/375/390 and again at 769;
-   `overview-attention` clips at 320, at 769 (117/165, the worst single tablet
-   cell) and at 800 (148/165) — those three cells are a DATED pre-remedy record
-   against the OLD "Health down" fixture string and its 165px clamp; cch-w18-bl
-   moved that fixture to the production-dominant "Health unknown · Agent offline"
-   (clamp 186px), and on the current bytes overflow-guard drives this host at
-   148/148 and 186/186 with zero truncation. Light and dark are byte-identical in every cell:
-   theme is not an axis for this row. Three of these rows ship on the landing
-   screen, and the row that hides the most was the one no instrument had ever
-   read — GR109 asked with `querySelector`, so it could only ever have seen
-   row[0].
-
-   THE ROUTE IS PART OF THE FACT (charter D228). `mixed-fleet`'s own deepLink is
-   `#fleet`, where this queue renders ZERO rows; a filed "renders ZERO at any
-   width" universal came from exactly that omission. The successor leg pins the
-   hash and asserts the landed view id per cell.
-
-   FOURTH COPY OF THE RECIPE, DELIBERATELY (D210). `.detail-rail`,
-   `.fleet-status`, `.instance-card-head` and now `.attention-row` each carry a
-   wrapper-scoped clone of the same five-declaration core. The shared
-   `.status-pill--wrap` variant was priced and refused three blocks below for
-   reasons that hold here unchanged — it saves ZERO rule heads, needs an app.js
-   change through the shared statusPill() factory, and authors a head INSIDE the
-   GR25-quarantined family. What was missing was not a refactor but a MEASURE of
-   divergence, and __css_check's E14 now pins all five declarations across every
-   copy: this block cannot drift from the other three without reddening.
-
-   GR11/GR25 CARVE-OUT BY CONSTRUCTION, NOT BY INSPECTION. `.attention-row` is a
-   WRAPPER in the vocabulary app.css:2270 uses; no quarantined pill family is
-   edited. Every line here is an ADD (D157 "an ADD, not a restyle"), so
-   `git diff -U0` shows this block as a hunk of OLD LENGTH ZERO and :2913-2957
-   is untouched without anyone having to check. It sits directly BELOW the
-   `.attention-row` 768 block on purpose (D236): a (0,0,2,0) wrapper selector
-   beats the (0,0,1,0) base from anywhere, so position is cascade-irrelevant
-   here — and the anchor that costs nothing keeps the file tail free for the
-   slices that need it.
-
-   THE VERTICAL HALF IS LOAD-BEARING, NOT CEREMONY (DRIVEN). `.status-pill`
-   pins `height: 24px` at :2923-2938 and computes `overflow: visible`. Two
-   negative controls — `white-space: normal` ALONE, and a detail-only wrap —
-   BOTH score a PERFECT horizontal 117/117 at 769 while `pill.scrollHeight 29 >
-   clientHeight 22` and the detail's bottom edge paints 6px OUTSIDE the capsule.
-   `height: auto` + `min-height: 24px` are the two declarations that carry it,
-   which is why the leg asserts pill height and the detail's bottom edge as well
-   as the width it was filed on.
-
-   THE 2px INSET IS DERIVED, as in the three blocks below: a 24px chip is 1px
-   border + 2px + an 18px line box + 2px + 1px, so `padding-top/bottom: 2px`
-   reproduces the existing optical inset exactly and a ONE-LINE pill measures
-   24px before and after — only a wrapped pill grows. `min-height: 24px` keeps
-   that floor. THE DOT OFFSET IS RE-DERIVED, NOT COPIED: this pill's own first
-   line box measures 18px (12px font, inherited line-height), so (18 - 7) / 2 =
-   5.5px puts the 7px dot on the centre of the FIRST line rather than the middle
-   of a two-line chip. `overflow: visible; text-overflow: clip` retires the
-   ellipsis machinery the wrap makes unreachable, so nothing can silently
-   re-truncate the reason. NO HEIGHT IS PINNED ANYWHERE (D206): the wrap
-   boundary is a property of the fixture STRING, not of this CSS. */
-.attention-row .status-pill {
-  white-space: normal;
-  height: auto;
-  min-height: 24px;
-  padding-top: 2px;
-  padding-bottom: 2px;
-  align-items: flex-start;
-}
-.attention-row .status-pill-dot { margin-top: 5.5px; }
-.attention-row .status-pill-detail { overflow: visible; text-overflow: clip; }
 /* W20-S9 tablet band, 769-899 — the OTHER half of the GR109 banner above.
    GR109 fixed the shape it describes only BELOW 769; from 769 up the row is
    still a row, `.attention-acts` is still flex:0 0 auto, and `.attention-main`
@@ -4323,39 +4220,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .attention-row { flex-wrap: wrap; row-gap: 10px; }
   .attention-main { min-width: 12rem; }
   .attention-acts { margin-left: auto; }
-  /* cch-w20-bl: THE WRAP POINT IS A RULE, NOT A REASON STRING. The three
-     declarations above make the row wrap; they do not say WHERE, and the
-     answer they left behind was arithmetic over a fixture: the action cluster
-     yields only once `pill + gap + 12rem` no longer fits, so the pill's width
-     — which is `statusOf(bp).detail`, a sentence — decided it per row. DRIVEN
-     on the bytes above at 800 on `mixed-fleet`, content box 482px: rows 0 and
-     1 carry 325.11px and 332.58px of pill and break AFTER the chip, row 2
-     carries 200.75px and keeps chip+name inline (200.75 + 14 + 192 = 406.75 <=
-     482). One card, two row shapes, and which shape a row wears is a property
-     of its reason sentence.
-
-     ONE DECLARATION, AND IT IS A FLEX-LINE RULE RATHER THAN A WIDTH. `flex: 0
-     0 100%` makes the pill's outer hypothetical main size the whole content
-     box, so nothing can ever share its flex line — at EVERY width in the band,
-     for EVERY reason string, present or future. A `min-width` floor was the
-     other candidate and was refused: it only reaches uniformity while the
-     floor out-measures the longest sentence in the corpus (21rem clears
-     today's 332.58px and nothing clears tomorrow's), so it re-decides the
-     shape by string the moment a longer reason ships. This is uniform BY
-     CONSTRUCTION, which is what the row asked for.
-
-     IT CANNOT ROB cch-w20-s6 (that row's host, and the failure mode s9 refused
-     when it priced the floor-only candidate at 165/165 -> 0/165). The pill is
-     the only element this touches and the rule only ever WIDENS it — from its
-     natural width to the full content box — so `.attention-row
-     .status-pill-detail` gains room or keeps what it had; it can never lose
-     any. The W20-attention-band-wrap-uniform leg measures that before/after
-     across s6's own cells rather than asserting it.
-
-     BOUNDED TO THE BAND, as its three siblings are. Below 769 the GR109 stack
-     already gives every child its own line; above 904 the row is a row and the
-     pill sits inline beside a name the ellipsis bounds. */
-  .attention-row .status-pill { flex: 0 0 100%; }
+  /* The pill in this row is chip-only (statusPill with detail:false — the
+     reason prints in .attention-reason), so the row's wrap point no longer
+     depends on a sentence's width; the old `flex: 0 0 100%` line rule that
+     made a reason-wide pill take its own line retired with that shape. */
 }
 /* v4 instances grid — auto-fill cards. */
 .overview-instances { margin-top: 4px; }
@@ -5241,9 +5109,18 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    150°+ away, so the two washes converged: sampled RGB distance 6.1 (light) /
    8.3 (dark) against 19.5–48.2 elsewhere — a 2.5–6x outlier, and the one defect
    the ~1,585-shot accent matrix found.
+   SUPERSEDED IN ITS PREMISE, NOT IN ITS RULE (cch DEFECT-A, 2026-09-20): --ok-hsl
+   no longer tracks --primary-hsl, so the ~19° ember convergence this block
+   describes cannot recur and the numbers above are HISTORY, measured on the
+   pre-DEFECT-A binding. The alpha separation below is KEPT on its own merit —
+   "a passing check should not shout" is a reading argument, not a hue
+   workaround, and it is hue-independent by construction, so the new green
+   cannot make it wrong. GR90's ruling that "--ok-hsl is NOT touched (it must
+   keep tracking the brand)" is the part that is overturned; see
+   design/emit.mjs cloudOkVars() for the measurement that overturned it.
    The fix separates the pair on ALPHA, not hue, so it works identically in all
-   five identities and gets no worse where hue already separates. --ok-hsl is NOT
-   touched (it must keep tracking the brand) and the FAIL wash is NOT touched
+   five identities and gets no worse where hue already separates. The FAIL wash
+   is NOT touched
    either — deepening it was measured and rejected: it does separate (ember-light
    6.1 → 45.9 at 0.28) but it drags the --danger glyph from 4.71:1 to 3.71:1,
    and because __css_check measures the --danger-soft TOKEN rather than this
@@ -6991,17 +6868,14 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border-radius: var(--pill);
   padding: 1px 8px;
 }
-.dom-rungs { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
-/* GR65 REVIEW: a rung is `white-space: nowrap` so its glyph + label never break
-   mid-phrase — but a FAILED rung also carries a server-authored reason ("No
-   A/AAAA record for acme.barkpark.cloud"), and an unbreakable 509px pill inside
-   a 340px rail pushed the whole DOCUMENT to scrollWidth 1533 in a 1440 viewport.
-   That is a horizontal page scroll on the instance workspace at DESKTOP width,
-   in every accent and both themes — not a tablet-only tightness. `max-width:
-   100%` bounds the pill to its flex line and the code span alone is allowed to
-   wrap (`anywhere`, because the reason ends in an unbreakable hostname); the
-   label chrome keeps its nowrap. Measured on the static harness, panel-overview:
-   1440 scrollWidth 1533 → 1440, 768 scrollWidth 797 → 768. */
+/* The checklist is a LIST: one rung per line, the capsule (glyph + label) on
+   the left and the server's evidence as mono prose beside it. The evidence
+   used to sit INSIDE the capsule, so a two-line reason painted a 100px-tall
+   balloon in the rail; the capsule now holds only the state and never wraps,
+   and `.dom-rung-code` wraps in its own column (`anywhere`, because a reason
+   can end in an unbreakable hostname — the GR65 page-scroll defect). */
+.dom-rungs { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 0; }
+.dom-rung-row { display: flex; align-items: flex-start; gap: 8px; min-width: 0; max-width: 100%; }
 .dom-rung {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 10px;
@@ -7012,16 +6886,20 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: var(--text-xs);
   font-weight: 600;
   white-space: nowrap;
+  flex: 0 0 auto;
   max-width: 100%;
   min-width: 0;
 }
 .dom-rung-glyph { font-size: 9px; line-height: 1; }
 .dom-rung-code {
-  font-family: var(--mono); font-weight: 400; color: var(--dim);
+  font-family: var(--mono); font-size: var(--text-xs); font-weight: 400; color: var(--dim);
+  flex: 1 1 10rem;
   min-width: 0;
+  padding-top: 4px;
+  line-height: var(--leading-xs);
   white-space: normal;
   overflow-wrap: anywhere;
-  text-align: left; /* a wrapped reason must read as a paragraph, not a centred blob */
+  text-align: left;
 }
 .dom-rung--ok { color: var(--ok-strong); background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.3); }
 .dom-rung--ok .dom-rung-glyph { color: var(--ok); }
@@ -7549,217 +7427,11 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .offload-watch-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .offload-watch-title { font-weight: 600; font-size: 13px; color: var(--text); }
 
-/* ====================================== W16-S3 PILL TEXT STAYS IN ITS CHIP
-   Pays TWO filed rows — `cch-w14-bl-status-pill-label-overflows-rail` and
-   `cch-w15-bl-fleet-support-detail-truncated-stacked-band`. They are ONE
-   banner because they share this anchor and `cssom-heads.baseline`, NOT
-   because they share a rule: they fail in different containers, on different
-   children, in disjoint bands.
 
-   GR11/GR25 CARVE-OUT, ARGUED NOT ASSUMED. GR25 forbids EDITING the four
-   quarantined pill families. Nothing below edits one: every declaration here
-   is an ADD under a WRAPPER selector (`.detail-rail`, `.fleet-status` —
-   app.css:2270 already states both are wrappers), the base blocks at
-   :2913-2957 are byte-identical, and this is the D157 precedent ("an ADD, not
-   a restyle") plus D191's inheritance statement. `git diff` on this file
-   touches no existing declaration.
-
-   THE METRIC. Every "fixed" below is `scrollWidth <= clientWidth` on BOTH the
-   pill and its offending child, never the right-edge delta
-   `label.right - pill.right`. The delta is a FALSE-CLEAN oracle: the measured
-   candidate `.detail-rail .status-pill-label { flex: 0 1 auto; min-width: 0 }`
-   ALONE drives it +36.52 -> -12.00 (a perfect score) while
-   `label.scrollWidth 130 > clientWidth 81` and `pill.scrollWidth 155 >
-   clientWidth 117` — the label BOX shrank 49px, the glyphs did not move, and
-   `.status-pill-label` declares no overflow, so 38% of "No content binding"
-   still paints outside the chip. `flex: 0 0 auto` at :2935 is ALREADY on disk,
-   so re-declaring it is a measured no-op; the shrink line below only earns its
-   place NEXT TO `white-space: normal`, which is what actually moves glyphs.
-
-   THE VERTICAL TRAP. A wrap without `height: auto` scores clean on every
-   HORIZONTAL metric while a 36px label sits inside a 24px chip
-   (`pill.scrollHeight 29 > clientHeight 22`) and the second line paints below
-   the capsule. No instrument in __preview__ measured any vertical dimension
-   before this slice; overflow-guard's W15 leg now asserts
-   `pill.scrollHeight <= pill.clientHeight`, mutation-proven by deleting
-   `height: auto` here.
-
-   THE 2px IS DERIVED, NOT TASTE. The base chip is `height: 24px` + 1px border
-   each side around an 18px label line box, i.e. a 2px optical inset per side.
-   `padding-top/bottom: 2px` REPRODUCES that inset exactly, so a single-line
-   pill measures 24px before and after (2+18+2+2 = 24) and only a WRAPPED pill
-   grows. `min-height: 24px` keeps the floor when the label is short. The 8/12/
-   16/20/24 --space-* scale has no 4px step, so a token was not available and
-   none is invented. */
-.detail-rail .status-pill {
-  white-space: normal;
-  height: auto;
-  min-height: 24px;
-  padding-top: 2px;
-  padding-bottom: 2px;
-}
-/* The shrink+wrap pair. `min-width: 0` lets the label fall below its
-   max-content width; `flex: 0 1 auto` lets flexbox ask. Neither means anything
-   without `white-space: normal` above — see THE METRIC. */
-.detail-rail .status-pill-label { flex: 0 1 auto; min-width: 0; }
-
-/* The fleet row's money message: "verify: no heartbeat within the provisioning
-   budget (listener never came online)" measured scrollWidth 463 against clientWidth 142 at 320 (69% of the
-   sentence unrendered) and 295/343 at 721/769 — the operator could not read WHY
-   the instance failed. The filed row's title says "721 and 769"; the driven band
-   is 320/360/390/430/620/721/769/800/830/860, clean at >= 899.
-   `align-items: flex-start` puts the dot on the FIRST line instead of the
-   vertical middle of a two-line chip; `margin-top` centres the 7px dot on that
-   18px line box ((18-7)/2 = 5.5px — derived from the measured line box, not
-   eyeballed). `overflow: visible; text-overflow: clip` retires the ellipsis
-   machinery the wrap makes unreachable, so nothing can silently re-truncate. */
-.fleet-status .status-pill {
-  white-space: normal;
-  height: auto;
-  min-height: 24px;
-  padding-top: 2px;
-  padding-bottom: 2px;
-  align-items: flex-start;
-}
-.fleet-status .status-pill-dot { margin-top: 5.5px; }
-.fleet-status .status-pill-detail { overflow: visible; text-overflow: clip; }
-
-/* ═════════════════ W18-S1 THE FRONT SCREEN SAYS WHY A BOX IS DEGRADED
-   Pays `cch-w16-bl-attention-pill-detail-truncated-front-screen`. On merged-main
-   bytes the LANDING route hid the reason: `.instance-card-head
-   .status-pill-detail` rendered 56 of 165px of "Health down · Agent offline" at
-   320 (66.1% unreadable), 96/165 at 360, 126/165 at 390 — a DATED record, taken
-   pre-remedy against the OLD fixture string, whose 165px clamp cch-w18-bl has
-   since moved to 186px by serving the production-dominant "Health unknown ·
-   Agent offline"; the defect on the string the server actually writes was
-   correspondingly WIDER at every width — and on `mixed-fleet`
-   45 of 237px of "Payment failed — subscription past due" (81.0%), still cut at
-   430 where the attention fixture is already clean. Light and dark are
-   byte-identical in every cell: theme is not an axis for this row.
-
-   WHY THE PILL ABSORBS ALL OF IT. Inside `.instance-card-head` the pill shares
-   the line with `.instance-card-name`, which carries `margin-right: auto` and no
-   `min-width: 0` — the name holds its min-content width and the pill takes 100%
-   of the deficit. `.attention-row`'s pill sits beside `.attention-main`
-   (`flex: 1; min-width: 0`), which shrinks instead. Two hosts, disjoint bands,
-   opposite shapes; one wrapper-scoped fix cannot pay both, and the tablet host
-   is a separate filed row (task-802585b77fc136b1), untouched here.
-
-   GR11/GR25 CARVE-OUT, BY CONSTRUCTION RATHER THAN BY INSPECTION. GR25 forbids
-   EDITING the four quarantined pill families, not CONSUMING them.
-   `.instance-card-head` is a WRAPPER in exactly the vocabulary app.css:2270
-   uses for `.fleet-status`/`.fleet-main`: it is not one of the four families and
-   no pill rule block is touched. Every line below is an ADD (D157 "an ADD, not a
-   restyle"), so `git diff -U0` on this file shows this block as a hunk of OLD
-   LENGTH ZERO and :2913-2957 is untouched without anyone having to check.
-   THE FOURTH HEAD IS THAT PROOF'S PRICE: `flex-wrap` could have been folded
-   into the existing `.instance-card-head` at app.css:3064 for +3 heads instead
-   of +4, and D198 refused that — it edits an existing declaration line and
-   forfeits the old-length-zero construction. +4 and the carve-out proof are the
-   same decision.
-
-   THE THIRD COPY OF THIS RECIPE IS DELIBERATE (D210). `.detail-rail`,
-   `.fleet-status` and now `.instance-card-head` each carry a wrapper-scoped
-   clone of the same five-declaration wrap. A shared `.status-pill--wrap`
-   variant was PRICED AND REFUSED: it saves ZERO rule heads (the variant is
-   itself a head), forfeits the old-length-zero proof this block rests on, needs
-   an app.js change through the shared statusPill() factory to emit the class on
-   three call sites, and authors a new head INSIDE the GR25-quarantined family —
-   which is the exact ground on which D198 refused the cheaper +3 variant above.
-   THE EXTRACTION TRIGGER IS THE FOURTH HOST, not this one.
-
-   THE NUMBERS BELOW ARE PILL HEIGHTS, NEVER CARD HEIGHTS (D205). Driven on this
-   fixture: the pill is 42px at 320 (the head row wraps, the pill takes the full
-   width and runs to two lines) and back to exactly 24px from 620 up. As CARD
-   height the same change costs +52 at 320 — a real design change to the
-   most-seen screen, ratified by D197; the candidate without `flex-wrap` costs
-   +54 at 320 and is 16px TALLER at 360/390, which is why `flex-wrap` is
-   load-bearing and not decoration.
-
-   THE BOUNDARY IS A PROPERTY OF THE STRING (D206), AND THE FIXTURE NOW SERVES
-   THE SERVER'S STRING (cch-w18-bl). This block was authored against the fixture
-   "Health down · Agent offline" — a pair the control plane does not organically
-   produce, because `Registry.mark_offline/1` writes `health_status: "unknown"`
-   DELIBERATELY and the shipped agent hard-codes `AgentStatus: "online"`. The
-   fixture was flipped to "Health unknown · Agent offline" and both boundaries
-   were DRIVEN 1px apart on `overview-attention`, light and dark identical:
-
-     "Health down · Agent offline"     42px <=343, 24px >=344   (343/344)
-     "Health unknown · Agent offline"  42px <=364, 24px >=365   (364/365)
-
-   Three characters bought +21px of boundary — the same +21 the attention-row
-   detail's clamped scrollWidth moves (165 -> 186). So the pill is 42px at 320
-   AND at 360 now, and 24px from 390 up on the sweep's grid; the sentence above
-   that predicted "425/430 to 450/460" was never driven and was wrong by ~80px
-   on both sides, which is the whole reason no height is pinned. overflow-guard's
-   W18-overview-card-pill leg therefore asserts INVARIANTS at every width
-   (detail.scrollWidth == clientWidth, pill.scrollHeight <= pill.clientHeight,
-   detail.bottom <= pill.bottom) and pins no height at all.
-
-   THE 2px INSET IS DERIVED, as in the two blocks above: 24px chip = 1px border
-   + 2px + an 18px line box + 2px + 1px, so `padding-top/bottom: 2px` reproduces
-   the existing optical inset exactly and a one-line pill measures 24px before
-   and after. THE DOT OFFSET IS RE-DERIVED, NOT COPIED: `.fleet-status`'s 5.5px
-   came from an 18px line box at 13px font; this pill's own first line box was
-   MEASURED at 18px (12px font, inherited line-height), so (18 - 7) / 2 = 5.5px
-   is the same number for a different reason — and it is the measurement, not
-   the precedent, that puts the dot on the centre of the FIRST line.
-
-   `overflow: visible; text-overflow: clip` retires the ellipsis machinery the
-   wrap makes unreachable, so nothing can silently re-truncate the reason. */
-/* cch-w24-s2 — THE FOURTH PILL HOST, APPENDED TO THE PRELUDES ABOVE RATHER THAN
-   AUTHORED AS ITS OWN BLOCK. `.detail-title-row` is the instance's OWN detail
-   header, and it is the one screen a person opens to read WHY provisioning
-   failed. Driven on `?scen=fleet-cruel-content#instance/…c2`, pre-fix, light,
-   every `.status-pill-detail` iterated with its wrapper scope MEASURED (not
-   `querySelector`): `.detail-title-row` detail len 512, computed white-space
-   `nowrap`, overflow `hidden`, text-overflow `ellipsis`, 3754/208 at 320 —
-   about 30 of 512 characters readable, and no gesture reaches the rest.
-
-   THE HOST IS `.detail-title-row`, NOT `.detail-rail`. `.detail-rail
-   .status-pill` is a real `white-space: normal` rule, but it reaches ZERO
-   `.status-pill-detail`: only `statusPill()` emits a detail span and no call
-   site lands in a rail. A `.detail-rail .status-pill-detail` selector matches
-   NOTHING. The scope histogram over every non-empty detail on the console reads
-   20 `.attention-row` / 5 `.detail-title-row` / 40 `.fleet-status` / 40
-   `.instance-card-head` / 0 `.detail-rail` — that census is a survey artefact,
-   not something the guard reprints on a green run (the W21 leg names a wrapper
-   scope only on a FAILING element), so re-derive it by walking every
-   `.status-pill-detail` and reading `el.closest()` against the five wrappers.
-
-   WHY COMMA MEMBERS AND NOT A FOURTH COPY (D291). The three blocks above are
-   already the SAME five declarations three times; a fourth copy costs +2 CSSOM
-   rule heads, and `cssom-parity.mjs` holds the head baseline this wave abstains
-   from moving. Appended here the cost is Δheads 0 — measured, PARITY PASS, exit
-   0 — and the D210 "third copy is deliberate" note above keeps its meaning:
-   this is not a fourth clone, it is the third clone gaining a second scope.
-   `.detail-title-row` already declares `flex-wrap: wrap` of its own, so the
-   `.instance-card-head` head on the line below stays single-scoped. */
+/* The card head wraps: name, provider chip and the status row share one line
+   when they fit and stack when they don't — the status row's prose column is
+   the item that gives (see STATUS PILL). */
 .instance-card-head { flex-wrap: wrap; }
-.instance-card-head .status-pill,
-.detail-title-row .status-pill {
-  white-space: normal;
-  height: auto;
-  min-height: 24px;
-  padding-top: 2px;
-  padding-bottom: 2px;
-  align-items: flex-start;
-}
-/* THE DOT COMES WITH THE PRELUDE, and it is a THIRD comma member rather than
-   the two the slice was cut for — stated plainly because it is a deviation.
-   `align-items: flex-start` above is what stops a wrapped pill centring its dot
-   against a 348px-tall capsule, and it puts the dot at the content-box top:
-   MEASURED at 320 on the cruel detail, dot top 423 with the first line box at
-   424 and 15px tall, so the dot's centre sat 5px above the centre of the line
-   it marks. 5.5px lands it at 432 against a line centre of 431.5. The same
-   number for a THIRD different reason — the head above derived it from an 18px
-   line box at 13px, the head below from an 18px line box at 12px, and this
-   scope from a 15px line box at 12px — so it is re-derived, never inherited.
-   Δheads 0: appending to an existing prelude authors no new rule. */
-.instance-card-head .status-pill-dot,
-.detail-title-row .status-pill-dot { margin-top: 5.5px; }
-.instance-card-head .status-pill-detail,
-.detail-title-row .status-pill-detail { overflow: visible; text-overflow: clip; }
 
 /* ═══ THE SHARED `.modal-card` MIN-CONTENT FLOOR, CENSUSED AND CLOSED ═══════
    cch-w22-s4 reflowed the ACCOUNT modal and filed the rest, guessing "15+"

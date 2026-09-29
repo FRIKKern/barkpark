@@ -151,12 +151,12 @@ scripts/prod-microblock-staleness-check.sh    # must now exit 0
 ```
 
 Exit 0 is the acceptance. Exit 3 means the pull did not land what you think; exit 4 means you
-cannot tell, and must be fixed before you believe anything. Also:
+cannot tell, so fix that first. Also:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' http://89.167.28.206/api/schemas    # 200
 ssh root@89.167.28.206 'psql -d "$DATABASE_URL" -c "select count(*) from schema_migrations;"'
-ssh root@89.167.28.206 'journalctl -u barkpark -n 100 --no-pager'
+ssh root@89.167.28.206 "journalctl -u barkpark -u 'barkpark-slot@*' -n 100 --no-pager"
 ```
 
 Compare that migration count against Step 1's high-water mark: it must have risen by 23.

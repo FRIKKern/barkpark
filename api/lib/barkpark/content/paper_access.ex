@@ -45,6 +45,7 @@ defmodule Barkpark.Content.PaperAccess do
 
   alias Barkpark.Repo
   alias Barkpark.Content.PaperAccessLog
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   @default_ttl_days 90
   @default_limit 100
@@ -96,7 +97,10 @@ defmodule Barkpark.Content.PaperAccess do
   def enabled?, do: Application.get_env(:barkpark, :paper_access_log_enabled, true) != false
 
   defp spawn_record(attrs) do
-    case Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn -> record_now(attrs) end) do
+    # C083: the trail row is bookkeeping on a read; a held instance drops it.
+    case Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+           Door.admit_or_skip(fn -> record_now(attrs) end, :ok)
+         end) do
       {:ok, _pid} ->
         :ok
 
