@@ -119,7 +119,6 @@ defmodule Barkpark.PluginFreeBootTest do
   # confirmed the Github & Tickets reaches are guarded — no crash under the
   # kill switch.
   @coupling_plugin_http [
-    {"Barkpark.Plugins.Bulldocs", "lib/barkpark_web/controllers/bulldocs_intents_controller.ex"},
     {"Barkpark.Plugins.Github", "lib/barkpark_web/plugs/github_webhook_signature.ex"},
     {"Barkpark.Plugins.Tickets", "lib/barkpark_web/plugs/require_ticket_key.ex"}
   ]
