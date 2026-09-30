@@ -188,9 +188,20 @@ defmodule BarkparkCloud.DeployLedgerDrainRetakeTest do
 
       # THE ARM the whole module exists for: the door NEVER prints wave 13's
       # inherited reading as if it had just taken it.
-      refute printed =~ "1110"
+      refute prints_inherited_reading?(printed)
       refute printed =~ "inherited"
       assert DrainDistribution.inherited_reading().n == 1_110
+    end
+
+    # task-41d7efab8fc4ff11: the arm above used to refute "1110" over the WHOLE
+    # output, including the wall-clock `read at <now>` stamp. At 12:49:17.111013Z
+    # the stamp itself held 1110 and the test failed on an unrelated PR.
+    test "the inherited-reading refute ignores the wall-clock stamp, and still catches the reading" do
+      clock =
+        "RE-TAKE 24h — mark 2026-08-07T22:19:52.000000Z, read at 2026-09-30T12:49:17.111013Z\n"
+
+      refute prints_inherited_reading?(clock <> "RECORD 24h rows    n=5\n")
+      assert prints_inherited_reading?(clock <> "RECORD 24h rows    n=1110\n")
     end
 
     test "it returns the same lines it printed, so a recorder need not scrape stdout" do
@@ -207,6 +218,14 @@ defmodule BarkparkCloud.DeployLedgerDrainRetakeTest do
   end
 
   # ── fixtures (same shape as deploy_ledger_drain_distribution_test.exs) ─────
+
+  # Does the printed re-take carry wave 13's inherited 1110, once the one
+  # wall-clock field (`read at <now>`) is masked?
+  defp prints_inherited_reading?(printed) do
+    printed
+    |> String.replace(~r/read at \S+/, "read at <now>")
+    |> String.contains?("1110")
+  end
 
   defp seed_chain(site, opts) do
     at = Keyword.fetch!(opts, :at)
