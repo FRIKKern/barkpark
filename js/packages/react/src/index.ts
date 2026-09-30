@@ -34,6 +34,7 @@ export type {
   ImageAssetRef,
   ImageAssetExpanded,
   ImageAssetMetadata,
+  ImageFieldValue,
 } from './Image'
 
 // Image-URL builder (preset-based, the urlFor equivalent) — re-exported from core

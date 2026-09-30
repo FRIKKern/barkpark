@@ -21,10 +21,11 @@ export type RenditionPreset = 'thumb' | 'preview' | 'hero' | 'og' | (string & {}
 
 /**
  * A stored image field: an unresolved reference (`{_ref}`), an expanded asset
- * (`{_id, url}`), or a bare URL string. Loose by design so it accepts both the
- * core `MediaAsset` and the react `ImageAsset` shapes without coupling.
+ * (`{_id, url}`), the Studio media picker's value (`{url, assetId, …}`), or a
+ * bare URL string. Loose by design so it accepts the core `MediaAsset`, the
+ * react `ImageAsset` and the Studio's stored shape without coupling.
  */
-export type ImageRef = string | { _ref?: string; _id?: string; url?: string }
+export type ImageRef = string | { _ref?: string; _id?: string; assetId?: string; url?: string }
 
 export interface ImageUrlOptions {
   /** A named server rendition (`thumb`/`preview`/`hero`/`og`). Omit for the original. */
@@ -43,6 +44,11 @@ function assetId(asset: ImageRef): string | undefined {
   if (typeof asset === 'string') return undefined
   if (asset._ref) return asset._ref
   if (asset._id) return asset._id
+  // The Studio media picker stores `{url, assetId, alt, width, height, lqip}`
+  // (bp-media-picker.js, `assetId` the canonical spelling). Without this a
+  // `preset` on every Studio-authored image fell through to the full-size
+  // original (stranger walk, 2026-09-30).
+  if (typeof asset.assetId === 'string' && asset.assetId) return asset.assetId
   return undefined
 }
 
