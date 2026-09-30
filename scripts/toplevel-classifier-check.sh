@@ -120,6 +120,7 @@ registry() {
   # MUT-EMPTY
   cat <<'REGISTRY'
 .air.toml none air live-reload config for the local Go loop
+.barkpark.json none bp repo context pin (server = the guerrilla ledger); read at runtime by bp, and Go tests of the saved-config layer t.Chdir away from it
 .claude none agent harness config, workflows and worktree scaffolding
 .codex none codex agent skills and epic-cycle scripts
 .cursor none cursor editor rules
