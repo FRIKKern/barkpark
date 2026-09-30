@@ -106,6 +106,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
       |> assign(:value, value)
       |> assign(:pending_value?, pending_value?)
       |> assign(:field, build_field(block))
+      |> assign(:unresolved_paint, unresolved_codelist_paint(block, field_type))
 
     {:ok, socket}
   end
@@ -119,6 +120,28 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   def update(%{tree_value: code}, socket) do
     {:ok, persist(socket, code)}
   end
+
+  # A codelist whose list is not registered on this instance renders an empty,
+  # disabled select: the label and the stored code the reader paints vanished
+  # in Edit (r2b click-to-edit census). Paint the reader's own line read-only
+  # above the control so Edit shows what View shows; nothing is written.
+  defp unresolved_codelist_paint(block, "codelist") do
+    plugin = Map.get(block, "plugin", "core")
+    list_id = Map.get(block, "codelistId") || ""
+
+    resolved? =
+      try do
+        match?(%{values: [_ | _]}, Barkpark.Content.Codelists.get(plugin, list_id))
+      rescue
+        _ -> false
+      end
+
+    if resolved?,
+      do: nil,
+      else: Barkpark.PortableDoc.Render.render_block(block, %{style: :article})
+  end
+
+  defp unresolved_codelist_paint(_block, _type), do: nil
 
   # ── render dispatch — one inner field component per type ────────────────────
 
@@ -235,6 +258,9 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   def render(%{field_type: "codelist"} = assigns) do
     ~H"""
     <div id={@id} class="bp-paper-composite-block" data-field-type="codelist" data-block-id={@block_id} data-codelist-variant="flat">
+      <div :if={@unresolved_paint not in [nil, ""]} class="bp-paper-contextual-preview" data-test-id="paper-codelist-unresolved-paint">
+        {Phoenix.HTML.raw(@unresolved_paint)}
+      </div>
       <form id={"#{@id}-form"} phx-change="inner-change" phx-target={@myself} phx-hook="BarkparkFieldBridge" data-paper-field-flush>
         <CodelistField.codelist_field
           field={@field}
