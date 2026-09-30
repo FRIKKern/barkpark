@@ -181,6 +181,23 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
                Content.get_document("p2", "post", @dataset)
     end
 
+    # Stranger walk, 2026-09-30: a selected document that is already published
+    # with no pending draft made the flash say "(1 failed)". Nothing failed —
+    # there was nothing to publish — and the flash now says so.
+    test "bulk-publish reports an already-published document as nothing to publish",
+         %{conn: conn} do
+      {:ok, _} = Content.publish_document("p1", "post", @dataset)
+
+      {:ok, view, _html} = live(admin_conn(conn), scoped_studio("/d/#{@dataset}/studio/post"))
+
+      _ = render_click(view, "toggle-doc-checkbox", %{"id" => "p1"})
+      _ = render_click(view, "toggle-doc-checkbox", %{"id" => "p2"})
+      html = render_click(view, "bulk-publish", %{})
+
+      assert html =~ "Published 1 of 2. 1 had no draft changes to publish."
+      refute html =~ "failed"
+    end
+
     test "bulk-clear empties the selection set", %{conn: conn} do
       {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post"))
 
