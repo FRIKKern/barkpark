@@ -837,7 +837,7 @@ defmodule BarkparkCloud.Billing do
       # silent :already_active. Still not auto-applied (swapping a live paid
       # subscription is a human's call), but it is loud.
       match?(%Subscription{status: "active"}, live) and is_binary(subscription_id) and
-          is_binary(live.gateway_subscription_id) and
+        is_binary(live.gateway_subscription_id) and
           live.gateway_subscription_id != subscription_id ->
         Logger.error(
           "[billing] DUPLICATE PAID SUBSCRIPTION: team #{team_id} is active on " <>
