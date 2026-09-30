@@ -117,6 +117,10 @@ defmodule Barkpark.Webhooks.RetryWorker do
             _ = Dispatcher.redeliver(webhook, body, delivery.event_id, delivery, n + 1)
             :ok
 
+          {:disabled, reason} ->
+            _ = Barkpark.Webhooks.abandon_delivery(delivery, reason)
+            :ok
+
           :gone ->
             :ok
         end
