@@ -16948,7 +16948,9 @@ defmodule PDS.Census do
 
     why =
       if drifted == [] do
-        "all #{length(@declared)} basis token(s) still occur inside their recorded span(s)"
+        "all #{length(@declared)} basis token(s) still occur inside their recorded span(s) " <>
+          "(containment only: a basis can keep its token and gain a false sentence beside it; " <>
+          "this proves the basis is STILL THERE, not that it is TRUE)"
       else
         "#{length(drifted)} declared basis has DRIFTED off its recorded span: " <>
           Enum.map_join(drifted, " · ", fn d ->
