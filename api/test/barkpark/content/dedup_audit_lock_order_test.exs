@@ -129,3 +129,175 @@ defmodule Barkpark.Content.DedupAuditLockOrderTest do
              "scope lock is not ordered after the audit-chain lock"
   end
 end
+
+defmodule Barkpark.Content.PublishAuditChainKeyTest do
+  @moduledoc """
+  task-962637a90e406961 — a publish takes ONE audit-chain lock: the chain its
+  own emit writes to.
+
+  A draft with no workspace publishes into the workspace `WriteScope` resolves
+  for it (the seeded Default for a fixture). The dedup re-check pre-locked the
+  chain of the DRAFT's workspace (global), and `tap_broadcast` then emitted on
+  the PUBLISHED row's workspace (Default): two chains, global then Default, in
+  one transaction. Any transaction holding audit(Default) that then needs
+  audit(global) closes the cycle. The plugins-off weekly run hit it
+  (run 36650351431):
+
+      Process 10354 waits for ... advisory lock [16384,0,485729316,1]  audit(Default)
+      Process 10353 waits for ... advisory lock [16384,0,2301988177,1] audit(global)
+      audit emit crashed for repair-legacy: ... deadlock_detected
+
+  Each process below checks out its OWN sandbox connection, so each is one
+  open transaction to the end of its turn, exactly as two async tests are.
+  """
+  use ExUnit.Case, async: false
+
+  alias Barkpark.Audit
+  alias Barkpark.Content
+  alias Barkpark.Content.Document
+  alias Barkpark.LabelFixtures
+  alias Barkpark.Repo
+  alias Barkpark.Tenancy
+  alias Ecto.Adapters.SQL.Sandbox
+
+  @dataset "publish_audit_chain_key_test"
+
+  setup do
+    :ok = Sandbox.checkout(Repo)
+    :ok
+  end
+
+  defp chain_key(ws), do: :erlang.crc32("barkpark.audit.chain:" <> (ws || "\x00global"))
+
+  defp held_advisory_keys do
+    Repo.query!(
+      "SELECT objid FROM pg_locks WHERE locktype = 'advisory' AND classid = 0 " <>
+        "AND pid = pg_backend_pid()"
+    ).rows
+    |> List.flatten()
+  end
+
+  defp insert_unscoped_draft!(id) do
+    block = %{
+      "type" => "table",
+      "id" => "t1",
+      "head" => [[%{"type" => "text", "value" => "A"}], [%{"type" => "text", "value" => "B"}]],
+      "rows" => [[[%{"type" => "text", "value" => id}], [%{"type" => "text", "value" => "d"}]]]
+    }
+
+    content = LabelFixtures.with_registered_labels(%{"blocks" => [block]}, @dataset)
+
+    %Document{}
+    |> Document.changeset(%{
+      "doc_id" => "drafts." <> id,
+      "type" => "paper",
+      "dataset" => @dataset,
+      "title" => "Unscoped draft #{id}",
+      "status" => "draft",
+      "content" => content,
+      "rev" => "rev-" <> id
+    })
+    |> Repo.insert!()
+  end
+
+  test "publishing a workspace-less draft locks only the audit chain it emits on" do
+    id = "chain-key-#{System.unique_integer([:positive])}"
+    draft = insert_unscoped_draft!(id)
+    assert draft.workspace_id == nil
+
+    assert {:ok, published} = Content.publish_document(id, "paper", @dataset)
+    assert is_binary(published.workspace_id)
+
+    held = held_advisory_keys()
+
+    assert chain_key(published.workspace_id) in held
+
+    refute chain_key(nil) in held,
+           "the publish took audit(global) for a row it audits under " <>
+             "#{published.workspace_id} — two audit chains in one transaction"
+  end
+
+  test "a workspace-less publish and a writer holding audit(Default) do not deadlock" do
+    default_ws = Tenancy.get_default_workspace().id
+    parent = self()
+
+    # A: holds audit(Default) first (any async test that emitted on Default),
+    # then needs audit(global).
+    a =
+      Task.async(fn ->
+        :ok = Sandbox.checkout(Repo)
+
+        result =
+          try do
+            {:ok, _} =
+              Audit.emit(%{
+                category: "content_mutation",
+                action: "probe.a1",
+                workspace_id: default_ws
+              })
+
+            send(parent, :a_holds_default)
+
+            receive do
+              :go_a -> :ok
+            end
+
+            {:ok, _} =
+              Audit.emit(%{category: "content_mutation", action: "probe.a2", workspace_id: nil})
+
+            :ok
+          rescue
+            e in Postgrex.Error -> {:postgres_error, e.postgres[:code]}
+          end
+
+        Sandbox.checkin(Repo)
+        result
+      end)
+
+    assert_receive :a_holds_default, 5_000
+
+    # B: the publish of a workspace-less draft.
+    b =
+      Task.async(fn ->
+        :ok = Sandbox.checkout(Repo)
+        id = "chain-key-dl-#{System.unique_integer([:positive])}"
+        insert_unscoped_draft!(id)
+        %{rows: [[pid]]} = Repo.query!("SELECT pg_backend_pid()")
+        send(parent, {:b_backend, pid})
+        result = Content.publish_document(id, "paper", @dataset)
+        Sandbox.checkin(Repo)
+        result
+      end)
+
+    assert_receive {:b_backend, b_pid}, 10_000
+
+    # Release A only once B is parked on a lock A holds, so the interleaving
+    # is fixed: B waits on audit(Default) either way — before the fix it
+    # already holds audit(global) while it waits.
+    wait_until_blocked!(b_pid, 100)
+    send(a.pid, :go_a)
+
+    a_result = Task.await(a, 15_000)
+    b_result = Task.await(b, 15_000)
+
+    refute a_result == {:postgres_error, :deadlock_detected},
+           "A was the 40P01 victim: B held audit(global) while waiting for audit(Default)"
+
+    assert a_result == :ok
+    assert {:ok, %Document{}} = b_result
+  end
+
+  defp wait_until_blocked!(_pid, 0), do: flunk("the publish never blocked on audit(Default)")
+
+  defp wait_until_blocked!(pid, tries) do
+    %{rows: rows} =
+      Repo.query!("SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1", [pid])
+
+    if rows == [["Lock"]] do
+      :ok
+    else
+      Process.sleep(50)
+      wait_until_blocked!(pid, tries - 1)
+    end
+  end
+end

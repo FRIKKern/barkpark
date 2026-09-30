@@ -386,8 +386,21 @@ defmodule Barkpark.Content.Lifecycle do
                   # same `discard_draft_refused_as_duplicate/5` the pre-txn
                   # refusal takes, so a caller cannot tell which of the two
                   # gates refused it.
+                  #
+                  # The ref carries the DESTINATION workspace, not the draft's.
+                  # The re-check pre-locks the audit chain of `ref.workspace_id`
+                  # and `tap_broadcast` below emits on the PUBLISHED row's
+                  # workspace. A nil-workspace draft publishes into the workspace
+                  # `scope_attrs` resolved (usually Default), so keying on the
+                  # draft took audit(global) here and audit(Default) at the emit:
+                  # two chains in one transaction, and a writer taking them in
+                  # the other order deadlocked it (40P01, task-962637a90e406961).
                   case AuthoringWall.recheck_dedup_under_scope_lock(
-                         %{draft | content: pub_content},
+                         %{
+                           draft
+                           | content: pub_content,
+                             workspace_id: scope_attrs["workspace_id"] || draft.workspace_id
+                         },
                          type,
                          pid,
                          dataset,
