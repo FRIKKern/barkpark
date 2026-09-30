@@ -936,6 +936,10 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// (doc_publish_no_draft.go). stderr only; exit code unchanged.
 	emitDocPublishNothingToPublish(out, g, ctx, m, cmd, tail, status)
 
+	// A typo'd type answers like an empty one (doc_unknown_type.go): one
+	// schema probe on an empty doc ls/query page or a doc create. stderr only.
+	emitDocUnknownType(out, g, ctx, m, cmd, tail, status, respBody)
+
 	// The flag only ever overrides the HONEST success path (code == exitOK,
 	// meaning handleResponse's 2xx branch rendered it, not a screen's own
 	// refusal above with its own exit code). Rendering is byte-identical
