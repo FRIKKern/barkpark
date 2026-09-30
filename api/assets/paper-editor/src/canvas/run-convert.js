@@ -1397,7 +1397,7 @@ function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
   }
   if (cls.isField) {
     return fieldNodeChanged(prevChild, nextChild)
-      ? fieldNodeToPatch(nextChild)
+      ? fieldNodeToPatch(nextChild, prevChild)
       : null;
   }
   if (cls.isRole) {
@@ -2960,10 +2960,18 @@ function fieldNodeToBlock(node, id) {
 // per-block bridge byte-for-byte. The value is normalized to its per-type stored
 // form (boolean for field-boolean; string otherwise) so a canvas field edit persists
 // IDENTICALLY to a per-block field edit.
-function fieldNodeToPatch(node) {
+// With the previous node, the patch carries only the keys the author changed: a
+// label typed in place writes `label` and leaves the stored value's form untouched.
+function fieldNodeToPatch(node, prevNode) {
   const attrs = (node && node.attrs) || {};
   const bpType = attrs.bpType || "field-string";
-  return { value: normalizeFieldValue(bpType, attrs.value) };
+  const value = normalizeFieldValue(bpType, attrs.value);
+  if (!prevNode) return { value };
+  const prev = prevNode.attrs || {};
+  const patch = {};
+  if (canonicalJSON(value) !== canonicalJSON(normalizeFieldValue(prev.bpType || bpType, prev.value))) patch.value = value;
+  if ((attrs.label ?? null) !== (prev.label ?? null)) patch.label = attrs.label ?? null;
+  return Object.keys(patch).length ? patch : { value };
 }
 
 // True when a field node's VALUE changed (the only mutable datum). Canonical
@@ -2978,7 +2986,7 @@ function fieldNodeChanged(prevNode, nextNode) {
 function stableFieldKey(node) {
   const a = (node && node.attrs) || {};
   const bpType = a.bpType || "field-string";
-  return canonicalJSON({ value: normalizeFieldValue(bpType, a.value) });
+  return canonicalJSON({ value: normalizeFieldValue(bpType, a.value), label: a.label ?? null });
 }
 
 // ── action ⇄ canvas control-atom node (editable-action) ──────────────────────
@@ -4609,7 +4617,7 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
         ops.push({
           op: "patch-block",
           id: entry.id,
-          patch: fieldNodeToPatch(entry.node),
+          patch: fieldNodeToPatch(entry.node, prevNode),
         });
       }
       continue;
