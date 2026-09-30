@@ -124,7 +124,15 @@ defmodule BarkparkCloud.UnavailableVocabulary do
       relation: :one_sided,
       registry: "decrypt_failed",
       usage: nil,
-      note: "Registry-only, same axis as no_admin_token: no read was attempted."
+      note:
+        "Registry-only, same axis as no_admin_token, argued on its own terms: a credential " <>
+          "IS stored and the plane failed on it, but the meter's read is a request TO THE " <>
+          "BOX, and with no usable token that request never leaves the plane " <>
+          "(`Usage.instance_admin_token/1` answers `{:error, :decrypt_failed}` before any " <>
+          "HTTP call). Nothing about the box was asked, so the customer meter says " <>
+          "`unmetered`, not `we could not measure it`. The plane-side fault is not " <>
+          "swallowed: it is named where an operator can act on it, as the registry's own " <>
+          "`decrypt_failed` reason (task-b6025aab302e3ab8)."
     },
     %{
       fact: "the box is not live, so nothing was asked",
