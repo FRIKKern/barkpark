@@ -1891,7 +1891,8 @@ defmodule BarkparkCloud.Accounts do
            # Single-use: consume THIS link and any sibling links for the user, so
            # a second outstanding reset email cannot be replayed afterwards.
            _ <- revoke_reset_tokens(uid, DateTime.truncate(now, :microsecond)),
-           {:ok, _n} <- revoke_all_user_sessions(user) do
+           {:ok, _n} <- revoke_all_user_sessions(user),
+           _ <- revoke_recovery_credentials(uid, DateTime.truncate(now, :microsecond)) do
         updated
       else
         {:error, reason} -> Repo.rollback(reason)
@@ -1900,6 +1901,23 @@ defmodule BarkparkCloud.Accounts do
   end
 
   def reset_password_by_token(_, _), do: {:error, :invalid_token}
+
+  # A RESET is account RECOVERY, not a voluntary password change
+  # (task-2cf2d783832c12e9). `revoke_all_user_sessions/2` deliberately spares PATs
+  # — right for "change my password", wrong here: the person resetting may be
+  # recovering from a compromise, and an attacker who held the account could
+  # have minted a PAT, a 2FA challenge, an OAuth exchange code or an email-change
+  # code that would otherwise outlive the recovery. Kill them all.
+  @recovery_revoked_contexts ~w(pat 2fa_pending oauth_exchange change_email)
+
+  defp revoke_recovery_credentials(user_id, now) do
+    from(t in UserToken,
+      where:
+        t.user_id == ^user_id and t.context in ^@recovery_revoked_contexts and
+          is_nil(t.revoked_at)
+    )
+    |> Repo.update_all(set: [revoked_at: now])
+  end
 
   # Revoke (stamp revoked_at) every live `reset` token for a user. Used both when
   # a fresh reset is requested (supersede older links) and when one is consumed
