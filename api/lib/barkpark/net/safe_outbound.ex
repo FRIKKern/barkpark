@@ -123,11 +123,31 @@ defmodule Barkpark.Net.SafeOutbound do
   @spec ip_allowed?(:inet.ip_address()) :: boolean()
   def ip_allowed?({a, b, c, d})
       when a in 0..255 and b in 0..255 and c in 0..255 and d in 0..255 do
-    not ipv4_blocked?(a, b)
+    not ipv4_blocked?(a, b, c)
   end
 
   # IPv4-mapped IPv6 (::ffff:a.b.c.d) — unwrap the low 32 bits and re-check as IPv4.
   def ip_allowed?({0, 0, 0, 0, 0, 0xFFFF, g, h}) do
+    ip_allowed?({g >>> 8, g &&& 0xFF, h >>> 8, h &&& 0xFF})
+  end
+
+  # IPv6 forms that EMBED an IPv4 address a gateway or the stack will route to
+  # (r2c webhook audit): each is unwrapped and re-checked as IPv4, so
+  # `64:ff9b::a9fe:a9fe` (NAT64 of the metadata IP) is as blocked as
+  # 169.254.169.254 itself.
+  #   * 64:ff9b::/96  well-known NAT64 prefix — the low 32 bits
+  #   * 2002::/16     6to4 — bits 16..47
+  #   * ::a.b.c.d     deprecated IPv4-compatible (not :: or ::1, handled below)
+  def ip_allowed?({0x64, 0xFF9B, 0, 0, 0, 0, g, h}) do
+    ip_allowed?({g >>> 8, g &&& 0xFF, h >>> 8, h &&& 0xFF})
+  end
+
+  def ip_allowed?({0x2002, b, c, _, _, _, _, _}) when b in 0..0xFFFF and c in 0..0xFFFF do
+    ip_allowed?({b >>> 8, b &&& 0xFF, c >>> 8, c &&& 0xFF})
+  end
+
+  def ip_allowed?({0, 0, 0, 0, 0, 0, g, h})
+      when g in 0..0xFFFF and h in 0..0xFFFF and g != 0 do
     ip_allowed?({g >>> 8, g &&& 0xFF, h >>> 8, h &&& 0xFF})
   end
 
@@ -236,8 +256,8 @@ defmodule Barkpark.Net.SafeOutbound do
     end)
   end
 
-  # IPv4 classification keyed on the first two octets.
-  defp ipv4_blocked?(a, b) do
+  # IPv4 classification keyed on the first three octets.
+  defp ipv4_blocked?(a, b, c) do
     cond do
       # 0.0.0.0/8 unspecified / this-network
       a == 0 -> true
@@ -253,6 +273,10 @@ defmodule Barkpark.Net.SafeOutbound do
       a == 169 and b == 254 -> true
       # 100.64.0.0/10 CGNAT
       a == 100 and b in 64..127 -> true
+      # 192.0.0.0/24 IETF protocol assignments (DS-Lite / NAT64 plumbing)
+      a == 192 and b == 0 and c == 0 -> true
+      # 198.18.0.0/15 benchmarking — never a public destination
+      a == 198 and b in 18..19 -> true
       # 224.0.0.0/4 multicast
       a in 224..239 -> true
       # 240.0.0.0/4 reserved + 255.255.255.255 broadcast
@@ -273,6 +297,8 @@ defmodule Barkpark.Net.SafeOutbound do
       (a &&& 0xFFC0) == 0xFE80 -> true
       # ff00::/8 multicast
       (a &&& 0xFF00) == 0xFF00 -> true
+      # 64:ff9b:1::/48 local-use NAT64 (RFC 8215) — translator-internal, never public
+      a == 0x64 and elem(addr, 1) == 0xFF9B and elem(addr, 2) == 1 -> true
       true -> false
     end
   end
