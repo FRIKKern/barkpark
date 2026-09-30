@@ -270,7 +270,10 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
             # The base rides into run/2 too: Runner's own default is a literal
             # localhost:4000, so a stripped path without it goes to the wrong node.
-            result = Runner.run(legacy, base: config.base)
+            result =
+              legacy
+              |> Runner.run(base: config.base)
+              |> sweep_cleanup(ep, test_config)
 
             %{
               endpoint_id: ep.id,
@@ -305,6 +308,36 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       end)
 
     {scenario_results, last_results}
+  end
+
+  # Undo what a Run all scenario created, for the endpoints whose create leaves
+  # a LIVE side effect: endpoint id -> fun of the response body -> cleanup
+  # steps. Run all only: a single Run is the author's explicit request and keeps
+  # its result. The steps' outcome rides on the result as `:sweep_cleanup` so a
+  # failed undo is visible.
+  @sweep_cleanups %{
+    "webhooks-create" => &Barkpark.ApiTester.Endpoints.Webhooks.created_webhook_cleanup/1
+  }
+
+  @doc false
+  def sweep_cleanup(result, ep, config) do
+    case {Map.get(@sweep_cleanups, ep[:id]), result[:body_json]} do
+      {fun, %{} = body} when is_function(fun, 1) ->
+        case fun.(body) do
+          [] ->
+            result
+
+          steps ->
+            Map.put(
+              result,
+              :sweep_cleanup,
+              run_plugin_cleanup(steps, token: config.token, base: config.base)
+            )
+        end
+
+      _ ->
+        result
+    end
   end
 
   # Single-endpoint run, extracted so it can run inside a Task. Returns the

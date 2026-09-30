@@ -122,6 +122,28 @@ defmodule Barkpark.ApiTester.Endpoints.Webhooks do
     }
   end
 
+  @doc """
+  The cleanup steps for a webhook the Run all SWEEP just created with
+  `webhooks-create`: DELETE it by the id and dataset in the 201 body
+  (`{"webhook": {"id", "dataset"}}`). `[]` when the body carries no created
+  webhook (a refused create leaves nothing to undo).
+
+  Why (stranger walk, 2026-09-30): every Run all installed one more ACTIVE
+  "Notify Slack" webhook to https://hooks.slack.com/services/... on `publish`
+  of `post` — the scenario's body_example — and nothing removed it, so each
+  later post publish in that dataset made an outbound POST to Slack's domain,
+  failed, and counted consecutive_failures. Wired by id in
+  `ApiTesterLive.sweep_cleanup/3`, not as a catalog key, so the catalog's
+  pre-split parity fixture is untouched.
+  """
+  @spec created_webhook_cleanup(map() | nil) :: [map()]
+  def created_webhook_cleanup(%{"webhook" => %{"id" => id, "dataset" => ds}})
+      when is_binary(id) and id != "" and is_binary(ds) and ds != "" do
+    [%{method: :delete, path: "/v1/webhooks/#{URI.encode(ds)}/#{URI.encode(id)}", auth: :admin}]
+  end
+
+  def created_webhook_cleanup(_), do: []
+
   defp webhooks_delete(dataset) do
     %{
       id: "webhooks-delete",
