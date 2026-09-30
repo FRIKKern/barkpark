@@ -144,6 +144,18 @@ func runMigrate(out *writer, g globals, args []string) int {
 	from := endpointFrom(cfg, fromEntry, fallbackTok)
 	to := endpointFrom(cfg, toEntry, fallbackTok)
 
+	// A migration whose source and target are the SAME scope copies every
+	// document onto itself (stranger walk, 2026-09-30: `bp migrate local local`
+	// planned "total: 33" and would, with --yes, createOrReplace all 33 back into
+	// the dataset they came from — one new revision each, nothing moved). There
+	// is one --dataset for both ends, so same server + workspace + project IS the
+	// same scope. Refuse before any read.
+	if sameMigrateScope(from, to) {
+		return migrateError(out, machineOut, "same_scope",
+			fmt.Sprintf("source and target are the same scope (%s, workspace %s, project %s, dataset %s) — nothing to migrate; name a different <to> server", from.url, from.workspace, from.project, dataset),
+			exitUsage)
+	}
+
 	// 1. Determine the set of types to migrate.
 	var types []string
 	if opt.typ != "" {
@@ -213,6 +225,13 @@ func endpointFrom(cfg *Config, e ServerEntry, fallbackToken string) migrateEndpo
 		workspace: firstNonEmptyStr(e.Workspace, "default"),
 		project:   firstNonEmptyStr(e.Project, "default"),
 	}
+}
+
+// sameMigrateScope reports whether two endpoints address the same server
+// scope: URL (case-insensitive, trailing slash already trimmed at populate),
+// workspace and project. The dataset is shared by construction.
+func sameMigrateScope(a, b migrateEndpoint) bool {
+	return strings.EqualFold(a.url, b.url) && a.workspace == b.workspace && a.project == b.project
 }
 
 // migrateFallbackToken resolves the shared fallback token used when a saved
