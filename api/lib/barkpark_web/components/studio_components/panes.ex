@@ -148,6 +148,8 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   # document count). nil or 0 → no count chip. Callers pass the already-filtered
   # count (only :doc items) so :divider/:header/:plugin_link never inflate it.
   attr :count, :integer, default: nil
+  # The list behind `count` was truncated — the count is a floor ("100+").
+  attr :count_more, :boolean, default: false
   # Optional extra class appended to the (non-collapsed) column wrapper —
   # used by callers to mark structurally-significant panes (e.g.
   # `bp-doc-list` on the document-list pane so Beta focus mode can hide it
@@ -241,7 +243,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         <div class="pane-header">
           <span class="pane-header-titlewrap">
             <span class="pane-header-title"><%= @title %></span>
-            <span :if={@count && @count > 0} class="pane-header-count"><%= @count %></span>
+            <span :if={@count && @count > 0} class="pane-header-count"><%= @count %><%= if @count_more, do: "+" %></span>
           </span>
           <%= if @header_actions != [] do %>
             <div class="pane-header-actions"><%= render_slot(@header_actions) %></div>
