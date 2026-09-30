@@ -55,19 +55,43 @@ defmodule Barkpark.Content.Edges do
     # truncated by the default 100-row cap. A caller needing EVERY referencer
     # past 1000 (the unpublish/delete disconnect) pages the scan —
     # `disconnect_references/3` drains it batch-by-batch until empty.
+    #
+    # BOTH value shapes are scanned (task-37ee0fed8f9b0de1): a bare id matches
+    # `content->>field`, a `{"_ref": id}` object matches `content->field->>_ref`.
+    # Which shape is canonical is an open owner ruling; until then every reader
+    # of a reference sees both, so the guard and the disconnect miss neither.
     Enum.flat_map(ref_fields, fn {type_name, field_name} ->
-      ref_opts =
-        opts
-        |> Keyword.put(:perspective, :raw)
-        |> Keyword.put(:filter_map, %{field_name => pub_id})
-        |> Keyword.put_new(:limit, 1000)
+      [field_name, field_name <> "._ref"]
+      |> Enum.flat_map(fn path ->
+        ref_opts =
+          opts
+          |> Keyword.put(:perspective, :raw)
+          |> Keyword.put(:filter_map, %{path => pub_id})
+          |> Keyword.put_new(:limit, 1000)
 
-      Content.list_documents(type_name, dataset, ref_opts)
+        Content.list_documents(type_name, dataset, ref_opts)
+      end)
+      |> Enum.uniq_by(& &1.doc_id)
       |> Enum.map(fn doc ->
         %{doc_id: doc.doc_id, type: type_name, title: doc.title, field: field_name}
       end)
     end)
   end
+
+  @doc """
+  The target id a stored reference VALUE points at, or `nil`.
+
+  A reference is stored either as a bare id string (what Studio writes) or as a
+  Sanity-style `%{"_ref" => id}` object (what the SDK, the starters and
+  `?expand` use). Which shape is canonical is an open owner ruling
+  (task-37ee0fed8f9b0de1); this reader accepts both so edge extraction, the
+  referencer scan and the disconnect strip agree with `?expand`. It never
+  changes what is stored.
+  """
+  @spec reference_target(term()) :: String.t() | nil
+  def reference_target(value) when is_binary(value) and value != "", do: value
+  def reference_target(%{"_ref" => ref}) when is_binary(ref) and ref != "", do: ref
+  def reference_target(_), do: nil
 
   @doc """
   Remove all references to a document ID from other documents.
@@ -205,15 +229,11 @@ defmodule Barkpark.Content.Edges do
       value = Map.get(acc, name)
 
       cond do
-        field["type"] == "reference" and is_binary(value) and
-            DraftId.published_id(value) == target_pub_id ->
+        field["type"] == "reference" and targets?(value, target_pub_id) ->
           Map.delete(acc, name)
 
         get_in(field, ["of", "type"]) == "reference" and is_list(value) ->
-          kept =
-            Enum.reject(value, fn v ->
-              is_binary(v) and DraftId.published_id(v) == target_pub_id
-            end)
+          kept = Enum.reject(value, &targets?(&1, target_pub_id))
 
           if kept == value, do: acc, else: Map.put(acc, name, kept)
 
@@ -221,6 +241,14 @@ defmodule Barkpark.Content.Edges do
           acc
       end
     end)
+  end
+
+  # Either stored shape (bare id or `{"_ref": id}`) pointing at the target.
+  defp targets?(value, target_pub_id) do
+    case reference_target(value) do
+      nil -> false
+      ref -> DraftId.published_id(ref) == target_pub_id
+    end
   end
 
   # ── Content graph edges (reference-field extraction + CRUD) ─────────────────
@@ -420,17 +448,14 @@ defmodule Barkpark.Content.Edges do
     field_name = field["name"]
     ref_type = dangling_ref_type(field)
 
-    case Map.get(content, field_name) do
-      value when is_binary(value) and value != "" ->
-        [{value, field_name, ref_type}]
-
-      _ ->
-        []
+    case reference_target(Map.get(content, field_name)) do
+      nil -> []
+      target -> [{target, field_name, ref_type}]
     end
   end
 
-  # arrayOf-of-reference field → one entry per non-blank element (bare-id
-  # string array, the task.attachments shape).
+  # arrayOf-of-reference field → one entry per non-blank element, bare id (the
+  # task.attachments shape) or `{"_ref": id}` object alike.
   defp extract_field_edges(
          %{"type" => "arrayOf", "of" => %{"type" => "reference"} = of} = field,
          content
@@ -445,7 +470,7 @@ defmodule Barkpark.Content.Edges do
     content
     |> Map.get(field_name)
     |> List.wrap()
-    |> Enum.filter(fn v -> is_binary(v) and v != "" end)
+    |> Enum.flat_map(fn v -> List.wrap(reference_target(v)) end)
     |> Enum.map(fn value -> {value, field_name, ref_type} end)
   end
 
