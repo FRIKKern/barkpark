@@ -48,6 +48,16 @@ defmodule Barkpark.Content.DeskSearchScopeTest do
     {:ok, _} = Content.publish_document(id, type, @dataset, scope)
   end
 
+  defp draft!(type, id, title, scope) do
+    {:ok, _} =
+      Content.upsert_document(
+        type,
+        %{"doc_id" => id, "title" => title, "status" => "draft"},
+        @dataset,
+        Keyword.put(scope, :source, :api)
+      )
+  end
+
   defp titles(hits), do: hits |> Enum.map(& &1.title) |> Enum.sort()
 
   # An authenticated member: `bypasses_visibility_gate?/1` is true, so private
@@ -139,6 +149,33 @@ defmodule Barkpark.Content.DeskSearchScopeTest do
 
     assert titles(Content.search_documents_across_types("Nordic Crime A", @dataset, a)) ==
              ["Nordic Crime A"]
+  end
+
+  # Stranger walk, 2026-09-30: a never-published document is a draft row only,
+  # and the search over published rows could not find it — every new document
+  # was unsearchable until its first publish.
+  test "a never-published document is found", %{scope_a: a} do
+    a = Keyword.put(a, :caller_context, member_ctx())
+    draft!("publication", "drafts.a-fresh", "Zulukladd draft only", a)
+
+    assert [hit] = Content.search_documents_across_types("zulukladd", @dataset, a)
+    assert hit.title == "Zulukladd draft only"
+    assert Content.published_id(hit.doc_id) == "a-fresh"
+  end
+
+  # A word that exists only in the title being edited finds the document, once,
+  # and the hit carries the draft's title — the one the editor opens.
+  test "a word only in the draft title finds the document once, with the draft title",
+       %{scope_a: a} do
+    a = Keyword.put(a, :caller_context, member_ctx())
+    draft!("publication", "drafts.a-nord", "Nordic Crime A (utkast)", a)
+
+    assert [hit] = Content.search_documents_across_types("utkast", @dataset, a)
+    assert hit.title == "Nordic Crime A (utkast)"
+
+    assert [both] = Content.search_documents_across_types("Nordic Crime A", @dataset, a)
+    assert both.title == "Nordic Crime A (utkast)"
+    assert Content.published_id(both.doc_id) == "a-nord"
   end
 
   test "the limit is honoured", %{scope_a: a} do

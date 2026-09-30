@@ -51,7 +51,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.DeskSearch do
       )
       |> Enum.map(fn d ->
         %{
-          id: d.doc_id,
+          # A draft-only document's row is `drafts.<id>`; the Studio path
+          # addresses every document by its published id.
+          id: Content.published_id(d.doc_id),
           type: d.type,
           title: ((is_binary(d.title) and d.title != "") && d.title) || d.doc_id,
           status: d.status || ""
