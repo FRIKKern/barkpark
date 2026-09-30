@@ -950,6 +950,17 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
           "widening it by one context would delete other people's evidence.",
       anchor: ~r/Accounts\.reap_oauth_exchange_codes\(\)/
     },
+    "barkpark_cloud/accounts.ex|reclaim_if_unproven!" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "the pre-account-takeover reclaim (task-b3eb09e83fbb7cbc): an IdP-verified sign-in " <>
+          "deletes the provider identities an UNCONFIRMED squatter linked under another " <>
+          "email. No team resource is removed and there is no team actor — the rows are the " <>
+          "squatter's credentials on an account that never proved its address; the same " <>
+          "transaction's caller writes oauth.linked for the link, and the reclaim logs the user id.",
+      anchor: ~r/defp reclaim_if_unproven!\(/
+    },
     "barkpark_cloud/accounts.ex|reap_lifecycle_tokens" => %{
       kind: :allowlisted,
       count: 1,
