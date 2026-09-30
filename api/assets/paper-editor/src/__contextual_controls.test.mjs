@@ -8,6 +8,11 @@ assert.match(shell, /\.bp-paper-contextual-controls:not\(\[open\]\)\s*\{\s*width
   "a resting Configure toggle is only as wide as its summary, so it never covers the block's first row (390px tap census)");
 assert.match(shell, /\.bp-paper-contextual-controls\s*\{[^}]*width:\s*min\(32rem, calc\(100vw - 2rem\)\)/s,
   "an OPEN panel keeps its full width");
+{
+  const above = shell.match(/([^{}]*)\{\s*top:\s*auto;\s*bottom:\s*100%;\s*\}/g) || [];
+  assert.ok(above.some((rule) => /\.bp-paper-contextual-controls--columns:not\(\[open\]\):not\(\.bp-paper-contextual-controls--columns-empty\)/.test(rule)),
+    "a resting Configure columns toggle sits above the block: at 390px the columns stack and the first child's top-right text lies under it (390px tap census)");
+}
 assert.match(shell, /\.bp-paper-figure-editor-frame\s*\{[^}]*display:\s*flow-root/s,
   "Figure contains the reader image's trailing margin even when caption is empty");
 assert.match(mediaStyles, /\.bp-ab-grid\s*\{[^}]*display:\s*grid/s,
