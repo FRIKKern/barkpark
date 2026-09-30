@@ -497,17 +497,44 @@ defmodule Barkpark.Content.Broadcast do
 
     webhook_queue
     |> Enum.reverse()
-    |> Enum.each(fn {dataset, action, type, doc_id, document, event_id, opts} ->
-      Barkpark.Webhooks.Dispatcher.dispatch_async(
-        dataset,
-        action,
-        type,
-        doc_id,
-        document,
-        event_id,
-        opts
+    |> Enum.each(&flush_one_webhook/1)
+  end
+
+  # ONE queued webhook, isolated (r2c webhook audit). `Dispatcher.dispatch_async/7`
+  # does real work IN THIS PROCESS before it spawns — payload encoding and the
+  # `active_webhooks_for` selection query — so a raise there (a pool timeout,
+  # an unencodable document) used to abort the `Enum.each`: every LATER queued
+  # webhook of the same committed transaction was silently dropped, and the raise
+  # surfaced as a 500 on a write that had already committed. Each item now
+  # fails alone, loudly: logged at error with its event, and counted on
+  # `[:barkpark, :webhooks, :flush, :error]`.
+  defp flush_one_webhook({dataset, action, type, doc_id, document, event_id, opts}) do
+    Barkpark.Webhooks.Dispatcher.dispatch_async(
+      dataset,
+      action,
+      type,
+      doc_id,
+      document,
+      event_id,
+      opts
+    )
+  rescue
+    e ->
+      Logger.error(
+        "[webhooks] deferred dispatch FAILED for event_id=#{inspect(event_id)} " <>
+          "#{dataset}/#{type}/#{doc_id} (#{action}): #{Exception.message(e)} — " <>
+          "the remaining queued webhooks still flush"
       )
-    end)
+
+      :telemetry.execute([:barkpark, :webhooks, :flush, :error], %{count: 1}, %{
+        dataset: dataset,
+        type: type,
+        doc_id: doc_id,
+        event_id: event_id,
+        reason: e.__struct__
+      })
+
+      :error
   end
 
   @doc """
