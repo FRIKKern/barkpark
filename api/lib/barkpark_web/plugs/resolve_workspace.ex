@@ -84,8 +84,20 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
         |> refuse_if_archived()
 
       _ ->
-        halt_envelope(conn, {:error, :not_found})
+        halt_envelope(conn, unknown_workspace(slug))
     end
+  end
+
+  # task-69cd78907b82abf6: an unknown slug used to answer the bare
+  # `{:error, :not_found}`, whose envelope reads "document not found" with a
+  # hint about document ids. No document was named. The 404 now names the
+  # WORKSPACE slug the caller sent. That discloses nothing: it echoes the
+  # caller's own input, and an existing workspace the caller may not enter
+  # still answers 403, never this 404.
+  defp unknown_workspace(slug) do
+    {:error,
+     {:not_found, "workspace #{inspect(slug)} not found",
+      hint: "Check the workspace slug in the URL (/w/<workspace>/…) or the bp -w flag."}}
   end
 
   # ARCHIVED IS REFUSED AFTER ADMISSION, NEVER BEFORE (task-55474a106554e65a).
