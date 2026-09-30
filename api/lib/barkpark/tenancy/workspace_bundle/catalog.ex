@@ -197,7 +197,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     cycle_release_gate_migration_state_20260719020100 idempotency_keys login_tickets
     oban_jobs oban_peers oidc_connections org_domains organizations
     paper_events_dataset_rescope_backup plugin_settings plugin_settings_audit
-    pulse_counters pulse_events pulse_meters saml_connections schema_migrations
+    pulse_counters pulse_events pulse_meters saml_assertion_replays saml_connections schema_migrations
     scim_groups scim_tokens social_identities
     social_providers status_incidents user_email_tokens user_sessions users
     webauthn_credentials

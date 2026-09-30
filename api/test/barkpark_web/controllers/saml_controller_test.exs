@@ -302,6 +302,64 @@ defmodule BarkparkWeb.SamlControllerTest do
     assert "invalid_base64" in reasons
   end
 
+  # task-223e04ce556b1950: a bearer assertion is single-use (SAML Profiles
+  # §4.1.4.5). esaml's validate_assertion/2 checked nothing of the kind.
+  describe "replay" do
+    test "the SAME signed response POSTed twice logs in once", %{conn: conn} do
+      i = idp()
+      setup_conn(i.cert_pem)
+      saml_response = signed_response("replay@samlctrl.com", i.key, i.cert_der)
+
+      first = post(conn, "/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => saml_response})
+      assert first.status == 201
+
+      second =
+        scoped_conn() |> post("/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => saml_response})
+
+      assert second.status == 401
+      refute json_response(second, 401)["token"]
+    end
+
+    test "re-wrapping the same signed assertion in a new envelope is still a replay",
+         %{conn: conn} do
+      i = idp()
+      setup_conn(i.cert_pem)
+      saml_response = signed_response("rewrap@samlctrl.com", i.key, i.cert_der)
+
+      assert post(conn, "/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => saml_response}).status ==
+               201
+
+      # The envelope is unsigned: give it a new ID so its digest differs.
+      rewrapped =
+        saml_response
+        |> Base.decode64!()
+        |> String.replace(
+          ~s(<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">),
+          ~s(<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="_wrap2">)
+        )
+        |> Base.encode64()
+
+      refute rewrapped == saml_response
+
+      again = scoped_conn() |> post("/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => rewrapped})
+      assert again.status == 401
+    end
+
+    test "CONTROL: a different assertion from the same IdP still logs in", %{conn: conn} do
+      i = idp()
+      setup_conn(i.cert_pem)
+
+      a = signed_response("first@samlctrl.com", i.key, i.cert_der)
+      b = signed_response("second@samlctrl.com", i.key, i.cert_der)
+
+      assert post(conn, "/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => a}).status == 201
+
+      assert scoped_conn()
+             |> post("/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => b})
+             |> Map.get(:status) == 201
+    end
+  end
+
   test "POST ACS with a bad base64 body is 400", %{conn: conn} do
     i = idp()
     setup_conn(i.cert_pem)
