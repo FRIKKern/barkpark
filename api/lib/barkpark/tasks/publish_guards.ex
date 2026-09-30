@@ -213,13 +213,13 @@ defmodule Barkpark.Tasks.PublishGuards do
   #   * `lifecycle_status`   — claim/close/fence/move/stamp/ttl_sweeper
   #                            (already fenced by `Transitions.legal?/2` above)
   #   * `acceptance_criteria` — stamp (already fenced by `criteria_fence/2`)
-  #   * `close_reason`       — close.ex (`apply_close_update/8`)
+  #   * `close_reason`       — close.ex (`apply_close_update/11`)
   #   * `close_override`     — close.ex (`merge_override_record/2`)
   #   * `disposition`        — close.ex (`advance_disposition_on_close/2`),
   #                            stage.ex (@disposition_key)
   #   * `reopen_trigger`     — stage.ex (@reopen_trigger_key)
-  #   * `engagement`         — stage.ex:717
-  #   * `landed`             — internal.ex:493
+  #   * `engagement`         — stage.ex (`apply_engagement/6`)
+  #   * `landed`             — internal.ex (`merge_landed/2`)
   #
   # The first three already had a gate. THE LAST SIX HAD NONE: a draft minted
   # DURING or AFTER a close carries the claim byte-identical, so `stale_claim?/2`
