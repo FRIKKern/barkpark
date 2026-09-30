@@ -767,15 +767,15 @@
 /* ── section declaration panel (pe-bl-declaration-panel). variant="declaration"
    frames a closing section as a signed document: a double hairline ink frame, generous CSS
    padding (never spacer paragraphs), the section's own .bp-hr band hidden, and
-   a short signature rule above its LAST block — the signature slot is simply
-   the section's last paragraph, so every reader keeps the words (the TUI and
+   a short signature rule above its last block when that block is a paragraph —
+   the signature slot is simply the section's last paragraph, so every reader keeps the words (the TUI and
    email degrade to a plain section). Mirror: paper-editor/src/styles.css and
    the shell stylesheet. */
 .bp-paper-editor-body .bp-section--declaration { border: var(--bp-rule-hairline) solid var(--paper-ink); outline: var(--bp-rule-hairline) solid var(--paper-ink); outline-offset: 4px; padding: 2rem 2.25rem 1.75rem; margin: 2.5rem 4px; }
 .bp-paper-editor-body .bp-section--declaration > .bp-hr { display: none; }
 .bp-paper-editor-body .bp-section--declaration > :first-child, .bp-paper-editor-body .bp-section--declaration > .bp-hr:first-child + * { margin-top: 0; }
-.bp-paper-editor-body .bp-section--declaration > :not(.bp-hr):has(+ .bp-hr:last-child),
-.bp-paper-editor-body .bp-section--declaration > :not(.bp-hr):last-child { margin-top: 2.25rem; padding-top: 0.5rem; border-top: var(--bp-rule-hairline) solid var(--paper-ink); width: min(100%, 20rem); }
+.bp-paper-editor-body .bp-section--declaration > p:has(+ .bp-hr:last-child),
+.bp-paper-editor-body .bp-section--declaration > p:last-child { margin-top: 2.25rem; padding-top: 0.5rem; border-top: var(--bp-rule-hairline) solid var(--paper-ink); width: min(100%, 20rem); }
 .bp-paper-editor-body code {
   font-family: var(--paper-font-mono); font-size: var(--bp-code-size);
   background: var(--paper-bg-deep); padding: var(--bp-code-pad); border-radius: var(--bp-code-radius);
