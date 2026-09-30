@@ -229,6 +229,12 @@ defmodule BarkparkWeb.WebhookController do
   # it (cross-tenant document-snapshot exfiltration).
   # A NULL-project webhook is workspace-wide (see `Webhooks.scope/2`), so it may
   # replay any event of its own workspace.
+  # task-ae096a1b6ef7f5a6: listener presence is per-machine heartbeat truth and
+  # never fans out to a webhook (PDF-D18). Automatic dispatch, the SSE live leg
+  # and the SSE replay leg all drop `type == "listener"`; the replay door must
+  # agree, or an admin can hand-deliver what no automatic path would send.
+  defp event_in_scope?(%MutationEvent{type: "listener"}, _wh), do: false
+
   defp event_in_scope?(ev, wh) do
     ev.dataset == wh.dataset and
       (is_nil(ev.workspace_id) or
