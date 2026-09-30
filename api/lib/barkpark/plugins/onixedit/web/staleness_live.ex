@@ -48,6 +48,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
   alias Barkpark.Content.Broadcast
   alias Barkpark.Content.Codelists.Codelist
   alias Barkpark.Content.Document
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Plugins.OnixEdit.Codelists.StalenessChecker
   alias Barkpark.Repo
 
@@ -111,21 +112,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
   def handle_event("acknowledge", %{"doc_id" => doc_id}, socket) do
     with {:ok, doc} <- fetch_doc(doc_id),
          updated_content <- Map.put(doc.content || %{}, "staleness_acknowledged", true),
-         {:ok, updated_doc} <-
-           doc
-           |> Document.changeset(%{"content" => updated_content})
-           |> Repo.update() do
-      # NAMED FAILURE MODE (cross-context write bypassing the Content event
-      # path): the raw Repo.update above is state-preserving (charter D170 keeps
-      # it — Content.upsert_document would force a draft twin and coerce the
-      # published book row published→draft), but on its own it is INVISIBLE to
-      # the SSE /v1/data/listen endpoint, webhooks, and cache revalidation.
-      # Rejoin the canonical event spine AFTER commit: (i) a self-written
-      # mutation_events row — the listen controller drops frames whose msg has no
-      # :event_id, so the broadcast MUST reference a real row — and (ii) the
-      # canonical fan-out on documents:<dataset> + per-doc + workspace topics.
-      emit_canonical_mutation(updated_doc, doc.rev)
-
+         {:ok, updated_doc} <- acknowledge_write(doc, updated_content) do
       rows =
         Enum.map(socket.assigns.rows, fn r ->
           if r.doc_id == doc_id do
@@ -261,6 +248,32 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
   end
 
   # ── canonical event spine ────────────────────────────────────────────
+
+  # NAMED FAILURE MODE (cross-context write bypassing the Content event path):
+  # the raw Repo.update is state-preserving (charter D170 keeps it —
+  # Content.upsert_document would force a draft twin and coerce the published
+  # book row published→draft), but on its own it is INVISIBLE to the SSE
+  # /v1/data/listen endpoint, webhooks, and cache revalidation, so it rejoins
+  # the canonical event spine via emit_canonical_mutation/2.
+  #
+  # task-ff162c914cd0653c: the update and its event are ONE write under
+  # admission, as on the lifecycle paths (#20671). The update used to commit on
+  # its own (and outside the write-admission door), so a save_event fault or a
+  # hold left the book acknowledged with no event, no SSE frame and no webhook.
+  # `write_atomically/1` defers the fan-out until commit.
+  defp acknowledge_write(%Document{} = doc, updated_content) do
+    Door.admit!(fn ->
+      Broadcast.write_atomically(fn ->
+        with {:ok, updated_doc} <-
+               doc
+               |> Document.changeset(%{"content" => updated_content})
+               |> Repo.update() do
+          emit_canonical_mutation(updated_doc, doc.rev)
+          {:ok, updated_doc}
+        end
+      end)
+    end)
+  end
 
   # Write the mutation_events row + fire the canonical broadcast for a raw
   # cross-context write, so bypass-writers rejoin the same seam every
