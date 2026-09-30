@@ -234,7 +234,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # external Pd JSON, so an open `"class"` pass-through would let any document
   # claim arbitrary paper-surface classes (class injection). Compose stamps
   # these as FIXED literals (compose_section_stack); anything else stays inert.
-  @box_class_whitelist ~w(bp-section--framed bp-section--wide)
+  @box_class_whitelist ~w(bp-section--framed bp-section--wide bp-section--declaration)
 
   defp box(n, width, pal) do
     inner = render_children(Map.get(n, "children", []), width, pal)
