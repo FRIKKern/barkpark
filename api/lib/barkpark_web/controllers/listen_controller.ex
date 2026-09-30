@@ -5,8 +5,29 @@ defmodule BarkparkWeb.ListenController do
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Envelope, EventLog}
+  alias BarkparkWeb.{ErrorResponse, ListenFilter, ReadPerspective}
 
   def listen(conn, %{"dataset" => dataset} = params) do
+    # `?types=`, `?perspective=` and `filter[…]` narrow the stream server-side
+    # (task-684369333a0f0deb). A value the stream cannot honour is refused
+    # HERE, before any subscription or chunk, as a plain 400.
+    case ListenFilter.parse(params) do
+      {:ok, lf} ->
+        stream(conn, dataset, params, lf)
+
+      {:error, {:perspective, value}} ->
+        ReadPerspective.refuse(conn, value, ListenFilter.perspectives(),
+          message:
+            "unsupported perspective #{inspect(value)} for listen — supported values are " <>
+              "published, drafts and raw; omit ?perspective for every event"
+        )
+
+      {:error, {:filter, message, details}} ->
+        ErrorResponse.emit_custom(conn, 400, "malformed", message, details)
+    end
+  end
+
+  defp stream(conn, dataset, params, lf) do
     # Subscriber backpressure — HARD backstop (see the backpressure note above
     # listen_loop/5). Bound THIS connection process: message_queue_data is
     # on_heap, so the queued {:document_changed, …} messages count toward the
@@ -110,17 +131,17 @@ defmodule BarkparkWeb.ListenController do
           # caller is denied the row — by the owner-row ACL, or by her grant
           # ladder (task-c9c962c3451fd831) — so skip the chunk entirely and
           # never replay another user's or another grant's row.
-          case redacted_result(ev, dataset, caller_context, scope) do
-            :drop ->
-              c
+          with true <- ListenFilter.pass_meta?(lf, ev),
+               result when result != :drop <- redacted_result(ev, dataset, caller_context, scope),
+               true <- ListenFilter.pass_result?(lf, result) do
+            ev = Map.put(ev, :document, result)
 
-            result ->
-              ev = Map.put(ev, :document, result)
-
-              case chunk(c, format_event(ev, dataset)) do
-                {:ok, c2} -> c2
-                _ -> c
-              end
+            case chunk(c, format_event(ev, dataset)) do
+              {:ok, c2} -> c2
+              _ -> c
+            end
+          else
+            _ -> c
           end
         end)
       else
@@ -128,7 +149,7 @@ defmodule BarkparkWeb.ListenController do
       end
 
     try do
-      listen_loop(conn, dataset, workspace_id, caller_context, scope)
+      listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
     after
       send(forwarder, :stop)
     end
@@ -220,24 +241,24 @@ defmodule BarkparkWeb.ListenController do
   #   2. This message_queue_len check emits a final `event: overloaded` and
   #      closes as soon as chunk/2 returns. max_heap_size remains a last-resort
   #      process-local guard for unrelated heap growth.
-  defp listen_loop(conn, dataset, workspace_id, caller_context, scope) do
+  defp listen_loop(conn, dataset, workspace_id, caller_context, scope, lf) do
     case backpressure_step(conn, sse_mailbox_limit()) do
       {:shed, conn} ->
         # Backlog over the limit: shed cleanly rather than grow the heap.
         conn
 
       {:cont, conn} ->
-        listen_recv(conn, dataset, workspace_id, caller_context, scope)
+        listen_recv(conn, dataset, workspace_id, caller_context, scope, lf)
     end
   end
 
-  defp listen_recv(conn, dataset, workspace_id, caller_context, scope) do
+  defp listen_recv(conn, dataset, workspace_id, caller_context, scope, lf) do
     receive do
       :sse_overloaded ->
         shed(conn)
 
       {:document_changed, %{event_id: _eid} = msg} ->
-        if forward_event?(msg, workspace_id) do
+        if forward_event?(msg, workspace_id) and ListenFilter.pass_meta?(lf, msg) do
           # Re-render the live document under THIS subscriber instead of
           # forwarding the broadcast's pre-rendered (unredacted) envelope, so a
           # `private` / `owner_only` field never reaches a non-authorized caller.
@@ -253,26 +274,31 @@ defmodule BarkparkWeb.ListenController do
           # re-derives visibility through `redacted_result/4` below.
           case live_result(msg, dataset, caller_context, scope) do
             :drop ->
-              listen_loop(conn, dataset, workspace_id, caller_context, scope)
+              listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
 
             result ->
-              case chunk(conn, format_event(live_event(msg, result), dataset)) do
-                {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope)
-                _ -> conn
+              if ListenFilter.pass_result?(lf, result) do
+                case chunk(conn, format_event(live_event(msg, result), dataset)) do
+                  {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope, lf)
+                  _ -> conn
+                end
+              else
+                listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
               end
           end
         else
-          # Event belongs to a different workspace — drop it, keep listening.
-          listen_loop(conn, dataset, workspace_id, caller_context, scope)
+          # Event belongs to a different workspace, or its type/perspective is
+          # outside this subscriber's `?types=` / `?perspective=` — drop it.
+          listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
         end
 
       # Ignore legacy messages without event_id (defensive)
       {:document_changed, _} ->
-        listen_loop(conn, dataset, workspace_id, caller_context, scope)
+        listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
     after
       30_000 ->
         case chunk(conn, ": keepalive\n\n") do
-          {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope)
+          {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope, lf)
           _ -> conn
         end
     end
