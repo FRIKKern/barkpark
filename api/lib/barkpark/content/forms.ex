@@ -243,7 +243,7 @@ defmodule Barkpark.Content.Forms do
 
   defp coerce_field_value(%{"type" => "composite", "fields" => subs}, %{} = val)
        when is_list(subs) do
-    Enum.reduce(subs, val, fn sub, acc ->
+    Enum.reduce(subs, drop_unused(val), fn sub, acc ->
       name = Map.get(sub, "name")
 
       case is_binary(name) and Map.fetch(acc, name) do
@@ -259,6 +259,7 @@ defmodule Barkpark.Content.Forms do
   # is a non-negative integer string qualifies; anything else is returned
   # untouched so a genuinely map-shaped value is never guessed into a list.
   defp indexed_map_to_list(%{} = map) do
+    map = drop_unused(map)
     keys = Map.keys(map)
 
     if keys != [] and Enum.all?(keys, &index_key?/1) do
@@ -274,6 +275,22 @@ defmodule Barkpark.Content.Forms do
 
   defp index_key?(k) when is_binary(k), do: k != "" and String.match?(k, ~r/^\d+$/)
   defp index_key?(_), do: false
+
+  # LiveView's client marks every input the author has not interacted with by
+  # posting a SIBLING key with the `_unused_` prefix on its last segment — an
+  # untouched `doc[keywords][0]` also posts `doc[keywords][_unused_0]`
+  # (Phoenix.Component.used_input?/1 reads it). It is form bookkeeping, never a
+  # value. Left in, it made the row map `%{"0" => "", "_unused_0" => ""}` fail
+  # the all-index-keys test above, so an arrayOf field with one untouched row
+  # was STORED as that map the moment the author typed in ANY other field —
+  # the list was gone on reload and publish refused "expected a list"
+  # (task-b9f103b5b2666124, stranger walk, 2026-09-30). Dropped before the
+  # shape decision, at every nested level this coercion walks.
+  defp drop_unused(%{} = map) do
+    map
+    |> Enum.reject(fn {k, _} -> is_binary(k) and String.starts_with?(k, "_unused_") end)
+    |> Map.new()
+  end
 
   @doc """
   Coerce the Classic form's posted params into STORAGE shape by the schema —
