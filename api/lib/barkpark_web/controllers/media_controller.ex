@@ -224,7 +224,7 @@ defmodule BarkparkWeb.MediaController do
     with {:ok, file} <- Media.get_file(id, opts),
          {:ok, file} <- confine_one(opts, file),
          {:ok, file} <- confine_share_dataset(conn, file),
-         doc <- Media.asset_doc_for_file(file, file.dataset),
+         doc <- Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)),
          true <- Access.allowed?(conn, file, doc, :view) do
       json(conn, render_file(file, conn))
     else
@@ -251,7 +251,7 @@ defmodule BarkparkWeb.MediaController do
     with {:ok, file} <- Media.get_file_by_path(relative_path, opts),
          {:ok, file} <- confine_one(opts, file),
          {:ok, file} <- confine_share_dataset(conn, file),
-         doc <- Media.asset_doc_for_file(file, file.dataset),
+         doc <- Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)),
          true <- Access.allowed?(conn, file, doc, :original) do
       # Serve the path off the RESOLVED record, not the raw URL segment. The
       # lookup already matched on `path == relative_path`, but deriving the blob
@@ -362,7 +362,7 @@ defmodule BarkparkWeb.MediaController do
     with {:ok, file} <- Media.get_file(id, opts),
          {:ok, file} <- confine_one(opts, file),
          {:ok, file} <- confine_share_dataset(conn, file),
-         doc <- Media.asset_doc_for_file(file, file.dataset),
+         doc <- Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)),
          true <- Access.allowed?(conn, file, doc, :preview),
          watermark = Access.watermark_profile(doc),
          {:ok, relative} <- Renditions.ensure(file, preset, watermark: watermark) do

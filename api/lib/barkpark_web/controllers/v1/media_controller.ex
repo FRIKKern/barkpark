@@ -503,12 +503,12 @@ defmodule BarkparkWeb.V1.MediaController do
   defp apply_upload_metadata(file, params, dataset) do
     case upload_metadata(params) do
       metadata when map_size(metadata) == 0 ->
-        Media.asset_doc_for_file(file, dataset)
+        asset_doc(file, dataset)
 
       metadata ->
         case Media.patch_asset_metadata(file, metadata, dataset) do
           {:ok, doc} -> doc
-          _ -> Media.asset_doc_for_file(file, dataset)
+          _ -> asset_doc(file, dataset)
         end
     end
   end
@@ -542,7 +542,7 @@ defmodule BarkparkWeb.V1.MediaController do
     with :ok <- require_write(conn),
          {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
-         doc = Media.asset_doc_for_file(file, dataset),
+         doc = asset_doc(file, dataset),
          :ok <- ensure_edit(conn, file, doc),
          {:ok, doc} <- Media.patch_asset_metadata(file, metadata, dataset) do
       json(conn, %{
