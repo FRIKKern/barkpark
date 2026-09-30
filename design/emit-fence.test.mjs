@@ -23,10 +23,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   mkdtempSync, mkdirSync, cpSync, copyFileSync, readFileSync, writeFileSync, realpathSync,
-  rmSync,
+  rmSync, readdirSync, statSync, utimesSync, existsSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -74,16 +74,78 @@ function makeTree() {
 // filled the machine's boot disk. The exit hook (not per-test teardown)
 // keeps the trees inspectable while the run is alive and costs one rm each.
 const tempRoots = [];
-process.on("exit", () => {
-  for (const root of tempRoots) {
+function removeTempRoots() {
+  for (const root of tempRoots.splice(0)) {
     try {
       rmSync(root, { recursive: true, force: true });
     } catch {
-      // exit handler: nothing sane to do, and the leak signature in noo-noo
-      // sweeps stragglers.
+      // exit handler: nothing sane to do, and the stale sweep below takes
+      // any straggler on the next run.
     }
   }
-});
+}
+process.on("exit", removeTempRoots);
+
+// A KILLED RUN NEVER REACHES `exit` (task-c5d4ac654b076ba6). A builder that
+// is cancelled, times out or dies on a spend limit gets SIGTERM/SIGINT/SIGHUP,
+// and node's default action for those terminates without running `exit`
+// listeners: 135 emit-fence-* dirs appeared within hours of the exit hook
+// landing. Handling the signal turns it into process.exit(), which DOES run
+// the exit hook above, with the conventional 128+n status so the caller still
+// sees a killed run.
+for (const [signal, n] of [["SIGINT", 2], ["SIGTERM", 15], ["SIGHUP", 1]]) {
+  process.on(signal, () => process.exit(128 + n));
+}
+
+// SIGKILL cannot be caught by anything, so every run also sweeps emit-fence-*
+// dirs that a PREVIOUS run left behind. The age bar keeps a concurrent run's
+// live trees safe: a whole run takes seconds, so a tree older than this has no
+// owner left.
+const STALE_TREE_MS = 6 * 60 * 60 * 1000;
+function sweepStaleTrees(dir = tmpdir(), now = Date.now()) {
+  let swept = 0;
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  for (const name of names) {
+    if (!name.startsWith("emit-fence-")) continue;
+    const path = join(dir, name);
+    try {
+      if (now - statSync(path).mtimeMs > STALE_TREE_MS) {
+        rmSync(path, { recursive: true, force: true });
+        swept += 1;
+      }
+    } catch {
+      // raced with another sweeper, or not ours to stat: leave it
+    }
+  }
+  return swept;
+}
+
+// Child modes for the cleanup tests at the bottom of this file. Each one
+// returns before any test is registered, so a child never recurses.
+if (process.env.EMIT_FENCE_CHILD === "sweep") {
+  console.log(`swept ${sweepStaleTrees()}`);
+  process.exit(0);
+}
+if (process.env.EMIT_FENCE_CHILD === "hold") {
+  makeTreeForChild();
+  console.log("tree-made");
+  setInterval(() => {}, 1000);
+  // Top-level await: module evaluation stops here, so no test is registered.
+  await new Promise(() => {});
+}
+sweepStaleTrees();
+
+function makeTreeForChild() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "emit-fence-")));
+  tempRoots.push(root);
+  writeFileSync(join(root, "marker"), "held by a child the test will SIGTERM\n");
+  return root;
+}
 
 function emit(root, args) {
   const r = spawnSync(process.execPath, [join(root, "design", "emit.mjs"), ...args], {
@@ -470,4 +532,53 @@ test("(o4) a unit whose region is UNREADABLE keeps its slot and is NOT called an
   const w = emit(root, ["--write"]);
   assert.notEqual(w.code, 0, "--write must refuse while an artifact is missing its marker");
   assert.ok(manifestKeys(root).includes(brokenKey), `${brokenKey} was pruned by a REFUSED --write`);
+});
+
+// ── cleanup on a KILLED run (task-c5d4ac654b076ba6) ──────────────────────────
+// Each child runs THIS file in a child mode against a private TMPDIR, so the
+// assertions see only the child's own trees.
+const selfPath = fileURLToPath(import.meta.url);
+function privateTmp() {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "emit-fence-cleanup-probe-")));
+  tempRoots.push(dir);
+  return dir;
+}
+const fenceTrees = (dir) => readdirSync(dir).filter((n) => n.startsWith("emit-fence-"));
+
+test("a SIGTERMed run removes its temp trees (the exit hook alone never fires on a signal)", async () => {
+  const dir = privateTmp();
+  const child = spawn(process.execPath, [selfPath], {
+    env: { ...process.env, EMIT_FENCE_CHILD: "hold", TMPDIR: dir },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("child never made its tree")), 10_000);
+    child.stdout.on("data", (b) => {
+      if (String(b).includes("tree-made")) { clearTimeout(timer); resolve(); }
+    });
+  });
+  assert.equal(fenceTrees(dir).length, 1, "the child should hold exactly one tree before the signal");
+  const code = await new Promise((resolve) => {
+    child.on("exit", (c, sig) => resolve(c ?? sig));
+    child.kill("SIGTERM");
+  });
+  assert.equal(code, 143, `a SIGTERMed run should still exit 128+15, got ${code}`);
+  assert.deepEqual(fenceTrees(dir), [], "the SIGTERMed run left its emit-fence-* tree behind");
+});
+
+test("a later run sweeps trees a SIGKILLed run left behind, and spares a live one", () => {
+  const dir = privateTmp();
+  const stale = join(dir, "emit-fence-stale");
+  const fresh = join(dir, "emit-fence-fresh");
+  mkdirSync(stale);
+  mkdirSync(fresh);
+  const old = new Date(Date.now() - 7 * 60 * 60 * 1000);
+  utimesSync(stale, old, old);
+  const r = spawnSync(process.execPath, [selfPath], {
+    env: { ...process.env, EMIT_FENCE_CHILD: "sweep", TMPDIR: dir },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, `sweep child failed\n${r.stdout}\n${r.stderr}`);
+  assert.ok(!existsSync(stale), "a tree older than the stale bar survived the sweep");
+  assert.ok(existsSync(fresh), "the sweep removed a FRESH tree — it could belong to a concurrent run");
 });
