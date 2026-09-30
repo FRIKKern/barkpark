@@ -39,6 +39,9 @@ x-control-plane: &control_plane
     - STRIPE_PRICE_SUPPORTER
     - STRIPE_PRICE_SUPPORT_PLUS
     - WORKER_TOKEN
+    # Optional: comma-separated client IPs the worker token is accepted from
+    # (dr-w24). Unset = token alone, as before.
+    - WORKER_ALLOWED_IPS
     # OAuth SSO (#680): OAUTH_STATE_SECRET is a hard boot raise in prod —
     # same passthrough-only rule as the secrets above. Provider client ids
     # are optional (provider disabled when unset).
