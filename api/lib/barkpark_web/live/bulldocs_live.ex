@@ -1882,6 +1882,12 @@ defmodule BarkparkWeb.BulldocsLive do
   # after every accepted op and MUST use the reader's own scoped fetch, not a
   # second copy of the two-front-doors rule.
   @doc false
+  # The reader serves PUBLISHED papers on every door: a `drafts.<slug>` spelling is
+  # never a reader address. The flat door's resolver already refuses it; the scoped
+  # door's `Content.get_paper/3` does not (no published_only), and the
+  # :shared_paper_browser pipeline lets an anonymous visitor into the Default
+  # workspace — so the draft was one path prefix away.
+  def fetch_paper("drafts." <> _slug, _scope, _dataset), do: nil
   def fetch_paper(slug, nil, dataset), do: Content.get_public_paper(slug, dataset)
   # Tenant-scoped reader (/w/:ws/p/:proj/papers/:slug) — dataset stays
   # "production" exactly as before (no dataset segment on that route).
