@@ -534,6 +534,7 @@ export const Field = Node.create({
       const labelEl = document.createElement("label");
       labelEl.className = "bp-canvas-field-label";
       labelEl.textContent = (node.attrs && node.attrs.label) || "";
+      const label = mountFieldLabel(labelEl, { editor, getPos });
 
       // Build the native control for this field type. The control is the EDIT
       // island — PM never manages it (stopEvent / ignoreMutation below).
@@ -566,7 +567,7 @@ export const Field = Node.create({
             control.readOnly = !editable;
           }
         }
-        labelEl.textContent = (n.attrs && n.attrs.label) || "";
+        label.paint(n);
       };
 
       paint(node);
@@ -607,6 +608,7 @@ export const Field = Node.create({
         }
       };
       const flushPending = () => {
+        label.flush();
         if (!writeTimer) return;
         clearTimeout(writeTimer);
         writeTimer = null;
@@ -648,6 +650,7 @@ export const Field = Node.create({
 
         destroy: () => {
           if (writeTimer) clearTimeout(writeTimer);
+          label.destroy();
           control.removeEventListener(eventName, scheduleWrite);
           dom.removeEventListener("bp-flush-node", flushPending);
         },
@@ -655,6 +658,75 @@ export const Field = Node.create({
     };
   },
 });
+
+// ── the field LABEL, edited where it reads ──────────────────────────────────────
+//
+// The label is the caption the reader paints above the field (block `label`). In
+// Edit it is its own plain-text typing surface: a click puts the caret in it, the
+// words save as the block's `label` (run-convert's field patch carries only the keys
+// that changed), Enter commits instead of breaking. An absent label stays absent
+// until the author types one. The surface is outside ProseMirror (the node view
+// already stops its events), so it never splits or mutates the run.
+export function mountFieldLabel(labelEl, { editor, getPos }) {
+  let timer = null;
+  const editable = () => !!(editor && editor.isEditable);
+  const sync = () => {
+    if (editable()) {
+      labelEl.setAttribute("contenteditable", "plaintext-only");
+      labelEl.setAttribute("role", "textbox");
+      labelEl.setAttribute("aria-label", "Field label");
+      labelEl.setAttribute("aria-multiline", "false");
+      labelEl.setAttribute("spellcheck", "false");
+      labelEl.tabIndex = 0;
+    } else {
+      labelEl.removeAttribute("contenteditable");
+      labelEl.removeAttribute("role");
+    }
+  };
+  const commit = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (!editable() || typeof getPos !== "function") return;
+    const pos = getPos();
+    if (pos == null) return;
+    const cur = editor.state.doc.nodeAt(pos);
+    if (!cur) return;
+    const text = (labelEl.textContent || "").replace(/\n+/g, " ");
+    const prev = cur.attrs.label;
+    if ((prev == null ? "" : String(prev)) === text) return;
+    const label = prev == null && text === "" ? null : text;
+    editor.chain().command(({ tr }) => {
+      tr.setNodeMarkup(pos, undefined, { ...cur.attrs, label });
+      return true;
+    }).run();
+  };
+  const onInput = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(commit, DEBOUNCE_MS);
+  };
+  const onKey = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); commit(); }
+  };
+  labelEl.addEventListener("input", onInput);
+  labelEl.addEventListener("keydown", onKey);
+  labelEl.addEventListener("blur", commit);
+  sync();
+  return {
+    // Paint from attrs unless the author is typing in it (never move their caret).
+    paint(n) {
+      sync();
+      const next = (n.attrs && n.attrs.label) || "";
+      if (labelEl.ownerDocument.activeElement === labelEl) return;
+      if (labelEl.textContent !== next) labelEl.textContent = next;
+    },
+    flush: commit,
+    destroy() {
+      if (timer) clearTimeout(timer);
+      labelEl.removeEventListener("input", onInput);
+      labelEl.removeEventListener("keydown", onKey);
+      labelEl.removeEventListener("blur", commit);
+    },
+  };
+}
 
 // ── the PICKER NodeView: a frame wrapping the non-PM client-side PICKER WC ─────
 //
@@ -698,6 +770,7 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   // discovery. Keep the already-stored value visible, but do not mount either
   // picker WC (both issue independent HTTP browse requests when upgraded).
   if (!scope.pickerBrowse) return buildPickerReadOnlyView(node, fieldType);
+  const label = mountFieldLabel(labelEl, { editor, getPos });
 
   // The picker WC — the EDIT island PM does NOT manage. Seed value + scope as
   // ATTRIBUTES, mirroring the per-block <bp-media-picker>/<bp-reference-picker> render
@@ -844,6 +917,7 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   // IS the new value (identity), forwarded as a patch-block{value}.
   const onChange = (e) => commit(coercePickerValue(e.detail));
   picker.addEventListener("bp-change", onChange);
+  dom.addEventListener("bp-flush-node", label.flush);
 
   // Keep the seeded picker in sync with an EXTERNAL attr change (an echo, an undo) — the
   // WC exposes a `value` PROPERTY setter (bp-media-picker.js:108 / bp-reference-picker.js
@@ -854,7 +928,7 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
     const v = n.attrs && n.attrs.value;
     const str = v == null ? "" : String(v);
     if (picker.value !== str) picker.value = str;
-    labelEl.textContent = (n.attrs && n.attrs.label) || "";
+    label.paint(n);
 
     // Show the ghost frame ONLY for an asset-less image picker that has not yet been
     // revealed; the moment an asset is present the frame steps aside for the WC.
@@ -891,6 +965,8 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
     // renders its own preview/dropdown DOM outside any contentDOM.
     ignoreMutation: () => true,
     destroy: () => {
+      label.destroy();
+      dom.removeEventListener("bp-flush-node", label.flush);
       picker.removeEventListener("bp-change", onChange);
       if (placeholder) {
         placeholder.removeEventListener("click", openPicker);
