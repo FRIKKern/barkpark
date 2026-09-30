@@ -10,8 +10,8 @@ package cli
 // Target resolution mirrors `bp agent`: an explicit --name wins, else the active
 // server; --url overrides the base outright (and --token the bearer) so the
 // command is usable against a server not yet in config. The stub probes
-// (agent/backup, cloud-9/10) report an honest "unknown/skipped" — the gate marks
-// them not-ready, and doctor surfaces that plainly rather than pretending green.
+// (agent/backup, cloud-9/10) report an honest NOT CHECKED — they abstain: never
+// counted as a pass, and (unwired everywhere today) never a failure either.
 
 import (
 	"strings"
@@ -23,8 +23,9 @@ import (
 // URL + token. It is a package var so the golden test can inject RootCAs (to
 // trust an httptest TLS cert) and point the stub probes at its fake server
 // without a live deployment — the command itself never knows it was swapped. The
-// default leaves the stub-probe URLs empty (agent/backup are cloud-9/10), so the
-// gate honestly marks them not-ready until those endpoints ship.
+// default leaves the stub-probe URLs empty (agent/backup are cloud-9/10) with
+// StubsOptional set, so the gate reports them NOT CHECKED until those endpoints
+// ship.
 //
 // When a Cloud session token is present in config, doctor adds an opt-in
 // cloud-sites probe pointing at the saved CloudURL — surfacing the P6 sites
@@ -32,7 +33,15 @@ import (
 // skipped silently when no token is in scope, so self-hosted Barkparks
 // without a Cloud control plane never see it.
 var doctorGateOpts = func(base, token string) setup.HealthGate {
-	g := setup.HealthGate{}
+	// StubsOptional (task-0421f0261badd1d6): the agent/backup probes are
+	// cloud-9/10 and have NO endpoint on any instance yet, so a required-but-
+	// unwired stub failed EVERY doctor run — `bp doctor` exited 1 against a
+	// perfectly healthy box and its exit code stopped meaning anything. The
+	// Cloud warm-pool already runs the gate this way for the same reason. The
+	// two rows still print, as NOT CHECKED (CheckSkip: they abstain, they are
+	// not counted as passes), and a non-empty probe URL is always probed, so
+	// this self-heals the day those endpoints ship. No real check is removed.
+	g := setup.HealthGate{StubsOptional: true}
 	if cfg, err := LoadConfig(); err == nil && cfg.HasCloudToken() {
 		url := strings.TrimRight(strings.TrimSpace(cfg.CloudURL), "/")
 		if url == "" {
