@@ -417,25 +417,47 @@ defmodule Barkpark.Connectors.Catalog do
         []
 
       uuid ->
-        Repo.all(
-          from(ci in Install,
-            join: w in Workspace,
-            on: type(ci.workspace_id, Ecto.UUID) == w.id,
-            where: w.id == ^uuid,
-            order_by: [asc: ci.provider, asc: ci.install_key],
-            select: %{
-              provider: ci.provider,
-              install_key: ci.install_key,
-              workspace_id: ci.workspace_id,
-              workspace_slug: w.slug,
-              created_at: ci.created_at
-            }
-          )
-        )
+        read_installs(uuid)
     end
   end
 
   def installs_for_workspace(_), do: []
+
+  # NO BRIDGE, NO TABLE (stranger walk, 2026-09-30). `chat_bridge` is created by
+  # the connectors bridge at ITS boot, never by an Ecto migration (charter D28).
+  # An instance that has never run the bridge — every `bp setup --target local`
+  # install, any self-hosted box without `connectors/` — has no such schema, and
+  # this read raised `42P01 undefined_table` inside ConnectorsLive.handle_params,
+  # so the Studio "Connectors" tab crashed to a LiveView server error. With no
+  # bridge there are no installs: that is the honest answer, and the catalog still
+  # renders every provider card as not-connected.
+  #
+  # Only the two "the bridge's DDL never ran" codes are absorbed; every other
+  # Postgres error still raises.
+  @no_bridge_schema_codes [:undefined_table, :invalid_schema_name]
+
+  defp read_installs(uuid) do
+    Repo.all(
+      from(ci in Install,
+        join: w in Workspace,
+        on: type(ci.workspace_id, Ecto.UUID) == w.id,
+        where: w.id == ^uuid,
+        order_by: [asc: ci.provider, asc: ci.install_key],
+        select: %{
+          provider: ci.provider,
+          install_key: ci.install_key,
+          workspace_id: ci.workspace_id,
+          workspace_slug: w.slug,
+          created_at: ci.created_at
+        }
+      )
+    )
+  rescue
+    e in Postgrex.Error ->
+      if get_in(e.postgres || %{}, [:code]) in @no_bridge_schema_codes,
+        do: [],
+        else: reraise(e, __STACKTRACE__)
+  end
 
   @doc """
   `installs_for_workspace/1` grouped by provider id — what the LiveView renders
