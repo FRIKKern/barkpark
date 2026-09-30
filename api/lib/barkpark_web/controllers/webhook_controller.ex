@@ -227,11 +227,13 @@ defmodule BarkparkWeb.WebhookController do
   # global sequential integers, so without the workspace clause a wsB admin
   # could point a wsB webhook at their own URL and replay wsA's event ids into
   # it (cross-tenant document-snapshot exfiltration).
+  # A NULL-project webhook is workspace-wide (see `Webhooks.scope/2`), so it may
+  # replay any event of its own workspace.
   defp event_in_scope?(ev, wh) do
     ev.dataset == wh.dataset and
       (is_nil(ev.workspace_id) or
          (ev.workspace_id == wh.workspace_id and
-            (is_nil(ev.project_id) or ev.project_id == wh.project_id)))
+            (is_nil(ev.project_id) or is_nil(wh.project_id) or ev.project_id == wh.project_id)))
   end
 
   # Load a webhook by id, enforcing BOTH the tenant scope (workspace/project via

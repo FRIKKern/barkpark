@@ -348,12 +348,30 @@ defmodule Barkpark.Webhooks do
 
   # Apply the workspace/project tenant boundary from `opts`. Nil-safe via
   # Content.Scope: an absent workspace_id returns the query untouched.
+  # A webhook with NO project (project_id NULL) is a WORKSPACE-wide subscriber
+  # (task-6a29d7640894d626). The flat route stamps only the workspace for a
+  # non-Default workspace (DeriveWorkspaceFromToken sets no project), while every
+  # document write is stamped with its workspace's default project — so the
+  # strict `project_id == doc.project_id` match of `Scope.scope_to_workspace_or_global/3`
+  # never selected such a hook and it lost every event, traced only by a DEBUG
+  # `selected=0` line. Within the workspace envelope it now matches any project;
+  # across workspaces nothing changes.
   defp scope(query, opts) do
-    Scope.scope_to_workspace_or_global(
-      query,
-      Keyword.get(opts, :workspace_id),
-      Keyword.get(opts, :project_id)
-    )
+    case {Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id)} do
+      {ws, proj} when is_binary(ws) and is_binary(proj) ->
+        where(
+          query,
+          [w],
+          w.workspace_id == ^ws and (w.project_id == ^proj or is_nil(w.project_id))
+        )
+
+      _ ->
+        Scope.scope_to_workspace_or_global(
+          query,
+          Keyword.get(opts, :workspace_id),
+          Keyword.get(opts, :project_id)
+        )
+    end
   end
 
   @doc """
