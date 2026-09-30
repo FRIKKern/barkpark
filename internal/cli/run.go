@@ -3669,6 +3669,12 @@ func renderMinimal(out *writer, payload []byte) {
 			ids = collectIDs(inner)
 		}
 	}
+	// The one-time secret riding beside the wrapped row (`bp webhook rotate` ->
+	// {"secret": "whsec_…", "webhook": {…}}) is the whole point of that write:
+	// the server moves the old secret aside and never shows the new one again.
+	// Dropping it left a bare "ok" and a webhook signed with a secret nobody
+	// could learn (stranger walk, 2026-09-30).
+	oneTimeSecret := wrappedOneTimeSecret(v)
 	rev := findRev(v)
 	if rev != "" {
 		out.outf("rev: %s", rev)
@@ -3690,7 +3696,10 @@ func renderMinimal(out *writer, payload []byte) {
 	for _, id := range ids {
 		out.outf("id: %s", id)
 	}
-	if rev == "" && len(ids) == 0 && !slugPrinted {
+	if oneTimeSecret != "" {
+		out.outf("secret: %s", oneTimeSecret)
+	}
+	if rev == "" && len(ids) == 0 && !slugPrinted && oneTimeSecret == "" {
 		out.outf("ok")
 	}
 }
@@ -3908,12 +3917,24 @@ func findRev(v any) string {
 // {"<resource>": {"id": ...}} and prints a bare "ok".
 var wrappedResourceKeys = []string{"webhook"}
 
+// oneTimeSecretKey is the field a write uses to hand back a credential it will
+// never show again (`webhook rotate`). It is only read beside a wrapped row, so
+// a document's own `secret` field is never taken for one.
+const oneTimeSecretKey = "secret"
+
 // singleWrappedObject returns the object inside a body that is exactly one of
-// wrappedResourceKeys holding one object ({"webhook": {...}}) and nil for
-// anything else.
+// wrappedResourceKeys holding one object ({"webhook": {...}}), optionally with
+// a one-time secret beside it, and nil for anything else.
 func singleWrappedObject(v any) map[string]any {
 	m, ok := v.(map[string]any)
-	if !ok || len(m) != 1 {
+	if !ok {
+		return nil
+	}
+	n := len(m)
+	if s, isStr := m[oneTimeSecretKey].(string); isStr && s != "" {
+		n--
+	}
+	if n != 1 {
 		return nil
 	}
 	for _, k := range wrappedResourceKeys {
@@ -3922,6 +3943,17 @@ func singleWrappedObject(v any) map[string]any {
 		}
 	}
 	return nil
+}
+
+// wrappedOneTimeSecret returns the one-time secret of a wrapped-row receipt
+// ({"secret": "whsec_…", "webhook": {…}}) and "" for any other body.
+func wrappedOneTimeSecret(v any) string {
+	m, ok := v.(map[string]any)
+	if !ok || singleWrappedObject(v) == nil {
+		return ""
+	}
+	s, _ := m[oneTimeSecretKey].(string)
+	return s
 }
 
 func collectIDs(v any) []string {
