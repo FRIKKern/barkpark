@@ -138,7 +138,54 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
     end
   end
 
+  # api-endpoint (PaperEditor's contextual editor): compose.ex api_endpoint_html/1
+  # paints, in document order, the method badge (upcased), the path, then per
+  # map param a Name / In / Type / Required row. Each painted cell whose stored
+  # string it paints verbatim writes its panel field; the method only when it
+  # is stored upper-case, and the derived Required Yes/No never.
+  def painted_copy_attrs(%{"type" => "api-endpoint"} = block, id) do
+    verbatim = fn value, name ->
+      if is_binary(value) and value != "", do: name, else: ""
+    end
+
+    method = Map.get(block, "method")
+    path = Map.get(block, "path")
+
+    method_name =
+      if is_binary(method) and method == String.upcase(method),
+        do: verbatim.(method, "method"),
+        else: ""
+
+    params =
+      block
+      |> Map.get("params", [])
+      |> List.wrap()
+      |> Enum.with_index()
+      |> Enum.filter(fn {param, _} -> is_map(param) end)
+      |> Enum.flat_map(fn {param, i} ->
+        Enum.map(~w(name in type), &verbatim.(Map.get(param, &1), "param-#{i}-#{&1}")) ++ [""]
+      end)
+
+    names = [method_name, verbatim.(path, "path") | params]
+
+    if (blank?(method) and blank?(path)) or Enum.all?(names, &(&1 == "")) do
+      %{}
+    else
+      %{
+        "id" => "api-endpoint-preview-" <> id,
+        "phx-hook" => "BarkparkPaperPaintedCopy",
+        "data-painted-copy" =>
+          ".bp-api-endpoint__method, .bp-api-endpoint__path, .bp-api-endpoint__params tbody td",
+        "data-painted-copy-names" => Enum.join(names, ","),
+        "data-painted-copy-form" => "api-endpoint-form-" <> id,
+        "data-painted-copy-label" => "API endpoint field"
+      }
+    end
+  end
+
   def painted_copy_attrs(_block, _id), do: %{}
+
+  defp blank?(value), do: not is_binary(value) or value == ""
 
   defp technical_label("diff"), do: "diff"
   defp technical_label("filetree"), do: "file tree"

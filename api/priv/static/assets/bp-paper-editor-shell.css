@@ -2245,10 +2245,11 @@ textarea.bp-paper-inline-text.bp-paper-link-ref-eyebrow-input { text-transform: 
 .bp-paper-contextual-editor textarea.bp-paper-inline-copy::placeholder {
   color: var(--paper-ink-faint, var(--paper-ink-soft));
 }
-/* The closed "Configure terminal/steps" toggle sits above the block, not over
-   the terminal bar or the first step title that now take the caret. */
+/* The closed "Configure terminal/steps/API endpoint" toggle sits above the block, not over
+   the terminal bar, the first step title or the endpoint path that now take the caret. */
 .bp-paper-contextual-controls.bp-paper-contextual-controls--terminal:not([open]),
-.bp-paper-contextual-controls.bp-paper-contextual-controls--steps:not([open]) {
+.bp-paper-contextual-controls.bp-paper-contextual-controls--steps:not([open]),
+.bp-paper-contextual-controls.bp-paper-contextual-controls--api-endpoint:not([open]) {
   top: auto; bottom: 100%;
 }
 [data-paper-inline-copy-empty="true"]:not(:focus-within) {

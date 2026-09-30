@@ -83,6 +83,40 @@ defmodule BarkparkWeb.Studio.TechnicalBlockPaintedCopyTest do
            "the aggregate Total row is derived, never wired"
   end
 
+  test "api-endpoint wires the method, path and param cells it paints verbatim" do
+    block = %{
+      "id" => "ae",
+      "type" => "api-endpoint",
+      "method" => "POST",
+      "path" => "/v1/data/mutate",
+      "params" => [
+        %{"name" => "dataset", "in" => "path", "type" => "string", "required" => true},
+        "legacy",
+        %{"name" => "dry", "in" => "", "type" => "boolean"}
+      ]
+    }
+
+    attrs = TechnicalBlockEditor.painted_copy_attrs(block, "ae")
+    assert attrs["data-painted-copy-form"] == "api-endpoint-form-ae"
+
+    # Document order: method, path, then Name / In / Type / Required per map
+    # param. The derived Required cell and an empty stored cell stay read-only.
+    assert attrs["data-painted-copy-names"] ==
+             "method,path,param-0-name,param-0-in,param-0-type,,param-2-name,,param-2-type,"
+
+    painted = Render.render_block(block, %{style: :article})
+
+    assert painted
+           |> LazyHTML.from_fragment()
+           |> LazyHTML.query(attrs["data-painted-copy"])
+           |> Enum.count() == 10
+
+    lower = TechnicalBlockEditor.painted_copy_attrs(Map.put(block, "method", "post"), "ae")
+
+    assert lower["data-painted-copy-names"] |> String.split(",") |> hd() == "",
+           "a method the reader upcases is never written back from its painted form"
+  end
+
   test "other technical types and a footnote with nothing painted get no wiring" do
     for block <- [
           %{"id" => "d", "type" => "diff", "diff" => "+x"},

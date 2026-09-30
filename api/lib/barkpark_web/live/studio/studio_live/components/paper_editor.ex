@@ -3280,10 +3280,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
       <% "api-endpoint" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-api-endpoint-contextual-editor">
-          <div class="bp-paper-contextual-preview" data-test-id="paper-api-endpoint-preview">
+          <div
+            class="bp-paper-contextual-preview"
+            data-test-id="paper-api-endpoint-preview"
+            {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}
+          >
             <%= raw(Render.render_block(@block, %{style: :article})) %>
           </div>
-          <details id={"api-endpoint-controls-" <> @id} class="bp-paper-contextual-controls"
+          <details id={"api-endpoint-controls-" <> @id} class="bp-paper-contextual-controls bp-paper-contextual-controls--api-endpoint"
                    phx-mounted={JS.ignore_attributes("open")}>
             <summary class="bp-paper-contextual-toggle">Configure API endpoint</summary>
             <div class="bp-paper-contextual-panel">
