@@ -113,13 +113,13 @@ SSE mutation stream, scoped to the resolved workspace + project.
 
 **Narrowing:** `?types=a,b`; `?perspective=published` drops draft writes; `filter[f]=v1,v2`: equality (any of) on the redacted doc; else 400.
 
-**Resuming:** `Last-Event-ID: <int>` (`?lastEventId=` for browsers) replays later scope events oldest-first, then live.
+**Resuming:** `Last-Event-ID: <int>` (`?lastEventId=<int>` for browsers) replays later scope events oldest-first, then live.
 
 **First frame:** `event: welcome`.
 
 **Mutation frame** — `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. **Keepalive:** `: keepalive` per 30 s idle.
 
-**Shed frame:** a stalled consumer gets ONE `event: overloaded` (`reason: slow_consumer`), then the stream closes; reconnect with `Last-Event-ID`. (Chat never sheds.)
+**Shed frame:** a stalled consumer gets ONE `event: overloaded` (`reason: slow_consumer`), then closes; reconnect with `Last-Event-ID`. (Chat never sheds.)
 
 **Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) adds **`event: workflow`** — a live workflow summary (unreplayable, NO `id:`).
 
