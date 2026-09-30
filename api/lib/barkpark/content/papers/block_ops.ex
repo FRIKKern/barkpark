@@ -51,6 +51,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   @paper_type "paper"
   @paper_default_dataset "production"
+
+  # [blockops-revless-cas] A revision-LESS op (no `:if_rev`) keeps its API: it
+  # needs no revision and is never refused for a stale one. It no longer loses a
+  # concurrent write: `fenced_or_plain_paper_update/3` compare-and-sets on the row
+  # rev the attempt read, and a lost race re-runs the whole op on the fresh row
+  # (bounded, `serialize_revless/2`). No lock is taken, so no lock order is added
+  # beside the audit-chain locks. The last attempt falls back to the legacy plain
+  # write: a pathologically hot paper degrades to last-writer-wins, never to an error.
+  @revless_cas :__revless_cas
+  @revless_attempts 8
   @html_conversion_message "HTML-only papers are read-only until an explicit revision-fenced conversion preserves the authored HTML preimage."
 
   # The closed blocks-type whitelist — the SOLE copy (compile-time module
@@ -943,10 +953,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
   Returns `{:ok, %{block:, fragment_html:, op_kind:, block_id:, position:,
   rev:}}` on success. When `opts[:if_rev]` is present, it must match the
   paper's current streaming revision and the final row update is atomically
-  fenced; omitting it preserves the legacy last-write-wins contract.
+  fenced; omitting it needs no revision, and the write compare-and-sets on the
+  row it read, re-applying the op on a lost race (`serialize_revless/2`).
   """
   def apply_paper_block_op(slug, op, dataset \\ @paper_default_dataset, opts \\ []),
-    do: Door.admit(fn -> admitted_apply_paper_block_op(slug, op, dataset, opts) end)
+    do:
+      Door.admit(fn ->
+        serialize_revless(opts, &admitted_apply_paper_block_op(slug, op, dataset, &1))
+      end)
 
   defp admitted_apply_paper_block_op(slug, op, dataset, opts)
        when is_binary(slug) and is_map(op) do
@@ -1104,7 +1118,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
   with `op_count: 0` and no block_ids, without writing.
   """
   def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ []),
-    do: Door.admit(fn -> admitted_apply_paper_block_ops(slug, ops, dataset, opts) end)
+    do:
+      Door.admit(fn ->
+        serialize_revless(opts, &admitted_apply_paper_block_ops(slug, ops, dataset, &1))
+      end)
 
   defp admitted_apply_paper_block_ops(slug, ops, dataset, opts)
        when is_binary(slug) and is_list(ops) do
@@ -2301,10 +2318,24 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # on the row's OPAQUE rev read at load (`doc.rev`): the write lands only if the
   # row's rev is STILL that value; otherwise 0 rows change and we surface
   # `{:error, :precondition_failed}` (→ 412) exactly as `check_paper_if_rev`
-  # would. With NO `ifRev` (the client sent none) the original unfenced
-  # last-write-wins `Repo.update` is unchanged.
+  # would. With NO `ifRev` the write is compare-and-set too (inside
+  # `serialize_revless/2`, which retries the op on a lost race) and only the
+  # last bounded attempt falls back to the plain `Repo.update`.
   defp fenced_or_plain_paper_update(changeset, %Document{rev: rev} = doc, opts) do
     case Keyword.get(opts, :if_rev) do
+      # A rev-LESS write inside `serialize_revless/2`: compare-and-set on the rev
+      # this op read, so a concurrent writer that committed in between makes this
+      # attempt retry on the fresh row instead of clobbering it.
+      nil when is_binary(rev) and rev != "" ->
+        if Keyword.get(opts, @revless_cas) do
+          case fenced_paper_update(changeset, doc, rev, opts) do
+            {:error, :precondition_failed} -> {:error, :revless_conflict}
+            other -> other
+          end
+        else
+          Repo.update(changeset)
+        end
+
       nil ->
         Repo.update(changeset)
 
@@ -2314,6 +2345,23 @@ defmodule Barkpark.Content.Papers.BlockOps do
       # No opaque rev to fence on (legacy row) — fall back to the plain write.
       _present ->
         Repo.update(changeset)
+    end
+  end
+
+  defp serialize_revless(opts, attempt) do
+    if Keyword.get(opts, :if_rev) != nil do
+      attempt.(opts)
+    else
+      retry_revless(attempt, Keyword.put(opts, @revless_cas, true), @revless_attempts)
+    end
+  end
+
+  defp retry_revless(attempt, opts, 1), do: attempt.(Keyword.delete(opts, @revless_cas))
+
+  defp retry_revless(attempt, opts, left) do
+    case attempt.(opts) do
+      {:error, :revless_conflict} -> retry_revless(attempt, opts, left - 1)
+      other -> other
     end
   end
 
