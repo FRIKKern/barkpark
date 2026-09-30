@@ -1568,16 +1568,19 @@ defmodule BarkparkWeb.QueryController do
   # %Ecto.Changeset{} as 422 `validation_failed`, details keyed by field) —
   # reusing that shape instead of inventing a new error code. The one message
   # carries both the rejected spec and the accepted grammar.
-  defp order_error({:error, {:invalid_order, spec}}), do: {:error, invalid_order_changeset(spec)}
-
-  defp invalid_order_changeset(spec) do
-    {%{}, %{order: :string}}
-    |> Ecto.Changeset.change()
-    |> Ecto.Changeset.add_error(
-      :order,
-      "unrecognised order spec #{inspect(spec)}; expected <field>[.<path>]:asc|desc " <>
-        "(dot-paths into JSONB content allowed), _updatedAt:asc|desc, or _createdAt:asc|desc"
-    )
+  #
+  # The envelope names the QUERY PARAMETER, not a document (task-7f0e58f885c3e363):
+  # the changeset route rendered "document failed validation" with a hint to
+  # match the schema, for a GET that sent neither a document nor a schema.
+  defp order_error({:error, {:invalid_order, spec}}) do
+    {:error,
+     {:validation_failed, "query parameter order",
+      %{
+        "order" => [
+          "unrecognised order spec #{inspect(spec)}; expected <field>[.<path>]:asc|desc " <>
+            "(dot-paths into JSONB content allowed), _updatedAt:asc|desc, or _createdAt:asc|desc"
+        ]
+      }, "Fix the order parameter to one of the accepted forms listed above, then resend."}}
   end
 
   defp parse_expand(nil), do: []
