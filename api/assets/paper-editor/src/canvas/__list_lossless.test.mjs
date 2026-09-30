@@ -51,7 +51,7 @@ try {
 
   editor.commands.setHardBreak();
   assert.deepEqual(tiptapToBlock(editor.getJSON(), "list", "list").items[1],
-    [{ type: "text", value: "\n" }, { type: "text", value: "Beta" }], "Shift-Enter serializes its break");
+    [{ type: "text", value: "\nBeta" }], "Shift-Enter serializes its break (joined to the untouched plain leaf)");
   editor.commands.undo();
   assert.deepEqual(editor.getJSON(), original, "break Undo restores the exact source");
   assert.equal(canvas.flushPendingChanges(), false);
