@@ -322,10 +322,61 @@ defmodule BarkparkCloud.Web.Auth do
     configured = worker_token()
 
     with token when is_binary(token) <- bearer_token(conn),
-         true <- is_binary(configured) and configured != "" do
-      Plug.Crypto.secure_compare(token, configured)
+         true <- is_binary(configured) and configured != "",
+         true <- Plug.Crypto.secure_compare(token, configured) do
+      worker_source_allowed?(conn)
     else
       _ -> false
+    end
+  end
+
+  # dr-w24-bl-internal-write-route-is-publicly-reachable: the worker token is a
+  # single-secret perimeter on a publicly reachable /v1/internal/* surface. An
+  # OPTIONAL second factor: when `:worker_allowed_ips` (WORKER_ALLOWED_IPS,
+  # comma-separated) names addresses, a correct token from any OTHER source is
+  # not the worker. Unset or empty keeps today's behaviour. `conn.remote_ip` is
+  # the client address the router's `trust_forwarded_ip` plug resolved (only a
+  # trusted front may move it), so a caller cannot forge its way in by header.
+  # An entry that does not parse as an IP matches nothing, so a list whose
+  # entries ALL fail to parse admits nobody (fails closed, never silently open).
+  defp worker_source_allowed?(conn) do
+    case worker_allowed_ips() do
+      :unset ->
+        true
+
+      allowed ->
+        ok? = Enum.any?(allowed, &(&1 == conn.remote_ip))
+
+        unless ok? do
+          Logger.warning(
+            "worker token presented from a source outside WORKER_ALLOWED_IPS: " <>
+              to_string(:inet.ntoa(conn.remote_ip))
+          )
+        end
+
+        ok?
+    end
+  end
+
+  @doc false
+  @spec worker_allowed_ips() :: :unset | [:inet.ip_address()]
+  def worker_allowed_ips do
+    raw =
+      :barkpark_cloud
+      |> Application.get_env(:worker_allowed_ips, [])
+      |> List.wrap()
+      |> Enum.map(&(&1 |> to_string() |> String.trim()))
+      |> Enum.reject(&(&1 == ""))
+
+    if raw == [] do
+      :unset
+    else
+      Enum.flat_map(raw, fn entry ->
+        case :inet.parse_address(String.to_charlist(entry)) do
+          {:ok, ip} -> [ip]
+          _ -> []
+        end
+      end)
     end
   end
 
