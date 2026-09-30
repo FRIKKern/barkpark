@@ -4,7 +4,7 @@ defmodule Barkpark.Content.PluginWriteWebhookFanoutTest do
   rejoin the event spine after a raw state-preserving write and say, in their
   own docs, that "SSE, webhooks, and cache revalidation see the write". They
   called `Content.broadcast_document_mutation/3`, which is PubSub ONLY, so no
-  webhook ever fired. `webhook: true` now dispatches the fan-out too; the
+  webhook ever fired. `webhooks: true` now dispatches the fan-out too; the
   default stays PubSub-only (task writers deliberately skip webhooks).
   """
   use Barkpark.DataCase, async: false
@@ -50,7 +50,7 @@ defmodule Barkpark.Content.PluginWriteWebhookFanoutTest do
     assert_receive {:fan_out, ^doc_id}, 1_000
   end
 
-  test "broadcast_document_mutation with webhook: true fans out; without it, it does not", %{
+  test "broadcast_document_mutation with webhooks: true fans out; without it, it does not", %{
     doc: doc
   } do
     ev =
@@ -59,7 +59,7 @@ defmodule Barkpark.Content.PluginWriteWebhookFanoutTest do
     Content.broadcast_document_mutation(doc, "update", event_id: ev.id)
     refute_receive {:fan_out, _}, 300
 
-    Content.broadcast_document_mutation(doc, "update", event_id: ev.id, webhook: true)
+    Content.broadcast_document_mutation(doc, "update", event_id: ev.id, webhooks: true)
     doc_id = doc.doc_id
     assert_receive {:fan_out, ^doc_id}, 1_000
   end

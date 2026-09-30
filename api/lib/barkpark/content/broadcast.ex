@@ -76,7 +76,7 @@ defmodule Barkpark.Content.Broadcast do
   `mutation` is the caller's mutation kind string and `opts` may carry
   `:event_id` (REQUIRED for the SSE path) and `:previous_rev`.
 
-  `webhook: true` ALSO dispatches the webhook fan-out for the write (with the
+  `webhooks: true` ALSO dispatches the webhook fan-out for the write (with the
   `:event_id`), for a bypass-writer that has rejoined the event spine and
   promises webhook subscribers the edit (task-a8ac171ba5cddba4). Default
   `false`: PubSub only, exactly as before — task-document writers (GitHub
@@ -135,7 +135,7 @@ defmodule Barkpark.Content.Broadcast do
       {:doc_updated, msg}
     )
 
-    if Keyword.get(opts, :webhook, false) and is_integer(event_id) do
+    if Keyword.get(opts, :webhooks, false) and is_integer(event_id) do
       maybe_dispatch_webhook(dataset, mutation, doc.type, doc.doc_id, msg.document, event_id,
         workspace_id: doc.workspace_id,
         project_id: doc.project_id
