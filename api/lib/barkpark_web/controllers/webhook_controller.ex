@@ -25,10 +25,10 @@ defmodule BarkparkWeb.WebhookController do
   def create(conn, %{"dataset" => dataset} = params) do
     attrs = Map.put(params, "dataset", dataset)
 
-    case Webhooks.create_webhook(attrs, ScopeHelpers.scope_opts(conn)) do
-      {:ok, wh} ->
-        conn |> put_status(201) |> json(%{webhook: render_webhook(wh)})
-
+    with :ok <- refuse_audit_subscription(params),
+         {:ok, wh} <- Webhooks.create_webhook(attrs, ScopeHelpers.scope_opts(conn)) do
+      conn |> put_status(201) |> json(%{webhook: render_webhook(wh)})
+    else
       {:error, changeset} ->
         validation_failed(conn, changeset)
     end
@@ -37,6 +37,7 @@ defmodule BarkparkWeb.WebhookController do
   def update(conn, %{"id" => id} = params) do
     with :ok <- validate_uuid(id),
          {:ok, wh} <- Webhooks.get_webhook(id, ScopeHelpers.scope_opts(conn)),
+         :ok <- refuse_audit_subscription(params),
          {:ok, updated} <- Webhooks.update_webhook(wh, params) do
       json(conn, %{webhook: render_webhook(updated)})
     else
@@ -313,6 +314,44 @@ defmodule BarkparkWeb.WebhookController do
     |> put_status(env.status)
     |> json(%{error: Map.delete(env, :status)})
   end
+
+  # AUDIT SUBSCRIPTIONS ARE NOT A TENANT FEATURE (r2c webhook audit, finding 1).
+  # `Webhook.changeset/2` casts `audit_categories`, `audit_actions` and
+  # `organization_id` for the SERVER-SIDE audit bridge (era-w7), and
+  # `Webhooks.audit_webhooks_for/3` selects on them ORG-wide — a nil
+  # `organization_id` matches EVERY org. This route is gated per WORKSPACE
+  # (a workspace-bound admin token passes it), so letting the body set those
+  # keys let one workspace's admin subscribe to another organisation's audit
+  # stream (auth, token, membership, secret events with full metadata), or to
+  # every organisation's. The HTTP surface therefore REFUSES them, loudly, with
+  # a 422 naming the keys — never a silent drop, so a caller can tell. An empty
+  # list / nil (a client echoing the rendered object back) is not a request for
+  # a subscription and passes.
+  @audit_subscription_keys ~w(audit_categories audit_actions organization_id)
+
+  defp refuse_audit_subscription(params) do
+    case Enum.filter(@audit_subscription_keys, &audit_value_present?(Map.get(params, &1))) do
+      [] ->
+        :ok
+
+      keys ->
+        changeset =
+          Enum.reduce(keys, Ecto.Changeset.change(%Barkpark.Webhooks.Webhook{}), fn key, cs ->
+            Ecto.Changeset.add_error(
+              cs,
+              String.to_existing_atom(key),
+              "audit subscriptions are not available on this route"
+            )
+          end)
+
+        {:error, changeset}
+    end
+  end
+
+  defp audit_value_present?(nil), do: false
+  defp audit_value_present?([]), do: false
+  defp audit_value_present?(""), do: false
+  defp audit_value_present?(_), do: true
 
   defp validation_failed(conn, changeset) do
     base = Errors.to_envelope({:error, :malformed}, conn)
