@@ -740,6 +740,40 @@ defmodule BarkparkCloud.RegistryTest do
       assert %ProvisionJob{} = Repo.get(ProvisionJob, prov.id)
     end
 
+    # task-83e74d3465d7b12d: the provision succeed ran the barkpark upsert for
+    # ANY job kind, resetting a live row.
+    test "succeed_job on a job kind with its own succeed route → {:error, :conflict}, the live row untouched" do
+      team = team_fixture()
+
+      for {enqueue, n} <- [
+            {&Registry.enqueue_attach_domain_job/1, 1},
+            {&Registry.enqueue_enable_apply_job/1, 2},
+            {&Registry.enqueue_deprovision_job/1, 3}
+          ] do
+        bp = live_barkpark(team, %{slug: "kind-fence-#{n}"})
+        {:ok, job} = enqueue.(bp)
+
+        assert {:error, :conflict} = Registry.succeed_job(job.id, "198.51.100.7"),
+               "#{job.kind} must not run the provision upsert"
+
+        after_bp = Repo.get(Barkpark, bp.id)
+        assert after_bp.host == "203.0.113.10"
+        assert after_bp.health_status == "up"
+        assert Repo.get(ProvisionJob, job.id).status == "pending"
+      end
+    end
+
+    test "CONTROL: succeed_job still succeeds a provision job" do
+      team = team_fixture()
+      bp = barkpark_fixture(team, %{slug: "kind-fence-control"})
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:ok, %ProvisionJob{status: "succeeded"}} =
+               Registry.succeed_job(job.id, "198.51.100.8")
+
+      assert Repo.get(Barkpark, bp.id).host == "198.51.100.8"
+    end
+
     test "latest_provision_status_map ignores deprovision jobs; latest_deprovision_status_map returns them" do
       team = team_fixture()
       bp = live_barkpark(team)
