@@ -3647,6 +3647,20 @@ func renderMinimal(out *writer, payload []byte) {
 		}
 	}
 	ids := collectIDs(v)
+	// A create that answers with its row WRAPPED under one resource key —
+	// `bp webhook create` -> {"webhook": {"id": …, …}} — has no top-level id,
+	// so the harvest came back empty and the receipt was a bare "ok" (stranger
+	// walk, 2026-09-30): the caller never saw the id every later webhook verb
+	// (get, delete, deliveries, replay) needs. Look one level into a body that
+	// is exactly ONE known resource wrapper (wrappedResourceKeys). Named, not
+	// generic: a nested VERDICT such as `webhook replay`'s {"delivery": {...}}
+	// is deliberately left as "ok" (TestSucceedingVerdictIsLeftAlone), and a
+	// list envelope's rows are already walked by collectIDs.
+	if len(ids) == 0 {
+		if inner := singleWrappedObject(v); inner != nil {
+			ids = collectIDs(inner)
+		}
+	}
 	rev := findRev(v)
 	if rev != "" {
 		out.outf("rev: %s", rev)
@@ -3879,6 +3893,27 @@ func findRev(v any) string {
 		}
 	}
 	return ""
+}
+
+// wrappedResourceKeys are the write receipts that answer with the created row
+// WRAPPED under its resource name. Extend it when another create answers
+// {"<resource>": {"id": ...}} and prints a bare "ok".
+var wrappedResourceKeys = []string{"webhook"}
+
+// singleWrappedObject returns the object inside a body that is exactly one of
+// wrappedResourceKeys holding one object ({"webhook": {...}}) and nil for
+// anything else.
+func singleWrappedObject(v any) map[string]any {
+	m, ok := v.(map[string]any)
+	if !ok || len(m) != 1 {
+		return nil
+	}
+	for _, k := range wrappedResourceKeys {
+		if obj, ok := m[k].(map[string]any); ok {
+			return obj
+		}
+	}
+	return nil
 }
 
 func collectIDs(v any) []string {
