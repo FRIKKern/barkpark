@@ -163,8 +163,10 @@ defmodule Barkpark.Content.Expand do
     |> Enum.group_by(fn {ref_type, _id} -> ref_type end, fn {_ref_type, id} -> id end)
     |> Enum.reduce(%{}, fn {ref_type, ids}, acc ->
       ids = Enum.uniq(ids)
-      # Memoized once per ref_type (was two get_schema per ref).
-      schema = ref_schema(ref_type, dataset, opts)
+      # Memoized once per ref_type (was two get_schema per ref). A multi-type
+      # target resolves one schema per candidate type, and each document is
+      # redacted under its OWN type's schema.
+      schema_for = schema_resolver(ref_type, dataset, opts)
 
       # One scoped batch: the ids AND their `drafts.` twins together, so the
       # published-then-draft fallback the per-ref path did with a SECOND Repo.one
@@ -189,8 +191,11 @@ defmodule Barkpark.Content.Expand do
 
       Enum.reduce(ids, acc, fn id, acc2 ->
         case pick_ref_doc(docs_map, id, ref_type, published_only) do
-          nil -> acc2
-          doc -> Map.put(acc2, {ref_type, id}, Envelope.render(doc, schema, caller_context))
+          nil ->
+            acc2
+
+          doc ->
+            Map.put(acc2, {ref_type, id}, Envelope.render(doc, schema_for.(doc), caller_context))
         end
       end)
     end)
@@ -223,6 +228,10 @@ defmodule Barkpark.Content.Expand do
   end
 
   defp typed_doc(%{type: ref_type} = doc, ref_type), do: doc
+
+  defp typed_doc(%{type: type} = doc, targets) when is_list(targets),
+    do: if(type in targets, do: doc, else: nil)
+
   defp typed_doc(_doc, _ref_type), do: nil
 
   defp load_schemas(types, dataset, opts) do
@@ -261,18 +270,53 @@ defmodule Barkpark.Content.Expand do
 
   # A reference field — either a direct `reference` field or an `arrayOf` whose
   # element type is `reference` (e.g. a `tags` list of tag refs).
-  defp ref_field?(%{"type" => "reference", "refType" => rt}) when is_binary(rt), do: true
+  #
+  # THE TARGET VOCABULARY IS THE ONE THE REST OF THE SYSTEM READS
+  # (task-acde2704bb114428). A schema may name a reference's target through
+  # `refType`, or the Sanity way through `to` (a list of type strings or
+  # `%{"type" => t}` entries) or `refTypes` (Gyldendal parity E1.6). Studio's
+  # picker (`BarkparkWeb.FieldInputs.reference_types/1`) accepts all three;
+  # this module used to accept only `refType`, so `?expand=author` on a
+  # `to`-declared field returned the raw id, 200, with no warning.
+  defp ref_field?(%{"type" => "reference"} = field), do: ref_types(field) != []
 
-  defp ref_field?(%{"type" => "arrayOf", "of" => %{"type" => "reference", "refType" => rt}})
-       when is_binary(rt),
-       do: true
+  defp ref_field?(%{"type" => "arrayOf", "of" => %{"type" => "reference"} = of}),
+    do: ref_types(of) != []
 
   defp ref_field?(_), do: false
 
-  # {ref_type, array?} for a reference / arrayOf-of-reference field. Only called
-  # on fields that already passed ref_field?/1.
-  defp ref_target(%{"type" => "arrayOf", "of" => %{"refType" => rt}}), do: {rt, true}
-  defp ref_target(%{"refType" => rt}), do: {rt, false}
+  # {target, array?} for a reference / arrayOf-of-reference field. `target` is
+  # the single type name when the field names ONE target (byte-identical to the
+  # refType-only path), else the sorted list of every type it may point at, and
+  # the stored document's own type decides (`typed_doc/2`). Only called on
+  # fields that already passed ref_field?/1.
+  defp ref_target(%{"type" => "arrayOf", "of" => of}), do: {target(of), true}
+  defp ref_target(field), do: {target(field), false}
+
+  defp target(field) do
+    case ref_types(field) do
+      [one] -> one
+      many -> Enum.sort(many)
+    end
+  end
+
+  defp ref_types(field) do
+    ([Map.get(field, "refType")] ++
+       type_names(Map.get(field, "to")) ++ type_names(Map.get(field, "refTypes")))
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.uniq()
+  end
+
+  defp type_names(list) when is_list(list) do
+    Enum.map(list, fn
+      %{"type" => t} -> t
+      t when is_binary(t) -> t
+      _ -> nil
+    end)
+  end
+
+  defp type_names(t) when is_binary(t), do: [t]
+  defp type_names(_), do: []
 
   # A single reference field's value is either a plain id string or a Sanity-style
   # `%{"_ref" => id}` object — both resolve to the target id. Returns nil for any
@@ -292,6 +336,16 @@ defmodule Barkpark.Content.Expand do
   # same-named schema and gate this tenant's expanded refs with another tenant's
   # field visibility. The shared helper accepts the retry ONLY for a genuinely
   # global (`workspace_id: nil`) row, closing that inverse hazard.
+  defp schema_resolver(targets, dataset, opts) when is_list(targets) do
+    by_type = Map.new(targets, &{&1, ref_schema(&1, dataset, opts)})
+    fn doc -> Map.get(by_type, doc.type) end
+  end
+
+  defp schema_resolver(ref_type, dataset, opts) do
+    schema = ref_schema(ref_type, dataset, opts)
+    fn _doc -> schema end
+  end
+
   defp ref_schema(ref_type, dataset, opts) do
     case Content.Schema.get_schema_for_redaction(ref_type, dataset, opts) do
       {:ok, schema} -> schema
