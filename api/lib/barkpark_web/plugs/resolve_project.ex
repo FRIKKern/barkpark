@@ -26,7 +26,17 @@ defmodule BarkparkWeb.Plugs.ResolveProject do
         assign(conn, :current_project, project)
 
       _ ->
-        halt_envelope(conn, {:error, :not_found})
+        # task-69cd78907b82abf6: name the PROJECT slug, not a document. A
+        # project that exists in another workspace is "not found in" this one,
+        # which is the truth this lookup already enforces.
+        halt_envelope(
+          conn,
+          {:error,
+           {:not_found,
+            "project #{inspect(project_slug)} not found in workspace #{inspect(ws_slug)}",
+            hint:
+              "Check the project slug in the URL (/w/<workspace>/p/<project>/…) or the bp -p flag."}}
+        )
     end
   end
 
