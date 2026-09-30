@@ -3051,9 +3051,19 @@ func buildMultipartFile(path string) (io.Reader, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("read upload file %q: %w", path, err)
 	}
-	if _, err := f.Stat(); err != nil {
+	info, err := f.Stat()
+	if err != nil {
 		f.Close()
 		return nil, "", fmt.Errorf("read upload file %q: %w", path, err)
+	}
+	// os.Open succeeds on a directory; the read only fails inside the pipe
+	// goroutine, AFTER the request is in flight — so `bp media upload <dir>`
+	// surfaced as `request failed: Post …: multipart write: read <dir>: is a
+	// directory` (code request_failed, exit 1) instead of the usage error a bad
+	// path gets (stranger walk, 2026-09-30). Refuse it here, before any request.
+	if info.IsDir() {
+		f.Close()
+		return nil, "", fmt.Errorf("read upload file %q: is a directory — pass a file", path)
 	}
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
