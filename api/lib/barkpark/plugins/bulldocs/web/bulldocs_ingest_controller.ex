@@ -1712,7 +1712,16 @@ defmodule BarkparkWeb.BulldocsIngestController do
       true ->
         dataset = params["dataset"] || Content.paper_default_dataset()
 
-        case Content.propose_paper_blocks(slug, ops, source, dataset) do
+        # The caller's resolved scope, as apply_op reads it: without it
+        # `get_scoped_paper/3` fell back to the Default workspace for EVERY caller,
+        # so an admin token bound to another workspace proposed into Default's papers.
+        case Content.propose_paper_blocks(
+               slug,
+               ops,
+               source,
+               dataset,
+               paper_scope_opts(conn, params)
+             ) do
           {:ok, receipt} ->
             conn
             |> put_status(:ok)
