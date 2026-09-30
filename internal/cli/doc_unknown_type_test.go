@@ -96,7 +96,7 @@ func TestEmptyListOfAnUndeclaredTypeSaysSo(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit %d, want 0 (the note must not change it)", code)
 	}
-	if !strings.Contains(stderr, `no schema named "Post"`) {
+	if !strings.Contains(stderr, `no schema named "Post" exists in dataset "production"`) {
 		t.Fatalf("an empty page of an undeclared type must say no schema of that name exists:\n%s", stderr)
 	}
 }
