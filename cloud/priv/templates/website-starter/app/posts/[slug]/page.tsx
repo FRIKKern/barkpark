@@ -8,13 +8,14 @@ import '@barkpark/react/paper-surface.css'
 import { getDocBySlug } from '../../../lib/barkpark'
 import { formatDate } from '../../../lib/format-date'
 import { PortableDocSurface } from '../../portable-doc-surface'
+import { type SlugValue } from '../../../lib/slug'
 
 interface Post {
   _id: string
   title: string
   excerpt?: string
   publishedAt?: string
-  slug?: { current: string }
+  slug?: SlugValue
   // The canonical, type-keyed PortableDocument block array (Barkpark's own
   // block grammar) — rendered by `@barkpark/react`'s PortableDoc, NOT Sanity
   // PortableText.

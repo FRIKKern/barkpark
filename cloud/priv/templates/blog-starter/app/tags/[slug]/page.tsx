@@ -3,18 +3,19 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { barkparkMetadata } from '@barkpark/nextjs'
 import { getDocBySlug, getDocs } from '../../../lib/barkpark'
+import { slugOf, type SlugValue } from '../../../lib/slug'
 
 interface Tag {
   _id: string
   title: string
   description?: string
-  slug?: { current: string }
+  slug?: SlugValue
 }
 
 interface Post {
   _id: string
   title: string
-  slug?: { current: string }
+  slug?: SlugValue
   excerpt?: string
   publishedAt?: string
   tags?: Array<{ _ref: string }>
@@ -62,7 +63,7 @@ export default async function TagPage({
         ) : (
           <ul className="space-y-3">
             {posts.map((post) => {
-              const postSlug = post.slug?.current ?? post._id
+              const postSlug = slugOf(post.slug) ?? post._id
               return (
                 <li key={post._id}>
                   <Link href={`/posts/${postSlug}`} className="underline">

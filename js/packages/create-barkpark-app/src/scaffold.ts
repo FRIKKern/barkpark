@@ -22,6 +22,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
  *   app/not-found.tsx                      docker-compose.yml
  *   app/robots.ts                          docker-compose.override.yml.example
  *   lib/format-date.ts                     lib/resolve-server-token.ts
+ *   lib/slug.ts
  *
  * Everything else stays in the starter dir because it is INTENTIONALLY VARIANT
  * — it differs today (app/layout.tsx, app/page.tsx, lib/csp.ts, middleware.ts,
