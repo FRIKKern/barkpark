@@ -159,6 +159,9 @@ defmodule Barkpark.Media do
       {:error, :payload_too_large} = rejected ->
         rejected
 
+      {:error, {:validation_failed, _subject, _details, _hint}} = rejected ->
+        rejected
+
       # put_scope_attrs refused a caller-supplied `dataset` slug. It now runs
       # BEFORE the write, so there is no orphan blob to clean up — the typed
       # error is surfaced UNCHANGED so FallbackController renders 422
@@ -303,11 +306,28 @@ defmodule Barkpark.Media do
   defp validate_upload(mime_type, original_name, size) do
     cfg = Application.get_env(:barkpark, :media_uploads, [])
 
-    with :ok <- check_mime(cfg, mime_type),
+    with :ok <- check_nonempty(size),
+         :ok <- check_mime(cfg, mime_type),
          :ok <- check_extension(cfg, original_name) do
       check_size(cfg, size)
     end
   end
+
+  # A 0-byte file is never a usable asset (task-3221fd45e0f35b16). Stored, it
+  # listed in the Media library as an image whose renditions 404 and rendered
+  # nothing wherever a page picked it. `bp media upload` refused it locally
+  # (#20711), but the SDK's uploadAsset, the Studio picker and raw HTTP all
+  # reached this door and got a 201. This check is NOT config-gated, unlike the
+  # allowlist and size cap below, because no operator setting makes an empty
+  # asset useful. The refusal is a 422 `validation_failed` that names the
+  # upload, and it happens before anything is written.
+  defp check_nonempty(0) do
+    {:error,
+     {:validation_failed, "media upload", %{"file" => ["is empty (0 bytes)"]},
+      "Upload a file with content; a 0-byte file is refused before anything is stored."}}
+  end
+
+  defp check_nonempty(_size), do: :ok
 
   defp check_mime(cfg, mime_type) do
     case Keyword.get(cfg, :allowed_mime_types, []) do

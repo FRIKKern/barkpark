@@ -181,6 +181,31 @@ defmodule BarkparkWeb.Integration.MediaTest do
       assert resp.status == 401
     end
 
+    # task-3221fd45e0f35b16: a 0-byte file was stored as an asset (201, size 0)
+    # for every client but bp, which refused it locally. It is now a 422 that
+    # names the upload, and nothing is stored.
+    test "a 0-byte file → 422 validation_failed naming the upload; nothing stored", %{
+      conn: conn
+    } do
+      tmp_path = Path.join(System.tmp_dir!(), "barkpark-empty-#{:rand.uniform(1_000_000)}.png")
+      File.write!(tmp_path, "")
+      on_exit(fn -> File.rm(tmp_path) end)
+      before = Barkpark.Repo.aggregate(Barkpark.Media.Storage.MediaFile, :count)
+
+      resp =
+        conn
+        |> authed()
+        |> post(~p"/media/upload", %{
+          "file" => %Plug.Upload{path: tmp_path, filename: "empty.png", content_type: "image/png"}
+        })
+
+      body = json_response(resp, 422)
+      assert body["error"]["code"] == "validation_failed"
+      assert body["error"]["message"] == "media upload failed validation"
+      assert body["error"]["details"]["file"] == ["is empty (0 bytes)"]
+      assert Barkpark.Repo.aggregate(Barkpark.Media.Storage.MediaFile, :count) == before
+    end
+
     test "with auth but no `file` field → 400 envelope", %{conn: conn} do
       resp =
         conn
