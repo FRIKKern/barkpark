@@ -14,8 +14,22 @@ defmodule BarkparkWeb.SchemaController do
   end
 
   def show(conn, %{"dataset" => dataset, "name" => name}) do
-    with {:ok, schema} <- Content.get_schema(name, dataset, scope_opts(conn)) do
-      json(conn, %{_schemaVersion: 1, schema: Content.serialize_schema_for_sdk(schema)})
+    case Content.get_schema(name, dataset, scope_opts(conn)) do
+      {:ok, schema} ->
+        json(conn, %{_schemaVersion: 1, schema: Content.serialize_schema_for_sdk(schema)})
+
+      # The bare {:error, :not_found} renders "document not found" with a hint to
+      # check a document _id; what is missing here is a SCHEMA
+      # (task-8d46c1fe49954697), so name it and point at the listing.
+      {:error, :not_found} ->
+        {:error,
+         {:not_found,
+          "schema not found: no schema named #{inspect(name)} in dataset #{inspect(dataset)}",
+          hint:
+            "Check the schema name and dataset in the URL — GET /v1/schemas/#{dataset} lists the schemas you can read here."}}
+
+      other ->
+        other
     end
   end
 
