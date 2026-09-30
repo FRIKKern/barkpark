@@ -357,6 +357,16 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
       # onto it. Re-driving is right either way — a still-`queued` row reads the
       # NEW content when it starts, and an already-building one answers
       # `:not_queued`, which defers below instead of dropping the publish.
+      # task-786051334bc47508: a `--prebuilt` mint sits `queued` for up to an
+      # hour WAITING FOR ITS UPLOAD. Driving it here started a build with no
+      # bytes: the row died `failed`, and the client's upload then 409'd
+      # `deployment_not_queued` — the build was lost and the site showed a false
+      # failure. The reaper and resume_orphaned already skip such a row; so does
+      # this path now. Defer behind it like any other in-flight build.
+      {:duplicate,
+       %Deployment{status: "queued", source: "prebuilt", artifact_sha256: nil} = deployment} ->
+        defer_behind_running_build(site, deployment)
+
       {:duplicate, %Deployment{status: "queued"} = deployment} ->
         start_and_report(site, deployment)
 
