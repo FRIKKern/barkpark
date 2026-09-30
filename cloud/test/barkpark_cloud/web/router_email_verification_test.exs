@@ -191,6 +191,38 @@ defmodule BarkparkCloud.Web.RouterEmailVerificationTest do
       refute_email_sent()
     end
 
+    # task-9a30ab22cf0842f2 — with 2FA on, the right password alone is not
+    # enough: a stolen session plus a phished password must not move the address.
+    test "2FA on: the right password without a valid OTP → 401 invalid_otp, nothing staged" do
+      user = user_fixture()
+      token = session(user)
+
+      %{"secret" => b32} =
+        json_body(call(:post, "/v1/account/two-factor/enroll", %{}, token))
+
+      {:ok, secret} = Base.decode32(b32, padding: false)
+
+      assert call(
+               :post,
+               "/v1/account/two-factor/confirm",
+               %{code: BarkparkCloud.TotpTestHelper.totp_code_stable!(secret)},
+               token
+             ).status == 200
+
+      target = "stolen-#{System.unique_integer([:positive])}@example.com"
+
+      for body <- [
+            %{current_password: @password, new_email: target},
+            %{current_password: @password, otp: "000000", new_email: target}
+          ] do
+        conn = call(:post, "/v1/account/email/change", body, token)
+        assert conn.status == 401
+        assert json_body(conn) == %{"error" => "invalid_otp"}
+      end
+
+      assert is_nil(BarkparkCloud.Accounts.get_user(user.id).pending_email)
+    end
+
     test "unauthenticated → 401" do
       assert call(:post, "/v1/account/email/change", %{new_email: "x@example.com"}).status == 401
     end
