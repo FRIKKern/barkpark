@@ -140,6 +140,7 @@ defmodule Barkpark.Plugins.Github.Link do
   require Logger
 
   alias Barkpark.Content
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Content.Document
   alias Barkpark.Tasks.Internal
 
@@ -262,25 +263,32 @@ defmodule Barkpark.Plugins.Github.Link do
     observed_rev = published.rev
     content = Map.put(published.content || %{}, @content_key, merged)
 
-    case Internal.fenced_content_write(published, observed_rev, content, new_rev) do
-      {:ok, %Document{} = stored} ->
-        # Same event contract as the old upsert path: stamped `source: "github"`,
-        # so `Outbox.fetch/3` excludes it and the mirror cannot re-drain its own
-        # bookkeeping write (loop-cut #2).
-        ev = Internal.insert_mutation_event!(stored, "update", observed_rev, "github")
+    # task-8cb1e54603e4c3cf: the stamp and its mutation_events row are ONE
+    # write. `fenced_content_write` auto-commits outside a transaction, so an
+    # event fault used to leave the stamp with no event (no SSE frame, board
+    # refresh or webhook). `write_atomically/1` also defers the fan-out until
+    # commit, and hands a declined write's own term back unchanged.
+    Broadcast.write_atomically(fn ->
+      case Internal.fenced_content_write(published, observed_rev, content, new_rev) do
+        {:ok, %Document{} = stored} ->
+          # Same event contract as the old upsert path: stamped `source: "github"`,
+          # so `Outbox.fetch/3` excludes it and the mirror cannot re-drain its own
+          # bookkeeping write (loop-cut #2).
+          ev = Internal.insert_mutation_event!(stored, "update", observed_rev, "github")
 
-        Content.broadcast_document_mutation(stored, "update",
-          event_id: ev.id,
-          previous_rev: observed_rev
-        )
+          Content.broadcast_document_mutation(stored, "update",
+            event_id: ev.id,
+            previous_rev: observed_rev
+          )
 
-        {:ok, stored}
+          {:ok, stored}
 
-      :stale ->
-        detail = %{doc_id: pid, gate: "rev_fence", observed_rev: observed_rev}
-        report_anomaly(detail)
-        {:error, {:stamp_refused, detail}}
-    end
+        :stale ->
+          detail = %{doc_id: pid, gate: "rev_fence", observed_rev: observed_rev}
+          report_anomaly(detail)
+          {:error, {:stamp_refused, detail}}
+      end
+    end)
   end
 
   # NEVER-PUBLISHED arm — byte for byte the pre-existing behaviour: the stamp
