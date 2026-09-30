@@ -295,7 +295,7 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     end
 
     test "absurd value is clamped to the sane max" do
-      max = Application.get_env(:barkpark, :webhook_retry_after_max_ms, 300_000)
+      max = Dispatcher.retry_after_max_ms()
       assert Dispatcher.parse_retry_after([{"retry-after", "999999"}]) == max
     end
 

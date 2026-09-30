@@ -139,7 +139,8 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeper do
     end)
   end
 
-  defp stuck_after_seconds do
+  @doc false
+  def stuck_after_seconds do
     Application.get_env(
       :barkpark,
       :webhook_stuck_delivery_after_seconds,
@@ -210,12 +211,31 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeper do
               "Recovering stuck webhook delivery ##{delivery.id} (kind #{delivery.source_kind})"
             )
 
-            # Re-run the signed attempt loop against the SAME row. redeliver/4
-            # writes the terminal status via mark_delivered/mark_giveup, so the row
-            # leaves `pending`. A crash here re-strands it `pending` with a fresh
-            # updated_at → the next sweep past the threshold retries it. `event_id`
-            # is nil for media (no delivery-id header).
-            _ = Dispatcher.redeliver(webhook, body, delivery.event_id, delivery)
+            # Re-run the signed attempt loop against the SAME row, RESUMING at the
+            # row's own count (task-bcbef83443504e1c). This used to call
+            # redeliver/4, which restarts at attempt 1: every sweep reset the
+            # count, `attempts` ran backwards, and an endpoint answering 429 with
+            # a long Retry-After could keep a delivery pending indefinitely. A row
+            # that already spent its budget gives up instead of posting again.
+            # redeliver/5 writes the terminal status via mark_delivered/mark_giveup,
+            # so the row leaves `pending`; a crash here re-strands it `pending` with
+            # a fresh updated_at → the next sweep past the threshold retries it.
+            # `event_id` is nil for media (no delivery-id header).
+            resume_at = (delivery.attempts || 0) + 1
+
+            if resume_at > Dispatcher.max_attempts() do
+              _ =
+                Barkpark.Webhooks.mark_giveup(
+                  delivery,
+                  delivery.last_status_code,
+                  "exhausted: #{delivery.attempts} attempts spent before the sweep",
+                  delivery.attempts,
+                  delivery.last_latency_ms
+                )
+            else
+              _ = Dispatcher.redeliver(webhook, body, delivery.event_id, delivery, resume_at)
+            end
+
             :swept
 
           {:disabled, reason} ->
