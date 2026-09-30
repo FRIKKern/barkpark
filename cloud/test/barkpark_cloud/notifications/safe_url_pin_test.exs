@@ -93,6 +93,13 @@ defmodule BarkparkCloud.Notifications.SafeUrlPinTest do
       refute SafeUrl.private_address?({0x64, 0xFF9B, 0, 0, 0, 0, 0xCB00, 0x7109})
     end
 
+    # task-a30c403aea77a679: parity with the api's SafeOutbound.
+    test "the local-use NAT64 prefix 64:ff9b:1::/48 is refused, whatever it embeds" do
+      assert SafeUrl.private_address?({0x64, 0xFF9B, 1, 0, 0, 0, 0xCB00, 0x7109})
+      assert SafeUrl.private_address?({0x64, 0xFF9B, 1, 0xFFFF, 0, 0, 0, 1})
+      assert {:error, :ssrf_blocked} = SafeUrl.check("https://[64:ff9b:1::cb00:7109]/x")
+    end
+
     test "benchmarking, protocol-assignment, multicast and reserved v4 ranges" do
       assert SafeUrl.private_address?({198, 18, 0, 1})
       assert SafeUrl.private_address?({198, 19, 255, 254})
