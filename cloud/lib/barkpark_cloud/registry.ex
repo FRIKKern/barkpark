@@ -2478,6 +2478,10 @@ defmodule BarkparkCloud.Registry do
   "support"`; on any other row the value is ignored (a main never carries a
   token id). Absent → the column stays nil (older workers, back-compat).
   """
+  # The job kinds the Go worker reports through
+  # POST /v1/internal/provision-jobs/:id/succeed (task-83e74d3465d7b12d).
+  @provision_succeed_kinds ~w(provision resurrect provision_support)
+
   @spec succeed_job(binary(), String.t(), keyword()) ::
           {:ok, ProvisionJob.t()}
           | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
@@ -2503,6 +2507,15 @@ defmodule BarkparkCloud.Registry do
             case lock_provision_job(id) do
               nil ->
                 Repo.rollback(:not_found)
+
+              # task-83e74d3465d7b12d: only a job this route exists for may run
+              # the barkpark upsert below. attach_domain, enable_apply,
+              # push_agent_key and deprovision each have their own succeed route.
+              # A mis-routed one here used to reset the LIVE row to health
+              # "unknown" / agent "offline" with host = the posted ip (and a
+              # deprovision job read "succeeded" while its box lived on).
+              %ProvisionJob{kind: kind} when kind not in @provision_succeed_kinds ->
+                Repo.rollback(:conflict)
 
               # IDEMPOTENT: an already-succeeded job. Return it unchanged — NO
               # re-upsert of the barkpark, no error. A dropped response + worker
