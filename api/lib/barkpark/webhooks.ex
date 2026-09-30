@@ -599,6 +599,19 @@ defmodule Barkpark.Webhooks do
     result
   end
 
+  @doc """
+  Terminally abandon a pending delivery WITHOUT an attempt and WITHOUT counting
+  it against the endpoint's failure streak — for a resumed delivery whose
+  endpoint a person disabled (`PayloadRebuild.rebuild/1` answers
+  `{:disabled, reason}`). The row leaves `pending` as `failed_giveup` with the
+  reason in `last_error_text`; `attempts` is left as it was.
+  """
+  def abandon_delivery(%Delivery{} = d, reason) when is_binary(reason) do
+    d
+    |> Delivery.changeset(%{status: "failed_giveup", last_error_text: reason})
+    |> Repo.update()
+  end
+
   def mark_giveup(%Delivery{} = d, status_code, reason, attempts, latency_ms \\ nil) do
     result =
       d

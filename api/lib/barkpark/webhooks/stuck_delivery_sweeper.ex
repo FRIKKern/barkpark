@@ -218,6 +218,10 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeper do
             _ = Dispatcher.redeliver(webhook, body, delivery.event_id, delivery)
             :swept
 
+          {:disabled, reason} ->
+            _ = Barkpark.Webhooks.abandon_delivery(delivery, reason)
+            :skipped
+
           :gone ->
             :skipped
         end
