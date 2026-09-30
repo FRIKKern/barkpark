@@ -10,6 +10,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
   use Phoenix.Component
 
   alias Barkpark.PortableDoc.Render
+  alias BarkparkWeb.Studio.StudioLive.Blocks
   alias Phoenix.LiveView.JS
 
   attr :block, :map, required: true
@@ -183,7 +184,193 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
     end
   end
 
+  # route (PaperEditor's contextual editor): the painted caption writes the
+  # panel field `caption`. The meta line joins sport, distance, elevation and
+  # duration into one run, so it stays panel-edited.
+  def painted_copy_attrs(%{"type" => "route"} = block, id) do
+    case verbatim_name(Map.get(block, "caption"), "caption") do
+      "" ->
+        %{}
+
+      name ->
+        wiring(
+          "route-preview-" <> id,
+          ".bp-route__caption",
+          [name],
+          "route-form-" <> id,
+          "Route caption"
+        )
+    end
+  end
+
+  # gauge-list, share mode with map rows (the panel's own editable shape):
+  # data_viz.ex gauge_list_html/1 paints the title (when non-blank), then per
+  # row a label and, when non-blank, a note. Each painted run writes its panel
+  # field; the percentage readout is derived and never wired.
+  def painted_copy_attrs(%{"type" => "gauge-list"} = block, id) do
+    rows = Blocks.gauge_list_rows(block)
+
+    if Blocks.gauge_list_mode(block) != "share" or rows == [] or not Enum.all?(rows, &is_map/1) do
+      %{}
+    else
+      title = Map.get(block, "title")
+      title_names = if painted_string(title) == "", do: [], else: [verbatim_name(title, "title")]
+
+      row_names =
+        rows
+        |> Enum.with_index()
+        |> Enum.flat_map(fn {row, i} ->
+          note = Map.get(row, "note")
+          label_name = verbatim_name(Map.get(row, "label"), "gauge-#{i}-label")
+
+          if painted_string(note) == "",
+            do: [label_name],
+            else: [label_name, verbatim_name(note, "gauge-#{i}-note")]
+        end)
+
+      names = title_names ++ row_names
+
+      if Enum.all?(names, &(&1 == "")),
+        do: %{},
+        else:
+          wiring(
+            "gauge-list-preview-" <> id,
+            ".bp-gauge__t, .bp-gauge__l, .bp-gauge__n",
+            names,
+            "gauge-list-form-" <> id,
+            "Gauge text"
+          )
+    end
+  end
+
+  # bar-chart: each painted bar label writes `bar-<i>-label`. Values are
+  # numbers edited in the panel's number fields.
+  def painted_copy_attrs(%{"type" => "bar-chart"} = block, id) do
+    case Map.get(block, "bars") do
+      [_ | _] = bars ->
+        if Enum.all?(bars, &is_map/1) do
+          names =
+            bars
+            |> Enum.with_index()
+            |> Enum.map(fn {bar, i} -> verbatim_name(Map.get(bar, "label"), "bar-#{i}-label") end)
+
+          if Enum.all?(names, &(&1 == "")),
+            do: %{},
+            else:
+              wiring(
+                "bar-chart-preview-" <> id,
+                ".bp-bar-chart__l",
+                names,
+                "bar-chart-form-" <> id,
+                "Bar label"
+              )
+        else
+          %{}
+        end
+
+      _ ->
+        %{}
+    end
+  end
+
+  # code-tabs: compose.ex paints the tab strip (one button per map tab, its
+  # label verbatim), then one <pre> per tab holding its code verbatim. Labels
+  # write `tab-<i>-label`; each code panel writes `tab-<i>-value` and takes
+  # newlines (multiline host).
+  def painted_copy_attrs(%{"type" => "code-tabs"} = block, id) do
+    case Map.get(block, "tabs") do
+      [_ | _] = tabs ->
+        if Enum.all?(tabs, &is_map/1) do
+          indexed = Enum.with_index(tabs)
+
+          labels =
+            Enum.map(indexed, fn {tab, i} ->
+              label = Map.get(tab, "label")
+              if is_binary(label) and label != "", do: "tab-#{i}-label", else: ""
+            end)
+
+          values =
+            Enum.map(indexed, fn {tab, i} ->
+              value = Map.get(tab, "value") || Map.get(tab, "code")
+              if is_binary(value) and value != "", do: "tab-#{i}-value", else: ""
+            end)
+
+          names = labels ++ values
+
+          if Enum.all?(names, &(&1 == "")) do
+            %{}
+          else
+            ("technical-preview-" <> id)
+            |> wiring(
+              ".bp-code-tabs__tab, .bp-code-tabs__panel > pre",
+              names,
+              "technical-block-form-" <> id,
+              "Code tab"
+            )
+            |> Map.put("data-painted-copy-multiline", ".bp-code-tabs__panel > pre")
+          end
+        else
+          %{}
+        end
+
+      _ ->
+        %{}
+    end
+  end
+
+  # tabs (PaperEditor's stacked tabs editor): each section's painted label
+  # writes the panel field `panel-<i>-label`. A blank label paints the
+  # "Tab N" placeholder, which is never written back.
+  def painted_copy_attrs(%{"type" => "tabs"} = block, id) do
+    case Map.get(block, "tabs") do
+      [_ | _] = rows ->
+        names =
+          rows
+          |> Enum.with_index()
+          |> Enum.map(fn {row, i} ->
+            label = is_map(row) && Map.get(row, "label")
+            if is_binary(label) and String.trim(label) != "", do: "panel-#{i}-label", else: ""
+          end)
+
+        if Enum.all?(names, &(&1 == "")),
+          do: %{},
+          else:
+            wiring(
+              "tabs-preview-" <> id,
+              ":scope > .bp-tabs__section > .bp-tabs__label",
+              names,
+              "tabs-form-" <> id,
+              "Tab label"
+            )
+
+      _ ->
+        %{}
+    end
+  end
+
   def painted_copy_attrs(_block, _id), do: %{}
+
+  defp wiring(dom_id, selector, names, form, label) do
+    %{
+      "id" => dom_id,
+      "phx-hook" => "BarkparkPaperPaintedCopy",
+      "data-painted-copy" => selector,
+      "data-painted-copy-names" => Enum.join(names, ","),
+      "data-painted-copy-form" => form,
+      "data-painted-copy-label" => label
+    }
+  end
+
+  # The field name when the reader paints this stored string exactly as stored
+  # (data_viz.ex display_string/1 trims), else "" so the run stays read-only.
+  defp verbatim_name(value, name) do
+    if is_binary(value) and value != "" and value == String.trim(value), do: name, else: ""
+  end
+
+  # What data_viz.ex display_string/1 paints for a value ("" = nothing painted).
+  defp painted_string(value) when is_binary(value), do: String.trim(value)
+  defp painted_string(value) when is_number(value), do: to_string(value)
+  defp painted_string(_), do: ""
 
   defp blank?(value), do: not is_binary(value) or value == ""
 
