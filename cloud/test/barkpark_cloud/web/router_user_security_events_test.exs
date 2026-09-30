@@ -161,7 +161,8 @@ defmodule BarkparkCloud.Web.RouterUserSecurityEventsTest do
       token = session(user)
       _secret = enroll_and_confirm_two_factor(user, token)
 
-      assert call(:delete, "/v1/account/two-factor", nil, token).status == 200
+      assert call(:delete, "/v1/account/two-factor", %{current_password: @password}, token).status ==
+               200
 
       assert actions(trail(token)) == ["two_factor_disabled"]
     end
@@ -366,7 +367,10 @@ defmodule BarkparkCloud.Web.RouterUserSecurityEventsTest do
 
       # The member produces two user-security rows inside this admin's team.
       _secret = enroll_and_confirm_two_factor(member, member_token)
-      assert call(:delete, "/v1/account/two-factor", nil, member_token).status == 200
+
+      assert call(:delete, "/v1/account/two-factor", %{current_password: @password}, member_token).status ==
+               200
+
       assert call(:delete, "/v1/account/sessions", nil, member_token).status == 200
 
       assert actions(trail(member_token)) ==

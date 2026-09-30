@@ -35,7 +35,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/account/two-factor/enroll user   start TOTP enroll → {otpauth_uri, secret}
       POST    /v1/account/two-factor/confirm user  {code} → {recovery_codes} (2FA on)
       GET     /v1/account/two-factor user   {enabled: bool}
-      DELETE  /v1/account/two-factor user   disable 2FA → {ok: true}
+      DELETE  /v1/account/two-factor user   {current_password | otp} (when on) → {ok: true} | 401 reauth_failed
       POST    /v1/account/two-factor/recovery-codes user  regenerate → {recovery_codes}
       GET     /v1/account/security-audit user  the caller's OWN account-security audit rows (actor=self AND target=self)
       POST    /v1/auth/verify-email        —     {token} → confirm the account (single-use)
@@ -1969,9 +1969,38 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # DELETE /v1/account/two-factor → 200 {ok: true} — disable (nulls all columns).
+  # RE-AUTHENTICATED (task-e4cdc0f2e7766e1a): when 2FA is ON, turning it off
+  # needs the current password OR a current authenticator code in the body
+  # (`current_password` / `otp`). A bare session used to be enough, so a stolen
+  # session could strip the second factor before the owner noticed. Either
+  # proof is accepted because an OAuth-only account has no password but does
+  # have an authenticator. The password is tried first, so a password never
+  # spends the OTP budget. One refusal code for both (401 reauth_failed) says
+  # nothing about which one was wrong. With 2FA already off the route stays an
+  # idempotent 200: there is no factor to protect.
   delete "/v1/account/two-factor" do
     conn = Auth.require_user(conn, [])
 
+    cond do
+      conn.halted ->
+        conn
+
+      Accounts.two_factor_enabled?(conn.assigns.current_user) and
+          not two_factor_reauth?(conn.assigns.current_user, conn.body_params) ->
+        json(conn, 401, %{error: "reauth_failed"})
+
+      true ->
+        disable_two_factor(conn)
+    end
+  end
+
+  defp two_factor_reauth?(user, params) do
+    Accounts.valid_password?(user, params["current_password"]) or
+      (is_binary(params["otp"]) and params["otp"] != "" and
+         Accounts.verify_two_factor_otp(user, params["otp"]))
+  end
+
+  defp disable_two_factor(conn) do
     if conn.halted do
       conn
     else

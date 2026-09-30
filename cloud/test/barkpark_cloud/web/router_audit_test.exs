@@ -1580,7 +1580,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
         )
 
       before_count = audit_count()
-      conn = call(:delete, "/v1/account/two-factor", nil, token)
+      conn = call(:delete, "/v1/account/two-factor", %{current_password: @password}, token)
       assert conn.status == 200
 
       # Same witness for the disable verb: the row reached the table.
@@ -1662,7 +1662,10 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
 
       before_count = audit_count()
 
-      {conn, log} = with_log(fn -> call(:delete, "/v1/account/two-factor", nil, token) end)
+      {conn, log} =
+        with_log(fn ->
+          call(:delete, "/v1/account/two-factor", %{current_password: @password}, token)
+        end)
 
       assert conn.status == 200
       assert json_body(conn) == %{"ok" => true}
