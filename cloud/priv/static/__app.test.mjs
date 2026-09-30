@@ -33209,6 +33209,8 @@ const CCHW65_MUST_ANSWER = [
   // the instance has no forms plugin; the inbox paints this sentence as its
   // own state, so a deletion must red here.
   "forms_unsupported",
+  // task-8b4a4776ba35a9cd: the 409 on /v1/billing/checkout for a team that already pays.
+  "already_subscribed",
   // task-e4cdc0f2e7766e1a: the 409 on /v1/account/two-factor/enroll while 2FA is ON.
   "already_enabled",
   "no_team", "not_live", "password_invalid", "plan_invalid", "portal_failed",

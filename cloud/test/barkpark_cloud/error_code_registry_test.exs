@@ -92,6 +92,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "already_invited",
              "already_member",
              "already_provisioning",
+             "already_subscribed",
              "app_token_unsupported",
              "artifact_conflict",
              "artifact_digest_mismatch",

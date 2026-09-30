@@ -7756,6 +7756,12 @@ defmodule BarkparkCloud.Web.Router do
             # error the never-wired case already had.
             json(conn, 422, %{error: "billing_not_configured"})
 
+          {:error, :already_subscribed} ->
+            # task-8b4a4776ba35a9cd: the team already pays through a live Stripe
+            # subscription. A second Checkout would mint a second customer and
+            # bill twice; plan changes go through the billing portal.
+            json(conn, 409, %{error: "already_subscribed"})
+
           {:error, reason} ->
             json(conn, 422, %{error: "checkout_failed", reason: billing_reason(reason)})
         end

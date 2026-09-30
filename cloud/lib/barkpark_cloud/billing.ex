@@ -161,6 +161,35 @@ defmodule BarkparkCloud.Billing do
       nil ->
         {:error, :plan_invalid}
 
+      # task-8b4a4776ba35a9cd: a team that already PAYS through a live Stripe
+      # subscription must change plans in the billing portal. A second Checkout
+      # opens a second customer + subscription — billed twice — and the webhook
+      # cannot apply it. The console hid the button; the server is the gate.
+      _price_id when is_binary(plan) ->
+        if paying_subscription?(team) do
+          {:error, :already_subscribed}
+        else
+          do_checkout(team, plan)
+        end
+    end
+  end
+
+  defp paying_subscription?(team) do
+    case live_subscription(team_id(team)) do
+      %Subscription{status: status, gateway_subscription_id: gid}
+      when status == "active" and is_binary(gid) ->
+        true
+
+      _ ->
+        false
+    end
+  end
+
+  defp do_checkout(team, plan) do
+    case price_id(plan) do
+      nil ->
+        {:error, :plan_invalid}
+
       price_id ->
         case checkout_capability() do
           :available -> gateway().create_checkout_session(team_id(team), plan, price_id: price_id)
@@ -328,9 +357,17 @@ defmodule BarkparkCloud.Billing do
 
       %{suspended: length(suspended), restored: 0}
     else
+      # At most the HEADROOM (task-722ae49c93fe55d0). `overflow <= 0` means the
+      # live fleet fits, not that every quota-suspended box does: restoring all
+      # of them put 4 live boxes on a 3-box plan, and nothing re-checked. Oldest
+      # first, the mirror of the newest-first suspend above.
+      headroom = max(limit - length(live), 0)
+
       restored =
         tid
         |> Registry.list_quota_suspended_barkparks()
+        |> Enum.sort_by(& &1.inserted_at, {:asc, DateTime})
+        |> Enum.take(headroom)
         |> Enum.map(&unsuspend_one(&1, tid))
         |> Enum.reject(&is_nil/1)
 
@@ -735,7 +772,19 @@ defmodule BarkparkCloud.Billing do
     if is_binary(team_id) and is_binary(plan) do
       activate_from_session(team_id, plan, customer_id, subscription_id)
     else
-      {:error, :missing_metadata}
+      # A SIGNATURE-VERIFIED event we cannot act on (task-30d4058bf64c317b).
+      # Only the Checkout Session carries team_id/plan, so every
+      # customer.subscription.created{active} — and an updated{active} with no
+      # live row — lands here. Answering it with an error made the router send
+      # 400: Stripe retries a 4xx for days and can DISABLE the endpoint, after
+      # which payment_failed / deleted stop arriving. Acknowledge it, say so in
+      # the log, and change nothing. 4xx stays for bad signatures and payloads.
+      Logger.warning(
+        "[billing] verified Stripe event with no team_id/plan metadata ignored " <>
+          "(customer=#{inspect(customer_id)} subscription=#{inspect(subscription_id)})"
+      )
+
+      {:ok, :ignored}
     end
   end
 
@@ -765,7 +814,61 @@ defmodule BarkparkCloud.Billing do
   end
 
   defp do_activate_from_session(team_id, plan, customer_id, subscription_id) do
-    case live_subscription(team_id) do
+    live = live_subscription(team_id)
+
+    cond do
+      # task-731eb98d2a7f7097: a Stripe subscription we ALREADY hold a row for,
+      # that is not the team's live row, is a stale or redelivered session — the
+      # subscription was canceled since. Re-activating from it inserted a fresh
+      # ACTIVE row with the old ids and lifted billing_lapsed: an entitled team
+      # with no paying subscription. Stripe re-signs retries, so the signature
+      # tolerance never stopped it.
+      is_binary(subscription_id) and known_non_live_subscription?(subscription_id, live) ->
+        Logger.warning(
+          "[billing] checkout session for already-recorded, non-live subscription " <>
+            "#{subscription_id} (team #{team_id}) ignored — stale or redelivered event"
+        )
+
+        {:ok, :ignored}
+
+      # task-8b4a4776ba35a9cd: an ACTIVE team paying through a DIFFERENT Stripe
+      # subscription just completed a second checkout — the customer is now
+      # billed twice and this plan change is not applied. It used to be a
+      # silent :already_active. Still not auto-applied (swapping a live paid
+      # subscription is a human's call), but it is loud.
+      match?(%Subscription{status: "active"}, live) and is_binary(subscription_id) and
+          is_binary(live.gateway_subscription_id) and
+          live.gateway_subscription_id != subscription_id ->
+        Logger.error(
+          "[billing] DUPLICATE PAID SUBSCRIPTION: team #{team_id} is active on " <>
+            "#{live.gateway_subscription_id} and completed a second checkout " <>
+            "(#{subscription_id}, customer #{inspect(customer_id)}, plan #{plan}) — " <>
+            "the customer is billed twice; cancel one in Stripe"
+        )
+
+        :telemetry.execute([:barkpark_cloud, :billing, :duplicate_subscription], %{count: 1}, %{
+          team_id: team_id,
+          live_subscription_id: live.gateway_subscription_id,
+          new_subscription_id: subscription_id
+        })
+
+        {:ok, :already_active}
+
+      true ->
+        do_activate_from_live(live, team_id, plan, customer_id, subscription_id)
+    end
+  end
+
+  defp known_non_live_subscription?(subscription_id, live) do
+    live_id = live && live.id
+
+    from(s in Subscription, where: s.gateway_subscription_id == ^subscription_id)
+    |> Repo.all()
+    |> Enum.any?(&(&1.id != live_id))
+  end
+
+  defp do_activate_from_live(live, team_id, plan, customer_id, subscription_id) do
+    case live do
       %Subscription{plan: "trial"} = sub ->
         updated =
           sub

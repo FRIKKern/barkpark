@@ -197,6 +197,9 @@
     name_required: "A name is required.",
     no_active_subscription: "You need an active subscription to launch.",
     plan_invalid: "That plan can't be checked out.",
+    // task-8b4a4776ba35a9cd — the 409 on POST /v1/billing/checkout when the team
+    // already pays: a second checkout would bill twice.
+    already_subscribed: "Your team already has a paid plan. Change or cancel it from Manage billing.",
     // Two-factor challenge (POST /v1/auth/two-factor-challenge) — DISTINCT copy
     // so a 401 (wrong code, retryable) never reads like a 429 (limiter tripped).
     invalid_code: "That code didn't match. Authenticator codes rotate every 30 seconds — enter the current one, or use a recovery code.",
