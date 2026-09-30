@@ -2145,18 +2145,30 @@ defmodule PDS.Census do
         "mutation: hardcode sessionsRevoked — `mix test api/test/barkpark_web/controllers/pds_w36_revoke_all_receipt_test.exs` — the test `the receipt's sessionsRevoked EQUALS the rows the revoke stamped` — reds on Repo.aggregate",
     },
     # barkpark_web/controllers/auth_controller.ex:528
+    # RE-CITED (task-c7e10834d493da6f): this row used to cite the step-up test,
+    # whose body never calls mfa/verify. The cited test drives POST
+    # /v1/auth/mfa/verify, asserts the receipt's recovery_codes (10), then that
+    # login now demands a code — the side effect the `ok: true` stands for.
+    # Still UNJUDGED: no mutation has been run against this receipt.
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.mfa_verify/2", "16615157", "38279071"},
       verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence:
         {"api/test/barkpark_web/controllers/auth_controller_test.exs",
-         ~S|test "an enrolled user's stale session is challenged; step-up (TOTP) clears it", %{|}},
+         ~S|test "enroll → verify → login now requires a code", %{token: token} do|}},
     # barkpark_web/controllers/auth_controller.ex:567
+    # RE-CITED (task-c7e10834d493da6f): the step-up test only reaches mfa/disable
+    # as its guarded action. The cited test is the verb's own: a wrong password
+    # 403s, the right one 200s, and the stored user reads totp_enabled false —
+    # the side effect behind the bare `%{ok: true}`. Still UNJUDGED (no mutation).
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.mfa_disable/2", "103479204", "17468236"},
       verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence:
         {"api/test/barkpark_web/controllers/auth_controller_test.exs",
-         ~S|test "an enrolled user's stale session is challenged; step-up (TOTP) clears it", %{|}},
+         ~S|test "MEDIUM-8: mfa/disable needs the current password and turns MFA off", %{token: token} do|}},
     # barkpark_web/controllers/auth_controller.ex:600
+    # KEPT (task-c7e10834d493da6f): this is the one mfa_* row the step-up test
+    # really evidences — it posts /v1/auth/mfa/step-up and asserts the receipt's
+    # `factor` ("totp"), then that the guarded action clears.
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.mfa_step_up/2", "85508749", "111398976"},
       verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence:
