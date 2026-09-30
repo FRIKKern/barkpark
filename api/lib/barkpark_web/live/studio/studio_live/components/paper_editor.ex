@@ -3940,7 +3940,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
       <% t when t in ["form", "questionnaire"] -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-form-contextual-editor">
-          <div class="bp-paper-contextual-preview" data-test-id="paper-form-preview">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-form-preview"
+               {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}>
             <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
           </div>
           <%= if @tree_identity_safe and editable_form_questions?(@block) do %>

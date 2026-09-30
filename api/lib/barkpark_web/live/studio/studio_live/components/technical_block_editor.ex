@@ -35,7 +35,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
           {Phoenix.HTML.raw(@preview)}
         <% end %>
       </div>
-      <details id={"technical-controls-" <> @id} class="bp-paper-contextual-controls"
+      <details id={"technical-controls-" <> @id} class={technical_controls_class(@block)}
                phx-mounted={JS.ignore_attributes("open")}>
         <summary class="bp-paper-contextual-toggle">Configure {@label}</summary>
         <div class="bp-paper-contextual-panel">
@@ -348,7 +348,85 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
     end
   end
 
+  # form / questionnaire (PaperEditor's contextual editor): forms.ex paints per
+  # question a <legend> (prompt), a muted <p> for the rationale, a muted
+  # "Recommendation: …" <p>, then one <span> per choice. The prompt, the
+  # rationale and each single/multi option write their panel fields; the
+  # prefixed recommendation and the derived yes/no and scale labels never do.
+  def painted_copy_attrs(%{"type" => type} = block, id) when type in ["form", "questionnaire"] do
+    case Map.get(block, "questions") do
+      [_ | _] = questions ->
+        names =
+          questions
+          |> Enum.filter(&is_map/1)
+          |> Enum.with_index()
+          |> Enum.flat_map(fn {q, i} -> form_question_names(q, i) end)
+
+        if Enum.all?(names, &(&1 == "")),
+          do: %{},
+          else:
+            wiring(
+              "form-preview-" <> id,
+              ":scope > section > fieldset > legend, :scope > section > fieldset > p.bp-form-note, " <>
+                ":scope > section > fieldset > .bp-form-opts > label > span",
+              names,
+              "form-editor-" <> id,
+              "Question text"
+            )
+
+      _ ->
+        %{}
+    end
+  end
+
   def painted_copy_attrs(_block, _id), do: %{}
+
+  defp form_question_names(q, i) do
+    painted? = fn v -> is_binary(v) and v != "" end
+    prompt = if painted?.(q["prompt"]), do: "question-#{i}-prompt", else: ""
+    rationale = if painted?.(q["rationale"]), do: ["question-#{i}-rationale"], else: []
+    recommendation = if painted?.(q["recommendation"]), do: [""], else: []
+
+    choices =
+      case {q["type"], q["options"]} do
+        {t, opts} when t in ["single", "multi"] and is_list(opts) ->
+          opts
+          |> Enum.with_index()
+          |> Enum.map(fn {o, j} -> if painted?.(o), do: "question-#{i}-option-#{j}", else: "" end)
+
+        {"yesno", _} ->
+          ["", ""]
+
+        {"scale", _} ->
+          scale = if is_map(q["scale"]), do: q["scale"], else: %{}
+          min = form_bound(scale["min"], 1)
+          max = Kernel.min(form_bound(scale["max"], 5), min + 100)
+          if max >= min, do: List.duplicate("", max - min + 1), else: []
+
+        _ ->
+          []
+      end
+
+    [prompt | rationale] ++ recommendation ++ choices
+  end
+
+  defp form_bound(v, _default) when is_integer(v), do: v
+
+  defp form_bound(v, default) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, ""} -> n
+      _ -> default
+    end
+  end
+
+  defp form_bound(_v, default), do: default
+
+  # A code-tabs toggle rests ABOVE the block (like api-endpoint/steps/terminal):
+  # resting at the top-right corner it covered the second tab label.
+  defp technical_controls_class(%{"type" => "code-tabs"}),
+    do: "bp-paper-contextual-controls bp-paper-contextual-controls--code-tabs"
+
+  defp technical_controls_class(_block), do: "bp-paper-contextual-controls"
 
   defp wiring(dom_id, selector, names, form, label) do
     %{

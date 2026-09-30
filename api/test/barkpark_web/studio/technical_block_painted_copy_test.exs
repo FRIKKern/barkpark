@@ -263,6 +263,91 @@ defmodule BarkparkWeb.Studio.TechnicalBlockPaintedCopyTest do
     end
   end
 
+  test "form wires prompts, rationales and single/multi options; derived choices never" do
+    block = %{
+      "id" => "fm",
+      "type" => "form",
+      "kind" => "questionnaire",
+      "questions" => [
+        %{
+          "id" => "q1",
+          "prompt" => "Which surface?",
+          "rationale" => "Steers polish.",
+          "recommendation" => "reader",
+          "type" => "single",
+          "options" => ["reader", "studio"]
+        },
+        %{"id" => "q2", "prompt" => "Ship it?", "type" => "yesno"},
+        %{
+          "id" => "q3",
+          "prompt" => "Rate it",
+          "type" => "scale",
+          "scale" => %{"min" => 1, "max" => 3}
+        },
+        %{"id" => "q4", "prompt" => "Anything else?", "type" => "text"}
+      ]
+    }
+
+    attrs = TechnicalBlockEditor.painted_copy_attrs(block, "fm")
+    assert attrs["data-painted-copy-form"] == "form-editor-fm"
+
+    assert attrs["data-painted-copy-names"] ==
+             "question-0-prompt,question-0-rationale,,question-0-option-0,question-0-option-1," <>
+               "question-1-prompt,,," <>
+               "question-2-prompt,,,," <>
+               "question-3-prompt"
+
+    # the browser selector is :scope-anchored; the same rows without :scope
+    selector = String.replace(attrs["data-painted-copy"], ":scope > ", "")
+    names = String.split(attrs["data-painted-copy-names"], ",")
+    assert painted_count(block, selector) == length(names)
+
+    html =
+      render_component(&BarkparkWeb.Studio.StudioLive.Components.PaperEditor.paper_block_fields/1,
+        block: block,
+        root_slug: "paper",
+        canvas_enabled: true,
+        paper_rev: 1
+      )
+
+    tree = LazyHTML.from_fragment(html)
+    preview = LazyHTML.query(tree, "[data-test-id='paper-form-preview']")
+    assert LazyHTML.attribute(preview, "phx-hook") == ["BarkparkPaperPaintedCopy"]
+    form = LazyHTML.query(tree, "form#form-editor-fm")
+
+    for name <- Enum.reject(names, &(&1 == "")) do
+      assert form |> LazyHTML.query(~s([name="#{name}"])) |> Enum.count() == 1, name
+    end
+  end
+
+  test "a code-tabs Configure toggle rests above the block, off the tab strip" do
+    {_html, _el} =
+      preview(%{
+        "id" => "ct2",
+        "type" => "code-tabs",
+        "tabs" => [%{"label" => "JS", "value" => "x"}]
+      })
+
+    html =
+      render_component(&TechnicalBlockEditor.technical_block_editor/1,
+        block: %{
+          "id" => "ct2",
+          "type" => "code-tabs",
+          "tabs" => [%{"label" => "JS", "value" => "x"}]
+        },
+        id: "ct2"
+      )
+
+    assert html =~
+             ~s(class="bp-paper-contextual-controls bp-paper-contextual-controls--code-tabs")
+
+    css =
+      File.read!(Path.expand("../../../priv/static/assets/bp-paper-editor-shell.css", __DIR__))
+
+    assert css =~
+             ".bp-paper-contextual-controls.bp-paper-contextual-controls--code-tabs:not([open])"
+  end
+
   test "other technical types and a footnote with nothing painted get no wiring" do
     for block <- [
           %{"id" => "d", "type" => "diff", "diff" => "+x"},
