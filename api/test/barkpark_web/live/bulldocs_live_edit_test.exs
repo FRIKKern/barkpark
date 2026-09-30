@@ -1293,6 +1293,57 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert stored_blocks(slug) == committed_blocks
     end
 
+    # The request-LESS op path (paper-op / paper-add-block with no request_id)
+    # checked only the :can_edit? assign set at mount, so an already-open socket
+    # kept writing after its token was revoked (r2-lane-b paper write-path audit).
+    test "a revoked token cannot keep writing through the request-less op path", %{
+      conn: conn,
+      slug: slug
+    } do
+      raw = "eol-requestless-#{System.unique_integer([:positive])}"
+
+      {:ok, token} =
+        Auth.create_token(
+          raw,
+          "eol requestless",
+          @dataset,
+          ["read", "write"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
+
+      {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
+      render_click(view, "paper-toggle-edit", %{})
+
+      render_hook(view, "paper-op", %{
+        "op" => "patch-block",
+        "id" => "b-body",
+        "if_rev" => assigns_of(view).paper_rev,
+        "patch" => %{"content" => [%{"type" => "text", "value" => "Before revoke"}]}
+      })
+
+      assert assigns_of(view).last_save_ok? == true
+      before = stored_blocks(slug)
+
+      {:ok, _revoked} = Auth.revoke_token(token)
+
+      render_hook(view, "paper-op", %{
+        "op" => "patch-block",
+        "id" => "b-body",
+        "if_rev" => assigns_of(view).paper_rev,
+        "patch" => %{"content" => [%{"type" => "text", "value" => "After revoke"}]}
+      })
+
+      assert assigns_of(view).last_save_ok? == false
+      assert stored_blocks(slug) == before
+
+      render_hook(view, "paper-add-block", %{
+        "block-type" => "paragraph",
+        "if_rev" => assigns_of(view).paper_rev
+      })
+
+      assert stored_blocks(slug) == before
+    end
+
     test "canvas readiness refresh pushes the shared display channels", %{conn: conn, slug: slug} do
       {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
       render_click(view, "paper-toggle-edit", %{})

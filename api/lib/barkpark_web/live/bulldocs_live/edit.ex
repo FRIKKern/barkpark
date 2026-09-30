@@ -304,7 +304,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   defp apply_unidentified_op(socket, op) do
     cond do
-      not writable?(socket) ->
+      not fresh_writable?(socket) ->
         refuse_save(socket, nil)
 
       not is_binary(socket.assigns[:slug]) ->
@@ -333,7 +333,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   """
   def apply_ops(socket, ops) when is_list(ops) and ops != [] do
     cond do
-      not writable?(socket) ->
+      not fresh_writable?(socket) ->
         refuse(socket)
 
       not is_binary(socket.assigns[:slug]) ->
@@ -951,6 +951,19 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   # Connected item-share readers retain the signed mount session in the
   # PluginScopeSession liveness assign. Resolve its raw link again for EVERY
   # write so revocation/expiry is checked before an idempotency receipt lookup.
+  # The request-less write paths re-check the credential exactly as the
+  # request-identified path does: the :can_edit? assign is set at mount, so an
+  # open socket whose token was revoked (or whose share lapsed) must not keep
+  # writing on the strength of it.
+  defp fresh_writable?(socket) do
+    writable?(socket) and
+      PaperViewer.can_edit?(
+        fresh_authorization_assigns(socket.assigns),
+        doc_field(socket.assigns[:paper_doc], :workspace_id),
+        socket.assigns[:slug]
+      )
+  end
+
   defp fresh_authorization_assigns(assigns) do
     assigns
     |> refresh_api_token()
