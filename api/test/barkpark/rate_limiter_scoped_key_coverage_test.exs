@@ -47,6 +47,7 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
   # these is required to be compliant. It exists so the scan cannot go green by
   # finding nothing — if a site is renamed away, fix this list deliberately.
   @known_sites [
+    "lib/barkpark/accounts.ex",
     "lib/barkpark/plugins/bulldocs/web/bulldocs_form_controller.ex",
     "lib/barkpark/plugins/forms/web/submission_controller.ex",
     "lib/barkpark/quiz/spawn_budget.ex",
@@ -135,9 +136,11 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
     # pulse_controller carries two (write bucket + read bucket); quiz
     # spawn_budget added the ninth; the Forms submission controller the tenth
     # (one `check` call serving its per-IP and per-endpoint buckets); the
-    # Studio "Your data" page's per-user erase-password cap the eleventh.
-    assert Enum.sum(Enum.map(counts, &elem(&1, 1))) == 11,
-           "expected the 11 call sites the row names, found #{inspect(counts)}"
+    # Studio "Your data" page's per-user erase-password cap the eleventh; the
+    # per-account TOTP attempt budget in Accounts the twelfth
+    # (task-4d52cfb35cbb0b08).
+    assert Enum.sum(Enum.map(counts, &elem(&1, 1))) == 12,
+           "expected the 12 call sites the row names, found #{inspect(counts)}"
   end
 
   test "POSITIVE CONTROL: the scanner catches a call site that bypasses the helper" do
