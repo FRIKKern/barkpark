@@ -92,10 +92,12 @@ func TestWriteReceiptsCarryTheirOutcome(t *testing.T) {
 		{
 			// HTTP 200 by design — the controller returns the delivery VERDICT in
 			// the body. The command exists to tell you whether an endpoint works.
+			// The server's REAL body for a refused endpoint: its status set is
+			// pending | ok | failed_giveup, so "failed" never reaches the wire.
 			verb:    "webhook test-send (delivery failed)",
-			payload: `{"delivery":{"id":"d1","status":"failed","attempts":1,"last_error_text":"connection refused"}}`,
+			payload: `{"delivery":{"attempts":1,"created_at":"2026-09-30T19:07:04.232726Z","endpoint_id":null,"event_id":null,"id":277,"last_error_text":"%Req.TransportError{reason: :econnrefused}","last_latency_ms":0,"last_status_code":null,"status":"failed_giveup","updated_at":"2026-09-30T19:07:04.235703Z"}}`,
 			before:  "ok",
-			want:    []string{"failed", "connection refused"},
+			want:    []string{"delivery: failed_giveup", "econnrefused"},
 		},
 	}
 
