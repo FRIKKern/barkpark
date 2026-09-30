@@ -243,12 +243,28 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLiveTest do
 
       :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:production")
 
+      # task-a8ac171ba5cddba4: the moduledoc promises webhooks see this edit.
+      # The fan-out's `selected` telemetry is the proof it was dispatched.
+      me = self()
+      handler = "staleness-ack-fanout-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler,
+        [:barkpark, :webhooks, :fan_out, :selected],
+        fn _e, _m, meta, _ -> send(me, {:fan_out, meta.doc_id}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
       conn = init_test_session(conn, %{"api_token" => @admin_token})
       {:ok, view, _html} = live(conn, @url)
 
       view
       |> element(~s|tr[data-test-doc-id="ack-canon"] button[data-test-action="acknowledge"]|)
       |> render_click()
+
+      assert_receive {:fan_out, "ack-canon"}, 1_000
 
       assert_receive {:document_changed,
                       %{event_id: event_id, mutation: "update", doc_id: "ack-canon"}},
