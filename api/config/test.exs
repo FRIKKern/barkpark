@@ -205,6 +205,12 @@ config :barkpark, Barkpark.Mailer, adapter: Swoosh.Adapters.Test
 # a small budget explicitly and drives the live route until it 429s.
 config :barkpark, :auth_write_rate_limits, register: 1_000_000
 
+# task-7943350f12d1d5e1: UserNotifier's per-recipient auth-mail budget keys on
+# the ADDRESS and a mailer has no conn to carry the per-test scope, so fixture
+# addresses shared across the suite would drain one bucket. Effectively-off
+# here; user_notifier_budget_test.exs pins the production burst (3) itself.
+config :barkpark, :auth_mail_burst, 1_000_000
+
 # Fixed paper-ingest secret for tests.
 config :barkpark, :ingest_token, "barkpark-test-ingest-token"
 config :barkpark, :media_signing_secret, "test-media-signing-secret"

@@ -61,7 +61,53 @@ defmodule Barkpark.Accounts.UserNotifier do
     """)
   end
 
+  # task-7943350f12d1d5e1: THE PER-RECIPIENT BUDGET. The browser reset and
+  # magic-link doors mount no RateLimit, and the JSON twins are metered per IP
+  # only, so nothing bounded how many of these mails one ADDRESS received.
+  # Each kind (keyed by subject) gets a burst of `@mail_burst` per recipient,
+  # then about one per `@mail_refill_seconds`. A throttled send is skipped and
+  # logged without the address; the callers ignore this result, so the HTTP
+  # answer stays the same anti-enumeration receipt either way.
+  #
+  # The key is the ADDRESS, and a mailer has no conn to carry the per-test
+  # rate-limit scope, so config/test.exs raises the burst (`:auth_mail_burst`)
+  # far past what any suite sends to one fixture address; the budget's own
+  # test pins the production value.
+  @mail_burst 3
+  @mail_refill_seconds 600
+
   defp deliver(to, subject, body) do
+    if mail_budget_ok?(to, subject) do
+      send_now(to, subject, body)
+    else
+      Logger.warning(
+        "transactional email THROTTLED: subject=#{inspect(subject)} " <>
+          "recipient_hash=#{recipient_hash(to)} (per-recipient budget spent)"
+      )
+
+      {:error, :throttled}
+    end
+  end
+
+  defp mail_budget_ok?(to, subject) do
+    Barkpark.RateLimiter.check(
+      Barkpark.RateLimiter.scoped_key(nil, {:auth_mail, normalize(to), subject}),
+      capacity: Application.get_env(:barkpark, :auth_mail_burst, @mail_burst),
+      refill_per_sec: 1 / @mail_refill_seconds
+    ) == :ok
+  end
+
+  defp normalize(to) when is_binary(to), do: to |> String.trim() |> String.downcase()
+  defp normalize(to), do: to
+
+  # Enough to correlate log lines for one address; never the address itself.
+  defp recipient_hash(to) do
+    :crypto.hash(:sha256, to |> normalize() |> to_string())
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 12)
+  end
+
+  defp send_now(to, subject, body) do
     email =
       new()
       |> to(to)
