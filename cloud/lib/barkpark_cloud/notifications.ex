@@ -356,6 +356,16 @@ defmodule BarkparkCloud.Notifications do
   end
 
   @doc """
+  Tell the FORMER address that the account email was changed (task-9a30ab22cf0842f2)
+  — over the PLATFORM transport, user-scoped like the other lifecycle mails.
+  """
+  def deliver_email_changed_notice(to, new_email) when is_binary(to) and is_binary(new_email) do
+    result = Transactional.deliver_email_changed_notice(to, new_email)
+    record_delivery(nil, to, "email_changed_notice", "transactional", result, @platform_carrier)
+    result
+  end
+
+  @doc """
   cch-w30-bl — deliver the PAT expiry warning to the token's OWNER over the
   PLATFORM transport, and record it as a USER-SCOPED row (`team_id` nil, kind
   `"transactional"`), exactly like password-reset / verify / email-change-code.

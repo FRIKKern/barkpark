@@ -2085,6 +2085,9 @@ defmodule BarkparkCloud.Accounts do
           token.token_hash == UserToken.hash_token(code) ->
             with {:ok, updated} <- Repo.update(User.apply_email_change_changeset(user)),
                  {:ok, _tok} <- Repo.update(UserToken.changeset(token, %{revoked_at: n})) do
+              # A reset link already mailed to the OLD address (sent_to is nil
+              # on reset rows) must not outlive the change (task-9a30ab22cf0842f2).
+              _ = revoke_reset_tokens(user.id, n)
               {:ok, updated}
             else
               # pending_email got taken between stage and confirm → unique_constraint
