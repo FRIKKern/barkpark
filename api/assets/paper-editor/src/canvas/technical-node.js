@@ -50,6 +50,8 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
 import { wireAtomAccessibility, readerPaintClass } from "./embed-node.js";
+import { wireFiletreeInline } from "./filetree-inline.js";
+import { wireDiffInline } from "./diff-inline.js";
 
 // The TipTap node NAMES. Like bpCode / bpDiagram the node name differs from the
 // portable-doc bpType ("diff" / "filetree"): run-convert.js maps block.type → node
@@ -315,6 +317,35 @@ function createTechnicalNode(bpType) {
 
         paint(node);
 
+        // The reader's own painted lines edit where they read (filetree-inline.js:
+        // tree lines + legend; diff-inline.js: each row's text); the disclosure
+        // stays for the whole body and the metadata.
+        const currentAttrs = () => {
+          const pos = typeof getPos === "function" ? getPos() : null;
+          return (pos == null ? null : editor.state.doc.nodeAt(pos)?.attrs) || node.attrs || {};
+        };
+        const wireNative = bpType === "filetree" ? wireFiletreeInline : bpType === "diff" ? wireDiffInline : null;
+        const nativeInline = wireNative ? wireNative(body, {
+          getBlock: () => {
+            const attrs = currentAttrs();
+            const block = { type: bpType, [spec.body]: attrs[spec.body] || "" };
+            for (const meta of spec.meta) if (attrs[meta.key] != null) block[meta.key] = attrs[meta.key];
+            return block;
+          },
+          isEditable: () => editor.isEditable,
+          commit: (next) => {
+            if (!editor.isEditable || typeof getPos !== "function") return;
+            const pos = getPos();
+            const cur = pos == null ? null : editor.state.doc.nodeAt(pos);
+            if (!cur || cur.type.name !== spec.nodeName) return;
+            const attrs = { ...cur.attrs, [spec.body]: next[spec.body] ?? "" };
+            for (const meta of spec.meta) attrs[meta.key] = next[meta.key] == null || next[meta.key] === "" ? null : next[meta.key];
+            editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, attrs));
+          },
+          undo: () => editor.commands.undo(),
+          redo: () => editor.commands.redo(),
+        }) : null;
+
         // a11y: a tab stop with a role + accessible name, Enter/Space → NodeSelection
         // → Backspace deletes. wireAtomAccessibility's `e.target !== dom` guard keeps
         // a keystroke inside the textarea from triggering atom-select.
@@ -365,6 +396,7 @@ function createTechnicalNode(bpType) {
           }, DEBOUNCE_MS);
         };
         const flushPending = () => {
+          if (nativeInline) nativeInline.flush();
           if (!writeTimer) return;
           clearTimeout(writeTimer);
           writeTimer = null;
@@ -389,6 +421,7 @@ function createTechnicalNode(bpType) {
           update: (updated) => {
             if (updated.type.name !== spec.nodeName) return false;
             paint(updated);
+            if (nativeInline) nativeInline.refresh();
             return true;
           },
 
@@ -406,6 +439,7 @@ function createTechnicalNode(bpType) {
             for (const { input } of metaInputs)
               input.removeEventListener("input", scheduleWrite);
             dom.removeEventListener("bp-flush-node", flushPending);
+            if (nativeInline) nativeInline.destroy();
           },
         };
       };

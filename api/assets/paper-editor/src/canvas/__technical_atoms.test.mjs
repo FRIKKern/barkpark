@@ -9,9 +9,9 @@
 //      (an untouched block must never dirty the document — the no-op settlement
 //      that makes "open the canvas and save" a no-write);
 //   3. an EDIT to the body or to a metadata field emits EXACTLY ONE patch-block
-//      whose patch keys are the SAME key set TechnicalBlockEditor.build_patch/2
-//      writes from the classic form (so both Studio surfaces persist the same
-//      shape — this is what "both surfaces, lossless" means mechanically);
+//      whose patch keys are drawn from the key set TechnicalBlockEditor.build_patch/2
+//      writes from the classic form: the body always, a metadata key only when
+//      it changed (a body edit never writes file:"" the author never set);
 //   4. docToBlocks reconstructs the ORIGINAL block byte-for-byte (deep-equal),
 //      including the ABSENCE of an unset metadata key (no stray file:"").
 //
@@ -110,19 +110,25 @@ for (const c of CASES) {
     assert.deepEqual(ops, [], `untouched ${c.label} dirtied the document`);
   });
 
-  check(`${c.label}: a BODY edit emits exactly one patch-block with the form's key set`, () => {
+  check(`${c.label}: a BODY edit emits exactly one patch-block carrying only the body`, () => {
+    // Unchanged metadata never rides (the callout rule, task-56bafb69a8a1f250): a
+    // body edit must not write file:"" / lang:"" / legend:"" keys the author never
+    // set. Every key the patch may carry is still one of the form's keys.
     const nodes = project([c.block]);
     nodes[0].attrs[c.body] = c.block[c.body] + "\n+appended";
     const ops = runToOps([c.block], doc(nodes));
     assert.equal(ops.length, 1, `expected 1 op, got ${ops.length}`);
     assert.equal(ops[0].op, "patch-block");
     assert.equal(ops[0].id, c.block.id);
-    assert.deepEqual(
-      Object.keys(ops[0].patch).sort(),
-      [...c.patchKeys].sort(),
-      "the canvas patch key set diverged from TechnicalBlockEditor.build_patch/2 — the two Studio surfaces would persist different shapes",
-    );
+    assert.deepEqual(Object.keys(ops[0].patch), [c.body], "only the edited body rides the patch");
+    assert.ok(Object.keys(ops[0].patch).every(k => c.patchKeys.includes(k)),
+      "the canvas patch key set left TechnicalBlockEditor.build_patch/2's keys");
     assert.equal(ops[0].patch[c.body], c.block[c.body] + "\n+appended");
+    const bare = { id: c.block.id, type: c.block.type, [c.body]: c.block[c.body] };
+    const bareNodes = project([bare]);
+    bareNodes[0].attrs[c.body] = c.block[c.body] + "\n+x";
+    assert.deepEqual(runToOps([bare], doc(bareNodes))[0].patch, { [c.body]: c.block[c.body] + "\n+x" },
+      "a block with no metadata gains no metadata keys from a body edit");
   });
 
   check(`${c.label}: CLEARING a metadata field emits it as "" (removal-safe merge)`, () => {

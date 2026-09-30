@@ -1592,6 +1592,8 @@ bp-paper-canvas .ProseMirror :is(.bp-table__th, .bp-table__td) { white-space: pr
    them — one declaration block, so the two attr-atom families can never drift and no
    new hand-stamped type literal enters the design ratchet. */
 .bp-canvas-diagram, .bp-canvas-technical { position: relative; }
+/* A diff/file tree paints the reader's evidence pull: never clip it at the column (its lines edit in place). */
+.bp-canvas-technical { overflow-x: visible; }
 .bp-canvas-diagram-editor, .bp-canvas-technical-editor { position: absolute; top: 0; right: 0; z-index: 3; max-width: 100%; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; opacity: 0; pointer-events: none; }
 .bp-canvas-diagram:hover .bp-canvas-diagram-editor,
 .bp-canvas-diagram:focus-within .bp-canvas-diagram-editor,
