@@ -187,6 +187,10 @@ defmodule BarkparkCloud.Sites.Deploy do
   # `source` (charter D86) is WHERE the bytes will come from: "box-build" (the
   # default and every pre-W9 call) or "prebuilt". A prebuilt mint is
   # NON-IDEMPOTENT BY CONSTRUCTION — see `maybe_prebuilt_nonce/2`.
+  # Dead statuses and the template sweep's retry cooldown — see
+  # `rebuild_after_terminal/6` (task-1621e517bca0d51a).
+  @terminal_failed ~w(failed cancelled)
+  @template_retry_cooldown_s 24 * 3600
   @spec enqueue(Site.t(), Barkpark.t(), boolean(), String.t(), String.t() | nil, String.t()) ::
           {:ok, Deployment.t()} | {:duplicate, Deployment.t()} | {:error, Ecto.Changeset.t()}
   def enqueue(
@@ -217,8 +221,62 @@ defmodule BarkparkCloud.Sites.Deploy do
         {:ok, deployment}
 
       {:error, %Ecto.Changeset{} = cs} ->
-        recover_conflict(cs, site, build_id)
+        case recover_conflict(cs, site, build_id) do
+          {:duplicate, %Deployment{build_id: ^build_id, status: status} = dead}
+          when status in @terminal_failed ->
+            rebuild_after_terminal(site, bp, content_rev, trigger, source, dead)
+
+          other ->
+            other
+        end
     end
+  end
+
+  # task-1621e517bca0d51a: the `(site_id, build_id)` index covers EVERY status,
+  # so one failed or cancelled build used to own its inputs forever. An unforced
+  # enqueue of the same code+content+config found that dead row and answered
+  # `{:duplicate, dead}`: `POST /v1/sites/:id/deploy` returned 200 with the old
+  # failure and built nothing, and TemplateFreshnessWorker counted a quiet
+  # duplicate every hour, so a template roll whose first build failed never
+  # landed. Only a live or still-active row is a correct no-op. A dead one gets
+  # a fresh build under the force nonce (the key `force` already uses).
+  #
+  # The hourly template sweep is the one caller that would turn this into a
+  # retry loop against a build that keeps failing, so it waits out
+  # `@template_retry_cooldown_s` after the site's last dead template build.
+  defp rebuild_after_terminal(site, bp, content_rev, "template-auto" = trigger, source, dead) do
+    if recent_dead_template_build?(site.id),
+      do: {:duplicate, dead},
+      else: mint_fresh(site, bp, content_rev, trigger, source)
+  end
+
+  defp rebuild_after_terminal(site, bp, content_rev, trigger, source, _dead),
+    do: mint_fresh(site, bp, content_rev, trigger, source)
+
+  defp mint_fresh(site, bp, content_rev, trigger, source) do
+    build_id = build_id(site, bp, content_rev, true, source)
+
+    case Registry.create_deployment(site, %{
+           build_id: build_id,
+           content_rev: content_rev,
+           trigger: trigger,
+           source: source
+         }) do
+      {:ok, deployment} -> {:ok, deployment}
+      {:error, %Ecto.Changeset{} = cs} -> recover_conflict(cs, site, build_id)
+    end
+  end
+
+  defp recent_dead_template_build?(site_id) do
+    since = DateTime.add(DateTime.utc_now(), -@template_retry_cooldown_s, :second)
+
+    Repo.exists?(
+      from(d in Deployment,
+        where:
+          d.site_id == ^site_id and d.trigger == "template-auto" and
+            d.status in @terminal_failed and d.inserted_at > ^since
+      )
+    )
   end
 
   # A unique conflict on create. TWO indexes can refuse this INSERT and Postgres
