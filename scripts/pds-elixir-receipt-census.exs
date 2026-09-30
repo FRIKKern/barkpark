@@ -2580,6 +2580,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:83
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.task_list_response/4", "125262428", "1576835"},
+      stale_ack: %{recorded: {"125262428", "1576835"}, current: {"125262428", "132352533"},
+        why:
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 1576835 -> 132352533; head_hash 125262428 is unmoved. task-1ca34359dc0805df threaded the index's STRICT view into the receipt expression (render_task_list(docs, conn, view) + the same view into maybe_put_brief_truncation_help) so `?view=ids` is index-only; the `ok: true` receipt and its seal are unchanged. Transcribed from a run of this census on that branch, never re-typed. The row is NOT re-derived: it was UNJUDGED before and stays UNJUDGED, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "wave 36 measured this receipt divergent and pds-w36-help-seal-fix repaired it; no committed differential naming task_list_response/3 resolves in the tree at this sha, so the REPAIR is unjudged here rather than credited. UPGRADE-ON-MERGE (wave 37 review, 2026-08-02): that slice lands api/test/barkpark_web/controllers/pds_w36_help_seal_probe_test.exs, whose PROBE A and PROBE D were re-verified RED by this reviewer against a faithful revert of the seal hoist. It cites the ROUTE, never the function name, so this note's wording stays literally true after the merge and no arm will red — re-derive the row to end_to_end by hand when the branch lands.",

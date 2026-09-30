@@ -54,6 +54,12 @@ type fakeLedger struct {
 	// shape. It is what lets a test assert WHICH projection the board asked for
 	// rather than infer it from a byte count.
 	viewsSeen []string
+	// limitsSeen is the ?limit= of every corpus GET, index-aligned with
+	// viewsSeen, so a test can tell a full walk (1000) from a head page (50).
+	limitsSeen []int
+	// refuseIDs makes `?view=ids` answer 400 the way a server that predates the
+	// view does (its strict index view parser refuses an undeclared value).
+	refuseIDs bool
 	events    []TaskEvent
 	cursor    int64
 	srv       *httptest.Server
@@ -174,18 +180,31 @@ func (l *fakeLedger) serveTasks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	route := "tasks"
 	view := q.Get("view")
-	l.mu.Lock()
-	rows := append([]ledgerRow(nil), l.rows...)
-	l.viewsSeen = append(l.viewsSeen, view)
-	l.mu.Unlock()
-	if q.Get("lifecycle_status") == "in_progress" {
-		route = "tasks_in_progress"
-		rows = nil
-	}
 	limit := 1000
 	fmt.Sscanf(q.Get("limit"), "%d", &limit)
 	if limit <= 0 {
 		limit = 1000
+	}
+	l.mu.Lock()
+	rows := append([]ledgerRow(nil), l.rows...)
+	l.viewsSeen = append(l.viewsSeen, view)
+	l.limitsSeen = append(l.limitsSeen, limit)
+	refuse := l.refuseIDs
+	l.mu.Unlock()
+	if view == "ids" {
+		route = "tasks_ids"
+		if refuse {
+			body := []byte(`{"error":{"code":"invalid_filter","message":"view must be one of full, brief, board; got \"ids\""}}`)
+			l.record(route, len(body))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write(body)
+			return
+		}
+	}
+	if q.Get("lifecycle_status") == "in_progress" {
+		route = "tasks_in_progress"
+		rows = nil
 	}
 	start := 0
 	if c := q.Get("cursor"); c != "" {
@@ -197,6 +216,16 @@ func (l *fakeLedger) serveTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	docs := make([]map[string]any, 0, end-start)
 	for _, row := range rows[start:end] {
+		if view == "ids" {
+			// The REAL ids projection (params.ex render_ids/1): membership and
+			// the resync's comparison fields, nothing else.
+			docs = append(docs, map[string]any{
+				"doc_id":     row.DocID,
+				"status":     "published",
+				"updated_at": row.UpdatedAt.Format(time.RFC3339Nano),
+			})
+			continue
+		}
 		doc := map[string]any{
 			"doc_id":           row.DocID,
 			"rev":              row.Rev,

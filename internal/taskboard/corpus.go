@@ -77,7 +77,9 @@ const (
 	// even when the incremental one could have answered. It is the ONLY thing
 	// that can retire a row which vanished without a write (see the note above),
 	// so it is a correctness floor, not a tuning knob. Ten minutes is ~1/120th
-	// of the re-list rate the board ran at before.
+	// of the re-list rate the board ran at before. On a LIVE board with a sound
+	// base the resync is a membership walk (`?view=ids`, corpus_membership.go),
+	// not a re-download; the full walk remains the fallback for any doubt.
 	fullResyncEvery = 10 * time.Minute
 )
 
@@ -437,6 +439,21 @@ func fetchTaskCorpusWalk(ctx context.Context, c *apiclient.Client, cc *corpusCac
 		}
 		// ok=false is never an error — it is "the incremental walk cannot
 		// honestly answer this one". Fall through to the full walk.
+	} else if cc.live && resyncByMembershipUsable(base) {
+		// The base is sound but DUE (fullResyncEvery): re-verify it by
+		// membership (~1 MB) instead of re-downloading it (~14 MB). See
+		// corpus_membership.go; any doubt falls through to the full walk.
+		fresh, ok, err := resyncByMembership(ctx, c, base, cc.listView(), now)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if ok {
+			cc.store(fresh)
+			// Persisted at the same cadence the full walk persists (once per
+			// fullResyncEvery), so the next launch adopts a verified base.
+			cc.persist(fresh)
+			return fresh.tasks, fresh.details, true, nil
+		}
 	}
 	tasks, details, exhaustive, err := fetchTaskPages(ctx, c, listFetchPath+cc.listView())
 	if err != nil {
