@@ -273,7 +273,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
             result =
               legacy
               |> Runner.run(base: config.base)
-              |> sweep_cleanup(ep, test_config)
+              |> sweep_cleanup(ep, test_config, legacy)
 
             %{
               endpoint_id: ep.id,
@@ -310,20 +310,33 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     {scenario_results, last_results}
   end
 
-  # Undo what a Run all scenario created, for the endpoints whose create leaves
-  # a LIVE side effect: endpoint id -> fun of the response body -> cleanup
-  # steps. Run all only: a single Run is the author's explicit request and keeps
-  # its result. The steps' outcome rides on the result as `:sweep_cleanup` so a
-  # failed undo is visible.
-  @sweep_cleanups %{
-    "webhooks-create" => &Barkpark.ApiTester.Endpoints.Webhooks.created_webhook_cleanup/1
-  }
+  # Undo what a Run all scenario left behind: a live webhook, or fixture
+  # documents in the author's real dataset. Run all only: a single Run is the
+  # author's explicit request and keeps its result. Only after a 2xx (a refused
+  # scenario changed nothing). The steps' outcome rides on the result as
+  # `:sweep_cleanup` so a failed undo is visible.
+  #
+  # Each fun takes (response body, the scenario's request map) -> steps: the
+  # webhook undo reads the created id from the RESPONSE; the mutate undo reads
+  # the fixture ids from the REQUEST it just sent (Endpoints.Mutate).
+  @mutate_sweeps ~w(mutate-create mutate-createOrReplace mutate-createIfNotExists
+                    mutate-patch mutate-publish mutate-unpublish mutate-discardDraft)
+
+  defp sweep_fun("webhooks-create"),
+    do: fn body, _req -> Barkpark.ApiTester.Endpoints.Webhooks.created_webhook_cleanup(body) end
+
+  defp sweep_fun(id) when id in @mutate_sweeps,
+    do: fn _body, req ->
+      Barkpark.ApiTester.Endpoints.Mutate.touched_documents_cleanup(req[:body], req[:path])
+    end
+
+  defp sweep_fun(_), do: nil
 
   @doc false
-  def sweep_cleanup(result, ep, config) do
-    case {Map.get(@sweep_cleanups, ep[:id]), result[:body_json]} do
-      {fun, %{} = body} when is_function(fun, 1) ->
-        case fun.(body) do
+  def sweep_cleanup(result, ep, config, request \\ %{}) do
+    case {sweep_fun(ep[:id]), result[:body_json], result[:status]} do
+      {fun, %{} = body, status} when is_function(fun, 2) and status in 200..299 ->
+        case fun.(body, request) do
           [] ->
             result
 
