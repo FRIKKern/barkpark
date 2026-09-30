@@ -195,6 +195,8 @@ defmodule BarkparkCloud.Usage.SamplerGapsTest do
       assert log =~ "usage_sampler_missed_tick"
       assert log =~ "at=2019-03-04T23:52:00"
       assert log =~ "cause=no_node_observed_the_cron_minute"
+      # The CONTROLs' filter matches this report's real line (it is not blind).
+      assert own_missed_tick?(log)
     end
 
     test "CONTROL — a normal tick is SILENT" do
@@ -210,7 +212,7 @@ defmodule BarkparkCloud.Usage.SamplerGapsTest do
           assert %{reported: true, missed: []} = SamplerGaps.report(now, swept: 1)
         end)
 
-      refute log =~ "usage_sampler_missed_tick"
+      refute own_missed_tick?(log)
     end
 
     test "CONTROL — an empty checkable fleet is SILENT, not a wall of holes" do
@@ -220,7 +222,14 @@ defmodule BarkparkCloud.Usage.SamplerGapsTest do
                    SamplerGaps.report(~U[2019-03-05 00:10:00.000000Z], swept: 0)
         end)
 
-      refute log =~ "usage_sampler_missed_tick"
+      refute own_missed_tick?(log)
     end
   end
+
+  # task-67492d306f9d10ae: capture_log sees EVERY process's log events while it
+  # runs, and this module is async, so another test's real-clock sampler
+  # warning used to land in these captures. A missed-tick line from THIS
+  # report carries this report's own fixed window_end.
+  defp own_missed_tick?(log),
+    do: log =~ ~r/usage_sampler_missed_tick .*window_end=2019-03-05T00:10:00/
 end
