@@ -114,6 +114,13 @@ func Execute(args []string) int {
 		return exitUsage
 	}
 
+	// A `-s` value that is neither a saved server nor a URL is a typo, not a
+	// host: refuse it here, before the credential notice and the manifest
+	// fetch turn it into two misleading errors (server_flag_name.go).
+	if code, refused := refuseUnknownServerName(out, g); refused {
+		return code
+	}
+
 	// Resolve the target context (flags > env > repo file > active > defaults),
 	// together with WHICH layer supplied the bearer token — the three places that
 	// have to explain a credential (whoami, the tier-hidden refusal, the
