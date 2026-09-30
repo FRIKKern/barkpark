@@ -946,11 +946,11 @@ func (m model) renderPreview(width, height int) string {
 		return paneBorder.Width(width).Height(height).Render(content)
 	}
 
-	// Structure item → show what its child contains
-	if item.SourceNode == nil || item.SourceNode.Child == nil {
+	// Structure item → show what it opens to
+	child := opensTo(item.SourceNode)
+	if child == nil {
 		return ""
 	}
-	child := item.SourceNode.Child
 
 	switch child.Type {
 	case NodeDocumentTypeList:

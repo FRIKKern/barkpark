@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -408,7 +410,7 @@ func (m *model) rebuildPanes() {
 			break
 		}
 
-		child := found.Child
+		child := opensTo(found)
 		if child == nil {
 			break
 		}
@@ -483,9 +485,16 @@ func (m *model) buildDocListPane(node *StructureNode) Pane {
 	preview := schemaListPreview(node.TypeName)
 	var items []PaneItem
 	for i := range docs {
+		// A document with no title rendered as a bare status dot with nothing
+		// beside it — a row you cannot tell apart from its neighbours. Studio
+		// names it "Untitled <type> · <id>"; the terminal says the same.
+		title := docs[i].Title
+		if strings.TrimSpace(title) == "" {
+			title = "Untitled · " + strings.TrimPrefix(docs[i].ID, "drafts.")
+		}
 		items = append(items, PaneItem{
 			ID:       docs[i].ID,
-			Title:    docs[i].Title,
+			Title:    title,
 			Icon:     statusIcon(docs[i].Status),
 			Status:   docs[i].Status,
 			Subtitle: timeAgo(docs[i].UpdatedAt),
