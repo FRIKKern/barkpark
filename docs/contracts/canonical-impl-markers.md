@@ -29,9 +29,9 @@ set, whose count `scripts/docs-anchors-check.sh` prints (`§8 scanned N`). A bar
 
 ## Demand-driven, NOT universal
 
-Tag only genuinely-forked or jargon-named capabilities; remove a marker once dedup
-eliminates its decoys. A zero-marker corpus is legitimate. A marker certifies "one
-owner," **not** "bug-free."
+Tag only genuinely-forked or jargon-named capabilities. A marker
+should be REMOVED once dedup eliminates its decoys.
+A zero-marker corpus is legitimate. A marker certifies "one owner," **not** "bug-free."
 
 ## What the gate enforces
 
