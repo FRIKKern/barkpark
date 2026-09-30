@@ -20,4 +20,6 @@ Image upload completion stays outside native Undo history. Per-editor upload rec
 Native splits materialize duplicate inherited top-level IDs before dispatch. The original first occurrence and unrelated references remain stable across pending writes, reorder/delete and native history. Regression: `__block_identity_mounted.test.mjs`.
 
 
+Click-to-edit: every stored string a reader paints edits where it reads. By design it stays in the panel when it is not the block's own string: numbers, derived readouts (percentages, totals, yes/no, axis ticks, route meta), ledger snapshots (tasks/task-*/roadmap), recorded chat rows, Mermaid labels (edit the source), pre-gate badges, schema field structure. Census: `/papers/paper-editing-verification-2026-09-30`.
+
 Source: `api/assets/paper-editor/src/`; named regressions live under `src/canvas/`. The shared converter is `convert.js`; `index.js` and `canvas/index.js` mount the same boundaries.
