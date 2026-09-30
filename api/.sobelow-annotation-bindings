@@ -37,6 +37,8 @@ lib/barkpark/plugins/onixedit/export.ex	to_file
 lib/barkpark/plugins/onixedit/export/codelist_source.ex	read_source!
 lib/barkpark/plugins/onixedit/export/validator.ex	bounded_xmllint
 lib/barkpark/plugins/onixedit/export/validator.ex	run_xmllint
+lib/barkpark/plugins/onixedit/mix_tasks/onix.export_proof.ex	run
+lib/barkpark/plugins/onixedit/mix_tasks/onix.import.ex	run
 lib/barkpark/plugins/onixedit/schemas/contributor.ex	definition_map
 lib/barkpark/plugins/onixedit/schemas/text_content.ex	definition_map
 lib/barkpark/plugins/onixedit/web/export_controller.ex	render_onix

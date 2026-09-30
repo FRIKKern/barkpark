@@ -266,11 +266,11 @@ if (tasks) {
 // feature. Assert the classifier directly via the shared predicate so the test
 // tracks the production logic, not a re-derivation.
 ok(
-  "api/lib/mix/tasks/onix.import.ex classifies as an entry-point (Mix CLI task)",
-  isEntryPoint("api/lib/mix/tasks/onix.import.ex") &&
-    isMixTaskFile("api/lib/mix/tasks/onix.import.ex") &&
-    !isWebLayerFile("api/lib/mix/tasks/onix.import.ex"),
-  `isEntryPoint=${isEntryPoint("api/lib/mix/tasks/onix.import.ex")} isMixTask=${isMixTaskFile("api/lib/mix/tasks/onix.import.ex")}`
+  "api/lib/barkpark/plugins/onixedit/mix_tasks/onix.import.ex classifies as an entry-point (Mix CLI task)",
+  isEntryPoint("api/lib/barkpark/plugins/onixedit/mix_tasks/onix.import.ex") &&
+    isMixTaskFile("api/lib/barkpark/plugins/onixedit/mix_tasks/onix.import.ex") &&
+    !isWebLayerFile("api/lib/barkpark/plugins/onixedit/mix_tasks/onix.import.ex"),
+  `isEntryPoint=${isEntryPoint("api/lib/barkpark/plugins/onixedit/mix_tasks/onix.import.ex")} isMixTask=${isMixTaskFile("api/lib/barkpark/plugins/onixedit/mix_tasks/onix.import.ex")}`
 );
 // a real `tasks` feature source file is NOT an entry-point (stays a member).
 ok(

@@ -41,6 +41,11 @@ defmodule Mix.Tasks.Onix.Import do
   @switches [dataset: :string, dry_run: :boolean]
 
   @impl Mix.Task
+  # Sobelow skipped lib/mix/tasks; in the plugin tree it scans this file. The
+  # paths here come from the OPERATOR's own argv on a `mix` command line, a
+  # Mix task that no HTTP request can reach (a release carries no Mix).
+  # Inline rather than a line-pinned `.sobelow-skips` row (fingerprints shift).
+  # sobelow_skip ["Traversal.FileModule"]
   def run(args) do
     {opts, positional, invalid} = OptionParser.parse(args, strict: @switches)
 

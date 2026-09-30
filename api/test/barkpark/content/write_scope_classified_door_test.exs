@@ -203,7 +203,7 @@ defmodule Barkpark.Content.WriteScopeClassifiedDoorTest do
       for {file, symbol} <- [
             {"lib/barkpark/plugins/bootstrap.ex", "do_upsert"},
             {"lib/barkpark/content/tag_registry.ex", "do_register!"},
-            {"lib/mix/tasks/onix.import.ex", "handle_upsert"}
+            {"lib/barkpark/plugins/onixedit/mix_tasks/onix.import.ex", "handle_upsert"}
           ] do
         code =
           root
