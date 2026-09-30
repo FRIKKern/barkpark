@@ -1515,15 +1515,16 @@
   }
 
   // ======================================================= TWO-FACTOR (GR52/GR55/GR56)
-  // Five password-free routes; the live session IS the gate (that same session
-  // can already DELETE the factor, so a password reconfirm would be theatre).
+  // Four session-gated routes; DELETE additionally needs proof (the current
+  // password OR a current code) while 2FA is on (task-e4cdc0f2e7766e1a), so a
+  // stolen session alone can no longer strip the second factor.
   //
   //   POST   /v1/account/two-factor/enroll          → {otpauth_uri, secret}
   //   POST   /v1/account/two-factor/confirm {code}  → {recovery_codes:[8]}
   //                                                 | 422 invalid_otp
   //                                                 | 422 not_enrolled
   //   GET    /v1/account/two-factor                 → {enabled}   (unused: free on /v1/me)
-  //   DELETE /v1/account/two-factor                 → {ok:true}
+  //   DELETE /v1/account/two-factor {current_password | otp} → {ok:true} | 401 reauth_failed
   //   POST   /v1/account/two-factor/recovery-codes  → {recovery_codes:[8]}
   //
   // SEVEN states, and EXACTLY TWO honest server errors. There is NO
@@ -1580,6 +1581,27 @@
     }
     if (status === 422 && code === "not_enrolled") {
       return "That setup is no longer pending. Start again to get a fresh secret.";
+    }
+    return null;
+  }
+
+  // Pure (task-e4cdc0f2e7766e1a): the proof body for DELETE /v1/account/two-factor.
+  // One field takes the password or an authenticator code. A six-digit entry is
+  // sent as BOTH (the server tries the password first), anything else only as
+  // the password, so a real password never spends the code budget.
+  function twoFactorOffProof(value) {
+    var v = String(value == null ? "" : value);
+    var body = { current_password: v };
+    if (/^\d{6}$/.test(v.trim())) body.otp = v.trim();
+    return body;
+  }
+
+  // Pure: the sentence for a 2FA turn-off refused for its PROOF (401
+  // reauth_failed), else null so the caller keeps the account-write seam
+  // (an expired session is a 401 too, and it is not a wrong password).
+  function twoFactorOffReauthCopy(status, data) {
+    if (status === 401 && data && data.error === "reauth_failed") {
+      return "That password or code didn't match. Enter your account password, or the six digits your authenticator app shows right now.";
     }
     return null;
   }
@@ -1864,25 +1886,31 @@
     var off = $("#a2f-disable");
     if (off) off.addEventListener("click", function () {
       // Grave but reversible → the danger-no-echo tier: btn-danger weight, no
-      // typed echo. The live session is the gate; no password reconfirm.
+      // typed echo. task-e4cdc0f2e7766e1a: the server now needs PROOF, not just
+      // the session — the current password OR a current authenticator code
+      // (an OAuth-only account has no password). One field takes either: a
+      // six-digit entry is sent as both, and the server tries the password
+      // first, so a real password never spends the code budget.
       openConfirmModal({
         tier: "danger",
         title: "Turn off two-factor authentication?",
         confirmLabel: "Turn it off",
         busyLabel: "Turning off…",
         bodyHtml: "Sign-in drops back to <b>password only</b>, and your unused recovery " +
-          "codes stop working immediately.",
+          "codes stop working immediately." +
+          '<label class="label" for="a2f-off-proof">Your password, or the code from your authenticator app</label>' +
+          '<input class="form-input" id="a2f-off-proof" type="password" autocomplete="current-password" spellcheck="false">',
         // Named so the recovery arm can RE-ISSUE the request, exactly as
         // confirmDisconnectProvider / runRemoveMember do. A recovery handler
         // that only calls busy() would spin the button forever on a dead end.
         onConfirm: function run(ctl) {
-          api("DELETE", "/v1/account/two-factor", null, { noBounce: true }).then(function (r) {
+          api("DELETE", "/v1/account/two-factor", twoFactorOffProof(($("#a2f-off-proof") || {}).value), { noBounce: true }).then(function (r) {
             if (r.ok) {
               a2fSetEnabled(false);
               ctl.succeed();
               openAccountModal(); // straight back to the account screen, now Off
             } else {
-              ctl.fail(accountWriteFailureCopy(r.status, r.data, "Couldn't turn two-factor off."), "Try again",
+              ctl.fail(twoFactorOffReauthCopy(r.status, r.data) || accountWriteFailureCopy(r.status, r.data, "Couldn't turn two-factor off."), "Try again",
                 function (again) { again.busy(); run(again); });
             }
           });
@@ -31901,6 +31929,8 @@
       accountTwoFactorPhase: accountTwoFactorPhase, a2fBadgeState: a2fBadgeState,
       accountTwoFactorQrHtml: accountTwoFactorQrHtml,
       accountTwoFactorErrorCopy: accountTwoFactorErrorCopy,
+      twoFactorOffProof: twoFactorOffProof,
+      twoFactorOffReauthCopy: twoFactorOffReauthCopy,
       // gr-blk-a2fwire-coverage: the 2FA DOM mount + repaint seam. IMPURE and
       // exported by the same explicit permission as openModal/closeModal below
       // — the click -> api -> repaint chain had zero coverage, and driving the

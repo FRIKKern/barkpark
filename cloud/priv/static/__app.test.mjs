@@ -31553,8 +31553,10 @@ test("gr-blk-a2fwire: disable rides the danger confirm modal — DELETE fires on
     await settleInteraction();
 
     const del = plainRequest(h.requests[0]);
+    // task-e4cdc0f2e7766e1a: the DELETE now carries the proof field (empty in
+    // this harness: nothing was typed into it).
     assert.deepEqual({ path: del.path, method: del.method, body: del.body },
-      { path: "/v1/account/two-factor", method: "DELETE", body: null });
+      { path: "/v1/account/two-factor", method: "DELETE", body: { current_password: "" } });
     // succeed() closes the confirm and reopens the ACCOUNT modal, whose model
     // now folds the server-confirmed OFF — the fresh panel offers Set up.
     assert.equal(h.modalRoot.hidden, false, "the account modal is open in its place");
@@ -36655,4 +36657,21 @@ test("N-08: a site with no content binding makes no read and paints no shell", a
   const { box, calls } = await formsMount(() => [200, {}], { id: "s3", slug: "c", bootstrap_dataset: null });
   assert.equal(calls.length, 0);
   assert.equal(box.innerHTML, "");
+});
+
+// task-e4cdc0f2e7766e1a: turning 2FA off now needs proof — the current password
+// OR a current authenticator code — and the console sends it.
+test("e4cd: twoFactorOffProof sends a password as password, and a six-digit entry as both", () => {
+  const j = (v) => JSON.stringify(hooks.twoFactorOffProof(v));
+  assert.equal(j("correct-horse"), JSON.stringify({ current_password: "correct-horse" }));
+  assert.equal(j(" 123456 "), JSON.stringify({ current_password: " 123456 ", otp: "123456" }));
+  assert.equal(j(undefined), JSON.stringify({ current_password: "" }));
+  assert.equal(hooks.twoFactorOffProof("12345").otp, undefined, "five digits is not a code");
+});
+
+test("e4cd: only a 401 reauth_failed turn-off is told as a wrong password or code", () => {
+  assert.ok(/password or code didn't match/.test(hooks.twoFactorOffReauthCopy(401, { error: "reauth_failed" })));
+  assert.equal(hooks.twoFactorOffReauthCopy(500, null), null, "a server fault keeps the account-write seam");
+  assert.equal(hooks.twoFactorOffReauthCopy(401, { error: "unauthorized" }), null,
+    "an expired session is not a wrong password");
 });

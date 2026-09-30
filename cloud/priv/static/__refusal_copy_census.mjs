@@ -821,6 +821,9 @@ const PIN = [
   { key: "FN|deployLoadFailureHtml|08e51fd2", verdict: "UNREVIEWED", copy: "<p class=\"muted\">The server replied:" },
   { key: "FN|accountTwoFactorErrorCopy|2cc1513b", verdict: "UNREVIEWED", copy: "That code didn't match. Check your authenticator app and en..." },
   { key: "FN|accountTwoFactorErrorCopy|7b0c80b9", verdict: "UNREVIEWED", copy: "That setup is no longer pending. Start again to get a fresh..." },
+  // task-e4cdc0f2e7766e1a: CONSULTED, it branches on the server's 401 reauth_failed
+  // (cloud router DELETE /v1/account/two-factor), which the server emits.
+  { key: "FN|twoFactorOffReauthCopy|e54d88ea", verdict: "CONSULTED", copy: "That password or code didn't match. Enter your account pass..." },
   { key: "ARG|run|ctl.fail|acff7839", verdict: "DELEGATED", copy: "Couldn't turn two-factor off." },
   { key: "ARG|run|friendly|2b55dad9", verdict: "DELEGATED", copy: "Couldn't sign out the other devices." },
   { key: "ARG|run|ctl.fail|2b55dad9", verdict: "DELEGATED", copy: "Couldn't sign out the other devices." },
