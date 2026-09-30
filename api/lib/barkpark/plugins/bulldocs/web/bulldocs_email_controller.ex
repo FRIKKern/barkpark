@@ -118,6 +118,9 @@ defmodule BarkparkWeb.BulldocsEmailController do
 
   defp paper_scope(_conn, _params), do: []
 
+  # Published papers only on every door (the reader's rule): the scoped door's
+  # `Content.get_paper/3` would otherwise hand an anonymous visitor the draft row.
+  defp fetch_paper("drafts." <> _slug, _dataset, _scope), do: nil
   defp fetch_paper(slug, dataset, []), do: Content.get_public_paper(slug, dataset)
   defp fetch_paper(slug, dataset, scope), do: Content.get_paper(slug, dataset, scope)
 
