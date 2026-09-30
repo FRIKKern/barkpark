@@ -35,6 +35,7 @@ defmodule Barkpark.Sso.Saml do
 
   import Ecto.Query, warn: false
   alias Barkpark.Repo
+  alias Barkpark.Sso.SamlAssertionReplay
   alias Barkpark.Sso.SamlConnection
   alias Barkpark.Tenancy.Organization
 
@@ -87,7 +88,18 @@ defmodule Barkpark.Sso.Saml do
 
     {doc, _} = :xmerl_scan.string(to_charlist(xml), namespace_conformant: true)
 
-    case :esaml_sp.validate_assertion(doc, sp) do
+    # task-223e04ce556b1950: one-time use. esaml calls this hook LAST, after
+    # the signature and conditions checks, so only a valid assertion is ever
+    # recorded. It hands us a digest of the whole (unsigned) envelope; the key
+    # is the signed ASSERTION's digest instead, so re-wrapping cannot make an
+    # old assertion look new.
+    assertion_key = signed_assertion_digest(doc)
+
+    once = fn assertion, envelope_digest ->
+      SamlAssertionReplay.claim(assertion_key || envelope_digest, stale_at(assertion))
+    end
+
+    case :esaml_sp.validate_assertion(doc, once, sp) do
       {:ok, assertion} ->
         case subject_email(assertion) do
           nil ->
@@ -259,6 +271,33 @@ defmodule Barkpark.Sso.Saml do
 
   # "sha256:<base64(sha256(DER cert))>" — the format esaml's trusted_fingerprints
   # matches against the signer cert.
+  # The digest of the ONE signed assertion esaml validates (it takes exactly
+  # `/samlp:Response/saml:Assertion`). `xmerl_dsig:digest/1` strips the
+  # Signature and canonicalises, so this is the signed content's digest. `nil`
+  # when there is no plain assertion (esaml refuses that shape itself); the
+  # hook then falls back to esaml's envelope digest.
+  defp signed_assertion_digest(doc) do
+    ns = [
+      {~c"samlp", :"urn:oasis:names:tc:SAML:2.0:protocol"},
+      {~c"saml", :"urn:oasis:names:tc:SAML:2.0:assertion"}
+    ]
+
+    case :xmerl_xpath.string(~c"/samlp:Response/saml:Assertion", doc, namespace: ns) do
+      [assertion] -> :xmerl_dsig.digest(assertion)
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  # esaml's stale time (gregorian seconds: the earliest NotOnOrAfter, else
+  # IssueInstant + 5 min) as a UTC DateTime: how long the replay row must live.
+  defp stale_at(assertion) do
+    (:esaml.stale_time(assertion) - 62_167_219_200)
+    |> DateTime.from_unix!()
+    |> DateTime.add(0, :microsecond)
+  end
+
   @spec cert_fingerprint(String.t()) :: String.t()
   def cert_fingerprint(pem) do
     der =
