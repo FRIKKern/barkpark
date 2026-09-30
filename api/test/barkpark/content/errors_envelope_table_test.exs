@@ -53,6 +53,9 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
     [
       {"not_found", {:error, :not_found}, "not_found", 404, []},
       {"not_found/message", {:error, {:not_found, "secret not found"}}, "not_found", 404, []},
+      {"not_found/message+hint",
+       {:error, {:not_found, "schema not found", hint: "Check the schema name."}}, "not_found",
+       404, []},
       {"not_found/coded", {:error, {:not_found, "webhook_not_found", "no such webhook"}},
        "webhook_not_found", 404, []},
       {"unauthorized", {:error, :unauthorized}, "unauthorized", 401, []},

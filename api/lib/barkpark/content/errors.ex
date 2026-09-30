@@ -382,6 +382,16 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, {:not_found, message}}) when is_binary(message),
     do: %{code: "not_found", message: message, status: 404}
 
+  # Parameterized not_found that ALSO names its own fix. The code-keyed
+  # `not_found` hint says "Check the document _id…", which is wrong for a
+  # resource that is not a document (a schema, task-8d46c1fe49954697); an
+  # envelope carrying its own `hint` wins over the code-keyed default in
+  # `put_hint/1`. Same code and status, so clients keying on `not_found` are
+  # unaffected.
+  defp build({:error, {:not_found, message, hint: hint}})
+       when is_binary(message) and is_binary(hint),
+       do: %{code: "not_found", message: message, status: 404, hint: hint}
+
   # Resource-CODED not_found — same 404 semantics, but a resource-specific code
   # for the few endpoints whose consumers must discriminate which resource was
   # missing (webhook replay: endpoint vs event) or a real not-found from a
