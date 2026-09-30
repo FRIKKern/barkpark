@@ -1237,6 +1237,9 @@ func validateTaskPolicyEnum(policy map[string]any, field string, allowed []strin
 // caller's explicit escape hatch — type is never sniffed from the value.
 func applyTaskSet(body map[string]any, kv string) error {
 	if eq := strings.Index(kv, ":="); eq >= 0 && !strings.Contains(kv[:eq], "=") {
+		if err := checkSetKeyEmpty(kv, kv[:eq]); err != nil {
+			return err
+		}
 		var typed any
 		if err := json.Unmarshal([]byte(kv[eq+2:]), &typed); err != nil {
 			return fmt.Errorf("invalid --set %q: %q is not valid JSON (key:=value sends raw JSON; use key=value for strings)", kv, kv[eq+2:])
@@ -1247,6 +1250,9 @@ func applyTaskSet(body map[string]any, kv string) error {
 	eq := strings.IndexByte(kv, '=')
 	if eq < 0 {
 		return fmt.Errorf("invalid --set %q (want key=value, or key:=json for typed values)", kv)
+	}
+	if err := checkSetKeyEmpty(kv, kv[:eq]); err != nil {
+		return err
 	}
 	body[kv[:eq]] = kv[eq+1:]
 	return nil
