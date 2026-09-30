@@ -30,13 +30,29 @@ export interface ImageAssetExpanded {
   mimeType?: string
 }
 
+/**
+ * The value the Studio media picker stores for an image field
+ * (bp-media-picker.js): the file url, the asset id, and the denormalised
+ * metadata — flat, not under `metadata`.
+ */
+export interface ImageFieldValue {
+  url?: string
+  assetId?: string
+  alt?: string
+  width?: number | null
+  height?: number | null
+  lqip?: string | null
+  focalX?: number | null
+  focalY?: number | null
+}
+
 /** Either unresolved (`_ref`) or expanded (`_id` + optional `url`/`metadata`). */
 /**
- * Either an unresolved reference (`_ref`), an expanded asset document, or a bare
- * URL string — the shape Barkpark stores for image fields, e.g.
- * `"/media/files/2026/04/cover.jpg"`.
+ * Either an unresolved reference (`_ref`), an expanded asset document, the
+ * Studio's stored `{url, assetId, width, height, lqip}` value, or a bare URL
+ * string, e.g. `"/media/files/2026/04/cover.jpg"`.
  */
-export type ImageAsset = ImageAssetRef | ImageAssetExpanded | string
+export type ImageAsset = ImageAssetRef | ImageAssetExpanded | ImageFieldValue | string
 
 /** Props for {@link BarkparkImage}. Extra props (`...rest`) are forwarded to the underlying element. */
 export interface BarkparkImageProps {
@@ -82,9 +98,10 @@ let warnedPresetWithoutId = false
 
 function getAssetId(asset: ImageAsset): string | undefined {
   if (typeof asset === 'string') return undefined
-  if ('_ref' in asset && asset._ref) return asset._ref
-  if ('_id' in asset && asset._id) return asset._id
-  return undefined
+  // `_ref` (unresolved), `_id` (expanded), then `assetId` — the Studio picker's
+  // canonical spelling (see ImageFieldValue). First non-empty wins.
+  const a = asset as { _ref?: string; _id?: string; assetId?: string }
+  return a._ref || a._id || a.assetId || undefined
 }
 
 function getAssetUrl(asset: ImageAsset): string | undefined {
@@ -96,7 +113,14 @@ function getAssetUrl(asset: ImageAsset): string | undefined {
 function getMetadata(asset: ImageAsset): ImageAssetMetadata | undefined {
   if (typeof asset === 'string') return undefined
   if ('metadata' in asset) return asset.metadata
-  return undefined
+  // The Studio value carries its metadata FLAT. Read it so a Studio-authored
+  // image keeps its intrinsic size (no layout shift) and its blur placeholder.
+  const { width, height, lqip } = asset as ImageFieldValue
+  // Absent keys read as undefined downstream (`dims?.width`, `metadata?.lqip`).
+  return {
+    dimensions: width && height ? { width, height } : undefined,
+    lqip: lqip || undefined,
+  } as ImageAssetMetadata
 }
 
 /**
@@ -149,7 +173,10 @@ function computeImageSrc(
       // An expanded asset's inline `.url` is likewise stored relative. Prepend
       // baseUrl when it's a relative path.
       const inline = getAssetUrl(asset)
-      src = baseUrl && inline && inline.startsWith('/') ? `${baseUrl.replace(/\/+$/, '')}${inline}` : inline
+      src =
+        baseUrl && inline && inline.startsWith('/')
+          ? `${baseUrl.replace(/\/+$/, '')}${inline}`
+          : inline
     }
   }
   if (!src) {
