@@ -191,14 +191,42 @@ func whoamiSourceName(g globals, ctx manifest.Context) (source string, active bo
 	if anyEnvSet(ServerEnvNames...) {
 		return "env", false, name
 	}
-	// 3. Saved config — the resolved server matches the persisted active server.
+	// 3. Repo file — a .barkpark.json above cwd names the server that resolved.
+	//    It outranks the saved active config (flags > env > repo file > active),
+	//    so a pinned repo must not be labelled "default" (which tells the reader
+	//    to run `bp setup`) nor "saved" (which blames the global config).
+	if _, ok := whoamiRepoFileServer(cfg, ctx); ok {
+		active := cfg != nil && cfg.IsActiveServer(ctx.Server)
+		return "repo-file", active, name
+	}
+	// 4. Saved config — the resolved server matches the persisted active server.
 	if cfg != nil && cfg.ActiveServer() != "" {
 		if normalizeServerURL(cfg.ActiveServer()) == normalizeServerURL(ctx.Server) {
 			return "saved", cfg.IsActiveServer(ctx.Server), name
 		}
 	}
-	// 4. Otherwise it's the baked localhost default.
+	// 5. Otherwise it's the baked localhost default.
 	return "default", false, name
+}
+
+// whoamiRepoFileServer reports the path of the .barkpark.json that chose
+// ctx.Server: the nearest repo file above cwd names a server, and that server —
+// resolved the way overlayActive resolves it (a saved name/alias → its URL, else
+// the raw URL) — is the one ctx resolved to. A repo file that names no server
+// (scope only), or one whose server lost to a higher layer, is not the source.
+func whoamiRepoFileServer(cfg *Config, ctx manifest.Context) (string, bool) {
+	repo, err := loadRepoFile()
+	if err != nil || repo == nil || repo.Server == "" {
+		return "", false
+	}
+	server := repo.Server
+	if entry, ok := cfg.FindServer(repo.Server); ok {
+		server = entry.Server
+	}
+	if normalizeServerURL(server) != normalizeServerURL(ctx.Server) {
+		return "", false
+	}
+	return repo.Path, true
 }
 
 // runWhoami answers "what am I connected to" — and it is LOCAL-FIRST, so it
@@ -210,6 +238,12 @@ func whoamiSourceName(g globals, ctx manifest.Context) (source string, active bo
 func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenance) int {
 	source, active, name := whoamiSourceName(g, ctx)
 	tokenPresent := ctx.Token != ""
+	// The repo file that pinned the server, named so the reader can find it.
+	sourcePath := ""
+	if source == "repo-file" {
+		cfg, _ := LoadConfig()
+		sourcePath, _ = whoamiRepoFileServer(cfg, ctx)
+	}
 
 	// WHICH credential, not merely whether one exists. `token_present: true` was
 	// the whole diagnosis before this line, and it is the same "true" for a saved
@@ -374,6 +408,7 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 		"server":        ctx.Server,
 		"kind":          kind,
 		"source":        source,
+		"source_path":   sourcePath,
 		"active":        active,
 		"workspace":     ctx.Workspace,
 		"project":       ctx.Project,
@@ -456,9 +491,9 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 		prodMark = "  ⚠ PROD"
 	}
 	if name != "" {
-		out.outf("target:    %s — %s [%s] (%s)%s", name, ctx.Server, kind, whoamiSourceLabel(source, active), prodMark)
+		out.outf("target:    %s — %s [%s] (%s)%s", name, ctx.Server, kind, whoamiSourceLabel(source, active, sourcePath), prodMark)
 	} else {
-		out.outf("target:    %s [%s] (%s)%s", ctx.Server, kind, whoamiSourceLabel(source, active), prodMark)
+		out.outf("target:    %s [%s] (%s)%s", ctx.Server, kind, whoamiSourceLabel(source, active, sourcePath), prodMark)
 	}
 	// The scope block is no longer an unconditional echo of ctx — see
 	// whoamiScopeLines. Floor scope prints exactly one byte-identical line;
@@ -513,8 +548,13 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 // whoamiSourceLabel renders the parenthetical source annotation for the human
 // target line, e.g. "saved · active", "default — no saved config; run 'bp setup
 // --target connect'", "env", "flag".
-func whoamiSourceLabel(source string, active bool) string {
+func whoamiSourceLabel(source string, active bool, path string) string {
 	switch source {
+	case "repo-file":
+		if path != "" {
+			return "repo file " + path
+		}
+		return "repo file"
 	case "saved":
 		if active {
 			return "saved · active"
