@@ -502,4 +502,64 @@ defmodule Barkpark.Connectors.CloudPolicyTest do
       assert_full_belt(bound)
     end
   end
+
+  # Knob 5 (D120) was moduledoc-only: a headless Cloud turn has NO interactive
+  # permission gate, and every permission mode auto-approves tool calls, so
+  # unattended tool safety must come from the sandbox, the key gate and knob-2
+  # tool REMOVAL — never from the mode. These arms make that an executable
+  # claim: whatever mode a caller asks for, the argv carries the full belt, and
+  # the only thing that ever auto-approves is our own read-only loopback set.
+  describe "knob 5 — unattended auto-approval: safety never rides on the mode (D120)" do
+    setup do
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "cloud-knob5-ws", name: "Cloud Knob5 WS"})
+      {:ok, ws: ws}
+    end
+
+    test "every requested mode — valid, bypass, unknown — emits the FULL deny belt and never bypass",
+         %{ws: ws} do
+      requested = CloudPolicy.cloud_modes() ++ ["bypassPermissions", "nonsense", ""]
+
+      for mode <- requested do
+        args = ClaudeChat.cloud_build_args(mode, %{workspace_id: ws.id, tool_descriptors: []})
+
+        assert_full_belt(args)
+        refute "bypassPermissions" in args, "mode #{inspect(mode)} leaked bypassPermissions"
+        refute "--dangerously-skip-permissions" in args
+
+        idx = Enum.find_index(args, &(&1 == "--permission-mode"))
+        assert is_integer(idx), "mode #{inspect(mode)}: no --permission-mode in the cloud argv"
+        assert Enum.at(args, idx + 1) in CloudPolicy.cloud_modes()
+      end
+    end
+
+    test "the belt is IDENTICAL across modes — the mode never widens or narrows tool removal",
+         %{ws: ws} do
+      belt = fn mode ->
+        args = ClaudeChat.cloud_build_args(mode, %{workspace_id: ws.id, tool_descriptors: []})
+        idx = Enum.find_index(args, &(&1 == "--permission-mode"))
+        List.delete_at(List.delete_at(args, idx + 1), idx)
+      end
+
+      [first | rest] = Enum.map(CloudPolicy.cloud_modes(), belt)
+      for other <- rest, do: assert(other == first)
+    end
+
+    test "auto-approval never reaches a removed built-in or a foreign MCP tool" do
+      for tool <- CloudPolicy.cloud_disallowed_tools() do
+        refute ClaudeChat.mcp_auto_approved?(tool), "#{tool} would auto-approve"
+        refute Barkpark.StudioChat.Runtime.Claude.auto_approve?(%{tool_name: tool})
+      end
+
+      for foreign <- [
+            "mcp__github__create_issue",
+            "mcp__linear__save_issue",
+            "mcp__barkparkx__task_ready"
+          ] do
+        refute ClaudeChat.mcp_auto_approved?(foreign), "#{foreign} would auto-approve"
+      end
+
+      # CONTROL: the seam is not simply dead — our own read-only loopback tool does approve.
+      assert ClaudeChat.mcp_auto_approved?("mcp__barkpark__task_ready")
+    end
+  end
 end
