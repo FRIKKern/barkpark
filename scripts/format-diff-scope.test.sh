@@ -124,8 +124,17 @@ PY
                 || no "the Decide step body extracted EMPTY — every case below would be a straw man"
 
 OUT="$TMP/decide.out"
+# The Decide body folds the Test partitions' records first
+# (task-8345bf4c2ca2b989) and is red without them, so every run below gets the
+# complete clean set a green mix-test matrix uploads. This file's subject is
+# format, not partitions; elixir-path-escape-check.test.sh proves the fold.
+CELLS_OK="$TMP/mix-test-cells"
+for part in 1 2; do
+  mkdir -p "$CELLS_OK/mix-test-cell-p$part"
+  printf 'partition=%s\nof=2\nverdict=\n' "$part" >"$CELLS_OK/mix-test-cell-p$part/cell.txt"
+done
 decide() { # decide <R_FORMAT> <F_IN_DIFF>; leaves rc in $rc, output in $OUT
-  env -i PATH="$PATH" HOME="$HOME" \
+  env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" \
     R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success \
     R_FORMAT="$1" F_IN_DIFF="$2" O_COMPILE=true O_TEST=true \
     bash --noprofile --norc "$STEP" >"$OUT" 2>&1 && rc=0 || rc=$?
@@ -209,13 +218,13 @@ fi
 
 # C4 — the format job SKIPPED. Legitimate only when the dispatcher said this
 #      path set was untouched; on a compile=true diff a skip means it never ran.
-env -i PATH="$PATH" HOME="$HOME" \
+env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" \
   R_CHANGES=success R_TEST=skipped R_PROD=skipped R_PERF=skipped R_ESCAPE=success \
   R_FORMAT=skipped F_IN_DIFF= O_COMPILE=false O_TEST=false \
   bash --noprofile --norc "$STEP" >"$OUT" 2>&1 && rc=0 || rc=$?
 [ "$rc" = 0 ] && ok "C4 a docs-only diff legitimately skips format (gate='false') — green" \
               || no "C4 expected exit 0, got $rc: $(cat "$OUT")"
-env -i PATH="$PATH" HOME="$HOME" \
+env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" \
   R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success \
   R_FORMAT=skipped F_IN_DIFF= O_COMPILE=true O_TEST=true \
   bash --noprofile --norc "$STEP" >"$OUT" 2>&1 && rc=0 || rc=$?
@@ -240,7 +249,7 @@ if ! grep -q 'decide "format (diff-scoped)"' "$MUT" && [ "$(wc -l < "$MUT")" -lt
 else
   no "D0 the mutation did NOT apply — every case below is vacuous"
 fi
-env -i PATH="$PATH" HOME="$HOME" \
+env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" \
   R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success \
   R_FORMAT=failure F_IN_DIFF="$F" O_COMPILE=true O_TEST=true \
   bash --noprofile --norc "$MUT" >"$OUT" 2>&1 && rc=0 || rc=$?
@@ -252,7 +261,7 @@ fi
 MUT2="$TMP/mutant2.sh"
 sed 's/^\( *\)if \[ -n "\${F_IN_DIFF:-}" \]; then/\1if false; then/' "$STEP" > "$MUT2"
 if grep -q 'if false; then' "$MUT2"; then ok "D2 the name-carrying mutation APPLIED"; else no "D2 mutation did not apply"; fi
-env -i PATH="$PATH" HOME="$HOME" \
+env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" \
   R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success \
   R_FORMAT=failure F_IN_DIFF="$F" O_COMPILE=true O_TEST=true \
   bash --noprofile --norc "$MUT2" >"$OUT" 2>&1 && rc=0 || rc=$?
