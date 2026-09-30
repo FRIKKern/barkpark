@@ -283,9 +283,12 @@ defmodule BarkparkWeb.TasksController do
 
   defp task_list_response(docs, conn, params, page_opts) do
     docs = seal_docs(docs, conn)
+    # The index hands its STRICT view in (it alone knows `:ids`); every other
+    # caller keeps the lenient `parse_view/1` reading.
+    view = Keyword.get_lazy(page_opts, :view, fn -> Params.parse_view(params["view"]) end)
 
-    %{ok: true, docs: render_task_list(docs, conn, params)}
-    |> Params.maybe_put_brief_truncation_help(docs, Params.parse_view(params["view"]))
+    %{ok: true, docs: render_task_list(docs, conn, view)}
+    |> Params.maybe_put_brief_truncation_help(docs, view)
     |> Map.put(:page, page_block(docs, page_opts))
   end
 
@@ -327,8 +330,12 @@ defmodule BarkparkWeb.TasksController do
   # The docs arrive ALREADY sealed (field-visibility seal, fail-closed) — the
   # seal lives in task_list_response/4, this function's only caller, so the
   # truncation-honesty help[] line sees exactly what is rendered here.
-  defp render_task_list(docs, conn, params) do
-    case Params.parse_view(params["view"]) do
+  defp render_task_list(docs, conn, view) do
+    case view do
+      # task-1ca34359dc0805df: membership only — see `Params.render_ids/1`.
+      :ids ->
+        Enum.map(docs, &Params.render_ids/1)
+
       :brief ->
         child_counts = Params.batch_child_counts(docs, scope_opts(conn))
         # task-52f4f3aff99c64d5: the LIVE half of the same edge — one extra
@@ -592,7 +599,7 @@ defmodule BarkparkWeb.TasksController do
     # `Params.parse_index_view/1` documents why ready/prime stay lenient.
     with :ok <- Params.reject_unknown_flat_params(params, :index),
          {:ok, filters} <- Params.parse_index_filters(params),
-         {:ok, _view} <- Params.parse_index_view(params) do
+         {:ok, view} <- Params.parse_index_view(params) do
       # cchi-bl-task-get-needs-a-server-side-prefix-lookup: `id_prefix` is the
       # one narrowing that answers with a DIFFERENT, lean body (doc_id + title),
       # so it branches here rather than composing as another where-clause below.
@@ -607,7 +614,7 @@ defmodule BarkparkWeb.TasksController do
           # rather than an unnarrowed 200 the caller cannot tell from a real
           # answer.
           case Params.parse_updated_since(params, filters) do
-            {:ok, updated_since} -> do_index(conn, params, filters, updated_since)
+            {:ok, updated_since} -> do_index(conn, params, filters, updated_since, view)
             {:error, reason} -> bad_request(conn, reason)
           end
       end
@@ -635,7 +642,7 @@ defmodule BarkparkWeb.TasksController do
       "invalid_filter",
       "view must be one of #{Enum.join(Params.views(), ", ")}; got #{inspect(value)}",
       %{param: "view", value: value, accepted: Params.views()},
-      "Drop ?view= for the default full card, ?view=board for the full card without the content echo, or ?view=brief for the agent list card."
+      "Drop ?view= for the default full card, ?view=board for the full card without the content echo, ?view=brief for the agent list card, or ?view=ids for membership only (doc_id, status, updated_at)."
     )
   end
 
@@ -673,7 +680,7 @@ defmodule BarkparkWeb.TasksController do
     })
   end
 
-  defp do_index(conn, params, filters, updated_since) do
+  defp do_index(conn, params, filters, updated_since, view) do
     # THE WATERMARK. Read from the clock BEFORE the query runs, echoed back on a
     # delta request, and meant to be fed straight into the next poll's
     # `updated_since`. Taking it first (and comparing INCLUSIVELY in
@@ -836,6 +843,7 @@ defmodule BarkparkWeb.TasksController do
         body =
           docs
           |> task_list_response(conn, params,
+            view: view,
             limit: limit,
             offset: offset,
             cursor_axis: Params.cursor_axis(parent),

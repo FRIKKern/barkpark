@@ -173,7 +173,17 @@ defmodule BarkparkWeb.TasksController.Params do
   #     cannot rebuild from the fraction. See `render_doc/2`'s `:board` clause
   #     for why this is a subtraction and not a third key set, and for what
   #     the digest carries.
-  @views ~w(full brief board)
+  #   * `ids` — INDEX ONLY (task-1ca34359dc0805df): `{doc_id, status,
+  #     updated_at}` per row and nothing else. It is the membership read the
+  #     live board's periodic resync walks to retire a row that VANISHED
+  #     without a write (a hard delete, a twin collapse) — the one question the
+  #     `updated_since` delta cannot answer. The board view of the same corpus
+  #     is ~14 MB; this is ~1 MB. Same query, same scope, same ordering and
+  #     cursor as every other view, so its row set is the board's row set.
+  #     `parse_view/1` below does NOT know it, on purpose: ready/prime keep
+  #     their lenient fallback, so `ready?view=ids` is the full card (never a
+  #     crash in a renderer that has no `:ids` arm).
+  @views ~w(full brief board ids)
 
   def parse_view("brief"), do: :brief
   def parse_view("board"), do: :board
@@ -207,6 +217,8 @@ defmodule BarkparkWeb.TasksController.Params do
   in beside a projection. The asymmetry is stated here so the next reader finds
   a decision, not an oversight.
   """
+  def parse_index_view(%{"view" => "ids"}), do: {:ok, :ids}
+
   def parse_index_view(%{"view" => v}) when is_binary(v) do
     if v in @views, do: {:ok, parse_view(v)}, else: {:error, {:unknown_view, v}}
   end
@@ -1034,7 +1046,8 @@ defmodule BarkparkWeb.TasksController.Params do
   # one key removed), so charter law 2's honesty line would point at a cut the
   # reader cannot find. The clause is explicit rather than a catch-all so a
   # fourth view has to decide.
-  def maybe_put_brief_truncation_help(base, _docs, view) when view in [:full, :board], do: base
+  def maybe_put_brief_truncation_help(base, _docs, view) when view in [:full, :board, :ids],
+    do: base
 
   def maybe_put_brief_truncation_help(base, docs, :brief) do
     if Enum.any?(docs, &brief_truncated?/1),
@@ -1361,6 +1374,16 @@ defmodule BarkparkWeb.TasksController.Params do
     |> render_doc_with_counts(counts, child_counts)
     |> Map.delete(:content)
     |> put_content_digest(doc.content || %{})
+  end
+
+  @doc """
+  The `?view=ids` row (index only, task-1ca34359dc0805df): the membership key
+  and the two fields a resync compares — `status` (which twin the page projects)
+  and `updated_at` (re-stamped by every write). No title, no content, no counts:
+  nothing a field-visibility seal could be asked to hide, and no batched query.
+  """
+  def render_ids(%Document{} = doc) do
+    %{doc_id: doc.doc_id, status: doc.status, updated_at: doc.updated_at}
   end
 
   # C2: a lightweight child summary — just enough to render the rail without

@@ -645,7 +645,7 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
       assert error["message"] =~ "board"
       assert error["details"]["param"] == "view"
       assert error["details"]["value"] == "boad"
-      assert error["details"]["accepted"] == ["full", "brief", "board"]
+      assert error["details"]["accepted"] == ["full", "brief", "board", "ids"]
       # The whole reason ErrorResponse owns this: a correlatable refusal.
       assert is_binary(error["request_id"])
     end
@@ -654,7 +654,7 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
       phase = uniq("board-goodviews")
       mk_task!(uniq("board-goodviews-row"), scope, prose_content(phase))
 
-      for view <- ~w(full brief board) do
+      for view <- ~w(full brief board ids) do
         assert %{"docs" => [_]} = docs_at(conn, phase, "&view=#{view}")
       end
     end
@@ -676,6 +676,103 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
 
       assert [doc] = payload["docs"]
       assert Map.has_key?(doc, "content")
+    end
+  end
+
+  # ── ?view=ids — the membership read (task-1ca34359dc0805df) ──────────────
+  #
+  # The live board's periodic resync walks this to retire a row that vanished
+  # without a write. It is only safe if its ROW SET is the board view's row set
+  # (same query, same scope, same order, same cursor) — a membership list that
+  # silently differs would prune real rows off the board.
+
+  describe "?view=ids" do
+    test "each row is exactly {doc_id, status, updated_at}", %{conn: conn, scope: scope} do
+      phase = uniq("ids-keys")
+      for _ <- 1..3, do: mk_task!(uniq("ids-keys-row"), scope, prose_content(phase))
+
+      %{"docs" => docs} = docs_at(conn, phase, "&view=ids")
+      assert length(docs) == 3
+
+      for doc <- docs do
+        assert doc |> Map.keys() |> Enum.sort() == ["doc_id", "status", "updated_at"]
+        assert {:ok, _, _} = DateTime.from_iso8601(doc["updated_at"])
+      end
+    end
+
+    test "its row set, order and updated_at equal the board view's", %{conn: conn, scope: scope} do
+      phase = uniq("ids-parity")
+      for _ <- 1..5, do: mk_task!(uniq("ids-parity-row"), scope, prose_content(phase))
+
+      %{"docs" => ids} = docs_at(conn, phase, "&view=ids")
+      %{"docs" => board} = docs_at(conn, phase, "&view=board")
+
+      assert Enum.map(ids, &{&1["doc_id"], &1["status"], &1["updated_at"]}) ==
+               Enum.map(board, &{&1["doc_id"], &1["status"], &1["updated_at"]})
+    end
+
+    test "pages on the same cursor as every other view", %{conn: conn, scope: scope} do
+      phase = uniq("ids-cursor")
+      for _ <- 1..3, do: mk_task!(uniq("ids-cursor-row"), scope, prose_content(phase))
+
+      walk = fn view ->
+        Stream.unfold("", fn
+          nil ->
+            nil
+
+          cursor ->
+            page =
+              conn
+              |> authed()
+              |> get("/v1/tasks?parent=#{phase}&limit=2&view=#{view}&cursor=#{cursor}")
+              |> json_response(200)
+
+            {Enum.map(page["docs"], & &1["doc_id"]), page["page"]["next_cursor"]}
+        end)
+        |> Enum.to_list()
+        |> List.flatten()
+      end
+
+      assert walk.("ids") == walk.("board")
+      assert length(walk.("ids")) == 3
+    end
+
+    test "is far smaller than the board view of the same rows", %{conn: conn, scope: scope} do
+      phase = uniq("ids-bytes")
+      for _ <- 1..10, do: mk_task!(uniq("ids-bytes-row"), scope, prose_content(phase))
+
+      bytes = fn view ->
+        conn
+        |> authed()
+        |> get("/v1/tasks?parent=#{phase}&limit=1000&view=#{view}")
+        |> response(200)
+        |> byte_size()
+      end
+
+      assert bytes.("ids") * 5 < bytes.("board")
+    end
+
+    # ready/prime keep the LENIENT parser: `ids` is index-only, so it must fall
+    # back to the full card there — never reach a renderer without an `:ids` arm.
+    test "/v1/tasks/ready?view=ids falls back to the full card", %{conn: conn, scope: scope} do
+      phase = uniq("ids-ready")
+      mk_task!(uniq("ids-ready-row"), scope, %{"parent_id" => phase})
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/ready?phase_id=#{phase}&view=ids")
+        |> json_response(200)
+
+      assert [doc] = payload["docs"]
+      assert Map.has_key?(doc, "content")
+    end
+
+    test "/v1/tasks/prime?view=ids does not crash", %{conn: conn} do
+      conn
+      |> authed()
+      |> get("/v1/tasks/prime?view=ids&limit=1")
+      |> json_response(200)
     end
   end
 end
