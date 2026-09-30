@@ -1224,17 +1224,42 @@ defmodule BarkparkCloud.Registry do
         nil
 
       norm ->
-        origins = ["https://" <> norm, "https://" <> norm <> "/", "http://" <> norm]
+        claimed_barkpark(norm) || matched_barkpark(norm)
+    end
+  end
 
+  def get_barkpark_by_public_host(_), do: nil
+
+  # task-7ebf8c0480297e7d: THE ARBITER FIRST. When two rows hold one host (a
+  # ghost row's url beside another team's custom_host, the live
+  # gyldendal.barkpark.cloud case), `hostname_claims` records which one owns
+  # it. The column match alone ordered by age and handed the host to the OLDER
+  # row, the ghost: the real owner's members got a 404 at studio-signin.
+  defp claimed_barkpark(norm) do
+    case hostname_claim_key(norm) do
+      nil ->
+        nil
+
+      key ->
         Barkpark
-        |> where([b], b.custom_host == ^norm or b.url in ^origins)
-        |> order_by([b], asc: b.inserted_at)
+        |> join(:inner, [b], c in HostnameClaim, on: c.barkpark_id == b.id)
+        |> where([_b, c], c.host == ^key)
         |> limit(1)
         |> Repo.one()
     end
   end
 
-  def get_barkpark_by_public_host(_), do: nil
+  # No barkpark claims the host (rows provisioned before the claims table, a
+  # site-domain claim): the column match, oldest first, as before.
+  defp matched_barkpark(norm) do
+    origins = ["https://" <> norm, "https://" <> norm <> "/", "http://" <> norm]
+
+    Barkpark
+    |> where([b], b.custom_host == ^norm or b.url in ^origins)
+    |> order_by([b], asc: b.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+  end
 
   @doc """
   azh-w6 (S14c): the team's existing Barkpark with this exact `name`, or nil —
