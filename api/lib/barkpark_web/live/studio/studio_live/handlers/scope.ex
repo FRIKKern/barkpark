@@ -280,7 +280,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
             {:noreply,
              socket
-             |> assign(create_open: nil, current_workspace: workspace, current_project: project)
+             |> assign(
+               create_open: nil,
+               current_workspace: workspace,
+               current_project: project,
+               # Close the scope menu: its columns were built BEFORE the create
+               # (StudioChrome.open_scope_menu/1) and would go on listing the old
+               # scope, highlighted, beside a title that already names the new
+               # one. The next open rebuilds them fresh.
+               scope_menu: nil
+             )
              |> Shared.sync_scope_prefix()
              |> put_flash(:info, "Workspace created")
              |> Shared.rescope_dataset_for_project(project)}
@@ -310,7 +319,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
             {:noreply,
              socket
-             |> assign(create_open: nil, current_project: project)
+             |> assign(
+               create_open: nil,
+               current_project: project,
+               # Stranger walk (2026-09-30): after "Project created" the menu
+               # stayed open with its PRE-create columns — the new project absent
+               # and "Default Project" still highlighted, under a title that said
+               # "Nytt prosjekt Æøå". Close it; the next open lists the new one.
+               scope_menu: nil
+             )
              |> Shared.sync_scope_prefix()
              |> put_flash(:info, "Project created")
              |> Shared.rescope_dataset_for_project(project)}
