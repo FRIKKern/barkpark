@@ -658,27 +658,13 @@ defmodule BarkparkWeb.BulldocsLive do
   # the row (Event.changeset only requires event_type + one of goal_id/slug, and
   # we always pass paper_slug) so the action is never lost and never crashes.
   def handle_event("paper-action", %{"action" => key}, socket) do
-    slug = socket.assigns.slug
-    label = action_label(socket.assigns.paper_actions, key)
-
-    {goal_id, scope} =
-      paper_goal_and_scope(slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
-
-    # W1.5-C: stamp the intent row with the paper's OWN workspace/project so the
-    # event follows the paper/goal scope (Default fallback when unscoped).
-    _ =
-      Events.create_event(
-        %{
-          "event_type" => "action:" <> key,
-          "goal_id" => goal_id,
-          "paper_slug" => slug,
-          "payload_html" => "<p>Action '#{key}' requested from /papers/#{slug}</p>",
-          "branch" => "main"
-        }
-        |> stamp_scope(scope)
-      )
-
-    {:noreply, assign(socket, :last_action, label || key)}
+    # Only an action this paper DECLARES (its source_doc's button set) becomes an
+    # intent: the orchestrator acts on `action:<key>` rows, so a posted key the
+    # page never offered would be an arbitrary instruction from any principal.
+    case action_label(socket.assigns.paper_actions, key) do
+      nil -> {:noreply, socket}
+      label -> record_paper_action(socket, key, label)
+    end
   end
 
   # ── P6.U4 Simplify control ────────────────────────────────────────────────
@@ -985,9 +971,37 @@ defmodule BarkparkWeb.BulldocsLive do
 
   # ── P6.U5 action-button helpers ───────────────────────────────────────────
 
+  # Record a DECLARED action as a paper_events intent row.
+  defp record_paper_action(socket, key, label) do
+    slug = socket.assigns.slug
+
+    {goal_id, scope} =
+      paper_goal_and_scope(slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
+
+    # W1.5-C: stamp the intent row with the paper's OWN workspace/project so the
+    # event follows the paper/goal scope (Default fallback when unscoped).
+    _ =
+      Events.create_event(
+        %{
+          "event_type" => "action:" <> key,
+          "goal_id" => goal_id,
+          "paper_slug" => slug,
+          "payload_html" =>
+            "<p>Action '#{html_escape_text(key)}' requested from /papers/#{html_escape_text(slug)}</p>",
+          "branch" => "main"
+        }
+        |> stamp_scope(scope)
+      )
+
+    {:noreply, assign(socket, :last_action, label || key)}
+  end
+
+  defp html_escape_text(value),
+    do: value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+
   # The human label for a clicked key, looked up in the derived action set so
-  # the inline confirmation reads "Requested: Build this plan". Falls back to
-  # the raw key if the set somehow lacks it.
+  # the inline confirmation reads "Requested: Build this plan". nil for a key the
+  # set does not declare (the handler then records nothing).
   defp action_label(actions, key) when is_list(actions) do
     case Enum.find(actions, &(&1.key == key)) do
       %{label: label} -> label
