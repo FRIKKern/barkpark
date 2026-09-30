@@ -5865,7 +5865,22 @@ defmodule BarkparkCloud.Web.Router do
     case Registry.validate_custom_host(bp, domain) do
       {:ok, host} ->
         if Barkpark.platform_custom_host?(host) do
-          persist_and_enqueue_domain(conn, team, bp, domain)
+          # task-6f85554a4e0cbc4c: the attach job's DNS upsert REPLACES an
+          # existing record in our zone. A platform name that already resolves
+          # anywhere but this box is somebody's record (possibly the control
+          # plane's own), so it is refused as taken before anything is written.
+          case DomainOwnership.platform_label_free?(host, bp.host) do
+            :ok ->
+              persist_and_enqueue_domain(conn, team, bp, domain)
+
+            {:error, observed} ->
+              Logger.warning(
+                "attach-domain: refused platform host #{host} for barkpark #{bp.id}: " <>
+                  "it already resolves to #{inspect(observed)}, not this box (#{inspect(bp.host)})"
+              )
+
+              json(conn, 409, %{error: "taken"})
+          end
         else
           case DomainOwnership.pointed_at?(host, bp.host) do
             :ok ->

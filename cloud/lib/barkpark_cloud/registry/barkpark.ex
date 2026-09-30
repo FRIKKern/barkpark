@@ -1075,9 +1075,20 @@ defmodule BarkparkCloud.Registry.Barkpark do
         String.ends_with?(host, "." <> zone) ->
           label = String.replace_suffix(host, "." <> zone, "")
 
-          if Regex.match?(@custom_host_label_format, label),
-            do: [],
-            else: [custom_host: {"must be a single label under #{zone}", []}]
+          cond do
+            not Regex.match?(@custom_host_label_format, label) ->
+              [custom_host: {"must be a single label under #{zone}", []}]
+
+            # task-6f85554a4e0cbc4c: a platform label names a record in OUR zone,
+            # and the attach job's DNS upsert REPLACES an existing record. The
+            # system labels (api, www, mail, ...) are the control plane's own
+            # names; attaching one would repoint it at a customer box.
+            reserved?(label) ->
+              [custom_host: {"#{label}.#{zone} is reserved for the platform", []}]
+
+            true ->
+              []
+          end
 
         Regex.match?(@external_host_format, host) and
             not Regex.match?(@numeric_tld_format, host) ->
