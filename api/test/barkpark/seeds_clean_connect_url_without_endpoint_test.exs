@@ -13,8 +13,9 @@ defmodule Barkpark.SeedsCleanConnectUrlWithoutEndpointTest do
       ** (ArgumentError) errors were found at the given arguments:
         * 1st argument: the table identifier does not refer to an existing ETS table
           (stdlib 7.3) :ets.lookup(BarkparkWeb.Endpoint, :url)
-          (barkpark 0.1.0) lib/barkpark/seeds/clean.ex:232: Barkpark.Seeds.Clean.connect_url/0
-          (barkpark 0.1.0) lib/barkpark/seeds/clean.ex:208: Barkpark.Seeds.Clean.print_token_banner/1
+          (barkpark 0.1.0) lib/barkpark/seeds/clean.ex: Barkpark.Seeds.Clean.connect_url/0
+          (barkpark 0.1.0) lib/barkpark/seeds/clean.ex: Barkpark.Seeds.Clean.print_token_banner/1
+      (trace line numbers elided — they rot; the symbols are the anchors)
 
   `api/entrypoint.sh` runs under `set -e`, so that killed the container before
   `bin/barkpark start` — and it swallowed the shown-once admin token the banner
