@@ -936,6 +936,11 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// (doc_publish_no_draft.go). stderr only; exit code unchanged.
 	emitDocPublishNothingToPublish(out, g, ctx, m, cmd, tail, status)
 
+	// Its twin: an unpublish of a never-published draft 404s "does not exist
+	// in this scope" too. One drafts-lens probe says it exists only as a draft
+	// (doc_unpublish_draft_only.go). stderr only; exit code unchanged.
+	emitDocUnpublishDraftOnly(out, g, ctx, m, cmd, tail, status)
+
 	// A typo'd type answers like an empty one (doc_unknown_type.go): one
 	// schema probe on an empty doc ls/query page or a doc create. stderr only.
 	emitDocUnknownType(out, g, ctx, m, cmd, tail, status, respBody)
