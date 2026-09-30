@@ -53,6 +53,9 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
     [
       {"not_found", {:error, :not_found}, "not_found", 404, []},
       {"not_found/message", {:error, {:not_found, "secret not found"}}, "not_found", 404, []},
+      {"validation_failed/subject",
+       {:error, {:validation_failed, "query parameter order", %{"order" => ["bad"]}, "Fix it."}},
+       "validation_failed", 422, [:details]},
       {"not_found/message+hint",
        {:error, {:not_found, "schema not found", hint: "Check the schema name."}}, "not_found",
        404, []},

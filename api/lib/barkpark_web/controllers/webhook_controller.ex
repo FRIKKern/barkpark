@@ -367,7 +367,11 @@ defmodule BarkparkWeb.WebhookController do
     err =
       base
       |> Map.put(:code, "validation_failed")
-      |> Map.put(:message, "document failed validation")
+      # A webhook definition, not a document; and the caller's JSON parsed fine,
+      # so the inherited `malformed` hint about Content-Type is noise here
+      # (task-7f0e58f885c3e363).
+      |> Map.put(:message, "webhook failed validation")
+      |> Map.put(:hint, "Fix the listed webhook fields, then resend the definition.")
       |> Map.put(:details, format_errors(changeset))
       |> Map.delete(:status)
 

@@ -1054,6 +1054,22 @@ defmodule Barkpark.Content.Errors do
       details: details
     }
 
+  # validation_failed for an input that is NOT a document (a query parameter, a
+  # webhook body): the caller names WHAT failed (`subject`, e.g. "query parameter
+  # order") and the fix. The changeset arm below says "document failed
+  # validation" and its code-keyed hint points at a schema, which misled callers
+  # who never sent a document (task-7f0e58f885c3e363). Same code, status and
+  # `details` shape, so clients keying on `validation_failed` are unaffected.
+  defp build({:error, {:validation_failed, subject, details, hint}})
+       when is_binary(subject) and is_map(details) and is_binary(hint),
+       do: %{
+         code: "validation_failed",
+         message: "#{subject} failed validation",
+         status: 422,
+         details: details,
+         hint: hint
+       }
+
   defp build({:error, %Ecto.Changeset{} = cs}) do
     details =
       Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
