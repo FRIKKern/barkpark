@@ -85,10 +85,11 @@ for (const mode of ["canvas", "single"]) {
     host.flushPendingChanges();
     const patch = ops.filter(op => op.id === "alias").at(-1)?.patch;
     assert.ok(patch, "the touched paragraph emits its patch");
-    const struck = patch.content.filter(n => n.type === "strikethrough").map(n => n.children[0].value);
-    assert.deepEqual(struck, ["gone", "short"], "strike and s survive a touch as canonical strikethrough");
-    assert.ok(patch.content.some(n => n.type === "strong" && n.children[0].value === "bold"), "a flat bold mark survives as strong");
-    assert.match(JSON.stringify(patch.content), /legacy/, "a legacy text-key leaf keeps its words");
+    // The edit reached only the closing run: every run before it keeps the author's
+    // own spelling (strike / s, a flat bold leaf, a legacy text-key leaf).
+    assert.deepEqual(patch.content.slice(0, -1), aliasParagraph.content.slice(0, -1),
+      "runs the edit did not reach keep their source nodes");
+    assert.deepEqual(patch.content.at(-1), t(".!"), "the typed text joins its plain neighbour");
   } finally { host.remove(); }
 }
 dom.window.close();

@@ -1092,6 +1092,68 @@ function listItemFromTiptap(li, seen = new Set()) {
     ? { ...item, children } : { content: tiptapInlineToPd(content), children });
 }
 
+// reuseInlineSource(source, content) → the portable-doc inline array for an EDITED
+// carrier, keeping the author's own source nodes wherever the edit did not reach.
+//
+// A touched carrier re-serializes through tiptapInlineToPd, which writes the
+// canonical spelling of every run: `strike`/`s` become `strikethrough`, a flat
+// `marks` leaf becomes nested wrappers, a legacy `text` key becomes `value`, and
+// any key the canvas has no attr for is dropped — on runs the author never
+// touched. So the edit is located instead: the longest run of SOURCE nodes at the
+// start, and then at the end, whose own canvas projection equals the matching
+// stretch of the edited content is kept verbatim; only the stretch between them
+// is re-serialized. When the two ends cannot be told apart the canonical array
+// stands, and the result is checked to project exactly as the edited content does.
+function reuseInlineSource(source, content) {
+  const inline = tiptapInlineToPd(content);
+  if (!Array.isArray(source) || !source.length) return inline;
+  const whole = comparableListInline(content);
+  const target = whole.map(deepCloneJson);
+  const pieces = source.map((node) => comparableListInline(inlineArrayToTiptap([node])));
+  const matchesAt = (piece, at) => piece.length > 0 && at >= 0 && at + piece.length <= target.length &&
+    piece.every((node, k) => jsonEqual(node, target[at + k]));
+  // ProseMirror merges neighbouring text of the same marks into one node, so a source
+  // leaf can also be the leading (or trailing) part of a longer edited text node.
+  const partAt = (piece, at, fromEnd) => {
+    const node = target[at];
+    if (piece.length !== 1 || !node || piece[0].type !== "text" || node.type !== "text") return false;
+    if (!jsonEqual(piece[0].marks, node.marks) || node.text.length <= piece[0].text.length) return false;
+    return fromEnd ? node.text.endsWith(piece[0].text) : node.text.startsWith(piece[0].text);
+  };
+  let head = 0;
+  let from = 0;
+  let to = target.length;
+  while (head < source.length) {
+    if (matchesAt(pieces[head], from)) from += pieces[head++].length;
+    else if (from < to && partAt(pieces[head], from, false)) target[from].text = target[from].text.slice(pieces[head++][0].text.length);
+    else break;
+  }
+  let tail = source.length;
+  while (tail > head) {
+    const piece = pieces[tail - 1];
+    if (matchesAt(piece, to - piece.length) && to - piece.length >= from) to -= pieces[--tail].length;
+    else if (to - 1 >= from && partAt(piece, to - 1, true)) { const node = target[to - 1]; node.text = node.text.slice(0, -pieces[--tail][0].text.length); }
+    else break;
+  }
+  if (head === 0 && tail === source.length) return inline;
+  const middle = tiptapInlineToPd(target.slice(from, to));
+  // New text joins a plain neighbouring leaf rather than sitting beside it, so a
+  // paragraph does not gain one more leaf per editing session; kept source leaves
+  // never merge with each other.
+  const plain = (node) => node && node.type === "text" && typeof node.value === "string" &&
+    Object.keys(node).length === 2;
+  const out = source.slice(0, head).map(deepCloneJson);
+  const rest = source.slice(tail).map(deepCloneJson);
+  middle.forEach((node, k) => {
+    const last = out[out.length - 1];
+    if (plain(node) && plain(last)) last.value += node.value;
+    else if (k === middle.length - 1 && plain(node) && plain(rest[0])) rest[0].value = node.value + rest[0].value;
+    else out.push(node);
+  });
+  out.push(...rest);
+  return jsonEqual(comparableListInline(inlineArrayToTiptap(out)), whole) ? out : inline;
+}
+
 function inlineCarrierFromTiptap(item, content) {
   const inline = tiptapInlineToPd(content);
   if (jsonEqual(comparableListInline(inlineArrayToTiptap(listItemToInlineArray(item))),
@@ -1101,7 +1163,7 @@ function inlineCarrierFromTiptap(item, content) {
     if (!(Array.isArray(item.content) && item.content.length) && typeof item.text === "string" &&
       inline.every(node => node.type === "text")) next.text = inline.map(node => node.value).join("");
     else {
-      next.content = inline;
+      next.content = Array.isArray(item.content) && item.content.length ? reuseInlineSource(item.content, content) : inline;
       // Reader maps fall back to text when content is empty. Clearing the
       // authored body must not resurrect an old shadow text value.
       if (!inline.length && typeof next.text === "string") next.text = "";
@@ -1113,7 +1175,7 @@ function inlineCarrierFromTiptap(item, content) {
     if (!jsonEqual(decoded, [{ type: "text", value: item }])) return JSON.stringify(inline);
     if (inline.every(node => node.type === "text")) return inline.map(node => node.value).join("");
   }
-  return inline;
+  return Array.isArray(item) ? reuseInlineSource(item, content) : inline;
 }
 
 function headingInline(source) {
@@ -1137,7 +1199,8 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
         const fields = deepCloneJson(source);
         delete fields.level;
         if (jsonEqual(comparableListInline(headingInline(source)), comparableListInline(top.content))) return withAlign({ ...fields, level }, top, source);
-        const content = tiptapInlineToPd(top.content);
+        const content = Array.isArray(source.content) && source.content.length
+          ? reuseInlineSource(source.content, top.content) : tiptapInlineToPd(top.content);
         const rich = content.some(node => node.type !== "text");
         if ((Array.isArray(source.content) && source.content.length) || rich) {
           fields.content = content;
