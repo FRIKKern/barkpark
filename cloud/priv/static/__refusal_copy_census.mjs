@@ -731,6 +731,8 @@ const PIN = [
   { key: "MAP|ERRORS.instance_unreachable", verdict: "CONSULTED", copy: "Couldn't reach the instance — try again in a moment." },
   // task-71082f5541c13b53 (N-08): every /v1/sites/:id/forms route's 409 (router.ex forms_refusal/2).
   { key: "MAP|ERRORS.forms_unsupported", verdict: "CONSULTED", copy: "This instance doesn't have the forms plugin turned on, so it can't tak..." },
+  // task-e4cdc0f2e7766e1a: the 409 on POST /v1/account/two-factor/enroll while 2FA is ON.
+  { key: "MAP|ERRORS.already_enabled", verdict: "CONSULTED", copy: "Two-factor is already on. Turn it off first if you want to set it up a..." },
   { key: "MAP|ERRORS.instance_not_armed", verdict: "CONSULTED", copy: "This instance hasn't armed one-click apply, so resuming aut..." },
   { key: "MAP|ERRORS.network_error", verdict: "CONSULTED", copy: "Network error — is the control plane running?" },
   { key: "MAP|ERRORS.limit_reached", verdict: "CONSULTED", copy: "You're at your plan's instance limit." },

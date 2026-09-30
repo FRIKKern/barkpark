@@ -88,6 +88,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "already_attached",
              "already_attaching",
              "already_delivering",
+             "already_enabled",
              "already_invited",
              "already_member",
              "already_provisioning",
