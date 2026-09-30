@@ -22,6 +22,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 import { wireAtomAccessibility } from "./embed-node.js";
+import { safeUrl } from "../safe-url.js";
 
 // The TipTap node NAME is `bpImage`; the portable-doc `bpType` stays "image"
 // (run-convert.js maps a block.type "image" to this node and back).
@@ -187,7 +188,9 @@ export const Image = Node.create({
         const a = n.attrs || {};
         const src = a.src || "";
         const alt = a.alt || "";
-        const shown = src || a.previewUrl || "";
+        // A stored src takes the reader's allowlist; the transient local previewUrl (a blob:
+        // of the file being uploaded, never persisted) is the editor's own.
+        const shown = src ? safeUrl(src) : a.previewUrl || "";
         if (srcInput.value !== src) srcInput.value = src;
         if (altInput.value !== alt) altInput.value = alt;
         const w = a.width != null ? String(a.width) : "";

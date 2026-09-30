@@ -23,6 +23,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 import { wireAtomAccessibility } from "./embed-node.js";
+import { safeUrl } from "../safe-url.js";
 
 // ── field codecs ──────────────────────────────────────────────────────────────
 
@@ -177,8 +178,8 @@ export const ISLAND_SPECS = {
       video.controls = true;
       video.setAttribute("playsinline", "");
       video.preload = "metadata";
-      video.src = src;
-      if (attrs.poster) video.poster = attrs.poster;
+      video.src = safeUrl(src);
+      if (attrs.poster) video.poster = safeUrl(attrs.poster);
       video.loop = attrs.loop === true;
       fig.appendChild(video);
       el.appendChild(fig);
