@@ -201,6 +201,10 @@
     // so a 401 (wrong code, retryable) never reads like a 429 (limiter tripped).
     invalid_code: "That code didn't match. Authenticator codes rotate every 30 seconds — enter the current one, or use a recovery code.",
     rate_limited: "Too many attempts. Wait a moment, then try the code again.",
+    // task-e4cdc0f2e7766e1a — the 409 on POST /v1/account/two-factor/enroll while
+    // 2FA is ON (an enroll there used to switch it off unrecorded). Re-keying is
+    // off-then-enroll, so the copy names that one path.
+    already_enabled: "Two-factor is already on. Turn it off first if you want to set it up again with a new device.",
     no_team: "Your account has no team yet.",
     invalid: "That didn't work — check your input.",
     not_live: "The instance isn't live yet — wait for provisioning to finish.",
