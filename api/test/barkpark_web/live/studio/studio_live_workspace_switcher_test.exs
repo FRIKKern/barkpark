@@ -502,6 +502,9 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       assert assigns.current_project.id == project.id
       assert assigns.dataset == "production"
 
+      assert assigns.scope_menu == nil,
+             "create-workspace must close the scope menu built before the create"
+
       # No optimistic divergence (barkpark-6z0e): current_project is re-derived
       # via the DB-backed initial_project/1, NOT the transaction's partial
       # %Project{}. It must match the membership-joined switcher list entry
@@ -545,6 +548,15 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       assert assigns.current_workspace.slug == acme_ws.slug
       assert assigns.current_project.slug == "fresh-project"
       assert assigns.dataset == "production"
+
+      # The menu closes on create (its columns predate the new project) and
+      # the next open lists the new project — the stale-menu trap was an open
+      # popover still showing only the old project, highlighted.
+      assert assigns.scope_menu == nil,
+             "create-project must close the scope menu built before the create"
+
+      reopened = render_click(view, "scope-menu-toggle", %{})
+      assert reopened =~ "Fresh Project"
 
       # No optimistic divergence (barkpark-6z0e): current_project is re-fetched
       # by id from the DB, NOT the transaction's partial %Project{}. It is the
