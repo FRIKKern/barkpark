@@ -5610,6 +5610,20 @@
       // aria-current move is a selection ("Selected"), and NEITHER is a
       // success this hook is allowed to name.
       _paSettleWord(p) {
+        // AN ACTION'S ANSWER IS THE SERVER'S OWN SENTENCE. The words below name
+        // the PRESSED control, which is right for a row ("Opened “Hello”.") and
+        // wrong for an action button: "Unpublish" moved the row's status, so
+        // this said "Selected “Unpublish”."; "Duplicate" navigated to the copy,
+        // so it said "Opened “Duplicate”."; History's "Restore" said "Selected
+        // “Restore”." (stranger walk, 2026-09-30) — each beside the server's own
+        // "Unpublished" / "Duplicated as …" / "Restored from history". A flash
+        // sentence that APPEARED since the press is the strongest witness there
+        // is (the server wrote it), so it is the answer, quoted, never invented.
+        var doc = (this.el && this.el.ownerDocument) || (p.el && p.el.ownerDocument);
+        var flash = !doc ? "" : Array.prototype.map.call(doc.querySelectorAll(".flash"), function (n) {
+          return (n.textContent || "").replace(/\s+/g, " ").trim();
+        }).join(" | ");
+        if (flash && flash !== (p.flash || "")) return flash.length > 80 ? flash.slice(0, 79) + "…" : flash;
         if (location.href !== p.url) return p.name ? "Opened “" + p.name + "”." : "Opened.";
         if (this._paCurrentSig(p.root) !== p.sig) return p.name ? "Selected “" + p.name + "”." : "Selected.";
         if (this._paPressedChanged(p.pressed, p.root)) return p.name ? "Selected “" + p.name + "”." : "Selected.";
@@ -5772,6 +5786,11 @@
           url: location.href,
           sig: this._paCurrentSig(root),
           pressed: this._paPressedWitness(el),
+          // The flash text standing BEFORE the press, so only a sentence the
+          // server wrote in reply to THIS press becomes its answer.
+          flash: Array.prototype.map.call(el.ownerDocument.querySelectorAll(".flash"), function (n) {
+            return (n.textContent || "").replace(/\s+/g, " ").trim();
+          }).join(" | "),
         };
         // Newest press owns the region; the previous one's timers die with it.
         this._paRelease("");
