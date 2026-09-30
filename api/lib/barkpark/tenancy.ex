@@ -1728,15 +1728,36 @@ defmodule Barkpark.Tenancy do
   defp slug_key(attrs), do: if(Map.has_key?(attrs, "name"), do: "slug", else: :slug)
 
   @doc """
-  Slugify a name into a workspace/project slug: downcase, collapse any run of
-  non-alphanumerics to a single hyphen, trim leading/trailing hyphens. Returns
-  `""` for an all-symbol/blank input — the changeset's `validate_required` +
+  Slugify a name into a workspace/project slug: downcase, TRANSLITERATE
+  accented and ligature Latin letters, collapse any run of non-alphanumerics to
+  a single hyphen, trim leading/trailing hyphens. Returns `""` for an
+  all-symbol/blank input — the changeset's `validate_required` +
   `validate_format` then surface a clean error.
+
+  Transliteration (task-f5a0b3e391c5fb29): accented letters fold to their base
+  (NFD, combining marks dropped: å→a, é→e, ü→u); letters NFD cannot split get
+  their conventional spelling (æ→ae, ø→o, ß→ss, œ→oe, þ→th, ð→d, đ→d, ł→l),
+  the same rule Studio's document-slug Generate uses (#20729). Before it,
+  "Nytt prosjekt Æøå" derived `nytt-prosjekt` and "Blåbær" `bl-b-r`. ASCII names
+  derive byte-identically, and a slug is DERIVED only when a row is created
+  without one, so stored slugs never change.
   """
   @spec slugify(String.t()) :: String.t()
   def slugify(name) when is_binary(name) do
     name
     |> String.downcase()
+    |> String.replace(["æ", "ø", "ß", "œ", "þ", "ð", "đ", "ł"], fn
+      "æ" -> "ae"
+      "ø" -> "o"
+      "ß" -> "ss"
+      "œ" -> "oe"
+      "þ" -> "th"
+      "ð" -> "d"
+      "đ" -> "d"
+      "ł" -> "l"
+    end)
+    |> :unicode.characters_to_nfd_binary()
+    |> String.replace(~r/\p{Mn}/u, "")
     |> String.replace(~r/[^a-z0-9]+/, "-")
     |> String.trim("-")
   end
