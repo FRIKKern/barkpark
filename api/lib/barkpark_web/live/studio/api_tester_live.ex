@@ -202,7 +202,12 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   end
 
   defp do_run_all(socket) do
-    config = %{token: socket.assigns.token, base: runner_base(socket)}
+    config = %{
+      token: socket.assigns.token,
+      base: runner_base(socket),
+      dataset: socket.assigns.dataset
+    }
+
     endpoints = socket.assigns.endpoints
 
     task = Task.async(fn -> {:run_all_result, run_all_scenarios(endpoints, config)} end)
@@ -213,6 +218,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   # The blocking run-all sweep, extracted so it can run inside a Task off the
   # LiveView process. Returns {scenario_results, last_results}.
   defp run_all_scenarios(endpoints, config) do
+    fixtures = seed_fixture_overrides(config)
+
     scenario_results =
       endpoints
       |> Enum.filter(&(&1.kind == :endpoint && &1[:runnable] != false))
@@ -238,6 +245,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           []
         else
           Enum.map(scenarios, fn scenario ->
+            scenario = apply_seed_fixture(scenario, ep.id, fixtures)
             # Build form state from defaults + overrides
             base_form = initial_form_state(ep)
 
@@ -308,6 +316,78 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       end)
 
     {scenario_results, last_results}
+  end
+
+  # Three probes in the catalog read DEMO-seed content: "Get single document"
+  # fetches post `p1`, and "Search" expects a title matching "GROQ" and posts
+  # matching "a". On a
+  # CLEAN-seeded instance (what `bp setup --target local` gives a new user)
+  # neither exists, so a healthy server's first Run all read 32 Pass / 3 Fail
+  # (stranger walk, 2026-09-30). The sweep now looks once for the fixture this
+  # instance actually has: the demo's p1 keeps the catalog defaults; failing
+  # that, the clean seed's published `welcome` paper stands in, and the
+  # scenario label says so. Neither present: the defaults stay and fail
+  # honestly. Keyed by endpoint id + scenario label, outside the catalog, whose
+  # entry maps are pinned by EndpointsCatalogBaseline.
+  @doc false
+  def seed_fixture_overrides(config, get \\ &probe_get/1) do
+    ds = URI.encode(Map.get(config, :dataset, "production"))
+    base = Map.get(config, :base, runner_base_url())
+
+    cond do
+      get.(base <> "/v1/data/doc/#{ds}/post/p1") == 200 ->
+        %{}
+
+      get.(base <> "/v1/data/doc/#{ds}/paper/welcome") == 200 ->
+        %{
+          {"query-single", "gets document p1"} => %{
+            label: "gets the seeded welcome paper (no demo p1 on this instance)",
+            path_overrides: %{"type" => "paper", "doc_id" => "welcome"}
+          },
+          {"search-documents", "search with results"} => %{
+            label: "search with results (\"Welcome\"; no demo GROQ post on this instance)",
+            query_overrides: %{"q" => "Welcome"}
+          },
+          {"search-documents", "search with type filter"} => %{
+            label: "search with type filter (paper; no demo posts on this instance)",
+            query_overrides: %{"q" => "Welcome", "type" => "paper"}
+          }
+        }
+
+      true ->
+        %{}
+    end
+  end
+
+  @doc false
+  def apply_seed_fixture(scenario, endpoint_id, fixtures) do
+    case Map.get(fixtures, {endpoint_id, scenario[:label]}) do
+      nil ->
+        scenario
+
+      fix ->
+        scenario
+        |> Map.put(:label, fix[:label] || scenario[:label])
+        |> Map.update(
+          :path_overrides,
+          fix[:path_overrides] || %{},
+          &Map.merge(&1 || %{}, fix[:path_overrides] || %{})
+        )
+        |> Map.update(
+          :query_overrides,
+          fix[:query_overrides] || %{},
+          &Map.merge(&1 || %{}, fix[:query_overrides] || %{})
+        )
+    end
+  end
+
+  defp probe_get(url) do
+    case Req.get(url, retry: false, receive_timeout: 5_000, connect_options: [timeout: 2_000]) do
+      {:ok, %Req.Response{status: status}} -> status
+      _ -> nil
+    end
+  rescue
+    _ -> nil
   end
 
   # Undo what a Run all scenario left behind: a live webhook, or fixture
