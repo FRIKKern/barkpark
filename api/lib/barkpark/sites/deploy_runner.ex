@@ -3241,7 +3241,14 @@ defmodule Barkpark.Sites.DeployRunner do
 
   # Reachability: `dir` is `run_state_dir()`; `path` came back OUT of a manifest
   # on disk, which is exactly why it is checked before it is followed.
-  # sobelow_skip ["Traversal.FileModule"]
+  #
+  # NO sobelow_skip HERE, deliberately (task-3988d545ee8095bc): this def makes no
+  # File.* call itself — it invokes the capture it is handed — so Sobelow flags
+  # nothing in it and a waiver here suppresses nothing (MEASURED: `mix sobelow
+  # --skip` 0 findings with the waiver, 0 without; deleting the waiver on
+  # prune_run_state_dir/1 instead moves 0 -> 4). Sobelow flags the `&File.rm/1` /
+  # `&File.rm_rf/1` captures at the CALLER, and prune_run_state_dir/1's waiver
+  # covers them. The containment below is WHY that caller's waiver is sound.
   defp sweep_path(dir, path, fun) when is_binary(path) do
     if inside_run_state_dir?(dir, path) do
       fun.(path)
