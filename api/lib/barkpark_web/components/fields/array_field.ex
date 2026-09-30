@@ -318,7 +318,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         reference_row(%{
           wrap_id: ref_row_id(assigns.field, row_path, row_value, idx),
           input_name: row_path,
-          row_value: to_string(row_value || ""),
+          row_value: BarkparkWeb.Components.FieldInputs.reference_id(row_value),
           ref_type: ref_type_of(item),
           dataset: assigns[:dataset] || "production",
           scope_prefix: assigns[:scope_prefix] || "",

@@ -310,7 +310,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         readonly: assigns.readonly
       })
     else
-      value = to_string(get_value(assigns.value, sub.name, "") || "")
+      value =
+        BarkparkWeb.Components.FieldInputs.reference_id(get_value(assigns.value, sub.name, ""))
 
       reference_subfield_input(%{
         input_name: child_path(assigns.path, sub.name),

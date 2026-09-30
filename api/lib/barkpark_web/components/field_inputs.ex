@@ -272,7 +272,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
   def input(
         %{field: %{"type" => "reference", "name" => name, "refType" => "mediaAsset"}} = assigns
       ) do
-    val = Map.get(assigns.editor_form, name, "")
+    val = reference_id(Map.get(assigns.editor_form, name, ""))
     assigns = assign(assigns, n: name, v: val)
 
     ~H"""
@@ -304,7 +304,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # the picker searches across the set (`types=`) and shows the type on every
   # hit and on the selected pill. A single `refType` renders byte-identically.
   def input(%{field: %{"type" => "reference", "name" => name} = f} = assigns) do
-    val = Map.get(assigns.editor_form, name, "")
+    val = reference_id(Map.get(assigns.editor_form, name, ""))
     assigns = assign(assigns, n: name, v: val, ref_type: Enum.join(reference_types(f), ","))
 
     ~H"""
@@ -509,6 +509,26 @@ defmodule BarkparkWeb.Components.FieldInputs do
   end
 
   def slug_source(_, _), do: "title"
+
+  @doc """
+  The document id a stored reference VALUE points at, as the string every
+  picker's `value` attribute and hidden input carry.
+
+  Studio persists a reference as the bare id string, but the API accepts — and
+  `?expand` resolves — the Sanity-style object too (`{"_ref": id, "_type":
+  "reference"}`, api-v1.md), so documents written through the JS SDK or
+  `bp --set 'author:={"_ref":…}'` carry it. Rendered raw, that map crashed the
+  whole editor with `Phoenix.HTML.Safe not implemented for Map` (a 500 on the
+  document route; stranger walk 2026-09-30). The id it names is shown instead;
+  saving from Studio then stores the bare string.
+
+  `nil` and anything with no readable id render as `""` (an empty picker).
+  """
+  @spec reference_id(term()) :: String.t()
+  def reference_id(value) when is_binary(value), do: value
+  def reference_id(%{"_ref" => ref}) when is_binary(ref), do: ref
+  def reference_id(%{_ref: ref}) when is_binary(ref), do: ref
+  def reference_id(_), do: ""
 
   @doc """
   Every target type a reference field may point at, in declaration order and
