@@ -473,6 +473,18 @@ func (m model) getFieldValue(fieldName string) string {
 		if raw, ok := m.selectedDoc.Extra[fieldName]; ok && json.Unmarshal(raw, &s) == nil {
 			return s
 		}
+		// A reference stored Sanity-style — {"_ref": id, "_type": "reference"},
+		// the shape the API accepts and ?expand resolves, and what both
+		// create-barkpark-app starters seed — is an object, so it never reaches
+		// Values either. The picker read "" and showed "Select ..." over a
+		// document that HAS an author (stranger walk, 2026-09-30). The id it
+		// names is the field's value, exactly as a bare-id reference reads.
+		var ref struct {
+			Ref string `json:"_ref"`
+		}
+		if raw, ok := m.selectedDoc.Extra[fieldName]; ok && json.Unmarshal(raw, &ref) == nil && ref.Ref != "" {
+			return ref.Ref
+		}
 	}
 	return ""
 }
