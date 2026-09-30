@@ -242,6 +242,11 @@ defmodule BarkparkCloud.Notifications.SafeUrl do
     private_address?({div(g, 256), rem(g, 256), div(h, 256), rem(h, 256)})
   end
 
+  # 64:ff9b:1::/48 local-use NAT64 (RFC 8215). It is internal to the local
+  # translator and never a public destination (task-a30c403aea77a679; the api's
+  # SafeOutbound refuses it too).
+  def private_address?({0x64, 0xFF9B, 1, _, _, _, _, _}), do: true
+
   def private_address?({first, _, _, _, _, _, _, _}) do
     cond do
       # ff00::/8 multicast
