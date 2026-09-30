@@ -71,7 +71,10 @@ func (m *model) openRefPicker(field Field) {
 	// QueryResult, not Query: a refused/unreachable read also yields zero
 	// docs, and the empty-list arm below reported that as "no <type>
 	// documents" — asserting the type is empty when we never got to look.
-	docs, outcome := m.ds.QueryResult(field.RefType, "")
+	// The picker needs ids and titles only, so it asks for the route's full
+	// 1000-row page with a title projection — the default 100-row page left the
+	// 101st candidate unpickable (stranger walk, 2026-10-01).
+	docs, _, outcome := m.ds.QueryPage(field.RefType, "", docListMax, []string{"title"})
 	if m.refTitles == nil {
 		m.refTitles = make(map[string]string)
 	}

@@ -41,6 +41,7 @@ var helpSections = []helpSection{
 	}},
 	{"Documents (list pane)", [][2]string{
 		{"n", "new document (title prompt)"},
+		{"+", "load more (a list whose count shows N+)"},
 		{"y", "duplicate (content verbatim)"},
 		{"space", "mark / unmark row for bulk"},
 		{"ctrl+p / U", "publish / unpublish every marked doc"},

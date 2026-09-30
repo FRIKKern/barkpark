@@ -475,6 +475,15 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		}
 
+	// ── Load more (`+` on a truncated doc-list pane): the list read one page
+	//    and its header shows "100+"; this reads the next page. ──
+	case "+":
+		if m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes) &&
+			m.panes[m.focus.PaneIndex].IsDocList {
+			m.loadMoreDocs()
+			return m, nil
+		}
+
 	// ── Search (`/` on a focused pane only — never while editing text: the
 	//    editing/creating/search-prompt branches above own those keystrokes,
 	//    and the editor surfaces don't bind it). Opens the help-bar query

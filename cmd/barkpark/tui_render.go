@@ -1063,6 +1063,10 @@ func docListCount(pane Pane) string {
 	if pane.ReadFailed && len(pane.Items) == 0 {
 		return "—"
 	}
+	if pane.HasMore {
+		// A truncated page: the count is a floor, and `+` loads more.
+		return fmt.Sprintf("%d+", len(pane.Items))
+	}
 	return fmt.Sprintf("%d", len(pane.Items))
 }
 

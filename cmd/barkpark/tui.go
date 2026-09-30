@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -31,6 +32,10 @@ type Pane struct {
 	// set from apiclient's DocReadOutcome; a decodable 200 with zero rows is
 	// an honest empty and leaves this false.
 	ReadFailed bool
+	// HasMore marks a doc-list pane whose page was truncated — the server has
+	// rows past it. The header count reads as a floor ("100+") and `+` loads
+	// the next page (listLimits).
+	HasMore bool
 }
 
 // PaneItem is a single renderable row inside a Pane.
@@ -166,6 +171,11 @@ type model struct {
 	// cacheRefTitlesFor on editor open; never invalidated mid-session (titles
 	// are display sugar — a stale one re-resolves on the next picker open).
 	refTitles map[string]string
+	// listLimits is the page size per type for doc-list panes: absent = one
+	// page (docListPage), grown by `+` on a truncated list, capped at the
+	// query route's 1000-row limit. Kept across refreshes so a live update
+	// does not snap an extended list back to one page.
+	listLimits map[string]int
 	// Search (`/` on a focused pane — search.go): searching gates the help-bar
 	// query input (reuses m.textInput, the n-prompt mechanics); searchOpen +
 	// searchHits/searchCursor/searchQuery hold the transient results modal.
@@ -480,8 +490,18 @@ func (m *model) buildListPane(node *StructureNode) Pane {
 	return Pane{Node: node, Items: items, Cursor: clampToItem(items, 0, +1)}
 }
 
+// docListPage is one doc-list page; docListMax is the query route's own cap.
+const (
+	docListPage = 100
+	docListMax  = 1000
+)
+
 func (m *model) buildDocListPane(node *StructureNode) Pane {
-	docs, outcome := m.ds.QueryResult(node.TypeName, node.Filter)
+	limit := docListPage
+	if n, ok := m.listLimits[node.TypeName]; ok && n > 0 {
+		limit = n
+	}
+	docs, hasMore, outcome := m.ds.QueryPage(node.TypeName, node.Filter, limit, nil)
 	preview := schemaListPreview(node.TypeName)
 	var items []PaneItem
 	for i := range docs {
@@ -503,7 +523,44 @@ func (m *model) buildDocListPane(node *StructureNode) Pane {
 			Meta:     rowMeta(docs[i], preview),
 		})
 	}
-	return Pane{Node: node, Items: items, IsDocList: true, ReadFailed: outcome != apiclient.DocReadOK}
+	return Pane{Node: node, Items: items, IsDocList: true, HasMore: hasMore, ReadFailed: outcome != apiclient.DocReadOK}
+}
+
+// loadMoreDocs grows the focused doc-list pane's page by one page (up to the
+// route cap) and rebuilds it in place, keeping the cursor on the same row.
+func (m *model) loadMoreDocs() {
+	if m.focus.Target != FocusPane || m.focus.PaneIndex >= len(m.panes) {
+		return
+	}
+	pane := m.panes[m.focus.PaneIndex]
+	if !pane.IsDocList || pane.Node == nil {
+		return
+	}
+	if !pane.HasMore {
+		m.setStatusInfo("all documents are listed")
+		return
+	}
+	cur := docListPage
+	if n, ok := m.listLimits[pane.Node.TypeName]; ok && n > 0 {
+		cur = n
+	}
+	if cur >= docListMax {
+		m.setStatusInfo(fmt.Sprintf("showing the first %d — / search to find the rest", docListMax))
+		return
+	}
+	next := cur + docListPage
+	if next > docListMax {
+		next = docListMax
+	}
+	if m.listLimits == nil {
+		m.listLimits = make(map[string]int)
+	}
+	m.listLimits[pane.Node.TypeName] = next
+	rebuilt := m.buildDocListPane(pane.Node)
+	rebuilt.Cursor = pane.Cursor
+	rebuilt.Scroll = pane.Scroll
+	m.panes[m.focus.PaneIndex] = rebuilt
+	m.setStatusInfo(fmt.Sprintf("%d documents listed", len(rebuilt.Items)))
 }
 
 // refreshViewport rebuilds editor content without resetting scroll position.
