@@ -465,3 +465,53 @@ func TestRunSeedFailureDefaultTextUnchanged(t *testing.T) {
 		t.Errorf("default mode leaked a JSON envelope to stdout: %q", so.String())
 	}
 }
+
+// The demo schema's real article fields (GET /v1/schemas/production/article):
+// author declares its target ONLY through `to`, keywords is an arrayOf whose
+// element shape is anonymous. `bp seed article` stored {"_ref":"seed-ref-1"}
+// (an id no `bp seed person` ever creates) and [" 1"," 2"] (stranger walk,
+// 2026-09-30).
+func TestSeedDemoArticleReferenceAndArrayLabels(t *testing.T) {
+	const article = `{"name":"article","fields":[
+	  {"name":"author","required?":false,"title":"Author","to":[{"type":"person"}],"type":"reference"},
+	  {"name":"keywords","of":{"type":"string"},"ordered":true,"required?":false,"title":"Keywords","type":"arrayOf"}
+	]}`
+	var s seedSchema
+	if err := json.Unmarshal([]byte(article), &s); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	doc := generateDoc(s, 1)
+	ref, _ := doc["author"].(map[string]any)
+	if got := ref["_ref"]; got != "seed-person-1" {
+		t.Errorf("author = %v, want _ref seed-person-1 (the id `bp seed person` creates)", doc["author"])
+	}
+	kw, _ := doc["keywords"].([]any)
+	if len(kw) != 2 || kw[0] != "Keywords 1" || kw[1] != "Keywords 2" {
+		t.Errorf("keywords = %q, want [\"Keywords 1\" \"Keywords 2\"]", kw)
+	}
+}
+
+func TestDecodeRefTargetShapes(t *testing.T) {
+	cases := map[string]string{
+		`[{"type":"person"},{"type":"org"}]`: "person",
+		`{"type":"person"}`:                  "person",
+		`["person"]`:                         "person",
+		`"person"`:                           "person",
+		`[]`:                                 "",
+		`null`:                               "",
+		``:                                   "",
+	}
+	for raw, want := range cases {
+		if got := decodeRefTarget(json.RawMessage(raw)); got != want {
+			t.Errorf("decodeRefTarget(%s) = %q, want %q", raw, got, want)
+		}
+	}
+	// refType still wins when both are present.
+	var f seedField
+	if err := json.Unmarshal([]byte(`{"name":"a","type":"reference","refType":"author","to":[{"type":"person"}]}`), &f); err != nil {
+		t.Fatal(err)
+	}
+	if f.RefType != "author" {
+		t.Errorf("RefType = %q, want the declared refType author", f.RefType)
+	}
+}
