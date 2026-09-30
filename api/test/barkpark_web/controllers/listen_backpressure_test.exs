@@ -51,6 +51,20 @@ defmodule BarkparkWeb.ListenBackpressureTest do
   alias Barkpark.Content.CallerContext
   alias BarkparkWeb.ListenController
 
+  # A dataset NO other code writes to (task-5b5c0360d848c3e8). The listener
+  # subscribes to `documents:<dataset>`, and a shared-layer write elsewhere in
+  # the suite broadcasts there too. If a burst of 21 or more foreign events lands
+  # between the forwarder's subscribe and the listener's first loop step, the
+  # listener sheds before the test's own signal. The forwarder then exits on
+  # `:stop` before `Process.monitor/1` runs, so its DOWN reads `:noproc`
+  # instead of `:normal`. That is the main-run red of 2026-09-29.
+  #
+  # A probe (25 shared-layer broadcasts on `documents:production` fired from
+  # the adapter's `send_chunked`) reproduced it every run on "production", and
+  # passed every run on an isolated dataset. What this file tests is the shed
+  # and its cleanup, so each test owns its topic and asserts nothing weaker.
+  defp isolated_dataset, do: "listen-backpressure-#{System.unique_integer([:positive])}"
+
   defmodule BlockingChunkAdapter do
     def send_chunked(state, _status, _headers), do: {:ok, "", state}
 
@@ -113,6 +127,7 @@ defmodule BarkparkWeb.ListenBackpressureTest do
   end
 
   test "a blocked chunk sink keeps its mailbox bounded and terminates after overload" do
+    ds = isolated_dataset()
     previous = Application.get_env(:barkpark, ListenController)
 
     Application.put_env(:barkpark, ListenController,
@@ -134,7 +149,7 @@ defmodule BarkparkWeb.ListenBackpressureTest do
 
     {pid, monitor} =
       spawn_monitor(fn ->
-        ListenController.listen(conn, %{"dataset" => "production"})
+        ListenController.listen(conn, %{"dataset" => ds})
         send(test, :listener_returned)
       end)
 
@@ -154,7 +169,7 @@ defmodule BarkparkWeb.ListenBackpressureTest do
     for id <- 1..1_000 do
       Phoenix.PubSub.broadcast(
         Barkpark.PubSub,
-        "documents:production",
+        "documents:#{ds}",
         {:document_changed, event(id, %{"body" => "queued #{id}"})}
       )
     end
@@ -174,6 +189,7 @@ defmodule BarkparkWeb.ListenBackpressureTest do
   end
 
   test "an overload signal at the low-queue race boundary terminates and cleans up" do
+    ds = isolated_dataset()
     previous = Application.get_env(:barkpark, ListenController)
 
     Application.put_env(:barkpark, ListenController,
@@ -192,7 +208,7 @@ defmodule BarkparkWeb.ListenBackpressureTest do
       |> Map.put(:adapter, {BlockingChunkAdapter, %{test: self()}})
 
     {pid, monitor} =
-      spawn_monitor(fn -> ListenController.listen(conn, %{"dataset" => "production"}) end)
+      spawn_monitor(fn -> ListenController.listen(conn, %{"dataset" => ds}) end)
 
     # Startup-gated (see the budget note at the top of this module): an
     # explicit 2_000 ms, not the implicit 100 ms. A timing budget cannot mask
