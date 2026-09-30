@@ -8457,6 +8457,49 @@ else
   bad "(j) an ADDED context did not fall through to the deadlock detector (exit $RC31_J, wanted 3): $(head -1 <<<"$RC31_J_OUT")"
 fi
 
+section "32. the S2-premise clause runs on a REDIRECTED --workflows tree with the REAL spec — --s2-workflows points it at a copy of the committed tree"
+
+# task-d685139f019f1015. s2_premise_check stands down whenever --workflows is
+# redirected (every fixture arm in this file redirects it), so until this
+# section no fixture run with the real spec ever reached the clause: its
+# real-spec path was exercised only by the bare `--ci` run on main. Here the
+# SAME redirected invocation §26(b) greens on also names --s2-workflows: a
+# verbatim copy of .github/workflows must GREEN against the real spec's S2
+# rows, and the copy with ONE job-level `continue-on-error: true` removed
+# (go-format.yml job `gofmt`, which the committed spec's S2 row names) must
+# RED by name as a MISMATCH.
+RC32_WF="$TMP/rc32-wf-real"
+RC32_WF_FALSE="$TMP/rc32-wf-false-s2"
+mkdir -p "$RC32_WF" "$RC32_WF_FALSE"
+cp "$REPO_ROOT"/.github/workflows/*.yml "$RC32_WF"/
+cp "$REPO_ROOT"/.github/workflows/*.yml "$RC32_WF_FALSE"/
+awk 'BEGIN { in_job = 0; done = 0 }
+     /^  gofmt:[[:space:]]*$/ { in_job = 1 }
+     in_job && !done && /^    continue-on-error: true[[:space:]]*$/ { done = 1; next }
+     { print }' "$RC32_WF/go-format.yml" > "$RC32_WF_FALSE/go-format.yml"
+rc32_run() { # <s2-workflows-dir> -> sets RC32_OUT/RC32_RC
+  RC32_OUT="$(bash "$VERIFY" --spec "$RC26_WIDGET_SPEC" --readback "$RC26_WIDGET_RB" --runs "$RC26_WIDGET_RUNS" \
+    --sha probe --workflows "$RC26_WF_DENY" --s2-workflows "$1" 2>&1)" && RC32_RC=0 || RC32_RC=$?
+}
+if jq -e '[.exclusions[]? | select((.reason // "") | startswith("S2 ADVISORY: go-format.yml job"))] | length == 1' \
+     "$RC26_WIDGET_SPEC" >/dev/null 2>&1 \
+   && ! cmp -s "$RC32_WF/go-format.yml" "$RC32_WF_FALSE/go-format.yml"; then
+  rc32_run "$RC32_WF"
+  if [ "$RC32_RC" -eq 0 ] && ! grep -q "S2-premise stands down" <<<"$RC32_OUT"; then
+    ok "(a) redirected --workflows + --s2-workflows on a verbatim copy of the committed tree: the clause RUNS on the real spec's S2 rows and GREENS (exit 0)"
+  else
+    bad "(a) the real-spec S2 run on a verbatim tree copy did not green or stood down (exit $RC32_RC): $(grep -m3 -E 'FAIL|MISMATCH|UNRESOLVED|stands down' <<<"$RC32_OUT")"
+  fi
+  rc32_run "$RC32_WF_FALSE"
+  if [ "$RC32_RC" -ne 0 ] && grep -q "go-format.yml job 'gofmt' carries NO job-level continue-on-error" <<<"$RC32_OUT"; then
+    ok "(b) …and the SAME run reds by name once gofmt's job-level flag is gone — the real spec's S2 row is now a false claim (exit $RC32_RC)"
+  else
+    bad "(b) a false S2 row on the real spec did not red by name (exit $RC32_RC): $(grep -m3 -E 'FAIL|MISMATCH|S2' <<<"$RC32_OUT")"
+  fi
+else
+  bad "§32's premise moved: the real spec no longer has exactly one \`S2 ADVISORY: go-format.yml job\` row, or the plant did not change go-format.yml — re-point the plant at a job an S2 row names"
+fi
+
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
   echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."
