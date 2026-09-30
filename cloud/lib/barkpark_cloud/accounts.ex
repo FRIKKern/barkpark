@@ -265,15 +265,18 @@ defmodule BarkparkCloud.Accounts do
   @spec get_user_by_email_and_password(String.t(), String.t()) :: User.t() | nil
   def get_user_by_email_and_password(email, password)
       when is_binary(email) and is_binary(password) do
-    user = get_user_by_email(email)
+    # EXACTLY ONE bcrypt verification on every path (task-97852e25746dcd87). A
+    # known email pays `verify_pass/2` whether the password is right or wrong;
+    # an unknown email pays `no_user_verify/0`. The old `cond` sent a known email
+    # with a WRONG password through BOTH (verify_pass failed, then the catch-all
+    # burned a second hash), so a wrong password on a registered address took
+    # twice as long as one on an unknown address — measured 1.64x — which
+    # enumerated accounts the register/reset paths are careful not to reveal.
+    case get_user_by_email(email) do
+      %User{} = user ->
+        if Bcrypt.verify_pass(password, user.hashed_password), do: user, else: nil
 
-    cond do
-      user && Bcrypt.verify_pass(password, user.hashed_password) ->
-        user
-
-      true ->
-        # No matching user (or wrong password): burn a hash so the timing of
-        # the failure path matches the success path — never reveal which.
+      nil ->
         Bcrypt.no_user_verify()
         nil
     end
