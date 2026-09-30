@@ -4353,12 +4353,69 @@ defmodule BarkparkCloud.Registry do
       `reveal_admin_token_or_error/1`.
 
   This list goes stale. Re-run the grep instead of trusting it.
+
+  ## A url host another box owns (task-0d75da311d16a94d)
+
+  Every caller above sends the bearer to `bp.url`. If `hostname_claims` says
+  that url's host belongs to a DIFFERENT barkpark, the host is someone else's
+  server, and the bearer must not leave. This is the live prod case
+  `dr-w24-bl-gyldendal-live-cross-tenant-escalation` measured: a ghost row's
+  url is the host another team attached as its custom_host, and the usage
+  sampler posted the ghost row's admin bearer there every 15 minutes. The
+  backfill gave the host to the customer's custom_host claim, so this check
+  sees the collision.
+
+  Such a row answers `:error`, the fail-closed arm every caller already
+  handles, with an error log naming both rows and a
+  `[:barkpark_cloud, :registry, :admin_token_withheld]` event. A url host that
+  is unclaimed, claimed by this row, or claimed by a site is unchanged.
+  Healing the row (rotate the token, re-address it) stays an operator action.
   """
   @spec reveal_admin_token(Barkpark.t()) :: {:ok, binary() | nil} | :error
   def reveal_admin_token(%Barkpark{admin_token_encrypted: nil}), do: {:ok, nil}
 
-  def reveal_admin_token(%Barkpark{admin_token_encrypted: ciphertext}),
-    do: Vault.decrypt(ciphertext)
+  def reveal_admin_token(%Barkpark{admin_token_encrypted: ciphertext} = bp) do
+    case url_host_owner_elsewhere(bp) do
+      nil ->
+        Vault.decrypt(ciphertext)
+
+      {host, other_id} ->
+        Logger.error(
+          "[registry] admin token for barkpark #{bp.id} WITHHELD: its url host #{host} " <>
+            "is claimed by barkpark #{other_id}, so the bearer would go to another box. " <>
+            "Rotate this row's admin token and re-address it " <>
+            "(dr-w24-bl-gyldendal-live-cross-tenant-escalation)."
+        )
+
+        :telemetry.execute([:barkpark_cloud, :registry, :admin_token_withheld], %{count: 1}, %{
+          barkpark_id: bp.id,
+          claimed_by: other_id,
+          host: host
+        })
+
+        :error
+    end
+  end
+
+  # `{host, other_barkpark_id}` when the row's url host is claimed by a
+  # DIFFERENT barkpark, else nil. Only a row READ FROM THE DATABASE has claims
+  # to check. A hand-built struct (`:built`, as unit tests pass to the relay
+  # seams) has none, and it must not need a DB connection to reveal.
+  defp url_host_owner_elsewhere(%Barkpark{id: id, url: url} = bp) do
+    with :loaded <- Ecto.get_meta(bp, :state),
+         host when is_binary(host) <- hostname_claim_key(url),
+         other when is_binary(other) and other != id <-
+           Repo.one(
+             from(c in HostnameClaim,
+               where: c.host == ^host and not is_nil(c.barkpark_id),
+               select: c.barkpark_id
+             )
+           ) do
+      {host, other}
+    else
+      _ -> nil
+    end
+  end
 
   @doc """
   Mint (or rotate) the per-barkpark push-relay shared secret — the key the
