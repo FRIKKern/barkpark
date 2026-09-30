@@ -262,13 +262,15 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
             legacy = %{
               id: ep.id,
               method: req.method,
-              path: String.replace_prefix(req.url, "http://localhost:4000", ""),
+              path: String.replace_prefix(req.url, config.base, ""),
               headers: req.headers,
               body: decode_body(req.body_text),
               expect: scenario.expect
             }
 
-            result = Runner.run(legacy)
+            # The base rides into run/2 too: Runner's own default is a literal
+            # localhost:4000, so a stripped path without it goes to the wrong node.
+            result = Runner.run(legacy, base: config.base)
 
             %{
               endpoint_id: ep.id,
@@ -313,13 +315,13 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     legacy = %{
       id: endpoint.id,
       method: req.method,
-      path: String.replace_prefix(req.url, "http://localhost:4000", ""),
+      path: String.replace_prefix(req.url, base, ""),
       headers: req.headers,
       body: decode_body(req.body_text),
       expect: endpoint[:expect]
     }
 
-    result = Runner.run(legacy)
+    result = Runner.run(legacy, base: base)
 
     if plugin_spec = endpoint[:plugin_spec] do
       enrich_with_plugin_asserts(result, plugin_spec, token: token, base: base)
@@ -911,5 +913,26 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   # valid from any page, and resolve to the same Default tenant the
   # examples seed. Scoped-mirror documentation belongs in the endpoint
   # docs (each scoped family notes its /w/... twin), not the runner base.
-  defp runner_base(_socket), do: "http://localhost:4000"
+  #
+  # THE PORT IS THIS SERVER'S OWN LISTEN PORT, not a literal 4000 (stranger
+  # walk, 2026-09-30). The runner is a server-side :httpc call back into the
+  # same node, and the hardcoded `http://localhost:4000` only reached it when
+  # the node happened to listen there: a dev server on any other PORT answered
+  # "Error" on every row of Run all, and a blue/green box whose live slot is
+  # :4001 sent every run to the DORMANT slot (or to nothing). Loopback + the
+  # Endpoint's configured `:http` port is the node itself by construction.
+  defp runner_base(_socket), do: runner_base_url()
+
+  @doc false
+  # Public for the test that pins it: the runner's base is this node's own
+  # loopback + listen port.
+  def runner_base_url do
+    port =
+      case BarkparkWeb.Endpoint.config(:http) do
+        opts when is_list(opts) -> Keyword.get(opts, :port) || 4000
+        _ -> 4000
+      end
+
+    "http://127.0.0.1:#{port}"
+  end
 end
