@@ -62,7 +62,10 @@ defmodule Barkpark.Content.Forms do
 
             # A datetime rides to a `datetime-local` input, which accepts ONLY
             # `YYYY-MM-DDTHH:MM`; see datetime_form_value/1.
-            field["type"] == "datetime" ->
+            # A STRUCTURED stored value is handed through as-is so the input
+            # layer renders it read-only (FieldInputs' structured-value clause)
+            # and the save never posts it.
+            field["type"] == "datetime" and (is_binary(raw) or is_nil(raw)) ->
               datetime_form_value(raw)
 
             true ->
@@ -129,6 +132,23 @@ defmodule Barkpark.Content.Forms do
         case Map.fetch(acc, key) do
           {:ok, posted} when is_binary(stored) and stored != "" ->
             if posted == datetime_form_value(stored), do: Map.put(acc, key, stored), else: acc
+
+          _ ->
+            acc
+        end
+
+      # An OPTIONAL select whose stored value matches no option renders the
+      # "Select…" placeholder (value "") — the only choice that posts "". So a
+      # posted "" beside a non-empty stored value means "never touched": keep
+      # the stored value instead of letting an edit of ANOTHER field erase it.
+      %{"type" => "select", "name" => key, "options" => opts}, acc
+      when is_binary(key) and is_list(opts) ->
+        stored = Map.get(base_content, key)
+        valid = Enum.map(Barkpark.Content.SelectOptions.normalize(opts), & &1.value)
+
+        case Map.fetch(acc, key) do
+          {:ok, ""} when is_binary(stored) and stored != "" ->
+            if stored in valid, do: acc, else: Map.put(acc, key, stored)
 
           _ ->
             acc
