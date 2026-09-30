@@ -2,7 +2,9 @@ defmodule Barkpark.Seeds.Clean do
   @moduledoc """
   The clean seed profile (`BARKPARK_SEED_PROFILE=clean`) — what a fresh
   `bp setup` install gets: the Default tenancy scope, an admin token, and one
-  welcome paper. NO demo schemas, NO demo documents, NO `barkpark-dev-token`,
+  welcome paper. NO demo schemas, NO demo documents, NO `barkpark-dev-token`
+  (except on a DEV instance, where config/dev.exs names it as the Studio
+  browser token — see `maybe_install_dev_browser_token/1`),
   NO EDItEUR/Thema codelists (those serve onixedit, which is not in the clean
   plugin set). Plugin schemas (paper/mediaAsset/mediaCollection under
   `BARKPARK_PLUGINS=bulldocs,media`) land via the Bootstrap tail in
@@ -64,6 +66,34 @@ defmodule Barkpark.Seeds.Clean do
     IO.puts("Seed profile: clean (papers + media)")
     seed_welcome_paper(scope)
     bootstrap_admin_token(scope)
+    maybe_install_dev_browser_token(scope)
+  end
+
+  # ── The DEV Studio's browser token (task-aa0e0b0a993b6435) ───────────────
+  #
+  # `config :barkpark, :dev_browser_token` is set in config/dev.exs ONLY. With
+  # the dev public-demo posture, an anonymous local browser enters Studio and
+  # its client-side API calls (reference picker, media library) carry THAT
+  # token. Only the demo profile ever minted it, so the DEFAULT
+  # `bp setup --target local` path — clean profile, `mix phx.server` in dev —
+  # served a Studio whose LiveView ran as admin while every one of those calls
+  # answered 403: the picker said "No matches" over a person that existed and
+  # the media library showed empty (measured 2026-09-30, stranger walk).
+  #
+  # Installed here with the demo profile's exact grant (Demo.ensure_dev_token/2
+  # is the one implementation). A release, a deploy.sh box and the test env
+  # have no such config, so they still never carry it — this module's
+  # "NO barkpark-dev-token" promise holds everywhere except a dev instance,
+  # where the demo profile already made the same token.
+  defp maybe_install_dev_browser_token(scope) do
+    case Application.get_env(:barkpark, :dev_browser_token) do
+      raw when is_binary(raw) and raw != "" ->
+        :ok = Barkpark.Seeds.Demo.ensure_dev_token(scope, raw)
+        IO.puts("Dev Studio browser token installed (config :dev_browser_token, dev only).")
+
+      _ ->
+        :ok
+    end
   end
 
   # ── Welcome paper ────────────────────────────────────────────────────────

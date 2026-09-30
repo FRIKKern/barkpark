@@ -582,8 +582,23 @@ defmodule Barkpark.Seeds.Demo do
   # ── Dev API Token ────────────────────────────────────────────────────────────
 
   defp seed_dev_token(scope) do
-    dataset = scope.dataset
     dev_token = "barkpark-dev-token"
+    ensure_dev_token(scope, dev_token)
+    IO.puts("Dev token created: #{dev_token}")
+    IO.puts("Use with: curl -H 'Authorization: Bearer #{dev_token}' ...")
+  end
+
+  @doc """
+  Idempotently install `dev_token` as the Studio dev token for `scope` — the
+  credential `config :barkpark, :dev_browser_token` (config/dev.exs ONLY) hands
+  anonymous local browsers. Read/write/admin, bound to the scope's workspace with
+  its membership row: exactly what the demo profile has always minted. Also
+  called by `Barkpark.Seeds.Clean` when (and only when) that config is set, so a
+  clean-seeded DEV instance's Studio is not left calling the API with a token
+  that does not exist.
+  """
+  def ensure_dev_token(scope, dev_token) when is_binary(dev_token) do
+    dataset = scope.dataset
     dev_perms = ["read", "write", "admin"]
 
     # Mint the dev token through Auth.create_token so it is BOUND to the Default
@@ -623,8 +638,7 @@ defmodule Barkpark.Seeds.Demo do
         end
     end
 
-    IO.puts("Dev token created: #{dev_token}")
-    IO.puts("Use with: curl -H 'Authorization: Bearer #{dev_token}' ...")
+    :ok
   end
 
   # ── Codelist Registry (Bootstrap) ───────────────────────────────────────────
