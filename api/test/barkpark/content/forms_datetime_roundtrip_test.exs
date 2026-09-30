@@ -117,6 +117,37 @@ defmodule Barkpark.Content.FormsDatetimeRoundtripTest do
       assert saved.content["status2"] == "archived"
     end
 
+    test "a number or boolean stored in a string-control field keeps its type on an unrelated edit" do
+      schema = %{
+        fields: [
+          %{"name" => "title", "type" => "string"},
+          %{"name" => "slug", "type" => "slug"},
+          %{"name" => "body", "type" => "text"},
+          %{"name" => "rank", "type" => "number"}
+        ]
+      }
+
+      {:ok, doc} =
+        Content.upsert_document(
+          "widget",
+          %{
+            "doc_id" => "drafts.types-keep-#{System.unique_integer([:positive])}",
+            "title" => "Types",
+            "status" => "draft",
+            "content" => %{"slug" => 42, "body" => true, "rank" => 7}
+          },
+          @dataset
+        )
+
+      # What the Classic inputs show — and post back untouched: the string form.
+      params = %{"title" => "Types!", "slug" => "42", "body" => "true", "rank" => "8"}
+      assert {:ok, saved, _} = Forms.upsert_draft(doc, "widget", schema, params, @dataset)
+
+      assert saved.content["slug"] === 42, "an untouched 42 must not become \"42\""
+      assert saved.content["body"] === true, "an untouched true must not become \"true\""
+      assert saved.content["rank"] === 8, "an EDITED number still coerces to the new value"
+    end
+
     test "an EDITED datetime is stored as the input's value", %{doc: doc} do
       params = doc |> Forms.doc_to_form(@schema) |> Map.put("publishedAt", "2026-02-03T04:05")
 
