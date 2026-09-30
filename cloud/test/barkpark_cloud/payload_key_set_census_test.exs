@@ -4216,6 +4216,9 @@ defmodule BarkparkCloud.WorkerSeamCallerCensus do
     String.contains?(line, prefix) and (tail == "" or String.contains?(line, tail))
   end
 
+  # Every `/v1/internal/**` route's fixed prefix contains this (see callers/3).
+  @internal_marker "/v1/internal"
+
   @doc """
   `%{route => [{file, line}, …]}` over the corpus. One pass per file, every route
   tested per line.
@@ -4224,18 +4227,43 @@ defmodule BarkparkCloud.WorkerSeamCallerCensus do
     splits = Map.new(routes, fn r -> {r, split(elem(r, 1))} end)
     empty = Map.new(routes, &{&1, []})
 
+    # THE MARKER PREFILTER (task-88a2b6297536e2fc). MUTATION D widens the corpus
+    # to every `.md` in the tree, and scanning each line of each file against
+    # all routes took ~50 s alone and past the 60 s ExUnit timeout on a loaded
+    # runner. `line_calls?/2` needs the route's PREFIX on the line, and every
+    # prefix `write_routes/1` can parse contains `@internal_marker`. So a file
+    # or line without the marker can never match, and skipping it changes no
+    # verdict. `marker_bounded?/1` checks that premise on the parsed splits
+    # every call; if it ever fails, the full scan runs as before.
+    marker = if marker_bounded?(Map.values(splits)), do: @internal_marker, else: ""
+
     Enum.reduce(files, empty, fn rel, acc ->
-      root
-      |> Path.join(rel)
-      |> File.read!()
-      |> String.split("\n")
-      |> Enum.with_index(1)
-      |> Enum.reduce(acc, fn {line, n}, acc ->
-        Enum.reduce(routes, acc, fn route, acc ->
-          if line_calls?(line, splits[route]),
-            do: Map.update!(acc, route, &[{rel, n} | &1]),
-            else: acc
-        end)
+      body = root |> Path.join(rel) |> File.read!()
+
+      if String.contains?(body, marker) do
+        scan_lines(body, marker, routes, splits, rel, acc)
+      else
+        acc
+      end
+    end)
+  end
+
+  @doc "Does every route prefix contain the internal marker? (the prefilter's premise)"
+  def marker_bounded?(splits),
+    do:
+      splits != [] and
+        Enum.all?(splits, fn {prefix, _tail} -> String.contains?(prefix, @internal_marker) end)
+
+  defp scan_lines(body, marker, routes, splits, rel, acc) do
+    body
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {line, _n} -> String.contains?(line, marker) end)
+    |> Enum.reduce(acc, fn {line, n}, acc ->
+      Enum.reduce(routes, acc, fn route, acc ->
+        if line_calls?(line, splits[route]),
+          do: Map.update!(acc, route, &[{rel, n} | &1]),
+          else: acc
       end)
     end)
   end
@@ -4460,6 +4488,15 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
     # decision; borrowing it as a ruling about what counts as a caller would make
     # the corpus lie, because internal/cli is where `bp cloud` calls the seam.
     assert Enum.any?(ctx.files, &String.starts_with?(&1, "internal/cli/"))
+  end
+
+  # task-88a2b6297536e2fc: the marker prefilter in `callers/3` is only exact
+  # while every parsed route prefix carries `/v1/internal`. Pin the premise on
+  # the live router, and pin that a route outside it turns the prefilter off.
+  test "THE PREFILTER'S PREMISE holds on the live router, and a foreign prefix disarms it", ctx do
+    splits = Enum.map(ctx.routes, fn {_verb, path} -> Seam.split(path) end)
+    assert Seam.marker_bounded?(splits)
+    refute Seam.marker_bounded?([{"/v1/elsewhere/", ""} | splits])
   end
 
   test "MUTATION D: prose is refused TWICE, and the *.md refusal is the load-bearing one", ctx do
