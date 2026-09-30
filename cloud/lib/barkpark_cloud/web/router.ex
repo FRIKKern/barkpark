@@ -43,7 +43,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/auth/request-reset       —  request a password-reset email (always 200)
       POST    /v1/auth/reset       —         {token,password} → reset password (single-use)
       POST    /v1/auth/resend-verification user  re-send the confirm mail (always 200)
-      POST    /v1/account/email/change     user  {new_email} → stage + email a 6-digit code
+      POST    /v1/account/email/change     user  {current_password, new_email, otp?} → stage + email a 6-digit code
       POST    /v1/account/email/confirm    user  {code} → swap email + Stripe sync
       GET     /v1/me               user(s)   {user{id,email,confirmed,two_factor_enabled,platform_operator}, team{id,name,slug}, teams[], role, team_authority{team_id,role,admin,owner}, onboarding}
       GET     /v1/onboarding       user      the team's onboarding checklist state
@@ -2059,12 +2059,27 @@ defmodule BarkparkCloud.Web.Router do
   # ENUMERATION-SAFE: an already-registered target, a throttled request, and a
   # down mailer ALL answer the same 202 — only a malformed address (a syntax
   # fact) is 422. So a prober can't learn which addresses have accounts.
+  #
+  # RE-AUTHENTICATED (task-9a30ab22cf0842f2): `current_password` is required
+  # (401 invalid_password), plus a current authenticator `otp` when 2FA is on
+  # (401 invalid_otp). A bare session used to be enough, and the swap is the
+  # first half of a permanent takeover: move the address to one you control,
+  # then reset the password there. The refusal comes BEFORE the new_email check
+  # and is the same for every target, so it enumerates nothing.
   post "/v1/account/email/change" do
     conn = Auth.require_user(conn, [])
+    user = conn.assigns[:current_user]
 
     cond do
       conn.halted ->
         conn
+
+      not Accounts.valid_password?(user, conn.body_params["current_password"]) ->
+        json(conn, 401, %{error: "invalid_password"})
+
+      Accounts.two_factor_enabled?(user) and
+          not Accounts.verify_two_factor_otp(user, conn.body_params["otp"] || "") ->
+        json(conn, 401, %{error: "invalid_otp"})
 
       not is_binary(conn.body_params["new_email"]) ->
         json(conn, 422, %{error: "email_invalid"})
@@ -2109,6 +2124,14 @@ defmodule BarkparkCloud.Web.Router do
               previous_email: previous_email,
               new_email: user.email
             })
+
+            # The swap ends every OTHER session (the acting browser stays signed
+            # in), and the FORMER address is told — it is the only inbox the
+            # rightful owner may still read if the change was not theirs
+            # (task-9a30ab22cf0842f2). Live reset links are revoked inside
+            # `Accounts.update_user_email/2`. Best-effort, post-commit.
+            _ = Accounts.revoke_all_user_sessions(user, except: Auth.bearer_token(conn))
+            _ = Notifications.deliver_email_changed_notice(previous_email, user.email)
 
             json(conn, 200, %{
               user: %{id: user.id, email: user.email, confirmed: not is_nil(user.confirmed_at)}

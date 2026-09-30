@@ -224,10 +224,19 @@ defmodule BarkparkCloud.Web.RouterUserSecurityEventsTest do
       was = user.email
       target = "moved-#{System.unique_integer([:positive])}@example.com"
 
-      assert call(:post, "/v1/account/email/change", %{new_email: target}, token).status == 202
+      assert call(
+               :post,
+               "/v1/account/email/change",
+               %{current_password: @password, new_email: target},
+               token
+             ).status == 202
+
       code = last_email_code()
 
       assert call(:post, "/v1/account/email/confirm", %{code: code}, token).status == 200
+      # The swap also notifies the FORMER address (task-9a30ab22cf0842f2); drain it
+      # so the next code read takes the next change code, not this notice.
+      assert_receive {:email, %{subject: "Your Barkpark Cloud email was changed"}}
 
       [event] = trail(token)
       assert event["action"] == "email_changed"
@@ -235,7 +244,12 @@ defmodule BarkparkCloud.Web.RouterUserSecurityEventsTest do
       refute Jason.encode!(event) =~ code
 
       # A wrong code changes nothing, so it writes nothing.
-      assert call(:post, "/v1/account/email/change", %{new_email: "again-#{target}"}, token).status ==
+      assert call(
+               :post,
+               "/v1/account/email/change",
+               %{current_password: @password, new_email: "again-#{target}"},
+               token
+             ).status ==
                202
 
       _superseded = last_email_code()
