@@ -1135,11 +1135,36 @@ const PIN_MEMBER_SCENARIOS = 16;
 // scenario(s), pinned at 144") and the actor-set line, which still says 16 —
 // never by adding two.
 const PIN_TOTAL_SCENARIOS = 146;
-// FLOOR, not an equality: an added control must not force a table churn, but a
-// corpus that suddenly enumerates almost nothing is vacuous and reds. 134
-// today (also unguarded prose; it read 66 while the sweep printed 69).
-const FLOOR_CONTROLS = 60;
-const FLOOR_MOUNTS = 20;
+// TWO-WAY PINS on what step 2 examined (task-d505b6683375bf1e). These used to be
+// a FLOOR of 60/20 beside prose that named a count nothing re-read, so a change
+// that dropped 80 of the ~144 controls it examined was invisible. Now both
+// numbers are re-derived by every run and red in BOTH directions, naming the
+// direction and the number — the same shape as PIN_TOTAL_SCENARIOS above. A new
+// console control therefore moves the pin in the SAME commit: growth is NAMED,
+// never absorbed. Re-derive by RUNNING this sweep and copying what the
+// `examined` line PRINTS; there is no count in this comment to keep current.
+const PIN_CONTROLS = 160;
+const PIN_MOUNTS = 68;
+
+// Pure, so the red and quiet arms can be driven on fabricated counts. Each pin
+// reds on its own, naming the direction, the achieved number and the pin.
+function examinedPinErrors(controls, mounts, pinControls, pinMounts) {
+  const errs = [];
+  for (const [what, got, pin, name] of [
+    ["control(s)", controls, pinControls, "PIN_CONTROLS"],
+    ["mount(s)", mounts, pinMounts, "PIN_MOUNTS"],
+  ]) {
+    if (got === pin) continue;
+    const dir = got > pin ? "GREW" : "SHRANK";
+    errs.push("EXAMINED/" + name + ": the sweep examined " + got + " " + what + ", pinned at " + pin + " — it " + dir +
+      " by " + Math.abs(got - pin) + ". " + (got < pin
+        ? "Controls the member sweep used to reach are no longer examined: a renderer or HOOKS row stopped seeing " +
+          "them, or the console lost them. Say which before re-pinning. "
+        : "New controls are examined. ") +
+      "Re-derive by RUNNING this sweep and set " + name + " to the number it PRINTS, in the same commit.");
+  }
+  return errs;
+}
 
 function meRole(name) {
   try {
@@ -1577,16 +1602,12 @@ async function main() {
   //     reds, unless ROUTE_NULL_DECLARED says why.
   broken.push(...routeNullRead());
 
-  // 4 — the floor. The only remaining defence against a corpus that renders
-  // nothing and passes.
-  const floorOk = totalControls >= FLOOR_CONTROLS && totalMounts >= FLOOR_MOUNTS;
-  out("  " + (floorOk ? "ok  " : "FAIL") + " floor           — " + totalControls + " control(s) over " + totalMounts +
-    " mount(s) examined (floor " + FLOOR_CONTROLS + "/" + FLOOR_MOUNTS + ")\n");
-  if (!floorOk) {
-    broken.push("FLOOR/VACUOUS: the sweep examined " + totalControls + " control(s) over " + totalMounts +
-      " mount(s), below the floor of " + FLOOR_CONTROLS + "/" + FLOOR_MOUNTS + ". A green over an empty corpus " +
-      "measures the harness, not the console.");
-  }
+  // 4 — the examined pins. A corpus that renders nothing, or quietly loses half
+  // its controls, reds here instead of passing.
+  broken.push(...examinedPinErrors(totalControls, totalMounts, PIN_CONTROLS, PIN_MOUNTS));
+  const examinedOk = totalControls === PIN_CONTROLS && totalMounts === PIN_MOUNTS;
+  out("  " + (examinedOk ? "ok  " : "FAIL") + " examined        — " + totalControls + " control(s) over " + totalMounts +
+    " mount(s) examined (pinned " + PIN_CONTROLS + "/" + PIN_MOUNTS + ")\n");
 
   // 5 — the CONCEALED guard: a hidden container nothing points at.
   const concealed = [];
