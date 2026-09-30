@@ -485,8 +485,48 @@ func (m model) getFieldValue(fieldName string) string {
 		if raw, ok := m.selectedDoc.Extra[fieldName]; ok && json.Unmarshal(raw, &ref) == nil && ref.Ref != "" {
 			return ref.Ref
 		}
+		// A slug stored Sanity-style — {"current": "…"}, what both starters'
+		// seeds write — read as EMPTY, so the field ghosted a title-derived
+		// slug and enter→enter overwrote the real one (stranger walk,
+		// 2026-10-01). Its `current` is the field's value; saveDocument writes
+		// it back in the same shape (slugObjectFor). Slug fields only: another
+		// object that happens to carry a `current` key is not a slug.
+		if f := m.editorField(fieldName); f != nil && f.Type == FieldSlug {
+			if cur, ok := slugObjectCurrent(m.selectedDoc.Extra[fieldName]); ok {
+				return cur
+			}
+		}
 	}
 	return ""
+}
+
+// slugObjectCurrent returns the `current` of a slug stored as an object, and
+// ok=false for any other shape (a string, null, absent, or an object without a
+// string `current`).
+func slugObjectCurrent(raw json.RawMessage) (string, bool) {
+	var obj map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &obj) != nil || obj == nil {
+		return "", false
+	}
+	var cur string
+	if c, ok := obj["current"]; !ok || json.Unmarshal(c, &cur) != nil {
+		return "", false
+	}
+	return cur, true
+}
+
+// slugObjectFor rebuilds a slug that was stored as an object with its new
+// `current`, keeping every other key (e.g. `_type: "slug"`) as it was; ok=false
+// when the stored value was not an object slug, so the caller keeps the string.
+func slugObjectFor(raw json.RawMessage, current string) (map[string]json.RawMessage, bool) {
+	if _, ok := slugObjectCurrent(raw); !ok {
+		return nil, false
+	}
+	var obj map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &obj)
+	b, _ := json.Marshal(current)
+	obj["current"] = b
+	return obj, true
 }
 
 // applyDirtyToDoc updates the in-memory doc with dirty values for display.
