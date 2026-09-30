@@ -136,6 +136,14 @@ defmodule BarkparkCloud.SitesDeployTest do
     settled
   end
 
+  # A SUCCEEDED build. Since task-1621e517bca0d51a only a live (or still-active)
+  # row owns its inputs as a no-op; a failed one is rebuilt. A pin that means
+  # "the same inputs are a no-op" must settle to live, not failed.
+  defp settle_live(%Deployment{} = d) do
+    {:ok, settled} = Registry.transition_deployment(d, %{status: "live"})
+    settled
+  end
+
   # The debounced rebuild a deferral promises — a REAL Oban row, not a log line.
   defp pending_auto_deploy_jobs(site_id) do
     Repo.all(
@@ -165,6 +173,59 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert {:duplicate, existing} = Deploy.enqueue(site, bp)
       assert existing.id == d.id
       assert length(Registry.list_deployments(site, 10)) == 1
+    end
+
+    # task-1621e517bca0d51a: the `(site_id, build_id)` index covers every
+    # status, so a failed build used to own its inputs forever. An unforced
+    # deploy answered 200 with the OLD failed row and built nothing.
+    test "an unforced enqueue whose inputs match only a FAILED row builds again" do
+      {bp, site} = setup_site()
+      {:ok, d1} = Deploy.enqueue(site, bp)
+      settle(d1)
+
+      assert {:ok, %Deployment{} = d2} = Deploy.enqueue(site, bp)
+      refute d2.id == d1.id
+      refute d2.build_id == d1.build_id
+      assert d2.status == "queued"
+      assert length(Registry.list_deployments(site, 10)) == 2
+    end
+
+    test "a CANCELLED row does not own its inputs either" do
+      {bp, site} = setup_site()
+      {:ok, d1} = Deploy.enqueue(site, bp)
+      {:ok, _} = Registry.transition_deployment(d1, %{status: "cancelled"})
+
+      assert {:ok, %Deployment{} = d2} = Deploy.enqueue(site, bp)
+      refute d2.id == d1.id
+    end
+
+    test "a LIVE row is still the no-op" do
+      {bp, site} = setup_site()
+      {:ok, d1} = Deploy.enqueue(site, bp)
+      settle_live(d1)
+
+      assert {:duplicate, dup} = Deploy.enqueue(site, bp)
+      assert dup.id == d1.id
+    end
+
+    test "the hourly template sweep waits a day before retrying a failed template build" do
+      {bp, site} = setup_site()
+      {:ok, d1} = Deploy.enqueue(site, bp, false, "template-auto")
+      settle(d1)
+
+      # Inside the cooldown: the quiet duplicate, not an hourly retry loop.
+      assert {:duplicate, dup} = Deploy.enqueue(site, bp, false, "template-auto")
+      assert dup.id == d1.id
+
+      # A day later the roll gets a fresh build.
+      Repo.update_all(
+        from(d in Deployment, where: d.id == ^d1.id),
+        set: [inserted_at: DateTime.add(DateTime.utc_now(), -25 * 3600, :second)]
+      )
+
+      assert {:ok, %Deployment{} = d2} = Deploy.enqueue(site, bp, false, "template-auto")
+      refute d2.id == d1.id
+      assert d2.trigger == "template-auto"
     end
 
     test "a different dataset binding is a different build" do
@@ -368,7 +429,7 @@ defmodule BarkparkCloud.SitesDeployTest do
       # passes on the defective code for a reason that has nothing to do with the
       # revision: it measures the one-active-build guard, not the projection.
       # With d1 settled, only a repeat `build_id` can produce `:duplicate`.
-      settle(d1)
+      settle_live(d1)
 
       # 50 slots of `task` churn later, the bound type's only published event has
       # been truncated off the end of the window. Nothing this site publishes
@@ -447,7 +508,7 @@ defmodule BarkparkCloud.SitesDeployTest do
       # Settle it: an in-flight d1 makes `:duplicate` the answer to EVERY second
       # enqueue (see the eviction pin above), which would make this test green
       # over a projection that had moved.
-      settle(d1)
+      settle_live(d1)
 
       # The SAME published content, on a dataset that has since churned: a draft
       # of the bound type was saved, an unrelated `task` was closed, the totals
