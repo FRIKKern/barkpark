@@ -107,7 +107,8 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.Status do
 
     Content.broadcast_document_mutation(updated, "update",
       event_id: ev.id,
-      previous_rev: fresh.rev
+      previous_rev: fresh.rev,
+      webhooks: true
     )
 
     # PRESERVED plugin-private broadcast: the Bokbasen AdminLive / StudioLive

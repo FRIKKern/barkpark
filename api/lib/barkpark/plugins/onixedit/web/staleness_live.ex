@@ -273,7 +273,8 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
 
     Content.broadcast_document_mutation(doc, "update",
       event_id: ev.id,
-      previous_rev: previous_rev
+      previous_rev: previous_rev,
+      webhooks: true
     )
   end
 

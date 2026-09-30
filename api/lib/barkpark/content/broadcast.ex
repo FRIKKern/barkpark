@@ -75,6 +75,12 @@ defmodule Barkpark.Content.Broadcast do
   deferral). See the original `Content` @doc for the full options contract;
   `mutation` is the caller's mutation kind string and `opts` may carry
   `:event_id` (REQUIRED for the SSE path) and `:previous_rev`.
+
+  `webhooks: true` ALSO dispatches the webhook fan-out for the write (with the
+  `:event_id`), for a bypass-writer that has rejoined the event spine and
+  promises webhook subscribers the edit (task-a8ac171ba5cddba4). Default
+  `false`: PubSub only, exactly as before — task-document writers (GitHub
+  link/adopt) deliberately stay off the webhook channel.
   """
   @spec broadcast_document_mutation(Document.t(), String.t(), keyword()) :: :ok
   def broadcast_document_mutation(doc, mutation, opts \\ [])
@@ -128,6 +134,13 @@ defmodule Barkpark.Content.Broadcast do
       doc_topic(DraftId.published_id(doc.doc_id), doc.type, doc.workspace_id, dataset),
       {:doc_updated, msg}
     )
+
+    if Keyword.get(opts, :webhooks, false) and is_integer(event_id) do
+      maybe_dispatch_webhook(dataset, mutation, doc.type, doc.doc_id, msg.document, event_id,
+        workspace_id: doc.workspace_id,
+        project_id: doc.project_id
+      )
+    end
 
     :ok
   end
