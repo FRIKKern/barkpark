@@ -61,8 +61,16 @@ defmodule BarkparkCloud.Web.RouterOAuthTwoFactorTest do
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
+  # CONFIRMED on purpose: these arms model the real owner of the address. An
+  # UNCONFIRMED account is reclaimed by a verified OAuth sign-in (credentials and
+  # 2FA wiped — task-b3eb09e83fbb7cbc), which is the pre-account-takeover case
+  # oauth_test.exs pins, not the 2FA-challenge path this file exercises.
   defp register!(email) do
     {:ok, user} = Accounts.register_user(%{email: email, password: @password})
+
+    {:ok, user} =
+      user |> BarkparkCloud.Accounts.User.confirm_changeset() |> BarkparkCloud.Repo.update()
+
     user
   end
 

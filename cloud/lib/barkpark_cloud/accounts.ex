@@ -3569,7 +3569,7 @@ defmodule BarkparkCloud.Accounts do
   defp find_or_birth_oauth_user!(provider, uid, email) do
     case email && get_user_by_email(email) do
       %User{} = existing ->
-        {existing, :linked}
+        {reclaim_if_unproven!(existing, email), :linked}
 
       _ ->
         # No email match (or no email at all) → birth a fresh OAuth-only account
@@ -3578,6 +3578,79 @@ defmodule BarkparkCloud.Accounts do
         # the durable link is the (provider, uid) row, not this address.
         {birth_oauth_user!(email || synthetic_oauth_email(provider, uid)), :created}
     end
+  end
+
+  # PRE-ACCOUNT TAKEOVER GUARD (task-b3eb09e83fbb7cbc). `register_user/1` logs a
+  # password signup in immediately and never requires the address to be
+  # confirmed, so ANYONE can create `victim@corp.com` with a password of their
+  # choosing. Converging the victim's IdP-VERIFIED identity onto that row used to
+  # hand the squatter a shared account: their password, sessions, PATs, 2FA and
+  # any provider identity THEY linked all survived, and every team the victim
+  # later joined was readable by them.
+  #
+  # So an existing account is converged UNTOUCHED only when its ownership of the
+  # address is already PROVEN — `confirmed_at` is set, or it carries an external
+  # identity whose IdP-verified email IS this address (an OAuth-born account is
+  # born with confirmed_at NULL but proved the address through its provider).
+  # Otherwise the verified identity RECLAIMS the account: every credential the
+  # unproven holder could still use is killed — the password is replaced by a
+  # random one (as for any OAuth-born account; a reset sets a real one), all
+  # user_tokens are revoked (sessions, PATs, reset/confirm/change codes,
+  # 2fa_pending, oauth_exchange, sse), 2FA is cleared, a pending email change is
+  # dropped, and any provider identity linked under a DIFFERENT email is removed
+  # — and `confirmed_at` is stamped, because the IdP just verified the address.
+  # Teams, memberships and roles are left as they are.
+  defp reclaim_if_unproven!(%User{} = user, email) do
+    if address_proven?(user, email) do
+      user
+    else
+      now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+      from(t in UserToken, where: t.user_id == ^user.id and is_nil(t.revoked_at))
+      |> Repo.update_all(set: [revoked_at: now])
+
+      from(i in ExternalIdentity, where: i.user_id == ^user.id)
+      |> Repo.delete_all()
+
+      random = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+
+      user
+      |> Ecto.Changeset.change(
+        hashed_password: Bcrypt.hash_pwd_salt(random),
+        confirmed_at: now,
+        pending_email: nil,
+        two_factor_secret: nil,
+        two_factor_recovery_codes: nil,
+        two_factor_confirmed_at: nil,
+        two_factor_last_step: nil
+      )
+      |> Repo.update()
+      |> case do
+        {:ok, reclaimed} ->
+          Logger.warning(
+            "[accounts] oauth reclaimed an UNCONFIRMED account user_id=#{reclaimed.id}: " <>
+              "prior password, tokens, 2FA and foreign identities revoked"
+          )
+
+          reclaimed
+
+        {:error, reason} ->
+          Repo.rollback(reason)
+      end
+    end
+  end
+
+  defp address_proven?(%User{confirmed_at: %DateTime{}}, _email), do: true
+
+  defp address_proven?(%User{id: user_id}, email) do
+    target = String.downcase(email)
+
+    from(i in ExternalIdentity,
+      where: i.user_id == ^user_id and not is_nil(i.email),
+      select: i.email
+    )
+    |> Repo.all()
+    |> Enum.any?(&(String.downcase(&1) == target))
   end
 
   # Birth a passwordless OAuth user + team + owner membership + trial +
