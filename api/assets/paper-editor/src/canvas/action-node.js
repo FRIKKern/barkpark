@@ -37,6 +37,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
+import { safeUrl } from "../safe-url.js";
 
 // The TipTap node NAME is `bpAction`. There is NO StarterKit collision (StarterKit
 // ships no action/button node), so — UNLIKE bpCode / divider — NO StarterKit node is
@@ -299,7 +300,7 @@ export const Action = Node.create({
         // variant; href is display-only.
         preview.textContent = label || "Button";
         preview.className = variant;
-        preview.setAttribute("href", href || "#");
+        preview.setAttribute("href", safeUrl(href || "#"));
         preview.style.display = editable ? "none" : "";
       };
 
