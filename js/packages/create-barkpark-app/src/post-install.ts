@@ -57,12 +57,25 @@ export async function runGitInit(targetDir: string): Promise<void> {
   }
 }
 
+/**
+ * `dir` as ONE shell word, for a line the reader pastes. A directory name with
+ * a space or a shell metacharacter — `create-barkpark-app "Bad Name!"` makes a
+ * directory literally named `Bad Name!` — printed bare as `cd Bad Name!` splits
+ * into two words (and `!` is history expansion in an interactive bash), so the
+ * first next step failed. Plain names print unchanged; anything else is
+ * single-quoted POSIX-style, with an embedded `'` closed, escaped and reopened.
+ */
+export function shellArg(dir: string): string {
+  if (/^[A-Za-z0-9._\/@+-]+$/.test(dir)) return dir
+  return `'${dir.replace(/'/g, `'\\''`)}'`
+}
+
 export function printNextSteps(opts: PostInstallOptions): void {
   const rel = path.relative(process.cwd(), opts.targetDir) || opts.projectName
   const lines: string[] = []
   lines.push('')
   lines.push(pc.bold('Next steps:'))
-  lines.push(`  ${pc.cyan('cd')} ${rel}`)
+  lines.push(`  ${pc.cyan('cd')} ${shellArg(rel)}`)
   if (!opts.didInstall) {
     lines.push(`  ${pc.cyan(opts.pm.installCommand)}`)
   }
