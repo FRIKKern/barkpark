@@ -385,6 +385,10 @@ export const Section = Node.create({
           "bp-section--wide",
           (n.attrs && n.attrs.variant) === "wide",
         );
+        dom.classList.toggle(
+          "bp-section--declaration",
+          (n.attrs && n.attrs.variant) === "declaration",
+        );
         // ── STEP-2: paint the body layout. Grid mode swaps the body to the SHARED
         // `bp-section__grid` class + sets --bp-tracks/--bp-grid-gap; stack mode keeps
         // today's `bp-section__body` flex-column (byte-unchanged DOM). PM lays the

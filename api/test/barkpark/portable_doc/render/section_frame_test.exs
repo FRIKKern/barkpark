@@ -162,6 +162,36 @@ defmodule Barkpark.PortableDoc.Render.SectionFrameTest do
     end
   end
 
+  describe "declaration panel (pe-bl-declaration-panel)" do
+    @surface Path.expand("../../../../assets/paper-surface/paper-surface.css", __DIR__)
+
+    test "variant=declaration classes the box on :article, never on :email, stack and grid" do
+      decl = Map.put(section(), "variant", "declaration")
+      html = Render.render_block(decl, @article)
+
+      assert String.starts_with?(
+               html,
+               ~s(<div class="bp-section--declaration" style="display:flex;flex-direction:column">)
+             )
+
+      assert String.replace(html, ~s( class="bp-section--declaration"), "", global: false) ==
+               @stack_html
+
+      assert Render.render_block(grid(decl), @article) =~ ~s(class="bp-section--declaration")
+      assert Render.render_block(decl, %{}) == Render.render_block(section(), %{})
+    end
+
+    test "the reader stylesheet draws the panel: double ink frame, padding, band hidden, signature rule" do
+      css = File.read!(@surface)
+
+      assert css =~
+               ".bp-paper-surface .bp-section--declaration { border: var(--bp-rule-hairline) solid var(--paper-ink); outline:"
+
+      assert css =~ ".bp-paper-surface .bp-section--declaration > .bp-hr { display: none; }"
+      assert css =~ ".bp-paper-surface .bp-section--declaration > :not(.bp-hr):last-child"
+    end
+  end
+
   describe "neighbouring section-head beat survives" do
     test "the section AFTER a framed finale keeps its classless wrapper (div:not([class]) > h2 target)" do
       neighbour = %{
