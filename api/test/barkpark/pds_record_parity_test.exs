@@ -83,11 +83,20 @@ defmodule Barkpark.PdsRecordParityTest do
             "mutation harness cannot be run. Failing loud rather than skipping."
         )
 
-    {:ok, harness: harness, bash: bash, root: Path.expand("../../..", __DIR__)}
+    root = Path.expand("../../..", __DIR__)
+
+    # ONE harness run, shared by the three tests below. Each used to run the
+    # identical `bash pds-record-parity.test.sh` (4.8 + 4.9 + 5.4 s on main run
+    # 36775391161). The harness takes no arguments and reads only the tree, so
+    # three runs of one tree in one suite produce one output; the three tests
+    # assert three different things about that single real run.
+    {out, rc} = System.cmd(bash, [harness], cd: root, stderr_to_stdout: true)
+
+    {:ok, harness: harness, bash: bash, root: root, harness_out: out, harness_rc: rc}
   end
 
   test "the record-parity mutation harness is GREEN", ctx do
-    {out, rc} = System.cmd(ctx.bash, [ctx.harness], cd: ctx.root, stderr_to_stdout: true)
+    {out, rc} = {ctx.harness_out, ctx.harness_rc}
 
     assert rc == 0,
            "expected `bash #{@harness_rel}` to exit 0, got #{rc}. Its fixtures are two-sided: " <>
@@ -130,7 +139,7 @@ defmodule Barkpark.PdsRecordParityTest do
   ]
 
   test "the harness still RUNS the D-number arbiter's mutation pair", ctx do
-    {out, rc} = System.cmd(ctx.bash, [ctx.harness], cd: ctx.root, stderr_to_stdout: true)
+    {out, rc} = {ctx.harness_out, ctx.harness_rc}
 
     assert rc == 0, "the harness must be green before its coverage can be asserted.\n#{out}"
 
@@ -143,7 +152,7 @@ defmodule Barkpark.PdsRecordParityTest do
   end
 
   test "the harness still RUNS the wave-47 citation-resolver arms", ctx do
-    {out, rc} = System.cmd(ctx.bash, [ctx.harness], cd: ctx.root, stderr_to_stdout: true)
+    {out, rc} = {ctx.harness_out, ctx.harness_rc}
 
     assert rc == 0, "the harness must be green before its coverage can be asserted.\n#{out}"
 

@@ -48,10 +48,21 @@ defmodule Barkpark.OnExitRefCollisionTest do
     {"test/barkpark/plugins/plugin_env_test.exs", "ctx"}
   ]
 
-  describe "the live tree" do
-    test "no on_exit/2 site uses a non-module-scoped ref" do
-      {files, sites} = OnExitRefScan.scan(@roots)
+  # ONE scan of api/test, shared by the three live-tree tests. Each test used to
+  # re-walk and re-parse the whole tree (about 7 s apiece on CI, 21.6 s for the
+  # module on main run 36775391161). The tree does not change between three
+  # tests of one run, so three walks bought nothing a single walk does not.
+  # Every live-tree assertion below still reads the full live result.
+  setup_all do
+    {files, sites} = OnExitRefScan.scan(@roots)
+    %{live_files: files, live_sites: sites}
+  end
 
+  describe "the live tree" do
+    test "no on_exit/2 site uses a non-module-scoped ref", %{
+      live_files: files,
+      live_sites: sites
+    } do
       # A sweep that scanned nothing would report zero violations. Both of these
       # are preconditions on the MEASUREMENT, not on the tree.
       assert files > 100, "scanned #{files} files — the sweep did not reach api/test"
@@ -79,9 +90,7 @@ defmodule Barkpark.OnExitRefCollisionTest do
              """
     end
 
-    test "the bare-ref census is exactly the committed fixture" do
-      {_files, sites} = OnExitRefScan.scan(@roots)
-
+    test "the bare-ref census is exactly the committed fixture", %{live_sites: sites} do
       actual =
         sites
         |> Enum.reject(& &1.module_scoped?)
@@ -93,9 +102,7 @@ defmodule Barkpark.OnExitRefCollisionTest do
                "if the new site is a deliberate, marked pin"
     end
 
-    test "every censused bare ref carries the marker" do
-      {_files, sites} = OnExitRefScan.scan(@roots)
-
+    test "every censused bare ref carries the marker", %{live_sites: sites} do
       unmarked = sites |> Enum.reject(& &1.module_scoped?) |> Enum.reject(& &1.exempt?)
       assert unmarked == [], Enum.map_join(unmarked, "\n", &OnExitRefScan.format/1)
     end
