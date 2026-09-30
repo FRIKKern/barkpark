@@ -370,7 +370,7 @@ run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE/GO_*/NOD
     GO_HTTP="${GO_HTTP:-}" GO_FAIL="${GO_FAIL:-}" \
     NODE_MISSING="${NODE_MISSING:-}" NPM_FAIL="${NPM_FAIL:-}" NPM_NO_TSX="${NPM_NO_TSX:-}" \
     UNIT_ACTIVE="${UNIT_ACTIVE:-active}" CONNECTORS_HEALTH_CODE="${CONNECTORS_HEALTH_CODE:-000}" \
-    bash "$SCRIPT" > "$TMP/out.log" 2>&1
+    bash "${RUN_ENTRY:-$SCRIPT}" > "$TMP/out.log" 2>&1
   echo $?
 }
 run_rollback() { # $1=health code  $2=fake sha (live HEAD)
@@ -1091,6 +1091,56 @@ check "blank: no live line written"               "! grep -q '^BARKPARK_TRUSTED_
 check "blank: treated as EMPTY (placeholder + no-IPs WARN)" "grep -q '^# BARKPARK_TRUSTED_PROXIES=203.0.113.7\$' '$APP/.env' && grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS supplied' '$TMP/out.log'"
 check "blank: says it was SET but empty, and never reads as a refusal" "grep -q 'is set but holds no entries' '$TMP/out.log' && ! grep -q 'REFUSED by the validator' '$TMP/out.log'"
 rm -rf "$TMP"
+
+echo "== Case 16a: the self-update hand-off carries BARKPARK_CLOUD_EGRESS_IPS into instance-deploy.sh =="
+# task-b4b2bb60b63e28ea. A customer box is updated by POST /v1/admin/self-update:
+# the control plane sends the egress list, SelfUpdateController.egress_env/1
+# hands it to Barkpark.SelfUpdate.Runner as process env, and the Runner runs
+# scripts/self-update.sh — which, on a .slots box, `exec`s instance-deploy.sh.
+# Case 16 sets the variable on instance-deploy.sh DIRECTLY, so nothing proved the
+# LAST hop: an `env -i`, a sudo, or a wrapper in self-update.sh would drop the
+# list and every customer box would stay coarse-bucketed with a green update.
+# This drives the REAL scripts/self-update.sh from a staged checkout root.
+stage_self_update() { # $1 = staged self-update.sh body source
+  SU="$TMP/su"; mkdir -p "$SU/scripts" "$SU/deploy" "$SU/.slots"
+  cp "$1" "$SU/scripts/self-update.sh"
+  cp "$SCRIPT" "$SU/deploy/instance-deploy.sh"
+  RUN_ENTRY="$SU/scripts/self-update.sh"
+}
+SELF_UPDATE="$HERE/../scripts/self-update.sh"
+
+setup_case
+stage_self_update "$SELF_UPDATE"
+rc="$(BARKPARK_CLOUD_EGRESS_IPS=203.0.113.7 RUN_ENTRY="$RUN_ENTRY" run_deploy 200 suxffsha)"
+check "self-update: exit 0"                          "[ '$rc' = '0' ]"
+check "self-update: delegated to instance-deploy.sh" "grep -q 'blue/green slot box — delegating to deploy/instance-deploy.sh' '$TMP/out.log'"
+check "self-update: egress list reached the deploy (line written)" "grep -q '^BARKPARK_TRUSTED_PROXIES=203.0.113.7\$' '$APP/.env' && grep -q 'added BARKPARK_TRUSTED_PROXIES=203.0.113.7' '$TMP/out.log'"
+check "self-update: no 'nothing supplied' WARN"      "! grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+rm -rf "$TMP"
+
+# CONTROL: the same hand-off with the variable UNSET logs the gap — so the arm
+# above is reading the variable, not a default.
+setup_case
+stage_self_update "$SELF_UPDATE"
+rc="$(RUN_ENTRY="$RUN_ENTRY" run_deploy 200 sunoxffsha)"
+check "self-update, unset: exit 0 and the gap is logged" "[ '$rc' = '0' ] && grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log' && ! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+rm -rf "$TMP"
+
+# MUTATION: a self-update.sh that scrubs its environment before the exec (the
+# shape a future sudo/env -i wrapper takes) must be CAUGHT by the arm above:
+# the list never arrives, and the deploy logs the gap instead.
+setup_case
+sed 's#^  exec bash deploy/instance-deploy.sh#  exec env -i PATH="$PATH" HOME="$HOME" BARKPARK_APP_DIR="$BARKPARK_APP_DIR" BARKPARK_DEPLOY_LOCK="$BARKPARK_DEPLOY_LOCK" BARKPARK_CADDYFILE="$BARKPARK_CADDYFILE" BARKPARK_CADDYFILE_LOCK="$BARKPARK_CADDYFILE_LOCK" BARKPARK_HEALTH_HOST="$BARKPARK_HEALTH_HOST" FAKE_SHA="$FAKE_SHA" HEALTH_CODE="$HEALTH_CODE" PUBLIC_HEALTH_CODE="$PUBLIC_HEALTH_CODE" REMOTE_SHA="$REMOTE_SHA" GITSTATE="$GITSTATE" GITLOG="$GITLOG" MIXLOG="$MIXLOG" SYSCTLLOG="$SYSCTLLOG" CURLLOG="$CURLLOG" UNIT_ACTIVE="$UNIT_ACTIVE" bash deploy/instance-deploy.sh#' \
+  "$SELF_UPDATE" > "$TMP/self-update.mutant.sh"
+if cmp -s "$SELF_UPDATE" "$TMP/self-update.mutant.sh"; then
+  fail "self-update mutation: the exec anchor did not match — the mutant is the original, so this arm proves nothing"
+else
+  stage_self_update "$TMP/self-update.mutant.sh"
+  BARKPARK_CLOUD_EGRESS_IPS=203.0.113.7 RUN_ENTRY="$RUN_ENTRY" run_deploy 200 sumutsha >/dev/null
+  check "self-update mutation (env scrubbed before exec): the list is LOST and the arm would red" "! grep -q '^BARKPARK_TRUSTED_PROXIES=203.0.113.7\$' '$APP/.env' && grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+fi
+rm -rf "$TMP"
+unset RUN_ENTRY SU
 
 echo "== Case 16b: the egress validator gives ONE verdict whichever awk the host ships =="
 # task-0d0f4563784fa12f. The validator used to be an awk regex, and its verdict

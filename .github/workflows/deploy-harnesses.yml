@@ -51,6 +51,8 @@ on:
     paths:
       - "deploy/**"
       - ".github/workflows/deploy-harnesses.yml"
+      # instance-deploy_test.sh Case 16a drives the REAL self-update hand-off.
+      - "scripts/self-update.sh"
       - "api/lib/barkpark/sites/deploy_runner.ex"
       - "internal/caddyfile/**"
       - "internal/cli/setup/**"
@@ -59,6 +61,8 @@ on:
     paths:
       - "deploy/**"
       - ".github/workflows/deploy-harnesses.yml"
+      # instance-deploy_test.sh Case 16a drives the REAL self-update hand-off.
+      - "scripts/self-update.sh"
       # Both site engines' self-tests assert on THIS file — the @stage_names
       # whitelist that decides which BPSTAGE lines become a verdict (ROUTE must
       # stay out of it, charter D327/D346). Without this entry a PR that adds
