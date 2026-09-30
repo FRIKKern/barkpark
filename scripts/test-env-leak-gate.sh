@@ -93,6 +93,36 @@
 # Read this gate's green as "every mutation has a paired restore", and read
 # those two as "no mutation actually escaped". Neither substitutes for the other.
 #
+# A THIRD CLASS NEITHER SEES: THE SINGLETON LEFT MID-OPERATION (task-ee2e7837e9d40316)
+# ------------------------------------------------------------------------------
+# Measured in the ETS-flake lane: "the leak was not an unrestored put_env — it
+# was a periodically published VM-global gauge that no event republished, so
+# the stale value survived for a full 10-second tick." Nothing was set and left
+# dirty. A test left a TIMER-published singleton mid-operation, and the next
+# module read it before the timer came round. This gate asks "does this write
+# have a paired restore?", and for that case the honest answer is "there is no
+# unpaired write". Its GREEN there is CORRECT BY ITS OWN DEFINITION, and it is
+# NOT to be widened into a sixth idiom. Whether the value is republished before
+# anyone reads it depends on the tick, the next module and an unseeded shuffle,
+# which is not a property of any file. The question a check for it must ask
+# is "did you leave the singleton MID-OPERATION?", not "did you leave an
+# unpaired write?".
+#
+# DECISION (2026-09-30): NO INSTRUMENT TODAY. The options, and why none is built:
+#   1. a runtime probe that samples the published value at module teardown and
+#      compares it with a fresh republish: it needs the publisher named first;
+#   2. a forced-republish seam (event-driven publisher, or a synchronous
+#      republish the suite calls between modules): this FIXES the class rather
+#      than detecting it, and is the cheapest; it belongs in api/lib beside the
+#      publisher;
+#   3. an inventory of timer-published VM-globals, each declaring an
+#      event-driven invalidation path: the only statically checkable one, and
+#      it gates the PUBLISHER's design in api/lib, so it is outside this
+#      test-tree gate's fence.
+# The next measured recurrence should get (2) at the publisher it names. Until
+# then this class is known and deliberately undetected here, so a later sweep
+# should not re-file it as an oversight of this gate.
+#
 # WHY AN AST WALK AND NOT A REGEX
 # -------------------------------
 # `Application.put_env` appears ~820 times across 226 files in api/test. The vast
