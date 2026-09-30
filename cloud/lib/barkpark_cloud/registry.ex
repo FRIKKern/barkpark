@@ -9607,24 +9607,37 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  The DNS-safe preview subdomain label for `site_slug` + `branch`:
-  `<site_slug>--<branch_slug>-<hash>`. The 6-hex-char hash is a deterministic
-  digest of the RAW branch name — so the same branch always maps to the same
-  label (a new push replaces the branch's preview in place, blue/green) while two
-  branches that sanitize to the same slug (`feat/x` vs `feat-x`) stay distinct.
+  The DNS-safe preview subdomain label for `site_slug` + `branch` of the site
+  `site_id`: `<site_slug>--<branch_slug>-<hash>`. The 16-hex-char hash is a
+  deterministic digest of the site id AND the RAW branch name. The same branch
+  of the same site always maps to the same label (a new push replaces the
+  branch's preview in place, blue/green). Two branches that sanitize to the
+  same slug (`feat/x` vs `feat-x`) stay distinct, and so do two TEAMS' sites
+  that share a slug.
   Total length is clamped to 63 (the max DNS label), reserving room for the
   hash + separators.
   """
-  @spec preview_slug_for(String.t(), String.t()) :: String.t()
-  def preview_slug_for(site_slug, branch) when is_binary(site_slug) and is_binary(branch) do
+  #
+  # task-f98ea12880b32251: the hash is SITE-SCOPED and 64 bits. It used to be
+  # a 6-hex digest of the branch alone, while site slugs are unique only per
+  # TEAM (sites_team_slug_unique_idx). So every team with a site called `blog`
+  # previewing `dev` computed the SAME host, and `domain_registered?/1`
+  # certified it for whichever box asked. Folding the site id in makes the
+  # label team-unique, and 64 bits keeps a deliberate collision (the branch
+  # name is the attacker's to choose) out of reach of an offline search.
+  @spec preview_slug_for(String.t(), String.t(), binary()) :: String.t()
+  def preview_slug_for(site_slug, branch, site_id)
+      when is_binary(site_slug) and is_binary(branch) and is_binary(site_id) do
     hash =
-      :crypto.hash(:sha256, branch) |> Base.encode16(case: :lower) |> binary_part(0, 6)
+      :crypto.hash(:sha256, site_id <> <<0>> <> branch)
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 16)
 
     base = String.slice(site_slug, 0, 40)
 
-    # 63 budget − base − "--" (2) − "-" (1) − hash (6). At least 1 so a very long
-    # site slug still leaves a sliver for the branch part.
-    branch_room = max(63 - String.length(base) - 9, 1)
+    # 63 budget − base − "--" (2) − "-" (1) − hash (16). At least 1 so a very
+    # long site slug still leaves a sliver for the branch part.
+    branch_room = max(63 - String.length(base) - 19, 1)
 
     branch_slug =
       branch
@@ -9645,9 +9658,9 @@ defmodule BarkparkCloud.Registry do
   hostname the runtime keys its per-preview Caddy block on and the one
   `/v1/tls/ask` allowlists.
   """
-  @spec preview_host_for(String.t(), String.t()) :: String.t()
-  def preview_host_for(site_slug, branch) do
-    preview_slug_for(site_slug, branch) <> "." <> Barkpark.base_domain()
+  @spec preview_host_for(String.t(), String.t(), binary()) :: String.t()
+  def preview_host_for(site_slug, branch, site_id) do
+    preview_slug_for(site_slug, branch, site_id) <> "." <> Barkpark.base_domain()
   end
 
   @doc """
@@ -9717,8 +9730,8 @@ defmodule BarkparkCloud.Registry do
           {:ok, Deployment.t()} | {:error, Ecto.Changeset.t()}
   def create_preview_deployment(%Site{} = site, branch, sha, delivery_id \\ nil)
       when is_binary(branch) and is_binary(sha) do
-    slug = preview_slug_for(site.slug, branch)
-    host = preview_host_for(site.slug, branch)
+    slug = preview_slug_for(site.slug, branch, site.id)
+    host = preview_host_for(site.slug, branch, site.id)
     cap = max_previews_per_site()
 
     Repo.transaction(fn ->
