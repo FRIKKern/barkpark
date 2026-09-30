@@ -297,6 +297,10 @@ defmodule Barkpark.Tasks.Close do
         :ok = emit_broadcasts(broadcasts)
         {:ok, :stamped, indices}
 
+      {:ok, {:discrepancy_recorded, verdict, broadcasts}} ->
+        :ok = emit_broadcasts(broadcasts)
+        verdict
+
       {:ok, other} ->
         other
 
@@ -1986,12 +1990,33 @@ defmodule Barkpark.Tasks.Close do
   # successful reconcile into an error the webhook would retry forever.
   defp record_discrepancy_only(_doc, nil, verdict), do: verdict
 
+  #
+  # task-415cc445dacc889a: the record moves the rev, so it carries the same
+  # `task.criterion` event `write_reconcile/6` writes for this key, in this
+  # transaction. Without it the one record naming a false close was invisible
+  # to `bp task events`, SSE and the board, and the silent rev move tripped the
+  # next CAS writer's fence with nothing to explain it. The broadcast rides
+  # back out to `reconcile_merge_gate/3`, which emits it after commit.
   defp record_discrepancy_only(%Document{} = doc, record, verdict) do
     new_content = merge_autostamp_record(doc.content || %{}, @discrepancy_key, record)
+    observed_rev = doc.rev
 
-    case fenced_content_write(doc, doc.rev, new_content, generate_rev()) do
-      {:ok, _updated} -> verdict
-      :stale -> verdict
+    case fenced_content_write(doc, observed_rev, new_content, generate_rev()) do
+      {:ok, updated} ->
+        ev =
+          insert_mutation_event!(
+            updated,
+            @event_task_criterion,
+            observed_rev,
+            "github-merge",
+            %{"merge_reconcile" => %{"discrepancy" => true}}
+          )
+
+        {:discrepancy_recorded, verdict,
+         [task_broadcast(updated, @event_task_criterion, ev, observed_rev)]}
+
+      :stale ->
+        verdict
     end
   end
 
