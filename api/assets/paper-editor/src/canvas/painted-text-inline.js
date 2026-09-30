@@ -8,14 +8,16 @@ const scalar = value => typeof value === "string" || typeof value === "number";
 // keeps leading/trailing whitespace the reader paints (white-space: pre).
 const valueOf = (field, item) => field.read ? field.read(item) : item[field.key];
 
-export function wirePaintedTextInline(body, { getBlock, isEditable, commit, undo, redo }, describeFields) {
+// `collection` names the block key holding the rows (default `items`; pipeline
+// `nodes`, lineage `entries`, …); a field with `index: null` is a block-level key.
+export function wirePaintedTextInline(body, { getBlock, isEditable, commit, undo, redo, collection = "items" }, describeFields) {
   let fields = new Map();
   let pendingHtml = null;
   let composing = false;
   let sourceBlock = null;
   const dirty = new Set();
   const allowed = () => isEditable() && !getBlock()?.locked && getBlock()?.query == null;
-  const itemAt = (block, index) => index == null ? block : block?.items?.[index];
+  const itemAt = (block, index) => index == null ? block : block?.[collection]?.[index];
 
   function decorate() {
     fields = new Map();
@@ -73,7 +75,7 @@ export function wirePaintedTextInline(body, { getBlock, isEditable, commit, undo
     if (valueOf(field, item) === value) return;
     const updated = field.write ? field.write(item, value) : { ...item, [field.key]: value };
     commit(field.index == null ? updated : {
-      ...block, items: block.items.map((row, index) => index === field.index ? updated : row),
+      ...block, [collection]: block[collection].map((row, index) => index === field.index ? updated : row),
     });
   }
   function onKey(event) {

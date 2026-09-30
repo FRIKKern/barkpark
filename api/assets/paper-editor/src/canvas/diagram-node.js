@@ -309,11 +309,26 @@ export const Diagram = Node.create({
       // so an external attr change (an echo, an undo) reflects. Guard against
       // clobbering the field the user is actively typing in (don't reset its value
       // mid-keystroke) by only writing when the incoming value differs.
+      // The painted caption is its own plain-text typing surface (click-to-edit
+      // where it reads); the disclosure's caption input stays the way to ADD one.
       const syncChrome = () => {
         disclosure.hidden = !editor.isEditable;
+        if (editor.isEditable) {
+          figcaption.setAttribute("contenteditable", "plaintext-only");
+          figcaption.setAttribute("role", "textbox");
+          figcaption.setAttribute("aria-label", "Diagram caption");
+          figcaption.setAttribute("aria-multiline", "false");
+          figcaption.tabIndex = 0;
+        } else {
+          figcaption.removeAttribute("contenteditable");
+          figcaption.removeAttribute("role");
+          figcaption.removeAttribute("tabindex");
+        }
       };
 
       const paintCaption = (caption) => {
+        // Never repaint under the author's caret; blur repaints.
+        if (figcaption.ownerDocument.activeElement === figcaption) return;
         figcaption.replaceChildren();
         if (!caption) {
           figcaption.hidden = true;
@@ -437,6 +452,17 @@ export const Diagram = Node.create({
       dom.addEventListener("bp-flush-node", flushPending);
       const syncCaptionFromInput = () => paintCaption(captionInput.value);
       captionInput.addEventListener("input", syncCaptionFromInput);
+      const onFigcaptionInput = () => {
+        captionInput.value = (figcaption.textContent || "").replace(/\n+/g, " ");
+        scheduleWrite();
+      };
+      const onFigcaptionKey = (e) => {
+        if (e.key === "Enter") { e.preventDefault(); flushPending(); }
+      };
+      const onFigcaptionBlur = () => { flushPending(); paintCaption(captionInput.value); };
+      figcaption.addEventListener("input", onFigcaptionInput);
+      figcaption.addEventListener("keydown", onFigcaptionKey);
+      figcaption.addEventListener("blur", onFigcaptionBlur);
 
       return {
         dom,
@@ -468,6 +494,9 @@ export const Diagram = Node.create({
           captionInput.removeEventListener("input", scheduleWrite);
           dom.removeEventListener("bp-flush-node", flushPending);
           captionInput.removeEventListener("input", syncCaptionFromInput);
+          figcaption.removeEventListener("input", onFigcaptionInput);
+          figcaption.removeEventListener("keydown", onFigcaptionKey);
+          figcaption.removeEventListener("blur", onFigcaptionBlur);
         },
       };
     };

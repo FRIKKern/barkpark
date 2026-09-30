@@ -400,6 +400,7 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
         "cards-inline.js" -> without_cards_reader_queries(source)
         "notes-inline.js" -> without_notes_reader_queries(source)
         "filetree-inline.js" -> without_filetree_reader_queries(source)
+        "fleet-text-inline.js" -> without_fleet_text_reader_queries(source)
         "diff-inline.js" -> String.replace(source, ~s|querySelector(".bp-diff")|, "readerQuery()")
         _ -> source
       end
@@ -467,6 +468,53 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
       ~s|querySelector(":scope > .bp-filetree-legend")|
     ]
     |> Enum.reduce(source, &String.replace(&2, &1, "readerQuery()"))
+  end
+
+  # Native fleet/data-viz text editing (fleet-text-inline.js: pipeline, lineage,
+  # duel, heatmap, chart, form/questionnaire) decorates the SERVER-painted rows
+  # the same way; these exact read-only queries are not HTML producers. Every
+  # other reader-class occurrence in that file stays forbidden.
+  defp without_fleet_text_reader_queries(source) do
+    [
+      ~s|querySelector(".bp-chart > .bp-chart__t")|,
+      ~s|querySelector(":scope > .bp-duel__delta")|,
+      ~s|querySelector(":scope > .bp-duel__label")|,
+      ~s|querySelector(":scope > .bp-form-note")|,
+      ~s|querySelector(":scope > .bp-lineage__body")|,
+      ~s|querySelector(":scope > .bp-lineage__overline")|,
+      ~s|querySelector(":scope > .bp-lineage__title")|,
+      ~s|querySelector(":scope > .bp-lineage__unit")|,
+      ~s|querySelector(":scope > .bp-lineage__value")|,
+      ~s|querySelector(":scope > .bp-pnode__d")|,
+      ~s|querySelector(":scope > .bp-pnode__k")|,
+      ~s|querySelector(":scope > .bp-pnode__src")|,
+      ~s|querySelector(":scope > .bp-pnode__t")|,
+      ~s|querySelectorAll(".bp-chart__legend > .bp-chart__key")|,
+      ~s|querySelectorAll(".bp-duel__table tbody tr.bp-duel__row")|,
+      ~s|querySelectorAll(".bp-duel__table thead th[scope=col]")|,
+      ~s|querySelectorAll(".bp-form > fieldset.bp-form-question")|,
+      ~s|querySelectorAll(".bp-heat__grid > .bp-heat__cl")|,
+      ~s|querySelectorAll(".bp-heat__grid > .bp-heat__rl")|,
+      ~s|querySelectorAll(".bp-lineage__node")|,
+      ~s|querySelectorAll(".bp-pnode")|,
+      ~s|querySelectorAll(":scope > .bp-form-opts > .bp-form-opt > span")|,
+      ~s|querySelectorAll(":scope > td.bp-duel__val")|
+    ]
+    |> Enum.reduce(source, &String.replace(&2, &1, "readerQuery()"))
+  end
+
+  test "§3 native fleet-text queries never exempt markup producers" do
+    assert without_fleet_text_reader_queries(~s|body.querySelectorAll(".bp-pnode")|) ==
+             "body.readerQuery()"
+
+    for producer <- [
+          ~s|body.innerHTML = '<div class="bp-pnode"></div>'|,
+          ~s|el.className = "bp-heat__cl"|,
+          ~s|el.setAttribute("class", "bp-chart__t")|,
+          ~s|body.innerHTML = '<section class="bp-form"></section>'|
+        ] do
+      assert without_fleet_text_reader_queries(producer) == producer
+    end
   end
 
   test "§3 native file-tree queries never exempt markup producers" do
