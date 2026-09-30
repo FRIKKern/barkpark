@@ -1385,6 +1385,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           id={"pane-#{pane.title |> String.downcase() |> String.replace(~r/[^a-z0-9]/, "-")}"}
           title={pane.title}
           count={doc_count}
+          count_more={pane[:has_more] == true}
           last={idx == num_panes - 1 and not has_editor}
           collapsed={collapsed}
           data_role={pane[:role]}
@@ -1666,6 +1667,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   </.pane_item>
               <% end %>
             <% end %>
+            <%!-- The list was truncated: say so and load the next page. Without
+                  this the pane stopped at 100 rows with a count of exactly 100
+                  (stranger walk, 2026-10-01). --%>
+            <button
+              :if={pane[:has_more] == true and pane[:type_name] != nil}
+              type="button"
+              class="btn btn-ghost btn-sm"
+              style="margin:8px 12px;"
+              phx-click="desk-list-more"
+              phx-value-type={pane.type_name}
+              data-test-id="desk-list-more"
+            ><%= gettext("Show more") %></button>
           </div>
         </.pane_column>
       <% end %>

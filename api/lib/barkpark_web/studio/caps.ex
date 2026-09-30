@@ -161,7 +161,7 @@ defmodule BarkparkWeb.Studio.Caps do
     width-bucket
     search ref-search validate-upload reload-remote-doc
     select-view
-    desk-search desk-search-clear
+    desk-search desk-search-clear desk-list-more
     open-image-picker close-image-picker open-ref-picker close-ref-picker
     show-history close-history close-delete close-discard
     close-unpublish-guard close-confirm-modal
