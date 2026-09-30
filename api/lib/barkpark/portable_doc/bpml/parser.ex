@@ -26,7 +26,8 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "pullquote" => ~w(id),
     "ingress" => ~w(id),
     "byline" => ~w(id),
-    "ul" => ~w(id ordered),
+    # `start` (an ordered list's first number) rides with `ordered` for the same reason.
+    "ul" => ~w(id ordered start),
     "stats" => ~w(id),
     "steps" => ~w(id),
     "table" => ~w(id headcol),
@@ -337,6 +338,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
        %{"type" => "list", "items" => items}
        |> put_attr("id", attrs)
        |> put_bool_attr("ordered", attrs)
+       |> put_int_attr("start", attrs)
        |> put_bool_attr("task", attrs), cur}
     end
   end

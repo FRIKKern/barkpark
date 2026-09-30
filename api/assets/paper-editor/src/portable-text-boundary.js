@@ -22,8 +22,6 @@ export function portableTextBoundary(host, singleBlockType = () => null) {
         tr.doc.descendants((node, _pos, parent) => {
           if (node.type.name === "hardBreak" && !["paragraph", "heading"].includes(parent?.type.name)) {
             message = "Line breaks are not supported in this field yet. This edit was not applied.";
-          } else if (node.type.name === "orderedList" && node.attrs.start !== 1) {
-            message = "Custom list starting numbers are not supported yet. Start numbering at 1. This edit was not applied.";
           } else if (["listItem", "taskItem"].includes(node.type.name)) {
             let valid = node.firstChild?.type.name === "paragraph";
             node.forEach((child, _offset, index) => {

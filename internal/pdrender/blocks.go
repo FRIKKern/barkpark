@@ -2,6 +2,7 @@ package pdrender
 
 import (
 	"encoding/json"
+	"math"
 	"sort"
 	"strings"
 
@@ -95,11 +96,12 @@ type listRenderer struct{ ir InlineRenderer }
 func (lr listRenderer) Render(b Block, ctx RenderCtx) []string {
 	ordered := attrBool(b.Attrs, "ordered") || b.Type == "ordered-list" || b.Type == "numbered_list"
 	items := attrSlice(b.Attrs, "items")
+	start := listStart(b.Attrs)
 	var out []string
 	for i, item := range items {
 		prefix := "• "
 		if ordered {
-			prefix = itoa(i+1) + ". "
+			prefix = itoa(start+i) + ". "
 		}
 		indent := lipgloss.Width(prefix)
 		// Wrap the item body to the width left after the prefix, then hang.
@@ -143,6 +145,23 @@ func (lr listRenderer) Render(b Block, ctx RenderCtx) []string {
 		return []string{""}
 	}
 	return out
+}
+
+// listStart is an ordered list's first number: the block's integer `start`, else
+// 1. A JSON number only (a whole float64 is how it decodes) — a string "5" is
+// not a start, matching compose.ex list_start/1 and @barkpark/react listStart.
+func listStart(m map[string]any) int {
+	switch v := m["start"].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		if v == math.Trunc(v) && v >= math.MinInt32 && v <= math.MaxInt32 {
+			return int(v)
+		}
+	}
+	return 1
 }
 
 // orderedListRenderer forces ordered:true, then defers to the list renderer.

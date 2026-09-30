@@ -50,7 +50,7 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
     [%{"type" => "paragraph", "content" => inline(children)}]
   end
 
-  defp block({tag, _attrs, children, _meta}) when tag in ["ul", "ol"] do
+  defp block({tag, attrs, children, _meta}) when tag in ["ul", "ol"] do
     items =
       children
       |> Enum.filter(&match?({"li", _, _, _}, &1))
@@ -67,7 +67,10 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
 
       [%{"type" => "list", "ordered" => false, "task" => true, "items" => checklist_items}]
     else
-      [%{"type" => "list", "ordered" => tag == "ol", "items" => items}]
+      [
+        %{"type" => "list", "ordered" => tag == "ol", "items" => items}
+        |> put_list_start(tag, attrs)
+      ]
     end
   end
 
@@ -148,6 +151,21 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
   end
 
   defp task_item(_), do: nil
+
+  # An ordered list's first number rides the block as `start` (`5. five` → 5).
+  # The parser names it only when it is not 1, so a list numbered from 1 keeps
+  # its shape; every renderer reads a missing `start` as 1.
+  defp put_list_start(block, "ol", attrs) do
+    with {_, raw} <- List.keyfind(attrs, "start", 0),
+         {start, ""} <- Integer.parse(raw),
+         true <- start != 1 do
+      Map.put(block, "start", start)
+    else
+      _ -> block
+    end
+  end
+
+  defp put_list_start(block, _tag, _attrs), do: block
 
   # ── the portabledoc fence (native block escape hatch) ──────────────────
 

@@ -41,8 +41,16 @@ literal JSON already wrapped in text nodes is not heuristically decoded.
 
 [Nested lists](portable-doc-nested-lists.md) use item maps with child list blocks.
 Native inline breaks serialize as LF text, with exact source carriers retained
-on Undo. Multiple paragraphs per item, arbitrary child blocks and custom
-numbering starts remain rejected before entering history or emitting a save.
+on Undo. Multiple paragraphs per item and arbitrary child blocks remain rejected
+before entering history or emitting a save.
+
+## First number
+
+An ordered list's integer `start` other than 1 is its first number (`5. five`
+from markdown stores `start: 5`). Absent, 1, a string or a bullet list number
+from 1 with unchanged bytes. The HTML reader emits `<ol start="N">`; pdrender,
+@barkpark/react, mobile and BPML carry the same rule. The canvas mounts it as the
+orderedList `start` attr; numbering back from 1 patches `start: null`.
 Mounted coverage does not establish complete native-browser inventory proof.
 
 ## Verification
