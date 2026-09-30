@@ -219,3 +219,14 @@ config :barkpark_cloud,
   # unreachable polls) and grace-reset (a good poll refreshing the budget between
   # two error bursts) are cheap to prove. Prod default is 45 (~90s).
   site_deploy_poll_grace: 3
+
+# The credential rate buckets (DeviceAuth.RateLimiter "login"/"reset") key on the
+# peer IP, and every test request arrives from 127.0.0.1 — hundreds of logins a
+# minute across the suite. Lift them here; the limiter's own tests delete this
+# override to exercise the production numbers.
+config :barkpark_cloud, :rate_limit_overrides, %{
+  "login" => 1_000_000,
+  "login_email" => 1_000_000,
+  "reset" => 1_000_000,
+  "reset_email" => 1_000_000
+}

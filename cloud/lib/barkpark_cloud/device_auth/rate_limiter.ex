@@ -137,7 +137,18 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
     # gr-backlog-operator-digest-send — the outward-facing bucket. See the
     # moduledoc: every admitted hit SENDS REAL MAIL, so this is deliberately the
     # tightest number in the table rather than the @default_limit of 10.
-    "digest_send" => 2
+    "digest_send" => 2,
+    # task-9f03e6725aacd1c1 — the credential endpoints. `login:<ip>` and
+    # `reset:<ip>` are per peer IP with office-NAT headroom (the oauth_exchange
+    # reasoning above); `login_email:` / `reset_email:` key on a SHA-256 of the
+    # downcased address (no address is held in ETS) and are the tight ones: 10
+    # password guesses a minute against one account, 3 reset mails a minute to
+    # one inbox. Each login attempt costs a bcrypt verification, so the per-IP
+    # bucket is also the CPU brake.
+    "login" => 30,
+    "login_email" => 10,
+    "reset" => 10,
+    "reset_email" => 3
   }
 
   @doc false
@@ -194,8 +205,18 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
 
   defp limit_for(key) do
     action = key |> String.split(":", parts: 2) |> hd()
-    Map.get(@limits, action, @default_limit)
+
+    # A per-action override for ENVIRONMENTS that must not share a production
+    # budget across unrelated callers — the test suite logs in from one peer IP
+    # hundreds of times a minute (config/test.exs). Absent everywhere else.
+    case Application.get_env(:barkpark_cloud, :rate_limit_overrides, %{}) do
+      %{^action => n} when is_integer(n) -> n
+      _ -> Map.get(@limits, action, @default_limit)
+    end
   end
+
+  @doc false
+  def limit(action) when is_binary(action), do: Map.get(@limits, action, @default_limit)
 
   @impl true
   def init(_) do

@@ -801,11 +801,14 @@ defmodule BarkparkCloud.Web.Router do
   ## short-lived challenge_token instead of a session — they must clear
   ## POST /v1/auth/two-factor-challenge to upgrade it into a real session.
 
+  ##   → 429 {error: "rate_limited"}   — >30 attempts/min from this IP, or >10/min
+  ##                                      against this address (task-9f03e6725aacd1c1)
   post "/v1/auth/login" do
     email = conn.body_params["email"]
     password = conn.body_params["password"]
 
-    with true <- is_binary(email) and is_binary(password),
+    with :ok <- credential_rate_check("login", conn, email),
+         true <- is_binary(email) and is_binary(password),
          %{} = user <- Accounts.get_user_by_email_and_password(email, password) do
       if Accounts.two_factor_enabled?(user) do
         case Accounts.create_two_factor_pending_token(user) do
@@ -828,8 +831,27 @@ defmodule BarkparkCloud.Web.Router do
         end
       end
     else
+      {:error, :rate_limited} -> json(conn, 429, %{error: "rate_limited"})
       _ -> json(conn, 401, %{error: "invalid_credentials"})
     end
+  end
+
+  # One hit on BOTH credential buckets for `action` ("login" / "reset"): the
+  # peer-IP bucket and the per-address bucket (SHA-256 of the downcased email,
+  # so no address is held in ETS). Both are counted on every call so a burst
+  # spread across addresses still trips the IP bucket.
+  defp credential_rate_check(action, conn, email) do
+    ip_verdict = DeviceAuthRateLimiter.check(action <> ":" <> (peer_ip(conn) || "unknown"))
+
+    email_verdict =
+      if is_binary(email) do
+        digest = :crypto.hash(:sha256, String.downcase(String.trim(email))) |> Base.encode16()
+        DeviceAuthRateLimiter.check(action <> "_email:" <> digest)
+      else
+        :ok
+      end
+
+    if ip_verdict == :ok and email_verdict == :ok, do: :ok, else: {:error, :rate_limited}
   end
 
   ## two-factor-auth — POST /v1/auth/two-factor-challenge
@@ -1171,13 +1193,17 @@ defmodule BarkparkCloud.Web.Router do
   ## EMAILED — never returned in the response. (Contrast the invite flow, which
   ## hands the accept token back in `accept_url` for copy-paste: a reset link in
   ## the HTTP body would let anyone reset anyone's password by calling this.)
-  ## YAGNI: rate-limiting is a fronting-proxy/WAF concern, as for login/register.
+  ## RATE-LIMITED IN-APP (task-9f03e6725aacd1c1), no longer left to a proxy that
+  ## does not exist: every call mints a token and sends mail, so an unlimited
+  ## route was a mail bomb against any registered address. The response stays
+  ## 200 either way — a 429 here would tell a prober the address is real — and
+  ## an over-budget call simply sends nothing.
   post "/v1/auth/request-reset" do
     email = conn.body_params["email"]
 
     # Best-effort: a mailer/DB hiccup must not change the response (still 200) or
     # leak via timing of a 500 — the user is told "check your email" regardless.
-    if is_binary(email) do
+    if is_binary(email) and credential_rate_check("reset", conn, email) == :ok do
       case Accounts.request_password_reset(email) do
         {:ok, {user, raw_token}} ->
           _ = Notifications.deliver_password_reset(user.email, reset_url(conn, raw_token))
