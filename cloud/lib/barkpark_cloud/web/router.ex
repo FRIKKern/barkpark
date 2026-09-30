@@ -1868,16 +1868,28 @@ defmodule BarkparkCloud.Web.Router do
   # POST /v1/account/two-factor/enroll → 200 {otpauth_uri, secret}
   # Generate + persist a pending (unconfirmed) TOTP secret and return the
   # provisioning material; the SPA renders the QR client-side from otpauth_uri.
+  #
+  # → 409 {error: "already_enabled"} when 2FA is ON (task-e4cdc0f2e7766e1a).
+  # `User.two_factor_enroll_changeset/2` nulls `two_factor_confirmed_at`, so an
+  # enroll over an ENABLED factor used to switch 2FA OFF as a side effect — with
+  # no `twofa.disabled` audit row and no `two_factor_disabled` security event,
+  # i.e. the one disable path that left no trail. Turning 2FA off is DELETE's
+  # job, and DELETE records it; re-keying means off-then-enroll.
   post "/v1/account/two-factor/enroll" do
     conn = Auth.require_user(conn, [])
 
-    if conn.halted do
-      conn
-    else
-      {:ok, %{otpauth_uri: uri, secret_base32: secret}} =
-        Accounts.start_two_factor_enrollment(conn.assigns.current_user)
+    cond do
+      conn.halted ->
+        conn
 
-      json(conn, 200, %{otpauth_uri: uri, secret: secret})
+      Accounts.two_factor_enabled?(conn.assigns.current_user) ->
+        json(conn, 409, %{error: "already_enabled"})
+
+      true ->
+        {:ok, %{otpauth_uri: uri, secret_base32: secret}} =
+          Accounts.start_two_factor_enrollment(conn.assigns.current_user)
+
+        json(conn, 200, %{otpauth_uri: uri, secret: secret})
     end
   end
 

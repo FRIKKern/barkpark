@@ -275,6 +275,22 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
       assert json_body(call(:get, "/v1/me", nil, token))["user"]["two_factor_enabled"] == false
     end
 
+    # task-e4cdc0f2e7766e1a: enroll nulls two_factor_confirmed_at, so an enroll
+    # over an ENABLED factor used to switch 2FA off with no audit row and no
+    # security event. It is refused; turning 2FA off stays DELETE's (recorded) job.
+    test "enroll while 2FA is ENABLED → 409 already_enabled, and 2FA stays on" do
+      {user, _team} = user_with_team()
+      {_codes, _secret, token} = enable_two_factor(user)
+      assert Accounts.two_factor_enabled?(Accounts.get_user(user.id))
+
+      conn = call(:post, "/v1/account/two-factor/enroll", %{}, token)
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "already_enabled"
+
+      assert Accounts.two_factor_enabled?(Accounts.get_user(user.id))
+      assert json_body(call(:get, "/v1/me", nil, token))["user"]["two_factor_enabled"] == true
+    end
+
     test "confirm with a wrong code → 422 invalid_otp" do
       {user, _team} = user_with_team()
       token = login_token(user)
