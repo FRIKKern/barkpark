@@ -172,7 +172,7 @@ func taskRowLines(r map[string]any, ctx RenderCtx, w int) []string {
 		arrow = ctx.Theme.Dim.Render("↳") + " "
 	}
 
-	line := indent + arrow + glyph + " " + ctx.Theme.Body.Render(title)
+	line := indent + arrow + glyph + " " + draftTitle(r, ctx, ctx.Theme.Body.Render(title))
 	if meta := rowMeta(r); len(meta) > 0 {
 		line += "  " + ctx.Theme.Dim.Render(strings.Join(meta, " · "))
 	}
@@ -285,12 +285,13 @@ func treeRow(r map[string]any, ctx RenderCtx, w int, depths []int, i int, worker
 	if budget < 1 {
 		budget = 1
 	}
-	if runeWidth(title) > budget {
-		title = padOrTruncate(title, budget) // house-ellipsis, exactly `budget` wide
+	// A draft row's DRAFT chip counts against the same budget (draftFitLabel).
+	titleW := runeWidth(title) + draftLabelWidth(r)
+	if titleW > budget {
+		titleW = budget // house-ellipsis, exactly `budget` wide
 	}
-
-	left := ctx.Theme.Dim.Render(prefix) + glyph + " " + ctx.Theme.Body.Render(title)
-	leftW := prefixW + 2 + runeWidth(title)
+	left := ctx.Theme.Dim.Render(prefix) + glyph + " " + draftFitLabel(r, ctx, title, titleW, ctx.Theme.Body)
+	leftW := prefixW + 2 + titleW
 	if metaW == 0 {
 		return left
 	}
@@ -807,7 +808,7 @@ func laneBorderColor(t Theme, role string) lipgloss.TerminalColor {
 func boardCardLines(r map[string]any, role string, ctx RenderCtx, w int) []string {
 	glyph := statusGlyphStyle(ctx.Theme, role).Render(glyphForRole(role))
 	title := sanitizeText(strings.TrimSpace(attrStr(r, "title")))
-	line := "  " + glyph + " " + ctx.Theme.Body.Render(title)
+	line := "  " + glyph + " " + draftTitle(r, ctx, ctx.Theme.Body.Render(title))
 	var meta []string
 	if p := priorityLabel(attrStr(r, "priority")); p != "" {
 		meta = append(meta, p)
@@ -891,7 +892,7 @@ func (roadmapRenderer) Render(b Block, ctx RenderCtx) []string {
 	// Label column width: widest title, capped to a third of the surface.
 	labelW := 0
 	for _, r := range rows {
-		if n := runeWidth(sanitizeText(strings.TrimSpace(attrStr(r, "title")))); n > labelW {
+		if n := runeWidth(sanitizeText(strings.TrimSpace(attrStr(r, "title")))) + draftLabelWidth(r); n > labelW {
 			labelW = n
 		}
 	}
@@ -991,7 +992,7 @@ func roadmapUnplacedLane(r map[string]any, ctx RenderCtx, labelW, track int) str
 	}
 	marker := ctx.Theme.Dim.Render(padOrTruncate(roadmapLaneUnplacedCopy, track))
 	rail := ctx.Theme.Dim.Render("│")
-	joined := joinColumns([][]string{{labelStyle.Render(padOrTruncate(title, labelW))}, {rail + marker + rail}}, []int{labelW, track + 2}, 1)
+	joined := joinColumns([][]string{{draftFitLabel(r, ctx, title, labelW, labelStyle)}, {rail + marker + rail}}, []int{labelW, track + 2}, 1)
 	return firstLine(joined)
 }
 
@@ -1009,7 +1010,6 @@ type laneMarks struct {
 func roadmapLane(r map[string]any, ctx RenderCtx, labelW, track, todayCell int, ticks map[int]bool, blockStart, blockEnd time.Time, haveSpan bool) string {
 	role := roleForStatus(attrStr(r, "status"))
 	title := sanitizeText(strings.TrimSpace(attrStr(r, "title")))
-	label := padOrTruncate(title, labelW)
 	labelStyle := ctx.Theme.Body
 	if attrBool(r, "phase_row") {
 		labelStyle = ctx.Theme.Body.Bold(true)
@@ -1065,7 +1065,7 @@ func roadmapLane(r map[string]any, ctx RenderCtx, labelW, track, todayCell int, 
 	// primitive — no bespoke width math — and is byte-identical to the old
 	// `label + " " + │bar│` concat (each cell is already exactly its width, so
 	// joinColumns' pad is a no-op and the gutter is the one separating space).
-	joined := joinColumns([][]string{{labelStyle.Render(label)}, {rail + bar + rail}}, []int{labelW, track + 2}, 1)
+	joined := joinColumns([][]string{{draftFitLabel(r, ctx, title, labelW, labelStyle)}, {rail + bar + rail}}, []int{labelW, track + 2}, 1)
 	return firstLine(joined)
 }
 
