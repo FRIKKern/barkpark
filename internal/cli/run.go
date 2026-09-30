@@ -3726,9 +3726,13 @@ var receiptIdentKeys = []string{
 }
 
 // failedStatuses are the verdict tokens that mean the operation a receipt
-// describes did NOT succeed, even though the HTTP call did.
+// describes did NOT succeed, even though the HTTP call did. `failed_giveup` is
+// the one a webhook delivery actually reports: the server's status set is
+// `pending | ok | failed_giveup` (api webhooks/delivery.ex @statuses), so a
+// list holding only `failed` let `bp webhook test-send` print "ok" for a
+// refused endpoint (stranger walk, 2026-09-30).
 var failedStatuses = map[string]bool{
-	"failed": true, "failure": true, "error": true, "dead": true, "refused": true,
+	"failed": true, "failed_giveup": true, "failure": true, "error": true, "dead": true, "refused": true,
 }
 
 // outcomeReceiptLine renders the one line that says what a write actually did,
@@ -3749,7 +3753,7 @@ var failedStatuses = map[string]bool{
 //	schema delete        deleted: <name>          id: <row uuid> deleted: <name>
 //	workspace member-rm  removed: {seat}          ok             removed: <principal>
 //	token revoke         revoked: {id,label,…}    ok             revoked: <id>
-//	webhook test-send    delivery.status: failed  ok             delivery: failed: …
+//	webhook test-send    delivery.status: failed_giveup  ok      delivery: failed_giveup: …
 //
 // `bp doc delete` is deliberately NOT in that list, though an earlier draft of
 // this comment claimed it: doc.delete rides POST /v1/data/mutate/:dataset with
