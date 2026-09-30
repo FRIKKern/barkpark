@@ -26,6 +26,17 @@ func TestBuildMultipartFileRefusesADirectoryBeforeAnyRequest(t *testing.T) {
 		t.Fatalf("err = %q, want the read-upload-file wording naming the directory", err)
 	}
 
+	t.Run("an empty file is refused up front too", func(t *testing.T) {
+		p := filepath.Join(dir, "empty.png")
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		body, _, err := buildMultipartFile(p)
+		if err == nil || body != nil || !strings.Contains(err.Error(), "the file is empty") {
+			t.Fatalf("a 0-byte file must be refused before the request; body=%v err=%v", body, err)
+		}
+	})
+
 	t.Run("a regular file still streams", func(t *testing.T) {
 		p := filepath.Join(dir, "a.txt")
 		if err := os.WriteFile(p, []byte("hello"), 0o600); err != nil {

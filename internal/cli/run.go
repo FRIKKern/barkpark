@@ -3065,6 +3065,14 @@ func buildMultipartFile(path string) (io.Reader, string, error) {
 		f.Close()
 		return nil, "", fmt.Errorf("read upload file %q: is a directory — pass a file", path)
 	}
+	// A 0-byte file is never a meaningful upload for either file-argument verb
+	// (media upload, sheets import): the server stored a 0-byte "empty.png" as a
+	// media asset, listed and pickable in Studio's library, rendering as nothing
+	// (stranger walk, 2026-09-30). Refuse it here, before any request.
+	if info.Size() == 0 {
+		f.Close()
+		return nil, "", fmt.Errorf("read upload file %q: the file is empty (0 bytes) — nothing to upload", path)
+	}
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
 	go func() {
