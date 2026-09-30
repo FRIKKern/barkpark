@@ -205,6 +205,12 @@ export function createListenHandle<T = BarkparkDocument>(
 
   let unsubscribed = false
   let lastEventId: string | undefined
+  // The requested type set, applied HERE. The server's listen route does not
+  // read `?types=` (it streams every type in scope), so `listen('post')` used to
+  // yield article mutations too (stranger walk, 2026-09-30). The param is still
+  // sent so a server that learns to filter saves the bandwidth. `null` = every
+  // type; control frames (welcome) always pass.
+  const wantedTypes = parseTypeSet(type)
   let reconnectCount = 0
   let cleanCloseCount = 0
   // Consecutive unusable frames. Declared out here (like cleanCloseCount) so it
@@ -399,6 +405,12 @@ export function createListenHandle<T = BarkparkDocument>(
                   // Healthy DATA frame — the only thing that resets EITHER
                   // escalation. (A keepalive resets only the first, above.)
                   cleanCloseCount = droppedFrameCount = 0
+                  if (!matchesTypeSet(wantedTypes, event.type, frameDocType(payload))) {
+                    // Another type's mutation. lastEventId already advanced
+                    // above, so a resume does not replay it.
+                    frameEnd = findFrameBoundary(buffer)
+                    continue
+                  }
                   yield event
                   frameEnd = findFrameBoundary(buffer)
                 }
@@ -526,6 +538,35 @@ function parseSseFrame(frame: string): ParsedFrame | null {
     }
   }
   return { eventName, eventId, dataLines }
+}
+
+/** A comma-separated type list → its set of names; `null` when no type was asked for. */
+function parseTypeSet(type: string | undefined): Set<string> | null {
+  if (typeof type !== 'string') return null
+  const names = type
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s !== '')
+  return names.length > 0 ? new Set(names) : null
+}
+
+/** The document type a mutation frame names: its top-level `type`, else `result._type`. */
+function frameDocType(payload: Record<string, unknown>): unknown {
+  if (typeof payload['type'] === 'string') return payload['type']
+  const r = payload['result']
+  return r !== null && typeof r === 'object' ? (r as Record<string, unknown>)['_type'] : undefined
+}
+
+/** A mutation frame passes when its document type is wanted; every other frame passes. */
+function matchesTypeSet(
+  wanted: Set<string> | null,
+  eventType: 'welcome' | 'mutation',
+  docType: unknown,
+): boolean {
+  if (wanted === null || eventType !== 'mutation') return true
+  // A frame that names no type cannot be judged — keep it rather than lose it.
+  if (typeof docType !== 'string') return true
+  return wanted.has(docType)
 }
 
 function findFrameBoundary(buffer: string): { start: number; end: number } | -1 {

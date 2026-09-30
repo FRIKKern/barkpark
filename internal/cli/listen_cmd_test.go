@@ -2,9 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -76,5 +78,56 @@ func TestRunListenSinglePrefixOnError(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "no read access") {
 		t.Errorf("stderr = %q, want the server's message %q", stderr.String(), "no read access")
+	}
+}
+
+// TestRunListenAppliesTheTypeList: `bp listen post` printed article mutations
+// too, because the server's listen route ignores `?types=` (stranger walk,
+// 2026-09-30). The frames here are the server's real shape. The first connect
+// streams them and closes; the reconnect is refused so the command returns.
+func TestRunListenAppliesTheTypeList(t *testing.T) {
+	frame := func(id int, typ string) string {
+		return fmt.Sprintf("id: %d\nevent: mutation\ndata: {\"type\":%q,\"mutation\":\"update\",\"documentId\":\"drafts.%s-%d\",\"result\":{\"_type\":%q}}\n\n", id, typ, typ, id, typ)
+	}
+	var calls int32
+	var gotTypes string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) > 1 {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"code":"forbidden","message":"stop"}}`))
+			return
+		}
+		gotTypes = r.URL.Query().Get("types")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: welcome\ndata: {\"type\":\"welcome\"}\n\n" +
+			frame(1, "article") + frame(2, "post") + frame(3, "author") + frame(4, "article")))
+	}))
+	defer srv.Close()
+
+	run := func(args []string) string {
+		var stdout, stderr bytes.Buffer
+		atomic.StoreInt32(&calls, 0)
+		runListen(newWriter(&stdout, &stderr), globals{}, manifest.Context{Server: srv.URL, Dataset: "production"}, args)
+		return stdout.String()
+	}
+
+	got := run([]string{"post"})
+	if strings.Contains(got, "drafts.article") || strings.Contains(got, "drafts.author") {
+		t.Errorf("bp listen post printed another type's mutation:\n%s", got)
+	}
+	if !strings.Contains(got, "drafts.post-2") || !strings.Contains(got, `"welcome"`) {
+		t.Errorf("bp listen post lost the post mutation or the welcome:\n%s", got)
+	}
+	if gotTypes != "post" {
+		t.Errorf("?types= = %q, want it still sent as %q", gotTypes, "post")
+	}
+
+	got = run([]string{"post, article"})
+	if strings.Count(got, "drafts.article") != 2 || !strings.Contains(got, "drafts.post-2") || strings.Contains(got, "drafts.author") {
+		t.Errorf("bp listen 'post, article' = \n%s", got)
+	}
+
+	if got = run(nil); strings.Count(got, "\"mutation\"") != 4 {
+		t.Errorf("bp listen with no type list must print every mutation:\n%s", got)
 	}
 }

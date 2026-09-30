@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -67,7 +69,15 @@ func runListen(out *writer, g globals, ctx manifest.Context, args []string) int 
 	// off and reconnects, resuming from the last event id. On an interactive
 	// terminal, note each reconnect on stderr so the user sees the gap; stdout
 	// NDJSON stays clean for `bp listen | jq`.
-	err := client.Listen(sigCtx, types, func(_, data string) error {
+	// The type list is applied HERE. The server's listen route does not read
+	// `?types=` — it streams every type in scope — so `bp listen post` printed
+	// article mutations too (stranger walk, 2026-09-30). The param still rides
+	// the request for a server that learns to filter.
+	wanted := listenTypeSet(types)
+	err := client.Listen(sigCtx, types, func(event, data string) error {
+		if !listenEventWanted(wanted, event, data) {
+			return nil
+		}
 		out.outf("%s", data)
 		return nil
 	}, func() {
@@ -80,4 +90,46 @@ func runListen(out *writer, g globals, ctx manifest.Context, args []string) int 
 		return exitGeneric
 	}
 	return 0
+}
+
+// listenTypeSet turns `post, article` into its set of names; nil when no type
+// was asked for (every event passes).
+func listenTypeSet(types string) map[string]bool {
+	set := map[string]bool{}
+	for _, t := range strings.Split(types, ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			set[t] = true
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
+}
+
+// listenEventWanted reports whether one SSE frame belongs on stdout. Only a
+// `mutation` frame is judged, by its document type (top-level `type`, else
+// `result._type`); welcome and other control frames always pass, and a frame
+// that names no type is kept rather than lost.
+func listenEventWanted(wanted map[string]bool, event, data string) bool {
+	if wanted == nil || event != "mutation" {
+		return true
+	}
+	var frame struct {
+		Type   string `json:"type"`
+		Result struct {
+			Type string `json:"_type"`
+		} `json:"result"`
+	}
+	if json.Unmarshal([]byte(data), &frame) != nil {
+		return true
+	}
+	t := frame.Type
+	if t == "" {
+		t = frame.Result.Type
+	}
+	if t == "" {
+		return true
+	}
+	return wanted[t]
 }
