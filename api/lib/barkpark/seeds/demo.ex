@@ -582,8 +582,27 @@ defmodule Barkpark.Seeds.Demo do
   # ── Dev API Token ────────────────────────────────────────────────────────────
 
   defp seed_dev_token(scope) do
-    dataset = scope.dataset
     dev_token = "barkpark-dev-token"
+    {:ok, _token} = ensure_dev_token(scope, dev_token)
+    IO.puts("Dev token created: #{dev_token}")
+    IO.puts("Use with: curl -H 'Authorization: Bearer #{dev_token}' ...")
+  end
+
+  @doc """
+  Idempotently install `dev_token` as the Studio dev token for `scope` — the
+  credential `config :barkpark, :dev_browser_token` (config/dev.exs ONLY) hands
+  anonymous local browsers. Read/write/admin, bound to the scope's workspace with
+  its membership row: exactly what the demo profile has always minted. Also
+  called by `Barkpark.Seeds.Clean` when (and only when) that config is set, so a
+  clean-seeded DEV instance's Studio is not left calling the API with a token
+  that does not exist.
+
+  Returns `{:ok, %ApiToken{}}` — the token as it now stands (created, or the
+  existing row after any backfill) — never a bare `:ok` after the writes
+  (the sentinel-:ok-returner lens, `sentinel_ok_returner_lens_test.exs`).
+  """
+  def ensure_dev_token(scope, dev_token) when is_binary(dev_token) do
+    dataset = scope.dataset
     dev_perms = ["read", "write", "admin"]
 
     # Mint the dev token through Auth.create_token so it is BOUND to the Default
@@ -597,7 +616,7 @@ defmodule Barkpark.Seeds.Demo do
     # workspace_id + membership if missing.
     case Auth.verify_token(dev_token) do
       {:error, :unauthorized} ->
-        {:ok, _token} =
+        {:ok, %ApiToken{}} =
           Auth.create_token(dev_token, "dev-studio", dataset, dev_perms, scope.workspace_id)
 
       {:ok, %ApiToken{} = existing} ->
@@ -621,10 +640,9 @@ defmodule Barkpark.Seeds.Demo do
           {:ok, _membership} =
             TenancyAuth.create_membership(scope.workspace_id, existing.id, role)
         end
-    end
 
-    IO.puts("Dev token created: #{dev_token}")
-    IO.puts("Use with: curl -H 'Authorization: Bearer #{dev_token}' ...")
+        {:ok, existing}
+    end
   end
 
   # ── Codelist Registry (Bootstrap) ───────────────────────────────────────────

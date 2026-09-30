@@ -179,4 +179,38 @@ defmodule Barkpark.SeedsCleanTest do
     assert get_in(paper_after.content, ["rev"]) == rev_before
     assert paper_after.rev == paper_before.rev
   end
+
+  # task-aa0e0b0a993b6435 — a DEV instance (config :dev_browser_token set, as
+  # config/dev.exs does) gets that token installed by the clean profile too,
+  # with the demo profile's exact grant; without the config (release, deploy
+  # box, test env) nothing is minted — the test above pins that half.
+  describe "the dev Studio browser token" do
+    setup do
+      prev = Application.get_env(:barkpark, :dev_browser_token)
+      Application.put_env(:barkpark, :dev_browser_token, "r2d-dev-browser-token")
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :dev_browser_token, prev),
+          else: Application.delete_env(:barkpark, :dev_browser_token)
+      end)
+
+      :ok
+    end
+
+    test "is installed with read/write/admin and a workspace membership, idempotently" do
+      run_clean()
+
+      assert {:ok, token} = Auth.verify_token("r2d-dev-browser-token")
+      assert Enum.sort(token.permissions) == ["admin", "read", "write"]
+      ws_id = Barkpark.Tenancy.get_default_workspace().id
+      assert token.workspace_id == ws_id
+      assert TenancyAuth.member?(token, ws_id)
+
+      # A re-seed mints nothing new (the token row is found, not duplicated).
+      count = Repo.aggregate(Barkpark.Auth.ApiToken, :count)
+      run_clean()
+      assert Repo.aggregate(Barkpark.Auth.ApiToken, :count) == count
+    end
+  end
 end
