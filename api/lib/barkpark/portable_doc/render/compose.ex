@@ -434,7 +434,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       end)
 
     list = %{"kind" => "PdList", "ordered" => ordered, "children" => items}
-    if task, do: Map.put(list, "task", true), else: list
+    list = if task, do: Map.put(list, "task", true), else: list
+
+    case ordered and not task and list_start(b) do
+      start when is_integer(start) -> Map.put(list, "start", start)
+      _ -> list
+    end
   end
 
   def compose_block(%{"type" => "callout"} = b, style) do
@@ -2469,6 +2474,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   defp compose_list_children(_, _), do: []
+
+  @doc """
+  The first number of an ordered list: the block's integer `start` when it is
+  not 1, else nil (numbering from 1). Every surface reads `start` the same way —
+  pdrender listStart, @barkpark/react listStart, mobile listStart, the canvas.
+  """
+  def list_start(%{"start" => start}) when is_integer(start) and start != 1, do: start
+  def list_start(_block), do: nil
 
   defp normalize_list_item(item) when is_binary(item) do
     case Jason.decode(item) do

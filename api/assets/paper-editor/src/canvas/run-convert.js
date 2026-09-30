@@ -39,6 +39,7 @@ import {
   blockToTiptap,
   buildPatchBlockOp,
   inlineArrayToTiptap,
+  listStart,
   tiptapInlineToPd,
   tiptapToBlock,
 } from "../convert.js";
@@ -3996,11 +3997,14 @@ export function hasOverlappingOps(ops, baseline, remote) {
 function stableProseKey(node) {
   const level = node.attrs && node.attrs.level;
   const align = node.attrs && node.attrs.textAlign;
+  const start = node.type === "orderedList" && node.attrs ? node.attrs.start : null;
   return canonicalJSON({
     type: node.type,
     level: level == null ? null : level,
     // Author alignment is diff-relevant (a patch must follow it); left and absent are one.
     align: align === "center" || align === "right" ? align : null,
+    // An ordered list's first number is diff-relevant too; 1 and absent are one.
+    start: Number.isInteger(start) && start !== 1 ? start : null,
     content: node.content || null,
   });
 }
@@ -4712,7 +4716,7 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
     if (proseNodeChanged(prevNode, entry.node)) {
       const bpType = entry.bpType || (prevBlock && prevBlock.type);
       const op = buildPatchBlockOp(nodeToDocEnvelope(entry.node), entry.id, bpType);
-      ops.push({ ...op, patch: withAlignDrop(op.patch, entry.node, prevBlock) });
+      ops.push({ ...op, patch: withListStartDrop(withAlignDrop(op.patch, entry.node, prevBlock), entry.node, prevBlock) });
     }
   }
 
@@ -4733,6 +4737,18 @@ function withAlignDrop(patch, node, prevBlock) {
   if (now === "center" || now === "right") return patch;
   if (Object.hasOwn(patch, "align")) return patch;
   return { ...patch, align: null };
+}
+
+// The same for an ordered list's first number: tiptapToBlock carries `start` only
+// while the canvas numbers from something other than 1, so an ordered list the
+// author set back to 1 would keep the baseline's start on the shallow merge. When the
+// baseline has a start and the node is an ordered list that no longer shows one, the
+// patch says start:null. A bullet list keeps whatever the baseline holds.
+function withListStartDrop(patch, node, prevBlock) {
+  if (!patch || typeof patch !== "object" || !prevBlock) return patch;
+  if (!node || node.type !== "orderedList" || Object.hasOwn(patch, "start")) return patch;
+  if (listStart(prevBlock) === null) return patch;
+  return { ...patch, start: null };
 }
 
 // ── echo reconciliation: server-confirmed blocks ⇄ live doc (S4a) ────────────

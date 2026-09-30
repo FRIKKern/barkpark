@@ -1926,7 +1926,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp list(n, width, %{style: :article} = pal) do
     tag = if Map.get(n, "ordered"), do: "ol", else: "ul"
     inner = render_children(Map.get(n, "children", []), width, pal)
-    "<#{tag}>" <> inner <> "</#{tag}>"
+    "<#{tag}#{list_start_attr(n)}>" <> inner <> "</#{tag}>"
   end
 
   # Email/default keeps the same semantic structure but owns its styling inline:
@@ -1946,9 +1946,16 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     tag = if Map.get(n, "ordered"), do: "ol", else: "ul"
     inner = render_children(Map.get(n, "children", []), width, pal)
 
-    ~s(<#{tag} style="margin:0 0 24px;padding-left:24px;font-family:#{pal.font_body};color:#{pal.text};line-height:1.7">) <>
+    ~s(<#{tag}#{list_start_attr(n)} style="margin:0 0 24px;padding-left:24px;font-family:#{pal.font_body};color:#{pal.text};line-height:1.7">) <>
       inner <> "</#{tag}>"
   end
+
+  # Compose puts `start` on an ordered PdList only when it is an integer other
+  # than 1, so a list numbered from 1 keeps its bytes.
+  defp list_start_attr(%{"ordered" => true, "start" => start}) when is_integer(start),
+    do: ~s( start="#{escape_attr(Integer.to_string(start))}")
+
+  defp list_start_attr(_n), do: ""
 
   # Checklist item: a disabled native checkbox (state is data, not a control the
   # reader can toggle) ahead of the text; `data-checked` lets the surface style done

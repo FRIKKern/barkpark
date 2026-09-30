@@ -97,9 +97,10 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # `ordered` rides the attribute row: the render side reads it
   # (compose.ex `Map.get(b, "ordered") == true` -> PdList ordered), so dropping
   # it turned every numbered list in a pulled paper back into bullets on push.
+  # `start` (an ordered list's first number) rides beside it.
   defp block(%{"type" => "list"} = b, d) do
     items = Enum.map(Map.get(b, "items", []), &list_item_tag(&1, d))
-    wrap("ul", attr_str(b, ["id", "ordered", "task"]), items, d)
+    wrap("ul", attr_str(b, ["id", "ordered", "start", "task"]), items, d)
   end
 
   # `lang` likewise: components.ex `code_html/2` and pdrender's code.go both
