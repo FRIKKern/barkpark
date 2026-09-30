@@ -88,7 +88,7 @@ defmodule Barkpark.Seeds.Clean do
   defp maybe_install_dev_browser_token(scope) do
     case Application.get_env(:barkpark, :dev_browser_token) do
       raw when is_binary(raw) and raw != "" ->
-        :ok = Barkpark.Seeds.Demo.ensure_dev_token(scope, raw)
+        {:ok, _token} = Barkpark.Seeds.Demo.ensure_dev_token(scope, raw)
         IO.puts("Dev Studio browser token installed (config :dev_browser_token, dev only).")
 
       _ ->
