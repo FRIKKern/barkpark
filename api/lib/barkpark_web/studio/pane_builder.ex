@@ -1497,7 +1497,12 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
               # `if item.icon`, so nil means "draw no glyph" there, a real
               # design state rather than a crash.)
               icon: child.icon || "file",
-              drillable: drillable
+              drillable: drillable,
+              # The TYPE this row stands for, apart from its node id. They
+              # differ on the …Rest column (`Structure` ids a row
+              # `"rest-<type>"`), and the empty-editor notice names the type,
+              # not the node: it used to say "No schema for rest-nosuchtype".
+              type_name: Map.get(child, :type_name)
             }
           ]
       end

@@ -1603,15 +1603,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         }
 
       match?(%{role: :list}, last) ->
+        selected = Map.get(last, :selected)
+
         %{
           reason: :no_schema,
           doc_id: List.last(nav_path),
-          doc_type: Map.get(last, :selected)
+          doc_type: selected_type_name(last, selected) || selected
         }
 
       true ->
         %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
     end
+  end
+
+  # The type the selected row stands for. `:selected` is a NODE id, and a bare
+  # `/studio/<type>` URL is normalized into the …Rest column, whose rows
+  # `Structure` ids `"rest-<type>"` — so the node id is not the type name.
+  # nil when the row carries no type (the caller falls back to the id).
+  defp selected_type_name(pane, selected) do
+    pane
+    |> Map.get(:items, [])
+    |> Enum.find_value(fn
+      %{id: ^selected, type_name: type} when is_binary(type) -> type
+      _ -> nil
+    end)
   end
 
   # Did the desk walk stop on an outbound `:plugin_link` row? Keyed on the
