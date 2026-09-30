@@ -341,6 +341,22 @@ defmodule Barkpark.Codelists.EDItEUR do
   def thema_issue, do: @thema_issue
 
   @doc """
+  The ONIX issue `seed_bundled/1` writes (`#{@bundled_issue}`, from the bundled
+  `#{@bundled_filename}`). Exposed so a plugin's declared requirements pin the
+  issue boot actually seeds instead of retyping it.
+  """
+  @spec bundled_issue() :: String.t()
+  def bundled_issue, do: @bundled_issue
+
+  @doc """
+  The registry `list_id` `parse_xml/1` writes for ONIX list number `n`
+  (`"onixedit:list_<n>"`). The ONE spelling of the numeric id, so a declaration
+  and the seeder cannot disagree about it.
+  """
+  @spec list_id_for(pos_integer() | String.t()) :: String.t()
+  def list_id_for(n) when (is_integer(n) and n > 0) or is_binary(n), do: "onixedit:list_#{n}"
+
+  @doc """
   Locate the bundled Thema JSON snapshot on disk via `:code.priv_dir/1`.
 
   Returns `{:ok, abs_path}` when the file exists, `{:error, :not_found}`
@@ -490,7 +506,7 @@ defmodule Barkpark.Codelists.EDItEUR do
 
       [
         %{
-          list_id: "onixedit:list_#{list_number}",
+          list_id: list_id_for(list_number),
           list_number: list_number,
           issue: issue,
           name: list_name,
