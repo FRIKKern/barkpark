@@ -887,49 +887,58 @@ defmodule Barkpark.Content.Lifecycle do
             }
             |> Map.merge(scope_attrs)
 
-          txn =
-            Repo.transaction(fn ->
-              {draft_result, prev_draft_rev} =
-                case Content.get_document(did, type, dataset, opts) do
-                  {:ok, existing} ->
-                    {existing |> Document.changeset(draft_attrs) |> Repo.update(), existing.rev}
+          # [event-atomicity, unpublish/delete/discard] Same boundary as the
+          # publish path (acrc-publish-atomicity-txn-boundary): the row change and
+          # its `mutation_events` row land or fail TOGETHER. Before this wrap the
+          # write COMMITTED and only then did `tap_broadcast` insert the event, so a
+          # fault there left the change with no event — no webhook, no SSE frame,
+          # no cache revalidation — and a 500 on a write that had happened.
+          result =
+            Broadcast.write_atomically(fn ->
+              txn =
+                Repo.transaction(fn ->
+                  {draft_result, prev_draft_rev} =
+                    case Content.get_document(did, type, dataset, opts) do
+                      {:ok, existing} ->
+                        {existing |> Document.changeset(draft_attrs) |> Repo.update(),
+                         existing.rev}
 
-                  _ ->
-                    {%Document{} |> Document.changeset(draft_attrs) |> Repo.insert(), nil}
-                end
+                      _ ->
+                        {%Document{} |> Document.changeset(draft_attrs) |> Repo.insert(), nil}
+                    end
 
-              case draft_result do
-                {:error, cs} ->
-                  Repo.rollback(cs)
+                  case draft_result do
+                    {:error, cs} ->
+                      Repo.rollback(cs)
 
-                {:ok, draft} ->
-                  # Rev-fenced: a concurrent write to the published row since
-                  # the read above surfaces a rev_mismatch (412); a vanished
-                  # row resolves to {:error, :not_found} (prior semantics).
-                  case fenced_delete(pub) do
-                    :ok -> {draft, prev_draft_rev}
-                    {:error, reason} -> Repo.rollback(reason)
+                    {:ok, draft} ->
+                      # Rev-fenced: a concurrent write to the published row since
+                      # the read above surfaces a rev_mismatch (412); a vanished
+                      # row resolves to {:error, :not_found} (prior semantics).
+                      case fenced_delete(pub) do
+                        :ok -> {draft, prev_draft_rev}
+                        {:error, reason} -> Repo.rollback(reason)
+                      end
                   end
+                end)
+
+              case txn do
+                {:ok, {draft, prev_draft_rev}} ->
+                  Broadcast.tap_broadcast(
+                    {:ok, draft},
+                    dataset,
+                    type,
+                    "unpublish",
+                    prev_draft_rev,
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id),
+                    caller_context: Keyword.get(opts, :caller_context)
+                  )
+
+                {:error, reason} ->
+                  {:error, reason}
               end
             end)
-
-          result =
-            case txn do
-              {:ok, {draft, prev_draft_rev}} ->
-                Broadcast.tap_broadcast(
-                  {:ok, draft},
-                  dataset,
-                  type,
-                  "unpublish",
-                  prev_draft_rev,
-                  Keyword.get(opts, :source, :api),
-                  Keyword.get(opts, :user_id),
-                  caller_context: Keyword.get(opts, :caller_context)
-                )
-
-              {:error, reason} ->
-                {:error, reason}
-            end
 
           WriteScope.fire_after(result, :after_unpublish, payload)
       end
@@ -954,22 +963,27 @@ defmodule Barkpark.Content.Lifecycle do
         # that bumped the draft since the read surfaces a rev_mismatch (412)
         # rather than discarding the newer edit; a vanished row resolves to
         # {:error, :not_found}.
-        case fenced_delete(draft) do
-          {:error, reason} ->
-            {:error, reason}
+        # The delete and its `mutation_events` row share one boundary (see the
+        # unpublish note): a fault on the event insert no longer leaves a
+        # discarded draft that no consumer ever hears about.
+        Broadcast.write_atomically(fn ->
+          case fenced_delete(draft) do
+            {:error, reason} ->
+              {:error, reason}
 
-          :ok ->
-            Broadcast.tap_broadcast(
-              {:ok, draft},
-              dataset,
-              type,
-              "discardDraft",
-              prev_rev,
-              Keyword.get(opts, :source, :api),
-              Keyword.get(opts, :user_id),
-              caller_context: Keyword.get(opts, :caller_context)
-            )
-        end
+            :ok ->
+              Broadcast.tap_broadcast(
+                {:ok, draft},
+                dataset,
+                type,
+                "discardDraft",
+                prev_rev,
+                Keyword.get(opts, :source, :api),
+                Keyword.get(opts, :user_id),
+                caller_context: Keyword.get(opts, :caller_context)
+              )
+          end
+        end)
 
       error ->
         error
@@ -1017,47 +1031,55 @@ defmodule Barkpark.Content.Lifecycle do
             {:error, {:halted, reason}}
 
           :ok ->
-            txn =
-              Repo.transaction(fn ->
-                # Each variant is fenced against ITS OWN read rev — a concurrent
-                # write to either row aborts the whole delete with a rev_mismatch
-                # (412) rather than dropping a row the caller no longer intends.
-                results = Enum.map(docs, &fenced_delete/1)
+            # [event-atomicity, unpublish/delete/discard] Same boundary as the
+            # publish path (acrc-publish-atomicity-txn-boundary): the row change and
+            # its `mutation_events` row land or fail TOGETHER. Before this wrap the
+            # write COMMITTED and only then did `tap_broadcast` insert the event, so a
+            # fault there left the change with no event — no webhook, no SSE frame,
+            # no cache revalidation — and a 500 on a write that had happened.
+            result =
+              Broadcast.write_atomically(fn ->
+                txn =
+                  Repo.transaction(fn ->
+                    # Each variant is fenced against ITS OWN read rev — a concurrent
+                    # write to either row aborts the whole delete with a rev_mismatch
+                    # (412) rather than dropping a row the caller no longer intends.
+                    results = Enum.map(docs, &fenced_delete/1)
 
-                # A rev_mismatch means a variant was concurrently edited — delete
-                # must not report success while a live row remains, so roll back.
-                case Enum.find(results, &match?({:error, {:rev_mismatch, _}}, &1)) do
-                  {:error, {:rev_mismatch, _} = reason} ->
-                    Repo.rollback(reason)
+                    # A rev_mismatch means a variant was concurrently edited — delete
+                    # must not report success while a live row remains, so roll back.
+                    case Enum.find(results, &match?({:error, {:rev_mismatch, _}}, &1)) do
+                      {:error, {:rev_mismatch, _} = reason} ->
+                        Repo.rollback(reason)
 
-                  nil ->
-                    # A :not_found on ONE variant while the other deleted is
-                    # overall success (the rows are gone). Only if EVERY delete
-                    # was :not_found was the doc already fully gone → :not_found.
-                    case Enum.find(results, &(&1 == :ok)) do
-                      nil -> Repo.rollback(:not_found)
-                      :ok -> {{:ok, target}, target.rev}
+                      nil ->
+                        # A :not_found on ONE variant while the other deleted is
+                        # overall success (the rows are gone). Only if EVERY delete
+                        # was :not_found was the doc already fully gone → :not_found.
+                        case Enum.find(results, &(&1 == :ok)) do
+                          nil -> Repo.rollback(:not_found)
+                          :ok -> {{:ok, target}, target.rev}
+                        end
                     end
+                  end)
+
+                case txn do
+                  {:ok, {ok, prev_rev}} ->
+                    Broadcast.tap_broadcast(
+                      ok,
+                      dataset,
+                      type,
+                      "delete",
+                      prev_rev,
+                      Keyword.get(opts, :source, :api),
+                      Keyword.get(opts, :user_id),
+                      caller_context: Keyword.get(opts, :caller_context)
+                    )
+
+                  {:error, reason} ->
+                    {:error, reason}
                 end
               end)
-
-            result =
-              case txn do
-                {:ok, {ok, prev_rev}} ->
-                  Broadcast.tap_broadcast(
-                    ok,
-                    dataset,
-                    type,
-                    "delete",
-                    prev_rev,
-                    Keyword.get(opts, :source, :api),
-                    Keyword.get(opts, :user_id),
-                    caller_context: Keyword.get(opts, :caller_context)
-                  )
-
-                {:error, reason} ->
-                  {:error, reason}
-              end
 
             WriteScope.fire_after(result, :after_delete, payload)
         end
