@@ -52,6 +52,14 @@ func (m *model) saveDocument() {
 					setFields[k] = v == "true"
 					continue
 				}
+			case FieldSlug:
+				// A slug READ from {"current": …} is written back in that shape
+				// — a string here would silently change the stored type and
+				// break every reader of slug.current (stranger walk, 2026-10-01).
+				if obj, ok := slugObjectFor(m.selectedDoc.Extra[k], v); ok {
+					setFields[k] = obj
+					continue
+				}
 			}
 		}
 		setFields[k] = v
