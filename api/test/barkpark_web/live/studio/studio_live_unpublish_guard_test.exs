@@ -153,5 +153,65 @@ defmodule BarkparkWeb.Studio.StudioLiveUnpublishGuardTest do
       assert {:ok, pub} = Content.get_document("ug-target", @schema_name, @dataset)
       assert pub.status == "published"
     end
+
+    # Stranger walk, 2026-09-30: the list pane's "Unpublish selected" called
+    # unpublish_document straight through, so the document the editor's guard
+    # protects went unpublished with its referencers left dangling and a flash
+    # of "Unpublished 1 of 1". A referenced document is now skipped and named.
+    test "bulk-unpublish skips a referenced document and says why", %{conn: conn} do
+      {:ok, view, _html} =
+        live(bulk_admin_conn(conn), scoped_studio("/d/#{@dataset}/studio/#{@schema_name}"))
+
+      _ = render_click(view, "toggle-doc-checkbox", %{"id" => "ug-target"})
+      html = render_click(view, "bulk-unpublish", %{})
+
+      assert html =~ "Unpublished 0 of 1."
+      assert html =~ "1 skipped: still referenced by other documents"
+
+      assert {:ok, pub} = Content.get_document("ug-target", @schema_name, @dataset)
+      assert pub.status == "published"
+    end
+
+    test "bulk-unpublish still unpublishes the unreferenced documents in the set",
+         %{conn: conn} do
+      {:ok, _} =
+        Content.create_document(
+          @schema_name,
+          %{"doc_id" => "ug-free", "title" => "Free Post", "content" => %{"body" => "f"}},
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document("ug-free", @schema_name, @dataset)
+
+      {:ok, view, _html} =
+        live(bulk_admin_conn(conn), scoped_studio("/d/#{@dataset}/studio/#{@schema_name}"))
+
+      _ = render_click(view, "toggle-doc-checkbox", %{"id" => "ug-target"})
+      _ = render_click(view, "toggle-doc-checkbox", %{"id" => "ug-free"})
+      html = render_click(view, "bulk-unpublish", %{})
+
+      assert html =~ "Unpublished 1 of 2."
+      assert html =~ "1 skipped: still referenced by other documents"
+      assert {:error, _} = Content.get_document("ug-free", @schema_name, @dataset)
+
+      assert {:ok, %{status: "published"}} =
+               Content.get_document("ug-target", @schema_name, @dataset)
+    end
+  end
+
+  # bulk-publish / bulk-unpublish are ADMIN-tier Caps events.
+  defp bulk_admin_conn(conn) do
+    raw = "ug-bulk-admin-" <> Integer.to_string(System.unique_integer([:positive]))
+
+    {:ok, _} =
+      Barkpark.Auth.create_token(
+        raw,
+        "unpublish guard bulk admin",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
+    Plug.Test.init_test_session(conn, %{"api_token" => raw})
   end
 end

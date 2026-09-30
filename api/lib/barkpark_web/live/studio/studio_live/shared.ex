@@ -917,41 +917,76 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       # bulk publish surfaces the same advisories the single-doc path does.
       Warnings.reset()
 
+      # A BULK unpublish must not do what the single-document path refuses to do
+      # silently: unpublish a document other documents still reference. The
+      # editor's Unpublish opens a guard listing the referencers (disconnect /
+      # unpublish anyway); the bulk path used to call unpublish_document straight
+      # through and leave those references dangling with no warning (stranger
+      # walk, 2026-09-30). A referenced document is SKIPPED here and counted —
+      # the single-document guard stays the one place to review and decide.
+      {ids_to_run, referenced} =
+        case kind do
+          :unpublish ->
+            Enum.split_with(ids, fn id ->
+              Content.Graph.reverse_referencers(
+                id,
+                [dataset: dataset] ++ ScopeHelpers.scope_opts(socket)
+              ) == []
+            end)
+
+          :publish ->
+            {ids, []}
+        end
+
       # `walled` tracks label-spine rejections separately from plugin halts and
       # generic failures (authoring-excellence D14): a wall rejection carries a
       # fix and must say so — "cancelled by plugin rules" would misattribute
       # it, "failed" would hide it. The first rejection's detail rides the
       # flash so the author sees a concrete field/rule/fix, not just a count.
-      {ok, halted, err, walled, wall_detail} =
-        Enum.reduce(ids, {0, 0, 0, 0, nil}, fn id, {ok, halted, err, walled, wall_detail} ->
+      {{ok, halted, err, walled, wall_detail}, unchanged} =
+        Enum.reduce(ids_to_run, {{0, 0, 0, 0, nil}, 0}, fn id, {acc, unchanged} ->
+          {ok, halted, err, walled, wall_detail} = acc
+
           result =
             case kind do
               :publish -> Content.publish_document(id, type, dataset, opts)
               :unpublish -> Content.unpublish_document(id, type, dataset, opts)
             end
 
-          case result do
-            {:ok, _} ->
-              {ok + 1, halted, err, walled, wall_detail}
+          step =
+            case result do
+              {:ok, _} ->
+                {ok + 1, halted, err, walled, wall_detail}
 
-            {:error, {:halted, _}} ->
-              {ok, halted + 1, err, walled, wall_detail}
+              {:error, {:halted, _}} ->
+                {ok, halted + 1, err, walled, wall_detail}
 
-            {:error, {:label_spine, details}} ->
-              {ok, halted, err, walled + 1, wall_detail || format_wall_details(details)}
+              {:error, {:label_spine, details}} ->
+                {ok, halted, err, walled + 1, wall_detail || format_wall_details(details)}
 
-            # The E3/E4 wall shapes (authoring-excellence D80): an unknown-tag or
-            # near-duplicate rejection is a WALL block, not a generic failure —
-            # fold both into the `walled` accumulator (first-wall_detail idiom) so
-            # the batch flash attributes them to the wall with a concrete fix.
-            {:error, {:unknown_tag, payload}} ->
-              {ok, halted, err, walled + 1, wall_detail || format_wall_details(payload)}
+              # The E3/E4 wall shapes (authoring-excellence D80): an unknown-tag or
+              # near-duplicate rejection is a WALL block, not a generic failure —
+              # fold both into the `walled` accumulator (first-wall_detail idiom) so
+              # the batch flash attributes them to the wall with a concrete fix.
+              {:error, {:unknown_tag, payload}} ->
+                {ok, halted, err, walled + 1, wall_detail || format_wall_details(payload)}
 
-            {:error, {:duplicate_of, payload}} ->
-              {ok, halted, err, walled + 1, wall_detail || format_wall_details(payload)}
+              {:error, {:duplicate_of, payload}} ->
+                {ok, halted, err, walled + 1, wall_detail || format_wall_details(payload)}
 
-            _ ->
-              {ok, halted, err + 1, walled, wall_detail}
+              # Nothing to do is not a failure: publishing a document with no
+              # draft (already published, no pending changes) or unpublishing one
+              # that is not published. It used to be counted "failed".
+              {:error, :not_found} ->
+                :unchanged
+
+              _ ->
+                {ok, halted, err + 1, walled, wall_detail}
+            end
+
+          case step do
+            :unchanged -> {acc, unchanged + 1}
+            next -> {next, unchanged}
           end
         end)
 
@@ -979,11 +1014,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             "#{verb} #{ok} of #{length(ids)} (#{err} failed)"
         end
 
+      flash =
+        case bulk_skip_note(kind, unchanged, length(referenced)) do
+          "" -> flash
+          note -> String.trim_trailing(flash, ".") <> "." <> note
+        end
+
       socket
       |> assign(selected_doc_ids: MapSet.new())
       |> put_flash(:info, with_advisories(flash, advisories))
       |> rebuild_panes()
     end
+  end
+
+  # The sentences a bulk flash adds for documents it did not act on — never
+  # counted as failures, always saying why.
+  defp bulk_skip_note(kind, unchanged, referenced) do
+    nothing =
+      cond do
+        unchanged == 0 -> ""
+        kind == :publish -> " #{unchanged} had no draft changes to publish."
+        true -> " #{unchanged} #{if unchanged == 1, do: "was", else: "were"} not published."
+      end
+
+    refs =
+      if referenced == 0,
+        do: "",
+        else:
+          " #{referenced} skipped: still referenced by other documents — open " <>
+            "#{if referenced == 1, do: "it", else: "each"} to review the references before unpublishing."
+
+    nothing <> refs
   end
 
   @doc false
