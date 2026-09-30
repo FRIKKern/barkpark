@@ -245,6 +245,20 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     case Shared.redirect_dataset_leaf(socket, dataset) do
       {:redirect, slug} ->
+        # SAY SO (stranger walk, 2026-09-30): the redirect used to be silent, so a
+        # typo'd or foreign dataset in the URL landed the human in `slug` —
+        # usually production — with nothing but a badge to tell them they are
+        # not editing the dataset they asked for.
+        socket =
+          put_flash(
+            socket,
+            :info,
+            gettext("This project has no dataset named “%{asked}”, so Studio opened “%{opened}”.",
+              asked: dataset,
+              opened: slug
+            )
+          )
+
         {:noreply, push_patch(socket, to: Shared.studio_path(socket, path, slug, desk: desk))}
 
       :ok ->
