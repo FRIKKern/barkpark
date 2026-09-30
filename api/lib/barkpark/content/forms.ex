@@ -60,6 +60,11 @@ defmodule Barkpark.Content.Forms do
             field["type"] == "image" and is_map(raw) ->
               Jason.encode!(raw)
 
+            # A datetime rides to a `datetime-local` input, which accepts ONLY
+            # `YYYY-MM-DDTHH:MM`; see datetime_form_value/1.
+            field["type"] == "datetime" ->
+              datetime_form_value(raw)
+
             true ->
               classic_form_value(raw, field, content, key)
           end
@@ -70,6 +75,71 @@ defmodule Barkpark.Content.Forms do
       base
     end
   end
+
+  @doc """
+  The value a stored `datetime` shows in the Classic `datetime-local` input,
+  which accepts ONLY `YYYY-MM-DDTHH:MM` and renders anything else EMPTY.
+
+  Stranger walk (2026-09-30): a datetime written as ISO-8601 with an offset —
+  `2026-01-01T12:00:00Z`, what `bp seed`, the API and the SDK write — showed an
+  empty input, and because the Classic save treats a submitted `""` as "cleared",
+  editing ANY other field then erased it. An offset value is shown in UTC; a
+  naive value keeps its wall time; a bare date shows midnight; a value this
+  input cannot represent at all shows `""` (and `preserve_datetime_values/3`
+  keeps it on save).
+  """
+  @spec datetime_form_value(term()) :: String.t()
+  def datetime_form_value(raw) when is_binary(raw) do
+    cond do
+      raw == "" ->
+        ""
+
+      Regex.match?(~r/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, raw) ->
+        raw
+
+      match?({:ok, _, _}, DateTime.from_iso8601(raw)) ->
+        {:ok, dt, _} = DateTime.from_iso8601(raw)
+        Calendar.strftime(dt, "%Y-%m-%dT%H:%M")
+
+      match?({:ok, _}, NaiveDateTime.from_iso8601(raw)) ->
+        {:ok, ndt} = NaiveDateTime.from_iso8601(raw)
+        Calendar.strftime(ndt, "%Y-%m-%dT%H:%M")
+
+      match?({:ok, _}, Date.from_iso8601(raw)) ->
+        raw <> "T00:00"
+
+      true ->
+        ""
+    end
+  end
+
+  def datetime_form_value(_), do: ""
+
+  # The other half of the datetime round-trip: a posted datetime that EQUALS
+  # what datetime_form_value/1 showed for the stored value was not edited, so
+  # the stored value is kept byte-identical (its offset and seconds included)
+  # instead of being replaced by the input's minute-precision wall time — or,
+  # for a value the input could not show, erased by the posted `""`.
+  defp preserve_datetime_values(params, base_content, %{fields: fields})
+       when is_map(params) and is_list(fields) do
+    Enum.reduce(fields, params, fn
+      %{"type" => "datetime", "name" => key}, acc when is_binary(key) ->
+        stored = Map.get(base_content, key)
+
+        case Map.fetch(acc, key) do
+          {:ok, posted} when is_binary(stored) and stored != "" ->
+            if posted == datetime_form_value(stored), do: Map.put(acc, key, stored), else: acc
+
+          _ ->
+            acc
+        end
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp preserve_datetime_values(params, _base_content, _schema), do: params
 
   # A field's projected content value, flattened to the SCALAR the Classic form
   # input expects. A `body` REGION projects to a body map (`%{"blocks" => …,
@@ -329,6 +399,7 @@ defmodule Barkpark.Content.Forms do
   # the existing build_content/2 field-map behavior unchanged.
   defp classic_save_content(base_doc, params, schema, dataset) do
     base_content = Map.get(base_doc, :content) || %{}
+    params = preserve_datetime_values(params, base_content, schema)
 
     case Map.get(base_content, "blocks") do
       blocks when is_list(blocks) ->
