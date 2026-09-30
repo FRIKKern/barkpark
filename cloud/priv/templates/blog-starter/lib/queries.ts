@@ -7,7 +7,7 @@
  */
 
 export const allPosts = `*[_type == "post" && defined(publishedAt)] | order(publishedAt desc)`
-export const postBySlug = `*[_type == "post" && slug.current == $slug][0]`
+export const postBySlug = `*[_type == "post" && (slug.current == $slug || slug == $slug)][0]`
 export const postsByAuthor = `*[_type == "post" && author._ref == $authorId] | order(publishedAt desc)`
 export const postsByTag = `*[_type == "post" && $tagId in tags[]._ref] | order(publishedAt desc)`
 export const allAuthors = `*[_type == "author"] | order(name asc)`

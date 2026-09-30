@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { getDoc, getDocs } from '../lib/barkpark'
+import { slugOf, type SlugValue } from '../lib/slug'
 
 interface Page {
   _id: string
@@ -11,7 +12,7 @@ interface Post {
   _id: string
   title: string
   excerpt?: string
-  slug?: { current: string }
+  slug?: SlugValue
   publishedAt?: string
 }
 
@@ -41,7 +42,7 @@ export default async function HomePage() {
         ) : (
           <ul className="space-y-4">
             {posts.map((post) => {
-              const slug = post.slug?.current ?? post._id
+              const slug = slugOf(post.slug) ?? post._id
               return (
                 <li key={post._id} className="border-b border-slate-200 pb-4 dark:border-slate-800">
                   <Link href={`/posts/${slug}`} className="block">

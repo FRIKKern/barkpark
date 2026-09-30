@@ -3,6 +3,7 @@ import { BarkparkNotFoundError, makeFilterExpression, type Perspective } from '@
 import { createBarkparkServer } from '@barkpark/nextjs/server'
 import { barkparkClient } from '../barkpark.config'
 import { resolveServerToken } from './resolve-server-token'
+import { slugOf, type SlugValue } from './slug'
 
 // Envelope shapes returned by the /v1/data endpoints. `result.count` is the
 // TOTAL number of matching documents (not just the page you fetched).
@@ -87,13 +88,19 @@ export async function getDocById<T>(type: string, id: string, draft = false): Pr
 }
 
 export async function getDocBySlug<T>(type: string, slug: string, draft = false): Promise<T | null> {
-  // Filter server-side on the nested `slug.current` path, then match client-side
-  // as a safety net so we never return the wrong document.
-  const env = await barkparkFetch<QueryEnvelope<T>>({
-    type,
-    query: { filters: [makeFilterExpression('slug.current', 'eq', slug)] },
-    ...(draft ? { perspective: 'drafts' as Perspective } : {}),
-  })
-  const docs = env.result?.documents ?? []
-  return docs.find((d) => (d as { slug?: { current?: string } }).slug?.current === slug) ?? null
+  // A slug is stored as `{current}` (the seeds) OR a plain string (the Studio's
+  // Generate). Filter server-side on each path in turn, then match client-side
+  // through slugOf as a safety net so we never return the wrong document.
+  for (const path of ['slug.current', 'slug']) {
+    const env = await barkparkFetch<QueryEnvelope<T>>({
+      type,
+      query: { filters: [makeFilterExpression(path, 'eq', slug)] },
+      ...(draft ? { perspective: 'drafts' as Perspective } : {}),
+    })
+    const hit = (env.result?.documents ?? []).find(
+      (d) => slugOf((d as { slug?: SlugValue }).slug) === slug,
+    )
+    if (hit) return hit
+  }
+  return null
 }
