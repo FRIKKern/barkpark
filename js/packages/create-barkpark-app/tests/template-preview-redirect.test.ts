@@ -30,6 +30,15 @@ vi.mock('next/server', () => ({
   },
 }))
 
+// The routes import next/headers, which this package does not install for tsc:
+// load them by URL so the typecheck does not follow the import (vitest's mocks
+// above still apply at run time).
+type RouteModule = { GET: (req: Request) => Promise<Response> }
+const PREVIEW = new URL('../templates/blog-starter/app/api/preview/route.ts', import.meta.url).href
+const EXIT = new URL('../templates/blog-starter/app/api/exit-preview/route.ts', import.meta.url)
+  .href
+const load = (href: string) => import(/* @vite-ignore */ href) as Promise<RouteModule>
+
 const SECRET = 'r2d-preview-secret'
 let savedSecret: string | undefined
 
@@ -50,7 +59,7 @@ const asNextStartSees = (pathAndQuery: string) =>
 
 describe('blog-starter preview redirects stay on the host the editor came from', () => {
   it('/api/preview answers a relative Location', async () => {
-    const { GET } = await import('../templates/blog-starter/app/api/preview/route')
+    const { GET } = await load(PREVIEW)
     const res = await GET(asNextStartSees(`/api/preview?secret=${SECRET}&path=/posts/hello`))
     expect(res.status).toBe(307)
     expect(res.headers.get('location')).toBe('/posts/hello')
@@ -59,7 +68,7 @@ describe('blog-starter preview redirects stay on the host the editor came from',
 
   it('/api/exit-preview answers a relative Location', async () => {
     draft.enabled = true
-    const { GET } = await import('../templates/blog-starter/app/api/exit-preview/route')
+    const { GET } = await load(EXIT)
     const res = await GET(asNextStartSees('/api/exit-preview?path=/posts/hello'))
     expect(res.status).toBe(307)
     expect(res.headers.get('location')).toBe('/posts/hello')
@@ -67,7 +76,7 @@ describe('blog-starter preview redirects stay on the host the editor came from',
   })
 
   it('keeps refusing off-site targets: they collapse to /', async () => {
-    const { GET } = await import('../templates/blog-starter/app/api/preview/route')
+    const { GET } = await load(PREVIEW)
     for (const target of ['//evil.example/x', 'https://evil.example/x', '/\\evil.example']) {
       const res = await GET(
         asNextStartSees(`/api/preview?secret=${SECRET}&path=${encodeURIComponent(target)}`),
@@ -77,7 +86,7 @@ describe('blog-starter preview redirects stay on the host the editor came from',
   })
 
   it('a bad secret still never enables draft mode', async () => {
-    const { GET } = await import('../templates/blog-starter/app/api/preview/route')
+    const { GET } = await load(PREVIEW)
     const res = await GET(asNextStartSees('/api/preview?secret=nope&path=/posts/hello'))
     expect(res.status).toBe(401)
     expect(draft.enabled).toBe(false)
