@@ -458,8 +458,20 @@ func (m model) getFieldValue(fieldName string) string {
 	case "status":
 		return m.selectedDoc.Status
 	default:
-		if m.selectedDoc.Values != nil {
-			return m.selectedDoc.Values[fieldName]
+		if v, ok := m.selectedDoc.Values[fieldName]; ok {
+			return v
+		}
+		// Values deliberately skips the envelope's reserved keys (apiclient
+		// envelopeMetaKeys: body, blocks, content, …) because on a paper they
+		// carry structured blocks. But a schema may declare its OWN scalar field
+		// under one of those names — `body: text` on a post is the common case —
+		// and then the stored string never reached the editor: the TUI showed
+		// "Enter Body..." over a body that said "x" (stranger walk, 2026-09-30).
+		// A scalar string at that key IS the field's value; anything else
+		// (an array of blocks, an object) is not a string and stays "".
+		var s string
+		if raw, ok := m.selectedDoc.Extra[fieldName]; ok && json.Unmarshal(raw, &s) == nil {
+			return s
 		}
 	}
 	return ""
