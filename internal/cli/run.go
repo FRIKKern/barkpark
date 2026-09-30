@@ -940,6 +940,10 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// schema probe on an empty doc ls/query page or a doc create. stderr only.
 	emitDocUnknownType(out, g, ctx, m, cmd, tail, status, respBody)
 
+	// A Sanity-shaped `array` / `object` field applies cleanly and is then
+	// read-only in Studio (schema_readonly_field_note.go). stderr only.
+	emitSchemaReadonlyFieldNote(out, cmd, status, respBody)
+
 	// The flag only ever overrides the HONEST success path (code == exitOK,
 	// meaning handleResponse's 2xx branch rendered it, not a screen's own
 	// refusal above with its own exit code). Rendering is byte-identical
