@@ -132,25 +132,34 @@ end
 
 defmodule Barkpark.Content.PublishAuditChainKeyTest do
   @moduledoc """
-  task-962637a90e406961 — a publish takes ONE audit-chain lock: the chain its
-  own emit writes to.
+  task-962637a90e406961 — a publish takes ONE audit-chain lock, and the global
+  and Default chains share it.
 
-  A draft with no workspace publishes into the workspace `WriteScope` resolves
-  for it (the seeded Default for a fixture). The dedup re-check pre-locked the
-  chain of the DRAFT's workspace (global), and `tap_broadcast` then emitted on
-  the PUBLISHED row's workspace (Default): two chains, global then Default, in
-  one transaction. Any transaction holding audit(Default) that then needs
-  audit(global) closes the cycle. The plugins-off weekly run hit it
-  (run 36650351431):
+  THE PUBLISH. A workspace-less draft publishes into the workspace
+  `WriteScope` resolves for it. The dedup re-check pre-locked the chain of the
+  DRAFT's workspace (global), and `tap_broadcast` then emitted on the PUBLISHED
+  row's workspace: two chains in one transaction. The plugins-off weekly run
+  hit it (run 36650351431) with the Default as the destination:
 
       Process 10354 waits for ... advisory lock [16384,0,485729316,1]  audit(Default)
       Process 10353 waits for ... advisory lock [16384,0,2301988177,1] audit(global)
       audit emit crashed for repair-legacy: ... deadlock_detected
 
+  The re-check now keys on the destination. The tests below publish into a
+  workspace of their own, because global and the Default now share a lock
+  (next paragraph) and would hide the two-chain shape.
+
+  THE SHARED LOCK. Global and the Default are two hash chains that writers
+  touch together, so `Audit.lock_chain!/1` takes one lock for both. An async
+  test is one open sandbox transaction to its end, so two tests that touched
+  them in opposite orders deadlocked each other too.
+
   Each process below checks out its OWN sandbox connection, so each is one
   open transaction to the end of its turn, exactly as two async tests are.
   """
   use ExUnit.Case, async: false
+
+  import Barkpark.TenancyFixtures
 
   alias Barkpark.Audit
   alias Barkpark.Content
@@ -177,6 +186,22 @@ defmodule Barkpark.Content.PublishAuditChainKeyTest do
     |> List.flatten()
   end
 
+  # A one-workspace principal: a workspace-less draft published with only
+  # `user_id` in opts is INFERRED into that workspace (WriteScope), a
+  # destination other than the Default.
+  defp tenant! do
+    ws = create_workspace!()
+    _ = create_project!(ws, "default")
+
+    user =
+      Barkpark.AccountsFixtures.register_user(
+        "chain-key-#{System.unique_integer([:positive])}@example.com"
+      )
+
+    {:ok, _} = Tenancy.Auth.create_membership(ws.id, user.id, "member", "user")
+    {ws.id, [user_id: user.id]}
+  end
+
   defp insert_unscoped_draft!(id) do
     block = %{
       "type" => "table",
@@ -200,29 +225,65 @@ defmodule Barkpark.Content.PublishAuditChainKeyTest do
     |> Repo.insert!()
   end
 
+  test "the global chain and the seated Default's chain take one lock" do
+    default_ws = Tenancy.get_default_workspace().id
+
+    {:ok, _} = Audit.emit(%{category: "content_mutation", action: "probe.g", workspace_id: nil})
+    assert held_advisory_keys() == [chain_key(default_ws)]
+
+    {:ok, _} =
+      Audit.emit(%{category: "content_mutation", action: "probe.d", workspace_id: default_ws})
+
+    assert held_advisory_keys() == [chain_key(default_ws)]
+  end
+
   test "publishing a workspace-less draft locks only the audit chain it emits on" do
+    {ws, opts} = tenant!()
     id = "chain-key-#{System.unique_integer([:positive])}"
     draft = insert_unscoped_draft!(id)
     assert draft.workspace_id == nil
 
-    assert {:ok, published} = Content.publish_document(id, "paper", @dataset)
-    assert is_binary(published.workspace_id)
+    assert {:ok, published} = Content.publish_document(id, "paper", @dataset, opts)
+    assert published.workspace_id == ws
 
     held = held_advisory_keys()
+    shared = chain_key(Tenancy.get_default_workspace().id)
 
     assert chain_key(published.workspace_id) in held
 
-    refute chain_key(nil) in held,
-           "the publish took audit(global) for a row it audits under " <>
-             "#{published.workspace_id} — two audit chains in one transaction"
+    refute shared in held,
+           "the publish took the global/Default audit lock for a row it audits under " <>
+             "#{published.workspace_id}: two audit chains in one transaction"
   end
 
-  test "a workspace-less publish and a writer holding audit(Default) do not deadlock" do
-    default_ws = Tenancy.get_default_workspace().id
+  test "a workspace-less publish and a writer holding the destination's chain do not deadlock" do
     parent = self()
 
-    # A: holds audit(Default) first (any async test that emitted on Default),
-    # then needs audit(global).
+    # B: seats its own tenant (no audit emitted), inserts a workspace-less
+    # draft, and publishes it into that tenant when told to.
+    b =
+      Task.async(fn ->
+        :ok = Sandbox.checkout(Repo)
+        {ws, opts} = tenant!()
+        id = "chain-key-dl-#{System.unique_integer([:positive])}"
+        insert_unscoped_draft!(id)
+        %{rows: [[pid]]} = Repo.query!("SELECT pg_backend_pid()")
+        send(parent, {:b_ready, ws, pid, held_advisory_keys()})
+
+        receive do
+          :go_b -> :ok
+        end
+
+        result = Content.publish_document(id, "paper", @dataset, opts)
+        Sandbox.checkin(Repo)
+        result
+      end)
+
+    assert_receive {:b_ready, ws, b_pid, b_held}, 10_000
+    assert b_held == [], "B's setup already holds advisory locks: #{inspect(b_held)}"
+
+    # A: holds audit(ws) first, then needs audit(global). audit_events has no
+    # FK, so A can emit on B's uncommitted workspace id.
     a =
       Task.async(fn ->
         :ok = Sandbox.checkout(Repo)
@@ -230,13 +291,9 @@ defmodule Barkpark.Content.PublishAuditChainKeyTest do
         result =
           try do
             {:ok, _} =
-              Audit.emit(%{
-                category: "content_mutation",
-                action: "probe.a1",
-                workspace_id: default_ws
-              })
+              Audit.emit(%{category: "content_mutation", action: "probe.a1", workspace_id: ws})
 
-            send(parent, :a_holds_default)
+            send(parent, :a_holds_ws)
 
             receive do
               :go_a -> :ok
@@ -254,26 +311,12 @@ defmodule Barkpark.Content.PublishAuditChainKeyTest do
         result
       end)
 
-    assert_receive :a_holds_default, 5_000
-
-    # B: the publish of a workspace-less draft.
-    b =
-      Task.async(fn ->
-        :ok = Sandbox.checkout(Repo)
-        id = "chain-key-dl-#{System.unique_integer([:positive])}"
-        insert_unscoped_draft!(id)
-        %{rows: [[pid]]} = Repo.query!("SELECT pg_backend_pid()")
-        send(parent, {:b_backend, pid})
-        result = Content.publish_document(id, "paper", @dataset)
-        Sandbox.checkin(Repo)
-        result
-      end)
-
-    assert_receive {:b_backend, b_pid}, 10_000
+    assert_receive :a_holds_ws, 5_000
+    send(b.pid, :go_b)
 
     # Release A only once B is parked on a lock A holds, so the interleaving
-    # is fixed: B waits on audit(Default) either way — before the fix it
-    # already holds audit(global) while it waits.
+    # is fixed: B waits on audit(ws) either way — before the fix it already
+    # holds audit(global) while it waits.
     wait_until_blocked!(b_pid, 100)
     send(a.pid, :go_a)
 
@@ -281,13 +324,13 @@ defmodule Barkpark.Content.PublishAuditChainKeyTest do
     b_result = Task.await(b, 15_000)
 
     refute a_result == {:postgres_error, :deadlock_detected},
-           "A was the 40P01 victim: B held audit(global) while waiting for audit(Default)"
+           "A was the 40P01 victim: B held audit(global) while waiting for audit(ws)"
 
     assert a_result == :ok
     assert {:ok, %Document{}} = b_result
   end
 
-  defp wait_until_blocked!(_pid, 0), do: flunk("the publish never blocked on audit(Default)")
+  defp wait_until_blocked!(_pid, 0), do: flunk("the publish never blocked on audit(ws)")
 
   defp wait_until_blocked!(pid, tries) do
     %{rows: rows} =

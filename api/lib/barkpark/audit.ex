@@ -220,9 +220,30 @@ defmodule Barkpark.Audit do
   defp lock_chain(workspace_id) do
     # crc32 → 0..2^32-1, which fits a bigint (the single-arg lock form); the
     # two-int4 form would overflow for keys above 2^31.
-    key = :erlang.crc32(@lock_prefix <> (workspace_id || @nil_ws_key))
+    key = :erlang.crc32(@lock_prefix <> lock_scope(workspace_id))
     Repo.query!("SELECT pg_advisory_xact_lock($1::bigint)", [key])
   end
+
+  # The global (nil-workspace) chain and the seeded Default's chain share ONE
+  # lock (task-962637a90e406961). They are separate hash chains — `last_hash/1`
+  # still reads each on its own — but nil-workspace rows are the Default's
+  # back-compat surface, and writers touch both in one transaction: a
+  # workspace-less draft publishing into the Default, a mutate batch over a
+  # legacy row and a Default row. With two locks, each such transaction took
+  # them in whatever order its writes came, and two of them in opposite orders
+  # deadlocked (40P01, advisory 2301988177 = the global chain against the
+  # Default's). One lock has no order to get wrong. It costs nothing between
+  # workspaces: every other workspace keeps its own lock.
+  #
+  # No seated Default (a fresh database, a vacated seat) keeps the global key.
+  defp lock_scope(nil) do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: id} when is_binary(id) -> id
+      _ -> @nil_ws_key
+    end
+  end
+
+  defp lock_scope(workspace_id), do: workspace_id
 
   defp last_hash(workspace_id) do
     Repo.one(
