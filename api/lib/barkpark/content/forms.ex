@@ -154,6 +154,25 @@ defmodule Barkpark.Content.Forms do
             acc
         end
 
+      # A NUMBER or BOOLEAN stored in a field whose Classic input is a string
+      # control (string/slug/text/url/…) renders as its string form and posts
+      # it back unchanged — and the save stored that string, flipping `42` to
+      # "42" and `true` to "true" on an edit of ANOTHER field (stranger walk,
+      # 2026-09-30: slug 42 / body true on a post, after typing in the title).
+      # A posted value equal to the stored scalar's rendering was not edited:
+      # keep the stored value, type and all. `number`/`boolean` fields already
+      # coerce at the save boundary, so this changes nothing for them.
+      %{"name" => key}, acc when is_binary(key) ->
+        stored = Map.get(base_content, key)
+
+        case Map.fetch(acc, key) do
+          {:ok, posted} when is_number(stored) or is_boolean(stored) ->
+            if posted == to_string(stored), do: Map.put(acc, key, stored), else: acc
+
+          _ ->
+            acc
+        end
+
       _, acc ->
         acc
     end)
