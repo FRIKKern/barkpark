@@ -958,7 +958,8 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
           "change_email credential rows, swept on a schedule with no actor. Each row was " <>
           "already unusable to every reader. The where clause is deliberately narrow AND " <>
           "deliberately graced — the expiry clause waits out a window longer than the " <>
-          "@change_email_throttle, because throttled?/3 counts unrevoked rows without " <>
+          "@change_email_throttle, because throttled?/3 counts every row minted in the window " <>
+          "(revoked included) without " <>
           "filtering expires_at, so a no-grace sweep would return a resend slot early.",
       anchor: ~r/Accounts\.reap_lifecycle_tokens\(\)/
     },
