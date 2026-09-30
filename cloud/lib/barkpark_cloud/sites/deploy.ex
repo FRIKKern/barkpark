@@ -689,6 +689,10 @@ defmodule BarkparkCloud.Sites.Deploy do
           {:ok, :live | :failed | :deferred | :deferred_unrecorded} | {:error, term()}
   def run(deployment_id) when is_binary(deployment_id) do
     with %Deployment{} = deployment <- Registry.get_deployment(deployment_id),
+         # A prebuilt mint whose bytes have not arrived has nothing to build
+         # (task-786051334bc47508): answer `:not_queued` — the "cannot start
+         # this row now" every caller already handles — and never claim it.
+         :ok <- refuse_awaiting_upload(deployment),
          %Site{} = site <- Registry.get_site(deployment.site_id),
          %Barkpark{} = bp <- Registry.get_barkpark(site.barkpark_id),
          {:ok, claimed} <- Registry.claim_deployment(deployment_id, worker_id()) do
@@ -698,6 +702,11 @@ defmodule BarkparkCloud.Sites.Deploy do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp refuse_awaiting_upload(%Deployment{source: "prebuilt", artifact_sha256: nil}),
+    do: {:error, :not_queued}
+
+  defp refuse_awaiting_upload(%Deployment{}), do: :ok
 
   defp drive(%Deployment{} = deployment, %Site{} = site, %Barkpark{} = bp) do
     ctx = %{

@@ -324,6 +324,35 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
   # 8,830 deploys (51.4% of every failed row) were refused by a busy box and died
   # terminal-`failed` with nothing to re-drive them. 4,058 of those sites saw no
   # later build at all.
+  # task-786051334bc47508: a --prebuilt mint waits queued for its upload; a
+  # publish in that window used to drive it with no bytes and kill it.
+  describe "a prebuilt mint awaiting its upload" do
+    test "a publish defers behind it and never drives it" do
+      {bp, site} = setup_site()
+      Process.put(:site_deploy_starter, Deploy.SyncStarter)
+
+      {:ok, marker} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
+      assert marker.status == "queued" and is_nil(marker.artifact_sha256)
+
+      assert {:ok, :deferred} = perform_job(AutoDeployWorker, %{"site_id" => site.id})
+
+      row = Registry.get_deployment(marker.id)
+
+      assert row.status == "queued",
+             "the prebuilt row was driven without its bytes: #{row.status}"
+
+      assert is_nil(row.claim_worker)
+    end
+
+    test "Deploy.run/1 refuses to claim it" do
+      {bp, site} = setup_site()
+      {:ok, marker} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
+
+      assert {:error, :not_queued} = Deploy.run(marker.id)
+      assert Registry.get_deployment(marker.id).status == "queued"
+    end
+  end
+
   describe "a busy box is a COUNTED deferral that RE-FIRES (charter D9)" do
     test "the worker OBSERVES a box 409 instead of returning :ok blind" do
       {_bp, site} = setup_site()

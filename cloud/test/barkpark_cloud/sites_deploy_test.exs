@@ -1569,6 +1569,9 @@ defmodule BarkparkCloud.SitesDeployTest do
     test "a PREBUILT deploy is never deferred — it fails honestly, since the rebuild path would refuse it" do
       {bp, site} = setup_site()
       {:ok, d} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
+      # Its bytes have ARRIVED — Deploy.run/1 refuses a prebuilt row still
+      # awaiting its upload (task-786051334bc47508), which is not this case.
+      d = d |> Ecto.Changeset.change(artifact_sha256: String.duplicate("a", 64)) |> Repo.update!()
 
       FakeBoxRelay.program(
         start:
