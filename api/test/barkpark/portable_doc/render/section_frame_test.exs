@@ -188,7 +188,10 @@ defmodule Barkpark.PortableDoc.Render.SectionFrameTest do
                ".bp-paper-surface .bp-section--declaration { border: var(--bp-rule-hairline) solid var(--paper-ink); outline:"
 
       assert css =~ ".bp-paper-surface .bp-section--declaration > .bp-hr { display: none; }"
-      assert css =~ ".bp-paper-surface .bp-section--declaration > :not(.bp-hr):last-child"
+      assert css =~ ".bp-paper-surface .bp-section--declaration > p:last-child"
+
+      # only a closing PARAGRAPH is the signature slot: a closing callout or list keeps its width
+      refute css =~ ".bp-section--declaration > :not(.bp-hr):last-child"
     end
   end
 
