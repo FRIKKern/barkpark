@@ -60,7 +60,10 @@ func emitDocUnknownType(out *writer, g globals, ctx manifest.Context, m *manifes
 	if cmd.ID == "doc.create" {
 		what = "the document was stored anyway, under a type no schema describes — Studio has no form for it"
 	}
-	out.errf("bp: no schema named %q exists on this server — %s. Check the spelling (types are case-sensitive); `bp schema ls` lists the declared types.", typeName, what)
+	// Schemas are per DATASET, and the probe asked the dataset this command ran
+	// in — so the sentence names it. `bp -d nosuchdataset doc ls post` must not
+	// read as "post does not exist" when the dataset is what is missing.
+	out.errf("bp: no schema named %q exists in dataset %q on this server — %s. Check the spelling (types are case-sensitive) and the dataset (-d); `bp schema ls` lists the declared types.", typeName, ctx.Dataset, what)
 }
 
 // boundArg re-binds cmd's positionals and returns the named one ("" when absent
