@@ -11,7 +11,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.ObanAdmissionTest do
   @sync_ms 5_000
 
   alias Barkpark.ManagedRuntime.WriteAdmission, as: Admission
-  alias Barkpark.ManagedRuntime.WriteAdmission.{ObanAdmission, Operation}
+  alias Barkpark.ManagedRuntime.WriteAdmission.{Door, ObanAdmission, Operation}
 
   setup do
     Process.flag(:trap_exit, true)
@@ -111,8 +111,75 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.ObanAdmissionTest do
   end
 
   test "a job started while held runs unadmitted and is logged, never counted", %{gate: gate} do
-    {:ok, :held, hold} = Operation.hold("switch")
+    hold = hold_until_held!(gate)
+    assert_held_job_is_logged_never_counted(gate, hold)
+  end
 
+  # task-49941017ee745753. The door is GLOBAL while this file runs: the
+  # `:write_admission` env names this test's gate, so any writer in the VM that
+  # passes `Door.admit/1` (a paper access-log write, an edge projection, a sync
+  # worker a previous test left running) checks out from it. One still in
+  # flight when the hold begins makes `begin_hold` answer `:closing`, not
+  # `:held`, and the old `{:ok, :held, hold} = Operation.hold(...)` raised a
+  # MatchError. Closing-then-held is the order the coordinator is built for,
+  # so the test waits for `:held` instead of assuming it.
+  test "a writer in flight when the hold begins delays :held; the held arm still holds",
+       %{gate: gate} do
+    parent = self()
+
+    foreign =
+      spawn(fn ->
+        Door.admit(fn ->
+          send(parent, :foreign_admitted)
+
+          receive do
+            :settle -> :ok
+          end
+        end)
+
+        send(parent, :foreign_settled)
+      end)
+
+    assert_receive :foreign_admitted, @sync_ms
+    assert Admission.status(gate).pending == 1
+
+    {:ok, :closing, hold} = Operation.hold("switch")
+    send(foreign, :settle)
+    assert_receive :foreign_settled, @sync_ms
+
+    assert_held_job_is_logged_never_counted(gate, wait_held!(gate, hold))
+  end
+
+  defp hold_until_held!(gate) do
+    case Operation.hold("switch") do
+      {:ok, :held, hold} ->
+        hold
+
+      {:ok, :closing, hold} ->
+        wait_held!(gate, hold)
+
+      other ->
+        flunk("Operation.hold/1 answered #{inspect(other)}; status #{inspect(status(gate))}")
+    end
+  end
+
+  defp wait_held!(gate, hold, waited \\ 0) do
+    cond do
+      Operation.held?(hold) == true ->
+        hold
+
+      waited >= @sync_ms ->
+        flunk(
+          "the hold never reached :held within #{@sync_ms}ms; status #{inspect(status(gate))}"
+        )
+
+      true ->
+        Process.sleep(20)
+        wait_held!(gate, hold, waited + 20)
+    end
+  end
+
+  defp assert_held_job_is_logged_never_counted(gate, hold) do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         job(gate, :stop)
@@ -122,9 +189,21 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.ObanAdmissionTest do
         end)
       end)
 
-    assert log =~ "refused an Oban job"
-    assert Admission.status(gate).pending == 0
-    assert Admission.status(gate).phase == :held
+    # Every message names the state it saw, so a red under load is its own
+    # capture (the 2026-09-29 reds kept only the header line).
+    status = status(gate)
+
+    assert log =~ "refused an Oban job",
+           "no refusal logged; status #{inspect(status)}; log #{inspect(log)}"
+
+    assert status.pending == 0,
+           "the held job was counted; status #{inspect(status)}; log #{inspect(log)}"
+
+    assert status.phase == :held,
+           "the hold did not stay held; status #{inspect(status)}; log #{inspect(log)}"
+
     :ok = Operation.reopen(hold)
   end
+
+  defp status(gate), do: Admission.status(gate)
 end
