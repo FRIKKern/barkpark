@@ -60,9 +60,20 @@ your API host, dataset, workspace/project slugs, or schema fields.
 
 Webhook handler at `app/api/barkpark/webhook/route.ts`. HMAC signing is the combined `t=<unix>,v1=<hex>` header, HMAC-SHA256 over `<timestamp>.<rawBody>`. Tags follow `bp:ds:<dataset>:{_all|doc:<id>|type:<type>}`. See [webhook-realtime.md](https://github.com/barkpark/barkpark/blob/main/docs/contracts/webhook-realtime.md) for the full wire contract.
 
+Register the webhook with the `bp` CLI (Studio has no webhook screen), then mint its signing secret:
+
 ```sh
-BARKPARK_WEBHOOK_SECRET=<shared-secret-with-studio>
+bp webhook create https://<your-app>/api/barkpark/webhook my-site   # prints: id: <webhook-id>
+bp webhook rotate <webhook-id> -o json                             # {"secret":"whsec_…", …} — shown once
 ```
+
+Set that secret in the app's environment:
+
+```sh
+BARKPARK_WEBHOOK_SECRET=whsec_…
+```
+
+A webhook with no secret sends unsigned deliveries, and this route answers every one of them 401.
 
 ## Deploy
 
