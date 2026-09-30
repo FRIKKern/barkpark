@@ -692,6 +692,58 @@ func (c *Client) QueryResult(typeName, filter string) ([]Doc, DocReadOutcome) {
 	return result.Documents, DocReadOK
 }
 
+// QueryPage is QueryResult with an explicit page size and optional field
+// projection, and it KEEPS the envelope's `hasMore`. QueryResult sends no
+// `limit`, so every read through it got the route's default 100-row page and
+// could not tell a complete list from a truncated one: the TUI's desk list
+// stopped at 100 rows and its reference picker could not offer the 101st
+// candidate (stranger walk, 2026-10-01). limit <= 0 leaves the server default;
+// fields (e.g. {"title"}) trims each row for callers that only need ids and
+// titles.
+func (c *Client) QueryPage(typeName, filter string, limit int, fields []string) ([]Doc, bool, DocReadOutcome) {
+	endpoint := c.scopedURL("/v1/data/query/" + c.Dataset + "/" + url.PathEscape(typeName))
+	params := url.Values{}
+	if filter != "" {
+		params.Set("filter", filter)
+	}
+	if c.Perspective != "" {
+		params.Set("perspective", c.Perspective)
+	}
+	if limit > 0 {
+		params.Set("limit", strconv.Itoa(limit))
+	}
+	if len(fields) > 0 {
+		params.Set("fields", strings.Join(fields, ","))
+	}
+	endpoint += "?" + params.Encode()
+
+	resp, err := c.authGet(endpoint)
+	if err != nil {
+		return nil, false, DocReadUnreachable
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return nil, false, classifyReadStatus(resp.StatusCode)
+	}
+
+	var result struct {
+		Result struct {
+			Documents []Doc `json:"documents"`
+			HasMore   bool  `json:"hasMore"`
+		} `json:"result"`
+		Documents []Doc `json:"documents"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, false, DocReadUnreachable
+	}
+	if len(result.Result.Documents) > 0 {
+		return result.Result.Documents, result.Result.HasMore, DocReadOK
+	}
+	return result.Documents, result.Result.HasMore, DocReadOK
+}
+
 // Search runs the scoped full-text search endpoint
 //
 //	GET /w/<ws>/p/<proj>/v1/data/search/<dataset>?q=…[&limit=…][&perspective=…]
