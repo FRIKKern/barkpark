@@ -20,7 +20,7 @@ A Next.js 15 blog starter powered by [Barkpark](https://github.com/barkpark/bark
 ```sh
 cp .env.example .env.local
 docker compose up -d          # Phoenix API on :4000, Postgres on :5432
-{{pmCommand}} install
+npm install                   # or: pnpm install · yarn · bun install
 {{pmCommand}} seed            # 2 authors, 3 tags, 7 posts (6 published, 1 draft)
 {{pmCommand}} dev             # Next.js on :3000
 ```

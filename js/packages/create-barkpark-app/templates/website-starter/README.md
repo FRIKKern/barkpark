@@ -19,7 +19,7 @@ A Next.js 15 marketing site powered by [Barkpark](https://github.com/barkpark/ba
 ```sh
 cp .env.example .env.local
 docker compose up -d          # Phoenix API on :4000, Postgres on :5432
-{{pmCommand}} install
+npm install                   # or: pnpm install · yarn · bun install
 {{pmCommand}} codegen         # generate TypeScript types (runs barkpark generate; requires @barkpark/codegen in devDependencies)
 {{pmCommand}} seed            # 2 authors, 3 pages, 3 posts — all published
 {{pmCommand}} dev             # Next.js on :3000
