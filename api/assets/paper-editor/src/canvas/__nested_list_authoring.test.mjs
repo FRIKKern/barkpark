@@ -78,10 +78,14 @@ try {
       assert.match(JSON.stringify(saved().items), /Bu.*\\n.*ild/, "nested breaks serialize without losing the child");
       ed.commands.undo();
       assert.deepEqual(ed.getJSON(), beforeBreak, "nested break Undo restores exact carriers");
-      const invalidStart = ed.state.schema.nodes.orderedList.create({ start: 3 },
+      // An ordered list's first number is PortableDoc now (`start`): a custom start is
+      // accepted and saves as the number the canvas shows, and Undo restores the list.
+      const customStart = ed.state.schema.nodes.orderedList.create({ start: 3 },
         ed.state.schema.nodes.listItem.create(null, ed.state.schema.nodes.paragraph.create(null, ed.state.schema.text("Custom start"))));
-      ed.view.dispatch(ed.state.tr.replaceWith(0, ed.state.doc.content.size, invalidStart));
-      assert.deepEqual(ed.getJSON(), beforeBreak, "unsupported ordered starts cannot look saved");
+      ed.view.dispatch(ed.state.tr.replaceWith(0, ed.state.doc.content.size, customStart));
+      assert.equal(saved().start, 3, "a custom ordered start saves as shown");
+      ed.commands.undo();
+      assert.deepEqual(ed.getJSON(), beforeBreak, "custom start Undo restores exact carriers");
       const invalidItem = ed.state.schema.nodes.listItem.create(null, [
         ed.state.schema.nodes.paragraph.create(null, ed.state.schema.text("First")),
         ed.state.schema.nodes.paragraph.create(null, ed.state.schema.text("Second")),

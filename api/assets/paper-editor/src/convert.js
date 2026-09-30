@@ -1021,6 +1021,19 @@ function orderedListSource(block) {
   return block.ordered === true || block.type === "ordered-list" || block.type === "numbered_list";
 }
 
+// An ordered list's first number: the block's integer `start` when it is not 1,
+// else null (numbering from 1) — the reader's rule (compose.ex list_start/1).
+// It mounts as TipTap's orderedList `start` attr and comes back from it.
+export function listStart(block) {
+  const start = block && block.start;
+  return Number.isInteger(start) && start !== 1 ? start : null;
+}
+
+function nodeListStart(node) {
+  const start = node && node.type === "orderedList" ? node.attrs?.start : null;
+  return Number.isInteger(start) && start !== 1 ? start : null;
+}
+
 // A checklist is `{type:"list", task:true, items:[{content|text, checked, children?}…]}`; it mounts
 // as TipTap's taskList/taskItem so the checkbox is a native control, and comes back through
 // listItemFromTiptap with `checked` on every item map.
@@ -1034,9 +1047,14 @@ function listToTiptap(block, path, nested = false) {
       ...(Array.isArray(item?.children) ? item.children.flatMap((child, at) =>
         supportedListChild(child) ? [listToTiptap(child, `${path}/${index}/${at}`, true)] : []) : [])],
   }));
+  const start = !task && orderedListSource(block) ? listStart(block) : null;
+  const attrs = {
+    ...(nested ? { bpListFrameSource: { block: deepCloneJson(block), path } } : {}),
+    ...(start === null ? {} : { start }),
+  };
   return {
     type: task ? "taskList" : orderedListSource(block) ? "orderedList" : "bulletList",
-    ...(nested ? { attrs: { bpListFrameSource: { block: deepCloneJson(block), path } } } : {}),
+    ...(Object.keys(attrs).length ? { attrs } : {}),
     content: items.length ? items : [{ type: task ? "taskItem" : "listItem", ...(task ? { attrs: { checked: false } } : {}), content: [{ type: "paragraph" }] }],
   };
 }
@@ -1057,7 +1075,8 @@ function nestedListFromTiptap(node, seen) {
   const ordered = node.type === "orderedList";
   const task = node.type === "taskList";
   const items = (node.content || []).map(li => listItemFromTiptap(li, seen));
-  if (!ownsSource) return { type: "list", ordered, items, ...(task ? { task: true } : {}) };
+  const start = nodeListStart(node);
+  if (!ownsSource) return { type: "list", ordered, items, ...(start === null ? {} : { start }), ...(task ? { task: true } : {}) };
   const fields = deepCloneJson(source.block);
   // An empty source list needs a schema placeholder, not a new persisted item.
   const emptyPlaceholder = fields.items.length === 0 && node.content?.length === 1 &&
@@ -1071,6 +1090,11 @@ function nestedListFromTiptap(node, seen) {
     fields.type = "list";
     fields.task = task;
   }
+  // The shown first number wins: an ordered list the canvas numbers from 1 drops a
+  // stored start it no longer shows. Anything else (a bullet list, a start the
+  // reader ignores) keeps its source bytes.
+  if (start !== null) fields.start = start;
+  else if (ordered && listStart(fields) !== null) delete fields.start;
   return fields;
 }
 
@@ -1221,7 +1245,11 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
       const seen = new Set();
       const items = (top.content || []).map(li => listItemFromTiptap(li, seen));
       // `task` rides only when true; run-convert adds task:false when a checklist turns back into a plain list.
-      return task ? { ordered, items, task: true } : { ordered, items };
+      // `start` rides only when the canvas numbers from something other than 1; run-convert
+      // adds start:null when a stored start is no longer shown.
+      const start = nodeListStart(top);
+      if (task) return { ordered, items, task: true };
+      return start === null ? { ordered, items } : { ordered, items, start };
     }
     case "paragraph":
     default: {

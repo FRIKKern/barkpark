@@ -319,6 +319,13 @@ if config_env() == :prod do
   # to the Go provisioner (--token / --token-file).
   config :barkpark_cloud, :worker_token, System.get_env("WORKER_TOKEN")
 
+  # Optional second factor on the worker token (dr-w24): comma-separated client
+  # IPs the worker may call from. Unset = token alone, as before. Set = a correct
+  # token from any other source is refused; an unparseable list admits nobody.
+  config :barkpark_cloud,
+         :worker_allowed_ips,
+         String.split(System.get_env("WORKER_ALLOWED_IPS", ""), ",", trim: true)
+
   # oban-substrate: let prod tune queue concurrency / pause the engine without a
   # redeploy (e.g. during a migration window). Additive — the queues/plugins from
   # config.exs stay in force; this only overrides the `:queues` key, leaving the

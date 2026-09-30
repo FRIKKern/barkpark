@@ -112,6 +112,32 @@ defmodule BarkparkWeb.Studio.DeskSearchTest do
     assert html =~ ~s(href="#{prefix}/author/aut-nord")
   end
 
+  # Stranger walk, 2026-09-30: a never-published document was unsearchable.
+  # Its hit links by the PUBLISHED id, the address every Studio path uses —
+  # never the `drafts.` row id.
+  test "a never-published document is a hit linked by its published id", %{
+    conn: conn,
+    ws: ws,
+    proj: proj,
+    scope: scope
+  } do
+    {:ok, _} =
+      Content.upsert_document(
+        "publication",
+        %{"doc_id" => "drafts.pub-fresh", "title" => "Zulukladd draft only", "status" => "draft"},
+        @dataset,
+        Keyword.put(scope, :source, :api)
+      )
+
+    {view, _} = desk(conn, ws, proj)
+    html = type_in(view, "zulukladd")
+
+    assert html =~ "Zulukladd draft only"
+    prefix = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio"
+    assert html =~ ~s(href="#{prefix}/publication/pub-fresh")
+    refute html =~ "drafts.pub-fresh"
+  end
+
   test "a one-character query asks for more instead of matching the corpus", %{
     conn: conn,
     ws: ws,

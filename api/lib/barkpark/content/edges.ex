@@ -175,10 +175,17 @@ defmodule Barkpark.Content.Edges do
       if updated_content != content do
         prev_rev = doc.rev
 
-        doc
-        |> Document.changeset(%{"content" => updated_content, "rev" => Writer.generate_rev()})
-        |> Repo.update()
-        |> Broadcast.tap_broadcast(dataset, type, "update", prev_rev)
+        # task-5e4470a96f0a2e55: the strip and its mutation_events row are ONE
+        # write. Bare, the update auto-committed before `tap_broadcast`'s
+        # save_event, so an event fault left the referencer stripped with no
+        # event (no SSE frame, webhook or revalidation). `write_atomically/1`
+        # also defers the fan-out until commit.
+        Broadcast.write_atomically(fn ->
+          doc
+          |> Document.changeset(%{"content" => updated_content, "rev" => Writer.generate_rev()})
+          |> Repo.update()
+          |> Broadcast.tap_broadcast(dataset, type, "update", prev_rev)
+        end)
       end
 
       :ok

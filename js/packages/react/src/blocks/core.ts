@@ -539,9 +539,18 @@ const paragraph: Emit = (b) => {
 const pullquote: Emit = (b) =>
   `<p class="bp-role-pullquote" style="font-style:italic">${renderInlines(paragraphInline(b))}</p>`
 
+// An ordered list's first number: the block's integer `start` when it is not 1,
+// else null (numbering from 1). Mirrors compose.ex list_start/1 + walk.ex
+// list_start_attr/1 — absent or 1 keeps the bare `<ol>` bytes.
+export function listStart(b: Block): number | null {
+  const start = (b as { start?: unknown }).start
+  return typeof start === 'number' && Number.isInteger(start) && start !== 1 ? start : null
+}
+
 const list: Emit = (b) => {
   const tag = b.ordered === true ? 'ol' : 'ul'
-  return `<${tag}>${asList(b.items)
+  const start = b.ordered === true && (b as { task?: unknown }).task !== true ? listStart(b) : null
+  return `<${tag}${start === null ? '' : ` start="${start}"`}>${asList(b.items)
     .map(
       (item) =>
         `<li><span>${renderInlines(itemInlines(item))}</span>${renderBlocks(listChildren(item))}</li>`,

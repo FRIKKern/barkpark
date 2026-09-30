@@ -40,6 +40,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
     {:noreply, assign(socket, show_delete: false, delete_refs: [])}
   end
 
+  # The success sentence. A delete used to answer with nothing but the jump back
+  # to the list (stranger walk, 2026-09-30) — the press-answer region was left to
+  # narrate it as "Opened “Disconnect references and delete”." Name what went,
+  # and how many references the disconnect removed.
+  @doc false
+  def deleted_sentence(doc, disconnected?, refs) do
+    title = if is_binary(doc.title) and doc.title != "", do: doc.title, else: doc.doc_id
+
+    cond do
+      disconnected? and refs == 1 -> "Deleted “#{title}” and removed 1 reference to it."
+      disconnected? and refs > 1 -> "Deleted “#{title}” and removed #{refs} references to it."
+      true -> "Deleted “#{title}”."
+    end
+  end
+
   def confirm_delete(params, socket) do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
@@ -67,10 +82,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
 
         {:ok, _} ->
           new_path = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
+          refs = length(socket.assigns[:delete_refs] || [])
 
           {:noreply,
            socket
            |> assign(show_delete: false, delete_refs: [])
+           |> put_flash(:info, deleted_sentence(doc, params["disconnect"] == "true", refs))
            |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
         # A generic failure (not_found, rev_mismatch, …) must NOT be mistaken

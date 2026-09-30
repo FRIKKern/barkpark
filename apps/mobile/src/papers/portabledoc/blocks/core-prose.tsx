@@ -155,8 +155,17 @@ const pullquote: Render = (b, ctx, key) => (
   </Text>
 )
 
+// An ordered list's first number: the block's integer `start`, else 1. A JSON
+// number only — a string "5" is not a start (compose.ex list_start/1, pdrender
+// listStart, @barkpark/react listStart).
+export function listStart(b: Record<string, unknown>): number {
+  const start = b.start
+  return typeof start === 'number' && Number.isInteger(start) ? start : 1
+}
+
 const list: Render = (b, ctx, key) => {
   const ordered = b.ordered === true
+  const start = listStart(b)
   const items = asList(b.items)
   return (
     <View key={key} style={{ marginVertical: 6, gap: 4 }}>
@@ -185,7 +194,7 @@ const list: Render = (b, ctx, key) => {
         )
         return (
           <View key={i} style={{ flexDirection: 'row', paddingLeft: 8 }}>
-            <Text style={[bodyText(ctx), { width: 24 }]}>{ordered ? `${i + 1}.` : '•'}</Text>
+            <Text style={[bodyText(ctx), { width: 24 }]}>{ordered ? `${start + i}.` : '•'}</Text>
             {children.length === 0 ? (
               body
             ) : (

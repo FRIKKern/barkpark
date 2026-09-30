@@ -4,10 +4,11 @@ import { revalidateBarkpark } from '@barkpark/nextjs/revalidate'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-// Barkpark Studio → Next.js revalidation webhook.
-// Configure the corresponding webhook in Studio to POST events to
-// https://<your-app>/api/barkpark/webhook and set BARKPARK_WEBHOOK_SECRET
-// in your environment (same secret configured on the Barkpark side).
+// Barkpark → Next.js revalidation webhook.
+// Register it with the bp CLI and mint its signing secret (see README):
+//   bp webhook create https://<your-app>/api/barkpark/webhook my-site
+//   bp webhook rotate <webhook-id> -o json    # {"secret":"whsec_…"} — shown once
+// then set BARKPARK_WEBHOOK_SECRET to that secret in your environment.
 //
 // Why the handler is built lazily instead of at module scope:
 // createWebhookHandler validates its config synchronously and THROWS on an

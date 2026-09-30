@@ -690,22 +690,37 @@ defmodule Barkpark.Content.Lifecycle do
   defp claim_epoch_phrase(_draft), do: ""
 
   defp discard_refused_duplicate_draft(%Document{} = draft, payload, type, dataset, opts) do
-    payload = payload |> Map.put(:refused_draft_id, draft.doc_id) |> annotate_discard(draft)
+    payload = Map.put(payload, :refused_draft_id, draft.doc_id)
 
-    case fenced_delete(draft) do
-      :ok ->
-        Broadcast.tap_broadcast(
-          {:ok, draft},
-          dataset,
-          type,
-          "discardDraft",
-          draft.rev,
-          Keyword.get(opts, :source, :api),
-          Keyword.get(opts, :user_id),
-          caller_context: Keyword.get(opts, :caller_context)
-        )
+    # task-a89fda31b297077a: the delete and its mutation_events row are ONE
+    # write. Bare, the delete auto-committed before `tap_broadcast`'s
+    # save_event, so an event fault left the draft gone with no event and
+    # turned the refusal into a raise. Now a fault keeps the draft and the
+    # caller still gets its `duplicate_of` answer. The "was discarded"
+    # sentence is added only once the discard really happened.
+    discarded =
+      best_effort_atomically(fn ->
+        case fenced_delete(draft) do
+          :ok ->
+            Broadcast.tap_broadcast(
+              {:ok, draft},
+              dataset,
+              type,
+              "discardDraft",
+              draft.rev,
+              Keyword.get(opts, :source, :api),
+              Keyword.get(opts, :user_id),
+              caller_context: Keyword.get(opts, :caller_context)
+            )
 
-        {:error, {:duplicate_of, payload}}
+          {:error, _} = error ->
+            error
+        end
+      end)
+
+    case discarded do
+      {:ok, _} ->
+        {:error, {:duplicate_of, annotate_discard(payload, draft)}}
 
       {:error, reason} ->
         Logger.warning(
@@ -784,19 +799,27 @@ defmodule Barkpark.Content.Lifecycle do
             "rev" => Writer.generate_rev()
           }
 
-          case predecessor |> Document.changeset(attrs) |> Repo.update() do
-            {:ok, _} = stamped ->
-              Broadcast.tap_broadcast(
-                stamped,
-                dataset,
-                type,
-                "update",
-                prev_rev,
-                Keyword.get(opts, :source, :api),
-                Keyword.get(opts, :user_id),
-                caller_context: Keyword.get(opts, :caller_context)
-              )
-
+          # task-a89fda31b297077a: the stamp and its mutation_events row are ONE
+          # write. Bare, the update auto-committed before `tap_broadcast`'s
+          # save_event, so an event fault left the stamp with no event AND
+          # raised into a publish that had already committed. Best-effort means
+          # both halves: the pair rolls back together and the publish stands.
+          best_effort_atomically(fn ->
+            predecessor
+            |> Document.changeset(attrs)
+            |> Repo.update()
+            |> Broadcast.tap_broadcast(
+              dataset,
+              type,
+              "update",
+              prev_rev,
+              Keyword.get(opts, :source, :api),
+              Keyword.get(opts, :user_id),
+              caller_context: Keyword.get(opts, :caller_context)
+            )
+          end)
+          |> case do
+            {:ok, _} ->
               :ok
 
             {:error, reason} ->
@@ -1162,6 +1185,22 @@ defmodule Barkpark.Content.Lifecycle do
   # `id` is the physical PK (see `Content.Document`); fencing on it plus `rev`
   # is sufficient — the logical `(doc_id, type, dataset_id)` identity is already
   # pinned by the struct we read.
+  # task-a89fda31b297077a: a post-commit derived write (the supersede stamp, the
+  # refused-duplicate discard) and its event as ONE write, best-effort. At top
+  # level `write_atomically/1` opens a transaction, so a fault rolls both back
+  # and comes back as `{:error, _}` for the caller's log-and-continue arm.
+  # INSIDE an enclosing transaction (a `Content.Mutations` batch) it is a
+  # passthrough with no savepoint, so swallowing the raise there would keep
+  # the row change and lose its event; it re-raises and the batch rolls back.
+  defp best_effort_atomically(fun) do
+    Broadcast.write_atomically(fun)
+  rescue
+    e ->
+      if Repo.in_transaction?(),
+        do: reraise(e, __STACKTRACE__),
+        else: {:error, {:raised, Exception.message(e)}}
+  end
+
   defp fenced_delete(%Document{} = doc) do
     case Repo.delete_all(from(d in Document, where: d.id == ^doc.id and d.rev == ^doc.rev)) do
       {1, _} ->

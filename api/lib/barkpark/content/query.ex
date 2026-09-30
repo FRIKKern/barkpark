@@ -2082,8 +2082,13 @@ defmodule Barkpark.Content.Query do
 
   `maybe_scope_to_owner/4` is deliberately NOT used: it keys on a single type.
 
-  Drafts are excluded — the desk lists published rows and their draft twin is
-  surfaced by the row's own pill, not as a second hit.
+  ONE HIT PER DOCUMENT, drafts included. The desk lists a never-published
+  document as a draft row, so a search over published rows alone could not find
+  any new document until its first publish, nor a word that exists only in the
+  title being edited (stranger walk, 2026-09-30). Both rows are searched; a
+  document whose draft and published rows both match collapses to ONE hit, the
+  draft row (the title the editor opens). Callers link a hit by
+  `published_id(doc_id)`.
   """
   @spec search_documents_across_types(String.t(), String.t(), keyword(), pos_integer()) ::
           [Document.t()]
@@ -2111,7 +2116,6 @@ defmodule Barkpark.Content.Query do
   defp search_scoped(q, dataset, workspace_id, project_id, opts, limit_n) do
     Document
     |> where([d], ilike(d.title, ^like_contains(q)))
-    |> where([d], not like(d.doc_id, "drafts.%"))
     |> scope_to_dataset(dataset, opts)
     # The desk's own list read (PaneBuilder -> list_documents -> base_query)
     # uses this same helper, and a search narrower than the list it sits above
@@ -2125,8 +2129,30 @@ defmodule Barkpark.Content.Query do
     |> maybe_scope_to_grants(opts)
     |> restrict_to_visible_types(dataset, opts)
     |> order_by([d], asc: d.title, asc: d.type, asc: d.doc_id)
-    |> limit(^limit_n)
+    # A document can match twice (draft + published), so read twice the page
+    # and collapse before cutting it to the limit.
+    |> limit(^(limit_n * 2))
     |> Repo.all()
+    |> one_hit_per_document()
+    |> Enum.take(limit_n)
+  end
+
+  # Collapse a draft/published pair to one row, keeping the draft (the version
+  # the editor opens) and the order of the row that came first.
+  defp one_hit_per_document(rows) do
+    drafts =
+      for %Document{doc_id: "drafts." <> pub} = d <- rows, into: %{}, do: {{d.type, pub}, d}
+
+    {kept, _seen} =
+      Enum.reduce(rows, {[], MapSet.new()}, fn d, {acc, seen} ->
+        key = {d.type, String.replace_prefix(d.doc_id, "drafts.", "")}
+
+        if MapSet.member?(seen, key),
+          do: {acc, seen},
+          else: {[Map.get(drafts, key, d) | acc], MapSet.put(seen, key)}
+      end)
+
+    Enum.reverse(kept)
   end
 
   @doc """
