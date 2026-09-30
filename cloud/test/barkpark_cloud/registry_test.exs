@@ -729,6 +729,17 @@ defmodule BarkparkCloud.RegistryTest do
       assert %Barkpark{} = Repo.get(Barkpark, bp.id)
     end
 
+    # task-3524d976820cde9f: the succeed route deleted the row for ANY job kind.
+    test "succeed_deprovision_job on a NON-deprovision job → {:error, :conflict}, nothing deleted" do
+      team = team_fixture()
+      bp = live_barkpark(team)
+      {:ok, prov} = Registry.enqueue_provision_job(bp)
+
+      assert {:error, :conflict} = Registry.succeed_deprovision_job(prov.id)
+      assert %Barkpark{} = Repo.get(Barkpark, bp.id)
+      assert %ProvisionJob{} = Repo.get(ProvisionJob, prov.id)
+    end
+
     test "latest_provision_status_map ignores deprovision jobs; latest_deprovision_status_map returns them" do
       team = team_fixture()
       bp = live_barkpark(team)

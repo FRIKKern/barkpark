@@ -3239,6 +3239,13 @@ defmodule BarkparkCloud.Registry do
             %ProvisionJob{status: "failed"} ->
               Repo.rollback(:conflict)
 
+            # task-3524d976820cde9f: only a DEPROVISION job may delete the row.
+            # Before this fence any claimed provision / attach_domain /
+            # enable_apply job id posted here deleted the barkpark and its sites,
+            # leaving the real box billed with no row pointing at it.
+            %ProvisionJob{kind: kind} when kind != "deprovision" ->
+              Repo.rollback(:conflict)
+
             %ProvisionJob{barkpark_id: bp_id} = job ->
               if stale_claim?(job, claim_token) do
                 Repo.rollback(:stale_claim)
@@ -3283,7 +3290,7 @@ defmodule BarkparkCloud.Registry do
   # `revoke_barkpark_site_read_tokens/1` returns, so the audit stamp downstream
   # takes one argument either way.
   defp preflight_revoke_site_read_tokens(id, claim_token) do
-    with %ProvisionJob{} = job <- Repo.get(ProvisionJob, id),
+    with %ProvisionJob{kind: "deprovision"} = job <- Repo.get(ProvisionJob, id),
          false <- job.status == "failed",
          false <- stale_claim?(job, claim_token),
          %Barkpark{} = bp <- Repo.get(Barkpark, job.barkpark_id) do
