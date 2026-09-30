@@ -7,7 +7,7 @@ All routes here are **[token]**; anonymous callers get `404`, never an empty `20
 
 ## Backlinks — `GET /v1/data/backlinks/:dataset/:id` [token]
 
-Inbound refs (reverse of [api-v1.md](../api-v1.md) §5a) — docs referencing `:id`: `{result:{backlinks:[<docs>], count:N}}`. Scope/visibility-filtered; out-of-tenant/hidden omitted.
+Inbound refs (reverse of [api-v1.md](../api-v1.md) §5a) — docs referencing `:id` (a bare id or `{_ref: id}`): `{result:{backlinks:[<docs>], count:N}}`. Scope/visibility-filtered; out-of-tenant/hidden omitted.
 
 Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag overlap (Σ `LEAST(src,cand)/100` + main_tag bonus) + backlinks → `{result:{related:[{doc_id,type,title,score,sources,shared_tags}],count:N}}`. Anon 404.
 
