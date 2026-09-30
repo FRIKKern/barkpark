@@ -111,6 +111,35 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
     paper
   end
 
+  # A paper whose originating doc is a /specs/ doc: it declares create-plan + grill.
+  defp seed_spec_paper! do
+    slug = "eol-spec-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => slug,
+          "source_doc" => "/specs/eol-action.md",
+          "blocks" => [
+            %{
+              "id" => "s1",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Spec"}]
+            }
+          ]
+        })
+      )
+
+    slug
+  end
+
+  defp action_events(slug) do
+    slug
+    |> Barkpark.Plugins.Bulldocs.Events.list_for_paper()
+    |> Enum.map(& &1.event_type)
+    |> Enum.filter(&String.starts_with?(&1, "action:"))
+  end
+
   defp assigns_of(view), do: :sys.get_state(view.pid).socket.assigns
   defp socket_of(view), do: :sys.get_state(view.pid).socket
 
@@ -489,7 +518,8 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
     # The weaker gate, proved weaker: a READ-only token cannot edit, but it is
     # a principal, so the reader's own control runs for it.
     test "paper-action runs for a read-only token — a principal, not a writer",
-         %{conn: conn, slug: slug} do
+         %{conn: conn} do
+      slug = seed_spec_paper!()
       raw = "eol-action-reader-#{System.unique_integer([:positive])}"
 
       {:ok, _token} =
@@ -505,8 +535,29 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert assigns_of(view).can_edit? == false
       render_hook(view, "paper-action", %{"action" => "grill"})
 
-      assert assigns_of(view).last_action == "grill"
+      assert assigns_of(view).last_action == "Grill the spec"
       refute flash_of(view)["error"]
+      assert ["action:grill"] == action_events(slug)
+    end
+
+    # Only a key the paper DECLARES (its source_doc's button set) becomes an
+    # intent: the orchestrator acts on `action:<key>` rows (r2-lane-b paper
+    # write-path audit, 2026-09-30).
+    test "paper-action with a key the paper does not declare records nothing",
+         %{conn: conn, slug: plain_slug} do
+      spec_slug = seed_spec_paper!()
+      raw = "eol-action-undeclared-#{System.unique_integer([:positive])}"
+      {:ok, _token} = Auth.create_token(raw, "eol action undeclared", @dataset, ["read"])
+
+      {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{spec_slug}")
+      render_hook(view, "paper-action", %{"action" => "deploy-prod<script>"})
+      assert assigns_of(view).last_action == nil
+      assert action_events(spec_slug) == []
+
+      {:ok, plain, _html} = live(as_token(conn, raw), "/papers/#{plain_slug}")
+      render_hook(plain, "paper-action", %{"action" => "grill"})
+      assert assigns_of(plain).last_action == nil
+      assert action_events(plain_slug) == []
     end
   end
 
