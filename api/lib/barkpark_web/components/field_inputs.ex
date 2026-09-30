@@ -84,6 +84,32 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # Selects WITH a matching stored value are unchanged (that option is selected;
   # no placeholder). Required detection is rule-based (`validation.required`),
   # never name-based — cf. `Content.Forms` status handling (forms.ex).
+  # Types whose own clause below already copes with a structured (map/list)
+  # stored value: reference/image read ids and JSON, array/object render
+  # read-only JSON, richText renders block content read-only.
+  @structured_value_types ~w(richText reference image array object)
+
+  # A SCALAR input handed a STRUCTURED stored value — a Sanity-shaped slug
+  # `{"_type": "slug", "current": "…"}`, an object in a string field, a list in
+  # a select — crashed the whole document route (`Phoenix.HTML.Safe not
+  # implemented for Map`, or `lists in Phoenix.HTML …`; stranger walk,
+  # 2026-09-30, a post created through the API with a Sanity slug). Render it
+  # read-only with NO form input: the Classic save then never posts the field,
+  # so the stored value survives byte-identical instead of being replaced by a
+  # string. Declared before every scalar clause so none of them sees a map.
+  def input(%{field: %{"type" => t, "name" => name}, editor_form: %{} = form} = assigns)
+      when t not in @structured_value_types and is_map_key(form, name) and
+             (is_map(:erlang.map_get(name, form)) or is_list(:erlang.map_get(name, form))) do
+    assigns = assign(assigns, n: name, v: readonly_json(Map.get(form, name)))
+
+    ~H"""
+    <div data-readonly-field={@n} data-structured-value>
+      <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @v %></pre>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — stored as structured data this field's editor cannot show; saved unchanged</span>
+    </div>
+    """
+  end
+
   def input(%{field: %{"type" => "select", "name" => name, "options" => opts} = f} = assigns)
       when is_list(opts) do
     val = Map.get(assigns.editor_form, name, "")

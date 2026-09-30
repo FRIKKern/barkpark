@@ -91,6 +91,32 @@ defmodule Barkpark.Content.FormsDatetimeRoundtripTest do
       assert saved.content["publishedAt"] == "next tuesday"
     end
 
+    test "an optional select whose stored value matches no option keeps it on an unrelated edit" do
+      schema = %{
+        fields: [
+          %{"name" => "title", "type" => "string"},
+          %{"name" => "status2", "type" => "select", "options" => ["draft", "live"]}
+        ]
+      }
+
+      {:ok, doc} =
+        Content.upsert_document(
+          "widget",
+          %{
+            "doc_id" => "drafts.select-keep-#{System.unique_integer([:positive])}",
+            "title" => "Before",
+            "status" => "draft",
+            "content" => %{"status2" => "archived"}
+          },
+          @dataset
+        )
+
+      # The "Select…" placeholder is what renders — and what posts: "".
+      params = %{"title" => "After", "status2" => ""}
+      assert {:ok, saved, _} = Forms.upsert_draft(doc, "widget", schema, params, @dataset)
+      assert saved.content["status2"] == "archived"
+    end
+
     test "an EDITED datetime is stored as the input's value", %{doc: doc} do
       params = doc |> Forms.doc_to_form(@schema) |> Map.put("publishedAt", "2026-02-03T04:05")
 
