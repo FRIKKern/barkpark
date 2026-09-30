@@ -2333,6 +2333,11 @@ textarea.bp-paper-inline-text.bp-paper-link-ref-eyebrow-input { text-transform: 
 .bp-paper-contextual-editor:hover > .bp-paper-contextual-controls,
 .bp-paper-contextual-editor:focus-within > .bp-paper-contextual-controls,
 .bp-paper-contextual-controls[open] { opacity: 1; pointer-events: auto; }
+/* A RESTING (closed) toggle is only as wide as its summary. At the panel's
+   min(32rem, 100vw - 2rem) it lay over the block's first row — on a phone
+   (hover: none keeps it tappable) across the whole row — and ate the tap aimed
+   at the text under it: a tabs label, a columns paragraph, a second code tab. */
+.bp-paper-contextual-controls:not([open]) { width: max-content; }
 .bp-paper-contextual-controls--gauge-list[open],
 .bp-paper-contextual-controls--tabs[open],
 .bp-paper-contextual-controls--section[open],

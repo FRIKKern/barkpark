@@ -4,6 +4,10 @@ import { readFileSync } from "node:fs";
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const shell = readFileSync(new URL("../../../priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
 const mediaStyles = readFileSync(new URL("../../../priv/static/assets/bp-media-picker.css", import.meta.url), "utf8");
+assert.match(shell, /\.bp-paper-contextual-controls:not\(\[open\]\)\s*\{\s*width:\s*max-content;\s*\}/,
+  "a resting Configure toggle is only as wide as its summary, so it never covers the block's first row (390px tap census)");
+assert.match(shell, /\.bp-paper-contextual-controls\s*\{[^}]*width:\s*min\(32rem, calc\(100vw - 2rem\)\)/s,
+  "an OPEN panel keeps its full width");
 assert.match(shell, /\.bp-paper-figure-editor-frame\s*\{[^}]*display:\s*flow-root/s,
   "Figure contains the reader image's trailing margin even when caption is empty");
 assert.match(mediaStyles, /\.bp-ab-grid\s*\{[^}]*display:\s*grid/s,
