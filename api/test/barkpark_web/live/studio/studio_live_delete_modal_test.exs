@@ -84,6 +84,33 @@ defmodule BarkparkWeb.Studio.StudioLiveDeleteModalTest do
              "reverse_referencers probe — the old scalar find_referencing_docs undercounted it"
   end
 
+  # Stranger walk (2026-09-30): a successful delete answered with nothing but
+  # the jump back to the list, so the press-answer line narrated it as
+  # "Opened “Disconnect references and delete”." It now says what went.
+  test "a successful delete says what it deleted", %{conn: conn} do
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/del-target"))
+
+    _ = render_click(view, "delete-doc", %{})
+    html = render_click(view, "confirm-delete", %{})
+
+    assert html =~ "Deleted “Target Post”."
+  end
+
+  test "the success sentence counts the references a disconnect removed" do
+    doc = %{title: "Grace Hopper", doc_id: "grace"}
+    alias BarkparkWeb.Studio.StudioLive.Handlers.Delete
+
+    assert Delete.deleted_sentence(doc, true, 1) ==
+             "Deleted “Grace Hopper” and removed 1 reference to it."
+
+    assert Delete.deleted_sentence(doc, true, 3) ==
+             "Deleted “Grace Hopper” and removed 3 references to it."
+
+    assert Delete.deleted_sentence(doc, false, 3) == "Deleted “Grace Hopper”."
+    assert Delete.deleted_sentence(%{title: nil, doc_id: "x1"}, false, 0) == "Deleted “x1”."
+  end
+
   test "a delete that fails flashes an error instead of silently navigating away",
        %{conn: conn} do
     # Regression for [studio-delete-swallows-errors]: confirm_delete's old
