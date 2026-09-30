@@ -2418,6 +2418,9 @@ func assembleBody(cmd manifest.Command, flags map[string][]string, args map[stri
 			// value (a title that LOOKS numeric must stay a string).
 			if eq := strings.Index(kv, ":="); eq >= 0 && !strings.Contains(kv[:eq], "=") {
 				key := kv[:eq]
+				if err := checkSetKeyEmpty(kv, key); err != nil {
+					return nil, nil, "", err
+				}
 				var typed any
 				if err := json.Unmarshal([]byte(kv[eq+2:]), &typed); err != nil {
 					return nil, nil, "", fmt.Errorf("invalid --set %q: %q is not valid JSON (key:=value sends raw JSON; use key=value for strings)", kv, kv[eq+2:])
@@ -2465,6 +2468,9 @@ func assembleBody(cmd manifest.Command, flags map[string][]string, args map[stri
 				return nil, nil, "", fmt.Errorf("invalid --set %q (want key=value, or key:=json for typed values)", kv)
 			}
 			key := kv[:eq]
+			if err := checkSetKeyEmpty(kv, key); err != nil {
+				return nil, nil, "", err
+			}
 			if err := checkSetKeyIndexing(kv, key); err != nil {
 				return nil, nil, "", err
 			}
@@ -2538,6 +2544,21 @@ func setNestingError(kv, key, example string) error {
 		"so %q does not nest — it lands a literal key. Set the inner field directly, "+
 		"e.g. --set '%s' (use --file to send a body verbatim if you really meant a literal key)",
 		kv, key, example)
+}
+
+// checkSetKeyEmpty refuses a --set whose key is empty or blank: `--set =x`,
+// `--set ' =x'`, `--set :=1`.
+//
+// Stranger walk (2026-09-30): `bp doc create post --set =x` exited 0 and
+// stored a content key named "" holding "x" — a field no schema declares, no
+// Studio form shows and no `--set` can name again. A blank key is always a
+// typo (a lost shell variable, `--set $FIELD=x` with FIELD unset), never a
+// field, so it is a usage error.
+func checkSetKeyEmpty(kv, key string) error {
+	if strings.TrimSpace(key) != "" {
+		return nil
+	}
+	return fmt.Errorf("invalid --set %q: the field name before the = is empty (want key=value, or key:=json for typed values)", kv)
 }
 
 // checkSetKeyIndexing refuses a --set key carrying a bracket segment —
