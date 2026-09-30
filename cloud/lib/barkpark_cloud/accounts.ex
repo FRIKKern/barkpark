@@ -2159,16 +2159,24 @@ defmodule BarkparkCloud.Accounts do
       where: t.user_id == ^uid and t.context in ^contexts and is_nil(t.revoked_at)
   end
 
-  # DB-count MINT throttle: true when the user already minted `max` live tokens of
+  # DB-count MINT throttle: true when the user already minted `max` tokens of
   # this context within the last `window` seconds. Anti-spam on the deliver side
   # only — the wrong-code brute force is guarded by the failed_attempts lockout.
+  #
+  # EVERY row minted in the window counts, REVOKED ones included
+  # (task-e347bde0b83592fa). Each new mint supersedes (revokes) the previous
+  # live one, so counting only `is_nil(revoked_at)` rows could never exceed ONE
+  # and the throttle never fired: unlimited code mails to any address, and a
+  # per-code 5-attempt lockout that reset with every re-mint. The lifecycle
+  # reaper's grace (@lifecycle_reap_grace_seconds, 2x the largest window) keeps
+  # every row this count needs on disk.
   defp throttled?(%User{id: uid}, context, {max, window}) do
     since = DateTime.add(lifecycle_now(), -window, :second)
 
     count =
       UserToken
       |> where([t], t.user_id == ^uid and t.context == ^context)
-      |> where([t], is_nil(t.revoked_at) and t.inserted_at >= ^since)
+      |> where([t], t.inserted_at >= ^since)
       |> Repo.aggregate(:count)
 
     count >= max
