@@ -155,6 +155,49 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorkerTest do
     assert length(deprovision_jobs(bp.id)) == 1
   end
 
+  # task-ffdd6affa07adf05: a deprovision the Go worker FAILS is neither pending
+  # nor succeeded, so the dedup let every hourly pass enqueue again and re-send
+  # the always-send `trial_expired` mail, and the trial never finalised.
+  test "a FAILING teardown mails once, then retries silently and stops at the cap" do
+    import ExUnit.CaptureLog
+
+    {team, _sub} = trial_team(-3600)
+    bp = barkpark_fixture(team)
+
+    fail_pending = fn ->
+      Repo.update_all(
+        from(j in ProvisionJob,
+          where: j.barkpark_id == ^bp.id and j.kind == "deprovision" and j.status == "pending"
+        ),
+        set: [status: "failed"]
+      )
+    end
+
+    assert {:ok, %{teardowns: 1}} = perform_job(TrialExpiryWorker, %{})
+    notice_rows = length(teardown_notice_rows(team.id))
+    assert notice_rows >= 1
+
+    # Two more failed attempts are re-enqueued, and nobody is mailed again.
+    for _ <- 1..2 do
+      fail_pending.()
+      assert {:ok, %{teardowns: 1}} = perform_job(TrialExpiryWorker, %{})
+      assert length(teardown_notice_rows(team.id)) == notice_rows
+    end
+
+    # The third failure hits the cap: no fourth job, and an operator log.
+    fail_pending.()
+
+    log =
+      capture_log(fn ->
+        assert {:ok, %{teardowns: 0}} = perform_job(TrialExpiryWorker, %{})
+      end)
+
+    assert log =~ "failed 3 times"
+    assert length(deprovision_jobs(bp.id)) == 3
+    assert Enum.all?(deprovision_jobs(bp.id), &(&1.status == "failed"))
+    assert length(teardown_notice_rows(team.id)) == notice_rows
+  end
+
   ## 5. ADVERSARIAL — a subscribed team is NEVER torn down by the expiry worker
 
   test "a CONVERTED (paid) team's box is never torn down, even past its trial window" do

@@ -41,6 +41,16 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
        the instance NAMES exist — `Registry.succeed_deprovision_job/1` deletes
        the row — and the mail names them.
 
+       THE HOLE IN THAT DEDUP (task-ffdd6affa07adf05). A deprovision the Go
+       worker FAILS is neither pending nor succeeded: the barkpark row stays
+       and the dedup lets the next hourly pass enqueue again. So a box whose
+       teardown kept failing got a fresh job and a fresh always-send
+       `trial_expired` mail every hour, and the trial never finalised. Now:
+       the notice goes out only for a box that has NO earlier deprovision job,
+       so a retry tears down silently. After `@max_teardown_attempts` failed
+       deprovisions the box is no longer re-enqueued, and an error log names
+       it for an operator.
+
        THE LIMIT, STATED SO NOBODY OVER-READS IT: a lapsed trial with NO boxes
        gets no `trial_expired` notice, because this worker tore nothing down. The
        fifteen ghost rows of cch-w50 carry exactly that shape. A notice there
@@ -85,6 +95,13 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
   alias BarkparkCloud.Accounts.Team
   alias BarkparkCloud.Billing.Subscription
   alias BarkparkCloud.{Billing, Notifications, Registry, Repo}
+  alias BarkparkCloud.Registry.ProvisionJob
+
+  require Logger
+
+  # Failed deprovision jobs after which a trial box is no longer re-enqueued
+  # (task-ffdd6affa07adf05). See the moduledoc.
+  @max_teardown_attempts 3
 
   # Advance-notice thresholds, in seconds. A trial with `remaining <= @one_day`
   # gets the T-1 notice; `@one_day < remaining <= @three_days` gets the T-3 one.
@@ -186,9 +203,9 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
       # edit to finalise a team whose teardown this very pass just started —
       # which is the race the ordering exists to prevent.
       boxes = Registry.list_barkparks(team)
-      torn = teardown(boxes)
+      {torn, first_time} = teardown(boxes)
       f = finalize(sub, boxes, now)
-      notify_teardown(team, torn)
+      notify_teardown(team, first_time)
 
       %{
         acc
@@ -318,10 +335,42 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
   # count. The count is still `length/1` of it, and the identities are what the
   # `:trial_expired` notice needs — a teardown report that cannot name what it
   # tore down leaves the team guessing which of its boxes went.
+  #
+  # task-ffdd6affa07adf05: returns `{torn, first_time}`. `torn` is every box this
+  # pass enqueued; `first_time` is the subset with no earlier deprovision job,
+  # the only boxes the `trial_expired` notice may announce. A box with
+  # `@max_teardown_attempts` failed deprovisions is skipped and logged.
   defp teardown(boxes) do
-    Enum.filter(boxes, fn bp ->
-      match?({:ok, _job}, Registry.enqueue_deprovision_job(bp))
+    boxes
+    |> Enum.reduce({[], []}, fn bp, {torn, first} ->
+      {prior, failed} = deprovision_history(bp.id)
+
+      cond do
+        failed >= @max_teardown_attempts ->
+          Logger.error(
+            "TrialExpiryWorker: teardown of #{bp.slug} (#{bp.id}) failed #{failed} times; " <>
+              "not re-enqueued. An operator must deprovision it by hand."
+          )
+
+          {torn, first}
+
+        match?({:ok, _job}, Registry.enqueue_deprovision_job(bp)) ->
+          {[bp | torn], if(prior == 0, do: [bp | first], else: first)}
+
+        true ->
+          {torn, first}
+      end
     end)
+    |> then(fn {torn, first} -> {Enum.reverse(torn), Enum.reverse(first)} end)
+  end
+
+  # {every deprovision job ever enqueued for the box, how many of them failed}.
+  defp deprovision_history(bp_id) do
+    from(j in ProvisionJob,
+      where: j.barkpark_id == ^bp_id and j.kind == "deprovision",
+      select: {count(j.id), count(j.id) |> filter(j.status == "failed")}
+    )
+    |> Repo.one()
   end
 
   # cch-w52-bl — THE TEARDOWN'S OWN NOTICE. Fires only on the pass that won the
