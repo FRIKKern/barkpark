@@ -695,8 +695,16 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
       # Well past the cap, each event a DISTINCT key (a fresh doc_id), which is
       # exactly the shape the global topic delivers under campaign write load.
+      #
+      # The flood is CLOSE events. The seen-set keys on {doc_id, updated_at} and
+      # never looks at the lifecycle, so any distinct-key task event proves the
+      # bound equally. But a CLAIM puts each flood card in the unwindowed
+      # in-progress column, so every one of the cap * 3 re-renders paints every
+      # card before it: quadratic in the flood, 38 s on CI and past ExUnit's
+      # 60 s timeout on a loaded box. Done is the windowed column, so the render
+      # stays bounded and the test measures the set, not the painter.
       for i <- 1..(cap * 3) do
-        send(view.pid, claimed_event("flood-#{i}", "Flood #{i}"))
+        send(view.pid, closed_event("flood-#{i}", "Flood #{i}"))
       end
 
       _ = render(view)
