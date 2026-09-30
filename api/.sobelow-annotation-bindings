@@ -94,7 +94,6 @@ lib/barkpark/sites/deploy_runner.ex	read_manifest
 lib/barkpark/sites/deploy_runner.ex	read_tail_bytes
 lib/barkpark/sites/deploy_runner.ex	read_terminal_record
 lib/barkpark/sites/deploy_runner.ex	seed_prebuilt_log
-lib/barkpark/sites/deploy_runner.ex	sweep_path
 lib/barkpark/sites/deploy_runner.ex	tombstone
 lib/barkpark/sites/deploy_runner.ex	unlink_env
 lib/barkpark/sites/deploy_runner.ex	write_env_file
