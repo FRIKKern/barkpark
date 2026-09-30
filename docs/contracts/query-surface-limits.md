@@ -61,6 +61,8 @@ survive a projection.
 `?expand=author` inlines the referenced document. `?expand=tags` inlines every
 element of an `arrayOf` whose element type is `reference` — **ref arrays are
 not excluded**. `?expand=true` expands every reference field on the type.
+A field's target may be named by `refType`, `to` or `refTypes`; with several
+types, the stored document's own type decides.
 
 Depth is one hop. A dotted spec (`?expand=author.employer`) names no top-level
 reference field and expands nothing; there is no `expand=a.b` grammar.
