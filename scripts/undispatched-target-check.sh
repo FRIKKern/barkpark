@@ -40,7 +40,10 @@
 #   P3  SELF-INCLUSION. The guard is in its OWN target set, so it cannot be
 #       edited without dispatching the harness that proves it.
 #       EVIDENCE: the guard's own repo-relative path is matched by the set it
-#       prints.
+#       prints. VACUOUS (satisfied) when the consumer carries NO on.*.paths /
+#       paths-ignore key on any arm: it then dispatches on every push and PR,
+#       so there is no filter to defeat. It binds again the day a paths key
+#       appears.
 #
 # A candidate satisfying all three is IMMUNE. A candidate failing any is
 # AT-RISK, and the failing property is NAMED — an unclassified entry is not a
@@ -493,6 +496,46 @@ if [ "${UDT_SELFTEST:-0}" = 1 ]; then
   out="$(UNDISPATCHED_ROOT="$E2E" bash "$E2E/$SELF_REL" 2>&1)"; rc=$?
   [ "$rc" = 0 ] && ok "whole program: the plant removed, the PROCESS exits 0" || no "whole program: the plant removed, the PROCESS exited $rc, not 0: $(printf '%s\n' "$out" | grep -E '::error::|CANNOT READ' | head -3)"
 
+  # P3 IS CONDITIONAL ON THE CONSUMER CARRYING A PATHS KEY (task-bed0d6a0f6b40ea7),
+  # both directions, on the whole program: one SELF-EXCLUDED synthetic guard
+  # (it prints fixture-p3/**, which does not match its own path) consumed by
+  # two workflows. The paths-free consumer must read IMMUNE with P3 vacuous; the
+  # consumer whose push arm IS paths-filtered must still read AT-RISK on P3 —
+  # the control that proves the relaxation did not simply delete P3.
+  P3F="$S/p3"
+  mkdir -p "$P3F/.github/workflows" "$P3F/scripts"
+  for e in "$ROOT"/* "$ROOT"/.[!.]*; do
+    [ -e "$e" ] || continue
+    case "$(basename "$e")" in .github|.git|scripts) continue ;; esac
+    ln -s "$e" "$P3F/$(basename "$e")"
+  done
+  for e in "$ROOT"/.github/* "$ROOT"/.github/.[!.]*; do
+    [ -e "$e" ] || continue
+    [ "$(basename "$e")" = workflows ] && continue
+    ln -s "$e" "$P3F/.github/$(basename "$e")"
+  done
+  for e in "$WF_DIR"/*; do ln -s "$e" "$P3F/.github/workflows/$(basename "$e")"; done
+  for e in "$SCRIPT_DIR"/* "$SCRIPT_DIR"/.[!.]*; do
+    [ -e "$e" ] || continue
+    ln -s "$e" "$P3F/scripts/$(basename "$e")"
+  done
+  printf '#!/usr/bin/env bash\ncase "${1:-}" in\n  --print-set)\n    echo "fixture-p3/**" ;;\n  --match)\n    echo "fixture-p3/**" ;;\nesac\n' >"$P3F/scripts/zz-p3-guard.sh"
+  printf 'on:\n  pull_request:\n  push:\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: pin_script="scripts/zz-p3-guard.sh"; bash "$pin_script" --match fx\n' \
+    >"$P3F/.github/workflows/zz-p3-nopaths.yml"
+  printf 'on:\n  pull_request:\n  push:\n    paths:\n      - "fixture-p3/**"\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: pin_script="scripts/zz-p3-guard.sh"; bash "$pin_script" --match fx\n' \
+    >"$P3F/.github/workflows/zz-p3-pushpaths.yml"
+  out="$(UNDISPATCHED_ROOT="$P3F" bash "$P3F/$SELF_REL" 2>&1)"; rc=$?
+  nopaths="$(printf '%s\n' "$out" | grep -A1 -E '^(IMMUNE|AT-RISK) +scripts/zz-p3-guard\.sh --match fx -> zz-p3-nopaths\.yml$')"
+  pushpaths="$(printf '%s\n' "$out" | grep -A1 -E '^(IMMUNE|AT-RISK) +scripts/zz-p3-guard\.sh --match fx -> zz-p3-pushpaths\.yml$')"
+  case "$nopaths" in
+    IMMUNE*"P3 vacuous"*) ok "p3: a self-excluded guard whose consumer carries NO paths key is IMMUNE, P3 vacuous" ;;
+    *) no "p3: the paths-free consumer did not read IMMUNE/P3 vacuous (rc=$rc): $(printf '%s' "$nopaths" | tr '\n' ' ')" ;;
+  esac
+  case "$pushpaths" in
+    AT-RISK*"P3 FAILS"*) ok "p3: the SAME self-excluded guard on a paths-filtered consumer is still AT-RISK on P3 (the control can fail)" ;;
+    *) no "p3: the paths-filtered consumer did not read AT-RISK/P3 FAILS (rc=$rc): $(printf '%s' "$pushpaths" | tr '\n' ' ')" ;;
+  esac
+
   pat="$(print_pattern)"
   for needle in "SINGLE DERIVATION POINT" "NO WORKFLOW-LEVEL" "SELF-INCLUSION" "scripts/console-path-escape-check.sh" "console-harness.yml"; do
     case "$pat" in *"$needle"*) ok "pattern: names '$needle'" ;; *) no "pattern: does NOT name '$needle'" ;; esac
@@ -637,8 +680,20 @@ EOF
   fi
   ARMOUT=""
 
-  if [ "$arm_findings" = 0 ] && [ "$p1" = "single" ] && [ -z "$pr_key" ] && [ "$p3" = "self" ]; then
-    classify_line "IMMUNE" "$label" "P1 $p1_why · P2 no on.pull_request.paths on $wfb · P3 the guard is inside its own set · dispatch check clean on $ran trigger arm(s)"
+  # P3 IS VACUOUS ON A PATHS-FREE CONSUMER (task-bed0d6a0f6b40ea7). Self-inclusion
+  # exists to force dispatch PAST a workflow-level paths filter; a consumer with
+  # NO on.*.paths / paths-ignore key on any arm ($ran = 0) dispatches on every
+  # push and PR, so there is nothing for it to defeat. Conditional, never
+  # dropped: the day the consumer GAINS a paths key, $ran > 0 and a self-excluded
+  # guard is AT-RISK again (the selftest's p3 arms hold both directions).
+  p3_why="the guard is inside its own set"
+  if [ "$p3" = "no-self" ] && [ "$ran" = 0 ]; then
+    p3="vacuous"
+    p3_why="vacuous: $wfb carries no on.*.paths key, so every push and PR dispatches it and there is no filter for self-inclusion to defeat"
+  fi
+
+  if [ "$arm_findings" = 0 ] && [ "$p1" = "single" ] && [ -z "$pr_key" ] && [ "$p3" != "no-self" ]; then
+    classify_line "IMMUNE" "$label" "P1 $p1_why · P2 no on.pull_request.paths on $wfb · P3 $p3_why · dispatch check clean on $ran trigger arm(s)"
   else
     reasons=""
     [ -n "$pr_key" ] && reasons="P2 FAILS: $wfb carries on.pull_request.$pr_key, so a non-matching head emits NO check run at all (honest-gates D18)"
