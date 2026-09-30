@@ -1054,6 +1054,44 @@ function sectionBlockToNode(block, bpId, bpType) {
 // keeps its bpId or is CLIENT-MINTED one from the CALL-SHARED `taken` set (so a nested
 // mint never collides with a nested prev id — the duplicate_id-abort guard). RECURSES:
 // a nested bpOpaque section child rebuilds verbatim via nextNodeToBlock's opaque path.
+// A container rebuilt from its canvas node (a replace-block, or a rows patch) is
+// reconstructed from the keys the node models. Keys the node does NOT model — an
+// author's own metadata, a producer's provenance, any key a newer schema added —
+// are carried over from the stored block so a rebuild never drops them. Found by
+// mounting the whole pd-parity inventory: opening a section / expandable whose
+// children had no ids yet replaced it without its unknown keys.
+const CONTAINER_MODELED_KEYS = {
+  section: ["id", "type", "title", "layout", "variant", "blocks", "children", "cells", "locked", "role"],
+  expandable: ["id", "type", "summary", "open", "blocks", "children", "locked", "role"],
+};
+function carryUnmodeledKeys(prevBlock, rebuilt, bpType) {
+  const modeled = CONTAINER_MODELED_KEYS[bpType];
+  if (!modeled || !isPlainObject(prevBlock)) return rebuilt;
+  const out = { ...rebuilt };
+  for (const [k, v] of Object.entries(prevBlock)) {
+    if (!modeled.includes(k) && !Object.hasOwn(out, k)) out[k] = deepClone(v);
+  }
+  return out;
+}
+// Rows (steps / tabs): each rebuilt row keeps its stored row's unmodeled keys, and a
+// stored row that carried no body key at all does not gain an empty one.
+function carryRowKeys(prevRows, rows, spec) {
+  if (!Array.isArray(prevRows)) return rows;
+  const byId = new Map(prevRows.filter((r) => isPlainObject(r) && r.id != null).map((r) => [r.id, r]));
+  const modeled = ["id", spec.titleKey, "blocks", "children"];
+  return rows.map((row, i) => {
+    const prev = byId.get(row.id) || (isPlainObject(prevRows[i]) && prevRows[i].id == null ? prevRows[i] : null);
+    if (!prev) return row;
+    const out = { ...row };
+    for (const [k, v] of Object.entries(prev)) {
+      if (!modeled.includes(k) && !Object.hasOwn(out, k)) out[k] = deepClone(v);
+    }
+    const bodyless = !Object.hasOwn(prev, "blocks") && !Object.hasOwn(prev, "children");
+    if (bodyless && Array.isArray(out.blocks) && out.blocks.length === 0) delete out.blocks;
+    return out;
+  });
+}
+
 function sectionNodeToBlock(node, id, taken) {
   const seen = taken || new Set();
   const attrs = (node && node.attrs) || {};
@@ -4344,7 +4382,13 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
           ops.push({
             op: "patch-block",
             id: entry.id,
-            patch: { [spec.rowsKey]: rowsNodeToRows(entry.node, entry.bpType, taken) },
+            patch: {
+              [spec.rowsKey]: carryRowKeys(
+                prevBlock && prevBlock[spec.rowsKey],
+                rowsNodeToRows(entry.node, entry.bpType, taken),
+                spec,
+              ),
+            },
           });
         }
         continue;
@@ -4357,7 +4401,7 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
           ops.push({
             op: "replace-block",
             id: entry.id,
-            block: expandableNodeToBlock(entry.node, entry.id, taken),
+            block: carryUnmodeledKeys(prevBlock, expandableNodeToBlock(entry.node, entry.id, taken), "expandable"),
           });
         } else {
           if (expandableSummaryChanged(prevNode, entry.node)) {
@@ -4382,7 +4426,7 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
           ops.push({
             op: "replace-block",
             id: entry.id,
-            block: sectionNodeToBlock(entry.node, entry.id, taken),
+            block: carryUnmodeledKeys(prevBlock, sectionNodeToBlock(entry.node, entry.id, taken), "section"),
           });
         } else {
           // Fine-grained path: the section's own LAYOUT and TITLE are each diffed
