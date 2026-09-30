@@ -225,6 +225,64 @@ defmodule BarkparkWeb.BulldocsIngestScopeTest do
     end
   end
 
+  # A body project_id is not a credential either: it must name a project UNDER
+  # the resolved workspace, or the paper lands with a workspace/project pair no
+  # tenant owns (r2-lane-b paper write-path audit, 2026-09-30).
+  describe "REFUSE — a body project_id outside the resolved workspace" do
+    defp post_scoped(conn, raw, slug, ws_id, project_id) do
+      conn
+      |> put_req_header("authorization", "Bearer #{raw}")
+      |> put_req_header("content-type", "application/json")
+      |> post(
+        @path,
+        Map.merge(body(slug), %{"workspace_id" => ws_id, "project_id" => project_id})
+      )
+    end
+
+    test "a token bound to A naming A's workspace with B's project is refused, and writes NOTHING",
+         %{conn: conn, ws_a: ws_a, ws_b: ws_b} do
+      proj_b = create_project!(ws_b)
+      raw = "ingest-scope-project-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Auth.create_token(raw, "project-a", "production", ["read", "write", "admin"], ws_a.id)
+
+      slug = "ingest-scope-project-#{System.unique_integer([:positive])}"
+      resp = post_scoped(conn, raw, slug, ws_a.id, proj_b.id)
+
+      assert resp.status == 422, resp.resp_body
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "project_scope_conflict"
+      refute find_paper(slug), "a refused write must leave no row"
+    end
+
+    test "the shared secret naming A's workspace with B's project is refused too",
+         %{conn: conn, ws_a: ws_a, ws_b: ws_b} do
+      proj_b = create_project!(ws_b)
+      slug = "ingest-scope-project-secret-#{System.unique_integer([:positive])}"
+      resp = post_scoped(conn, @ingest_secret, slug, ws_a.id, proj_b.id)
+
+      assert resp.status == 422, resp.resp_body
+      refute find_paper(slug)
+    end
+
+    test "a project under the named workspace is stamped (positive control)",
+         %{conn: conn, ws_a: ws_a} do
+      proj_a = create_project!(ws_a)
+      raw = "ingest-scope-project-ok-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Auth.create_token(raw, "project-ok", "production", ["read", "write", "admin"], ws_a.id)
+
+      slug = "ingest-scope-project-ok-#{System.unique_integer([:positive])}"
+      resp = post_scoped(conn, raw, slug, ws_a.id, proj_a.id)
+
+      assert resp.status == 200, resp.resp_body
+      doc = find_paper(slug)
+      assert doc.workspace_id == ws_a.id
+      assert doc.project_id == proj_a.id
+    end
+  end
+
   describe "UNCHANGED — the excluded population" do
     test "the SHARED SECRET carries no principal and keeps the pipeline's Default",
          %{conn: conn} do

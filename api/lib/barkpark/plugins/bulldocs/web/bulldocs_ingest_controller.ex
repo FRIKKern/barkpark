@@ -1975,6 +1975,26 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # THE WRITE reconciliation. Returns `{:ok, {ws_id, project_id}}` or a typed
   # refusal (rendered by `scope_refusal/2` at the action head).
   defp resolve_write_scope(conn, params) do
+    with {:ok, {ws_id, project_id}} <- resolve_write_workspace(conn, params),
+         :ok <- project_under_workspace(ws_id, project_id) do
+      {:ok, {ws_id, project_id}}
+    end
+  end
+
+  # A project named by id (body `project_id`) must live under the workspace the
+  # write resolved to; a slug is already resolved under its workspace. Otherwise
+  # the row would carry a workspace/project pair no tenant owns.
+  defp project_under_workspace(_ws_id, nil), do: :ok
+  defp project_under_workspace(nil, _project_id), do: :ok
+
+  defp project_under_workspace(ws_id, project_id) do
+    case Tenancy.get_project_by_id(project_id) do
+      %{workspace_id: ^ws_id} -> :ok
+      _ -> {:error, {:project_scope_conflict, project_id, ws_id}}
+    end
+  end
+
+  defp resolve_write_workspace(conn, params) do
     ws = pipeline_workspace(conn)
     {req_ws, req_proj} = requested_scope(conn, params)
 
@@ -2049,6 +2069,17 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, {:workspace_scope_required, slugs}} ->
         conn
         |> render_error({:error, {:workspace_scope_required, slugs}})
+        |> halt()
+
+      {:error, {:project_scope_conflict, sent, workspace_id}} ->
+        conn
+        |> BarkparkWeb.ErrorResponse.emit_custom(
+          :unprocessable_entity,
+          "project_scope_conflict",
+          "project #{sent} is not a project of workspace #{workspace_id} — the write " <>
+            "was refused rather than stamped with a workspace/project pair no tenant owns",
+          %{sent: sent, workspace_id: workspace_id}
+        )
         |> halt()
 
       {:error, {:workspace_scope_conflict, sent, resolved}} ->
