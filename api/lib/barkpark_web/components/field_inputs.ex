@@ -177,16 +177,23 @@ defmodule BarkparkWeb.Components.FieldInputs do
     """
   end
 
+  # A plain richText whose stored value is NOT a string — Portable Text blocks,
+  # the shape `bp seed` writes for richText and the JS SDK/Sanity path uses.
+  # The Classic editor below is an HTML-string contenteditable; handed a list it
+  # crashed the whole document route with `ArgumentError … lists in
+  # Phoenix.HTML and templates may only contain integers …` (stranger walk,
+  # 2026-09-30: `bp make schema widget` → `bp schema apply` → `bp seed widget`
+  # → open it in Studio = 500). Show it read-only like the array/object clause
+  # and emit NO form input, so a Classic save preserves the stored blocks
+  # byte-identically instead of replacing them with an HTML string.
   def input(%{field: %{"type" => "richText", "name" => name}} = assigns) do
-    val = Map.get(assigns.editor_form, name, "")
-    assigns = assign(assigns, n: name, v: val)
+    case Map.get(assigns.editor_form, name, "") do
+      val when is_binary(val) or is_nil(val) ->
+        rich_text_editor(assign(assigns, n: name, v: val))
 
-    ~H"""
-    <div id={"bp-rt-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
-      <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"}></bp-rich-text-editor>
-    </div>
-    """
+      blocks ->
+        rich_text_readonly(assign(assigns, n: name, v: readonly_json(blocks)))
+    end
   end
 
   def input(%{field: %{"type" => t, "name" => name} = f} = assigns)
@@ -499,6 +506,24 @@ defmodule BarkparkWeb.Components.FieldInputs do
   end
 
   def slug_source_of(_), do: "title"
+
+  defp rich_text_editor(assigns) do
+    ~H"""
+    <div id={"bp-rt-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+      <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
+      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"}></bp-rich-text-editor>
+    </div>
+    """
+  end
+
+  defp rich_text_readonly(assigns) do
+    ~H"""
+    <div data-readonly-field={@n}>
+      <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @v %></pre>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — stored as block content, which the rich-text editor (HTML) cannot edit; saved unchanged</span>
+    </div>
+    """
+  end
 
   @doc "The slug source for the schema field named `name` (default `\"title\"`)."
   @spec slug_source(map() | nil, String.t()) :: String.t()
