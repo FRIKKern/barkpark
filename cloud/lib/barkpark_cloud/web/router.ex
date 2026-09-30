@@ -858,8 +858,8 @@ defmodule BarkparkCloud.Web.Router do
   ##   body {challenge_token, code} OR {challenge_token, recovery_code}
   ##   → 200 {token, team_id}        — OTP/recovery accepted; full session minted
   ##   → 401 {error: "invalid_code"} — bad token, bad OTP, or unknown recovery code
-  ##   → 429 {error: "rate_limited", retry_after: <seconds>} — >5 attempts/min
-  ##     for this pending user
+  ##   → 429 {error: "rate_limited", retry_after: <seconds>} — >5 attempts/min, or
+  ##     >30 per UTC day (task-4ce7aa98a5aaa885), for this pending user
   ##
   ## Step two of the two-phase login. The challenge_token is the 2fa-pending
   ## token from /v1/auth/login; a correct OTP or an unused recovery code swaps it

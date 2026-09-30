@@ -70,6 +70,61 @@ defmodule BarkparkCloud.Accounts.TwoFactorRateLimiterTest do
     assert {:error, {:rate_limited, 1}} = RL.check(u, w + 59_999)
   end
 
+  # task-4ce7aa98a5aaa885: 5/min alone was 7,200 guesses a day.
+  describe "the daily bound" do
+    @day_ms 86_400_000
+
+    test "30 attempts a UTC day across minute windows, then 429 until the day rolls over" do
+      u = "u-daily-#{System.unique_integer([:positive])}"
+      day_start = 500 * @day_ms
+
+      # Six full minute windows of 5 = 30 attempts, all admitted.
+      for m <- 0..5, _ <- 1..5 do
+        assert RL.check(u, day_start + m * 60_000) == :ok
+      end
+
+      # The 31st, in a fresh minute window, is refused for the rest of the day.
+      at = day_start + 6 * 60_000
+      assert {:error, {:rate_limited, retry_after}} = RL.check(u, at)
+      assert retry_after == div(@day_ms - 6 * 60_000, 1000)
+
+      # The next UTC day starts with a fresh budget.
+      assert RL.check(u, day_start + @day_ms) == :ok
+    end
+
+    test "attempts refused by the minute window do not spend the daily budget" do
+      u = "u-daily-minute-#{System.unique_integer([:positive])}"
+      day_start = 600 * @day_ms
+
+      # 5 admitted + 20 refused in one minute: only 5 reach the daily counter.
+      for _ <- 1..25, do: RL.check(u, day_start)
+
+      # 25 more admitted across later minutes brings the day to exactly 30.
+      for m <- 1..5, _ <- 1..5 do
+        assert RL.check(u, day_start + m * 60_000) == :ok
+      end
+
+      assert {:error, {:rate_limited, _}} = RL.check(u, day_start + 6 * 60_000)
+    end
+
+    test "an elapsed day's counter is swept by the user's next check" do
+      u = "u-daily-sweep-#{System.unique_integer([:positive])}"
+      d0 = 700 * @day_ms
+
+      assert RL.check(u, d0) == :ok
+      assert RL.check(u, d0 + @day_ms) == :ok
+
+      days =
+        :ets.tab2list(RL)
+        |> Enum.flat_map(fn
+          {{^u, {:day, d}}, _} -> [d]
+          _ -> []
+        end)
+
+      assert days == [701]
+    end
+  end
+
   test "reset/0 clears all counters (test-isolation contract)" do
     u = uid()
     now = 300 * 60_000

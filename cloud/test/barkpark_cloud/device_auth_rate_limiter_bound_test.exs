@@ -189,12 +189,23 @@ defmodule BarkparkCloud.DeviceAuthRateLimiterBoundTest do
         :ok = TwoFactorRateLimiter.check("user-#{i}-#{System.unique_integer()}", now)
       end
 
-      assert :ets.info(table, :size) == @prune_floor + 100 + 1,
-             "one row per user plus this window's claim marker"
+      users = @prune_floor + 100
+
+      # task-4ce7aa98a5aaa885: each user now holds a minute row AND a day row.
+      assert :ets.info(table, :size) == 2 * users + 1,
+             "a minute row and a day row per user, plus this window's claim marker"
 
       :ok = TwoFactorRateLimiter.check("user-next-window", now + @window_ms)
 
-      assert :ets.info(table, :size) <= 2,
+      # The next minute reclaims every elapsed minute row; the day rows are
+      # still today's and stay.
+      assert :ets.info(table, :size) == users + 2 + 1,
+             "today's day rows, the new user's two rows and the new marker " <>
+               "(held #{:ets.info(table, :size)})"
+
+      :ok = TwoFactorRateLimiter.check("user-next-day", now + 86_400_000)
+
+      assert :ets.info(table, :size) <= 3,
              "the same defect at a smaller key space takes the same fix, not a wait " <>
                "(held #{:ets.info(table, :size)})"
     end
