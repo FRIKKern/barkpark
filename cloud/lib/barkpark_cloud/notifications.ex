@@ -2406,8 +2406,9 @@ defmodule BarkparkCloud.Notifications do
 
     with {:ok, creds} <- reveal_credentials(cfg),
          :ok <- check_credential_url(creds),
-         {:ok, url, body, headers} <- shape(type, creds, event, payload, opts) do
-      post_chat(team_id, type, event, url, body, headers)
+         {:ok, url, body, headers} <- shape(type, creds, event, payload, opts),
+         {:ok, pinned} <- pin_credential_url(creds, url) do
+      post_chat(team_id, type, event, pinned, body, headers)
     else
       {:error, reason} ->
         log_chat_delivery(team_id, type, event, "failed", nil, reason)
@@ -2423,6 +2424,36 @@ defmodule BarkparkCloud.Notifications do
   defp check_credential_url(%{"url" => url}) when is_binary(url), do: SafeUrl.check(url)
   defp check_credential_url(_creds), do: :ok
 
+  # task-b771deef208d93e0: the check above resolves the name and approves it,
+  # but the HTTP client would resolve it AGAIN at connect time. A short-TTL name
+  # can pass the check and then connect to 169.254.169.254 (DNS rebinding).
+  # `SafeUrl.pin/2` resolves once and returns the approved IP literal, the Host
+  # header and the TLS server name, so the connect goes to the address that was
+  # checked. Only a url-bearing credential is pinned: telegram and pushover post
+  # to constant vendor endpoints.
+  defp pin_credential_url(%{"url" => url}, shaped_url) when is_binary(url),
+    do: SafeUrl.pin(shaped_url)
+
+  defp pin_credential_url(_creds, shaped_url),
+    do: {:ok, %{url: shaped_url, host: nil, server_name: nil}}
+
+  # An unpinned target (an IP literal, or a constant vendor endpoint) keeps the
+  # request map exactly as before. A pinned one adds the saved name as the Host
+  # header and as `:server_name`, which the transport uses for TLS SNI and the
+  # certificate hostname check.
+  defp chat_request(%{url: url, host: nil}, headers, body),
+    do: %{method: :post, url: url, headers: headers, body: body}
+
+  defp chat_request(%{url: url, host: host, server_name: server_name}, headers, body) do
+    %{
+      method: :post,
+      url: url,
+      headers: [{"Host", host} | headers],
+      body: body,
+      server_name: server_name
+    }
+  end
+
   # PURE envelope builder — dispatch on channel `type` to the right shaper. Every
   # url-bearing credential has already passed `check_credential_url/1` in
   # `do_deliver_chat/4` before a shaper runs.
@@ -2437,8 +2468,8 @@ defmodule BarkparkCloud.Notifications do
     end
   end
 
-  defp post_chat(team_id, type, event, url, body, headers) do
-    req = %{method: :post, url: url, headers: headers, body: to_string(body)}
+  defp post_chat(team_id, type, event, target, body, headers) do
+    req = chat_request(target, headers, to_string(body))
 
     case chat_http_client().request(req) do
       {:ok, %{status: status}} when status in 200..299 ->

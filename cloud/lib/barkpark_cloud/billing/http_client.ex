@@ -88,33 +88,33 @@ defmodule BarkparkCloud.Billing.HttpClient do
   a binary response body.
   """
   @spec to_httpc(request_map()) :: {tuple(), keyword(), keyword()}
-  def to_httpc(%{method: :post, url: url, headers: headers, body: body}) do
+  def to_httpc(%{method: :post, url: url, headers: headers, body: body} = req) do
     {content_type, other_headers} = pop_content_type(headers)
 
     request_arg =
       {to_charlist(url), to_header_charlists(other_headers), to_charlist(content_type),
        to_string(body)}
 
-    {request_arg, http_opts(), opts()}
+    {request_arg, http_opts(req), opts()}
   end
 
-  def to_httpc(%{method: :get, url: url, headers: headers}) do
+  def to_httpc(%{method: :get, url: url, headers: headers} = req) do
     request_arg = {to_charlist(url), to_header_charlists(headers)}
-    {request_arg, http_opts(), opts()}
+    {request_arg, http_opts(req), opts()}
   end
 
   # PUT — the instance-API proxy's `webhook.update` (and the dwb-6
   # `wire_site_url` webhook re-point). `:httpc` accepts the same 4-tuple form as
   # POST (content-type + body pulled out), so the JSON body rides alongside the
   # remaining headers.
-  def to_httpc(%{method: :put, url: url, headers: headers, body: body}) do
+  def to_httpc(%{method: :put, url: url, headers: headers, body: body} = req) do
     {content_type, other_headers} = pop_content_type(headers)
 
     request_arg =
       {to_charlist(url), to_header_charlists(other_headers), to_charlist(content_type),
        to_string(body)}
 
-    {request_arg, http_opts(), opts()}
+    {request_arg, http_opts(req), opts()}
   end
 
   # PATCH — Cloudflare's `ensure_zone_proxied` (PATCH /zones/:zone/dns_records/:id
@@ -123,28 +123,28 @@ defmodule BarkparkCloud.Billing.HttpClient do
   # rides alongside the remaining headers. Without this clause `request/1` would
   # FunctionClauseError-crash the first time a CF proxy flip reaches the wire
   # (D59 — the CF scaffold's DNS path emits `:patch` and there is no catch-all).
-  def to_httpc(%{method: :patch, url: url, headers: headers, body: body}) do
+  def to_httpc(%{method: :patch, url: url, headers: headers, body: body} = req) do
     {content_type, other_headers} = pop_content_type(headers)
 
     request_arg =
       {to_charlist(url), to_header_charlists(other_headers), to_charlist(content_type),
        to_string(body)}
 
-    {request_arg, http_opts(), opts()}
+    {request_arg, http_opts(req), opts()}
   end
 
   # DELETE — Stripe's immediate `cancel_subscription` (DELETE /v1/subscriptions/:id).
   # `:httpc` accepts the same 4-tuple form as POST (content-type + body), so the
   # body is the form-encoded params (typically empty) and the Content-Type rides
   # alongside the remaining headers.
-  def to_httpc(%{method: :delete, url: url, headers: headers, body: body}) do
+  def to_httpc(%{method: :delete, url: url, headers: headers, body: body} = req) do
     {content_type, other_headers} = pop_content_type(headers)
 
     request_arg =
       {to_charlist(url), to_header_charlists(other_headers), to_charlist(content_type),
        to_string(body)}
 
-    {request_arg, http_opts(), opts()}
+    {request_arg, http_opts(req), opts()}
   end
 
   # ── Internals ──
@@ -178,7 +178,19 @@ defmodule BarkparkCloud.Billing.HttpClient do
   # :httpc would silently FOLLOW it, unvalidated (blind redirect-SSRF). Disabling
   # it means a 3xx is RETURNED to the caller, not followed, so the guard can't be
   # bypassed by a redirect. Do not remove without re-validating each Location.
-  defp http_opts do
+  #
+  # `:server_name` (optional) is set when the caller PINNED the url to an IP
+  # literal (`Notifications.SafeUrl.pin/2`, task-b771deef208d93e0). ssl then
+  # sends it as SNI AND verifies the certificate against it, so connecting to
+  # the checked address never weakens the hostname check.
+  defp http_opts(%{server_name: name} = req) when is_binary(name) do
+    req
+    |> Map.delete(:server_name)
+    |> http_opts()
+    |> Keyword.update!(:ssl, &Keyword.put(&1, :server_name_indication, to_charlist(name)))
+  end
+
+  defp http_opts(_req) do
     [
       ssl: [
         verify: :verify_peer,
