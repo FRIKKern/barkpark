@@ -930,6 +930,12 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// `-o json` stay unchanged (stale_draft_publish_remedy.go).
 	emitStaleDraftPublishRemedy(out, cmd, tail, status, respBody)
 
+	// A publish with no pending draft 404s "document not found … does not exist
+	// in this scope" — false for a document that is live. One probe of the
+	// published lens, on this command's 404 only, says which it was
+	// (doc_publish_no_draft.go). stderr only; exit code unchanged.
+	emitDocPublishNothingToPublish(out, g, ctx, m, cmd, tail, status)
+
 	// The flag only ever overrides the HONEST success path (code == exitOK,
 	// meaning handleResponse's 2xx branch rendered it, not a screen's own
 	// refusal above with its own exit code). Rendering is byte-identical

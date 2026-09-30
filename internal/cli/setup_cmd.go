@@ -444,7 +444,7 @@ TARGETS
   provision   create a cloud host, then deploy (--provider; staged)
 
 FLAGS
-  --target <t>        one of connect|local|deploy|provision
+  --target <t>        one of connect|cloud|local|deploy|provision
   --server <url>      server URL for connect (http:// or https://)
   --name <handle>     short name to save this server under (bp use <handle>)
   --token <tok>       bearer token to persist with the connection

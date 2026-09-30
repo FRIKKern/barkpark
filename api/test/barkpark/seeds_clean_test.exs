@@ -76,6 +76,18 @@ defmodule Barkpark.SeedsCleanTest do
     docs = Repo.all(Document)
     assert [%Document{doc_id: "welcome", type: "paper"} = paper] = docs
     assert is_list(get_in(paper.content, ["blocks"]))
+
+    # The welcome code block is the first set of commands a new install shows.
+    # A bare `bp doc ls` (no <type>) exits 2 — the stranger walk of 2026-09-30
+    # (task-5ab7c2de5dcd0b27) hit it as the very first command typed.
+    [code] = Enum.filter(paper.content["blocks"], &(&1["type"] == "code"))
+
+    for line <- String.split(code["value"], "\n"),
+        [cmd | _] = String.split(line, "#"),
+        String.trim(cmd) in ["bp doc ls", "bp paper", "bp media"] do
+      flunk("the welcome paper suggests `#{String.trim(cmd)}`, a usage error (exit 2)")
+    end
+
     assert paper.title == "Welcome to Barkpark"
     # Article typography, so /papers/welcome shows off the article palette.
     assert get_in(paper.content, ["style"]) == "article"

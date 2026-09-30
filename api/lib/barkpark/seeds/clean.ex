@@ -47,11 +47,15 @@ defmodule Barkpark.Seeds.Clean do
     %{
       "id" => "code1",
       "type" => "code",
+      # Every line here must RUN as typed: this is the first thing a new
+      # install shows. A bare `bp doc ls` / `bp paper` / `bp media` is a usage
+      # error (exit 2) — each needs a type, a verb or a slug.
       "value" =>
-        "bp doc ls            # list documents\n" <>
-          "bp paper             # papers from the terminal\n" <>
-          "bp media             # media library\n" <>
-          "bp setup --help      # reconfigure"
+        "bp schema ls           # the document types on this server\n" <>
+          "bp doc ls <type>       # the documents of one type\n" <>
+          "bp paper view welcome  # this paper, in the terminal\n" <>
+          "bp media --help        # the media library\n" <>
+          "bp setup --help        # reconfigure"
     }
   ]
 

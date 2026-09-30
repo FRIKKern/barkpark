@@ -636,9 +636,11 @@ func Execute(args []string) int {
 			}
 		}
 		usageNoun(out, tree, noun)
-		if verb == "" {
+		if verb == "" && !g.help {
 			return exitUsage // a noun with no verb is incomplete usage
 		}
+		// `bp <noun> --help` ASKED for this page, so it is a success — the same
+		// exit 0 `bp help <noun>` and `bp <noun> <verb> --help` already give.
 		return exitOK
 	}
 
@@ -693,7 +695,7 @@ func Execute(args []string) int {
 			}
 			return usageErrHintf(out, func() {
 				usageSuggestVerb(out, tree, noun, verb)
-			}, verbHint(tree, noun, verb), "%s", noVerbMsg(n, noun, verb))
+			}, verbHint(tree, noun, verb), "%s", noVerbMsg(n, noun, verb)+hiddenVerbTierNote(m.AuthTier))
 		}
 		return suggestUnknownNoun(out, tree, m.AuthTier, noun, prov, manifestOverridePath(g))
 	}
