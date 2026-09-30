@@ -39,6 +39,10 @@ x-control-plane: &control_plane
     - STRIPE_PRICE_SUPPORTER
     - STRIPE_PRICE_SUPPORT_PLUS
     - WORKER_TOKEN
+    # /v1/internal/* perimeter (dr-w24-bl-internal-write-route-is-publicly-reachable):
+    # passthrough-only, no default — an UNSET value refuses to boot on purpose.
+    # Set it in .env on CP_HOST (CIDR list, or `any` to decline the network factor).
+    - INTERNAL_ALLOWED_CIDRS
     # OAuth SSO (#680): OAUTH_STATE_SECRET is a hard boot raise in prod —
     # same passthrough-only rule as the secrets above. Provider client ids
     # are optional (provider disabled when unset).
