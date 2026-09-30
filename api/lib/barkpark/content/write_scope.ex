@@ -589,6 +589,52 @@ defmodule Barkpark.Content.WriteScope do
 
   def resolve_read_dataset_id(_dataset, _opts), do: nil
 
+  @doc """
+  Does the read's project know the dataset leaf `dataset`?
+  (task-8b96938b28964500)
+
+  `GET /v1/data/query/nosuchds/post` used to answer an admin an ordinary empty
+  page (200) and an anonymous caller a generic 404 "document not found". So a
+  typo'd dataset read as "no content yet" to every SDK client with a token. The
+  query and doc doors now ask this first, for every principal.
+
+  The project is resolved exactly as `resolve_read_dataset_id/2` resolves it.
+  When there is no project to ask (a workspace pinned without a project, which
+  reads on the legacy string path, or an install with no Default project), the
+  leaf is not judged: `true`. Otherwise the leaf is known when the project has
+  the `datasets` row, or when any document the read could return carries that
+  dataset string (this project's, or project-less rows such as task-substrate
+  writes and pre-W2 content). A real dataset therefore always passes.
+  """
+  @spec read_dataset_known?(String.t(), keyword()) :: boolean()
+  def read_dataset_known?(dataset, opts) when is_binary(dataset) do
+    project_id =
+      cond do
+        pid = Keyword.get(opts, :project_id) -> pid
+        Keyword.has_key?(opts, :workspace_id) -> nil
+        true -> read_default_project_id(opts)
+      end
+
+    cond do
+      is_nil(project_id) -> true
+      resolve_read_dataset_id(dataset, opts) -> true
+      true -> legacy_dataset_rows?(project_id, dataset)
+    end
+  end
+
+  def read_dataset_known?(_dataset, _opts), do: true
+
+  # Rows the read could still return under this dataset STRING: this project's,
+  # or project-less ones (task-substrate writes and pre-W2 rows carry no
+  # project_id, and the flat read path shows them). Existence only, no data.
+  defp legacy_dataset_rows?(project_id, dataset) do
+    Barkpark.Repo.exists?(
+      from(d in Document,
+        where: d.dataset == ^dataset and (d.project_id == ^project_id or is_nil(d.project_id))
+      )
+    )
+  end
+
   # The Default project id is immutable within a request; memoize it so the
   # no-`:project_id` (flat/back-compat) route resolves get_default_project once
   # — collapsing get_default_workspace + get_default_project (2 reads) that

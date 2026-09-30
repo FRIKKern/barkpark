@@ -27,7 +27,17 @@ defmodule BarkparkWeb.QueryController do
   @document_perspectives ["published", "drafts", "raw"]
   @counts_perspectives ["published"]
 
-  def index(conn, %{"dataset" => dataset, "type" => type} = params) do
+  def index(conn, %{"dataset" => dataset, "type" => _type} = params) do
+    # task-8b96938b28964500: an unknown dataset leaf is a 404 that names it,
+    # for EVERY principal, before the auth gate. It used to be an admin-only
+    # 200 empty page beside an anonymous "document not found".
+    case dataset_gate(:index_dataset, "index/2 (dataset=#{inspect(dataset)})", conn, dataset) do
+      :ok -> index_in_dataset(conn, params)
+      refusal -> refusal
+    end
+  end
+
+  defp index_in_dataset(conn, %{"dataset" => dataset, "type" => type} = params) do
     # THE AUTH-PATH READ IS ITS OWN REGION (task-66ec6750399f649f). The
     # `schema_public?/3` leg of the gate below is a Repo read that sat OUTSIDE
     # `query_index/4`'s rescue region — see `public_gate/5`. Its three answers
@@ -682,33 +692,56 @@ defmodule BarkparkWeb.QueryController do
     if AnonPerspective.anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") do
       {:error, :not_found}
     else
-      # See `public_gate/5` (task-66ec6750399f649f): the `schema_public?/3` leg
-      # of this gate is a Repo read that sat outside `show_doc/5`'s region.
-      case public_gate(
-             :doc_show_auth,
-             "show/2 (dataset=#{inspect(dataset)} type=#{inspect(type)} doc_id=#{inspect(doc_id)})",
-             conn,
-             type,
-             dataset
-           ) do
-        {:error, _} = fault ->
-          fault
-
-        false ->
-          {:error, :not_found}
-
-        true ->
-          cond do
-            # AFTER the two existence-hiding 404s above, never before — otherwise the
-            # refusal answers "this document exists but your perspective is wrong" to
-            # a caller the endpoint is meant to tell nothing. Same ordering as counts/2.
-            bad = unsupported_read_perspective(params) ->
-              refuse_read_perspective(conn, bad)
-
-            true ->
-              show_doc(conn, dataset, type, doc_id, params)
-          end
+      case dataset_gate(:doc_show_dataset, "show/2 (dataset=#{inspect(dataset)})", conn, dataset) do
+        :ok -> show_in_dataset(conn, dataset, type, doc_id, params)
+        refusal -> refusal
       end
+    end
+  end
+
+  # task-8b96938b28964500: the doc door answers an unknown dataset leaf the
+  # same 404 the query door does, after the storage-free drafts refusal above.
+  defp show_in_dataset(conn, dataset, type, doc_id, params) do
+    # See `public_gate/5` (task-66ec6750399f649f): the `schema_public?/3` leg
+    # of this gate is a Repo read that sat outside `show_doc/5`'s region.
+    case public_gate(
+           :doc_show_auth,
+           "show/2 (dataset=#{inspect(dataset)} type=#{inspect(type)} doc_id=#{inspect(doc_id)})",
+           conn,
+           type,
+           dataset
+         ) do
+      {:error, _} = fault ->
+        fault
+
+      false ->
+        {:error, :not_found}
+
+      true ->
+        cond do
+          # AFTER the two existence-hiding 404s above, never before — otherwise the
+          # refusal answers "this document exists but your perspective is wrong" to
+          # a caller the endpoint is meant to tell nothing. Same ordering as counts/2.
+          bad = unsupported_read_perspective(params) ->
+            refuse_read_perspective(conn, bad)
+
+          true ->
+            show_doc(conn, dataset, type, doc_id, params)
+        end
+    end
+  end
+
+  # task-8b96938b28964500: an unknown dataset leaf, for every principal. The
+  # read runs in its OWN region site, so the auth gate's short-circuit (an
+  # authed caller never pays the schema read) is untouched, and a pool fault
+  # here answers the same 503 as every other read door.
+  defp dataset_gate(site, where, conn, dataset) do
+    case read_region(site, where, fn ->
+           Barkpark.Content.WriteScope.read_dataset_known?(dataset, scope_opts(conn))
+         end) do
+      true -> :ok
+      false -> {:error, {:not_found, "dataset #{inspect(dataset)} not found"}}
+      {:error, _} = fault -> fault
     end
   end
 
