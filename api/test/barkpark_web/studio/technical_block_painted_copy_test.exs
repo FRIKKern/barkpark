@@ -1,0 +1,131 @@
+defmodule BarkparkWeb.Studio.TechnicalBlockPaintedCopyTest do
+  # task-bbfdcf4c80b8300d long tail: a footnote's painted notes edit where they
+  # read. The preview keeps the reader HTML byte-for-byte and names, per painted
+  # note, the panel field it writes (BarkparkPaperPaintedCopy hook).
+  use ExUnit.Case, async: true
+
+  import Phoenix.LiveViewTest, only: [render_component: 2]
+
+  alias Barkpark.PortableDoc.Render
+  alias BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor
+
+  defp preview(block) do
+    html =
+      render_component(&TechnicalBlockEditor.technical_block_editor/1,
+        block: block,
+        id: block["id"]
+      )
+
+    {html,
+     html
+     |> LazyHTML.from_fragment()
+     |> LazyHTML.query(~s([data-test-id="paper-technical-preview"]))}
+  end
+
+  test "a footnote preview wires each painted note to its panel field, reader HTML unchanged" do
+    block = %{
+      "id" => "fn",
+      "type" => "footnote",
+      "notes" => [
+        %{"id" => "a", "text" => "First."},
+        %{"id" => "b", "text" => ""},
+        "legacy",
+        %{"id" => "c", "text" => "Third."}
+      ]
+    }
+
+    {html, el} = preview(block)
+    assert html =~ Render.render_block(block, %{style: :article})
+    assert LazyHTML.attribute(el, "phx-hook") == ["BarkparkPaperPaintedCopy"]
+    assert LazyHTML.attribute(el, "id") == ["technical-preview-fn"]
+    assert LazyHTML.attribute(el, "data-painted-copy-form") == ["technical-block-form-fn"]
+
+    # Only the notes the reader paints (map, non-empty text) are named, in order,
+    # so painted row i always writes the stored note it shows.
+    assert LazyHTML.attribute(el, "data-painted-copy-names") == ["note-0-text,note-3-text"]
+    assert el |> LazyHTML.query("li") |> Enum.count() == 2
+
+    form = html |> LazyHTML.from_fragment() |> LazyHTML.query("form#technical-block-form-fn")
+
+    for name <- ~w(note-0-text note-3-text) do
+      assert form |> LazyHTML.query(~s(textarea[name="#{name}"])) |> Enum.count() == 1
+    end
+  end
+
+  test "criteria-progress wires each painted row label to its panel field" do
+    block = %{
+      "id" => "cp",
+      "type" => "criteria-progress",
+      "rows" => [
+        %{"label" => "Survey", "met" => 2, "total" => 5},
+        "legacy",
+        %{"label" => " padded ", "met" => 1, "total" => 1},
+        %{"label" => "File tasks", "met" => 5, "total" => 5}
+      ]
+    }
+
+    attrs = TechnicalBlockEditor.painted_copy_attrs(block, "cp")
+    assert attrs["phx-hook"] == "BarkparkPaperPaintedCopy"
+    assert attrs["data-painted-copy-form"] == "criteria-progress-form-cp"
+
+    # One name per painted row (map rows only); a label the reader repaints
+    # trimmed stays read-only (empty name) so an edit can never drop its spaces.
+    assert attrs["data-painted-copy-names"] == "criterion-0-label,,criterion-3-label"
+
+    painted = Render.render_block(block, %{style: :article})
+
+    assert painted
+           |> LazyHTML.from_fragment()
+           |> LazyHTML.query(attrs["data-painted-copy"])
+           |> Enum.count() == 3
+
+    assert TechnicalBlockEditor.painted_copy_attrs(Map.put(block, "detail", "total"), "cp") == %{},
+           "the aggregate Total row is derived, never wired"
+  end
+
+  test "api-endpoint wires the method, path and param cells it paints verbatim" do
+    block = %{
+      "id" => "ae",
+      "type" => "api-endpoint",
+      "method" => "POST",
+      "path" => "/v1/data/mutate",
+      "params" => [
+        %{"name" => "dataset", "in" => "path", "type" => "string", "required" => true},
+        "legacy",
+        %{"name" => "dry", "in" => "", "type" => "boolean"}
+      ]
+    }
+
+    attrs = TechnicalBlockEditor.painted_copy_attrs(block, "ae")
+    assert attrs["data-painted-copy-form"] == "api-endpoint-form-ae"
+
+    # Document order: method, path, then Name / In / Type / Required per map
+    # param. The derived Required cell and an empty stored cell stay read-only.
+    assert attrs["data-painted-copy-names"] ==
+             "method,path,param-0-name,param-0-in,param-0-type,,param-2-name,,param-2-type,"
+
+    painted = Render.render_block(block, %{style: :article})
+
+    assert painted
+           |> LazyHTML.from_fragment()
+           |> LazyHTML.query(attrs["data-painted-copy"])
+           |> Enum.count() == 10
+
+    lower = TechnicalBlockEditor.painted_copy_attrs(Map.put(block, "method", "post"), "ae")
+
+    assert lower["data-painted-copy-names"] |> String.split(",") |> hd() == "",
+           "a method the reader upcases is never written back from its painted form"
+  end
+
+  test "other technical types and a footnote with nothing painted get no wiring" do
+    for block <- [
+          %{"id" => "d", "type" => "diff", "diff" => "+x"},
+          %{"id" => "t", "type" => "filetree", "text" => "a/"},
+          %{"id" => "e", "type" => "footnote", "notes" => [%{"text" => ""}]},
+          %{"id" => "m", "type" => "footnote", "notes" => "not a list"}
+        ] do
+      {_html, el} = preview(block)
+      assert LazyHTML.attribute(el, "phx-hook") == [], "#{block["id"]} must not be wired"
+    end
+  end
+end

@@ -23,7 +23,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
 
     ~H"""
     <div class="bp-paper-contextual-editor" data-test-id="paper-technical-contextual-editor">
-      <div class="bp-paper-contextual-preview" data-test-id="paper-technical-preview">
+      <div
+        class="bp-paper-contextual-preview"
+        data-test-id="paper-technical-preview"
+        {painted_copy_attrs(@block, @id)}
+      >
         <%= if @preview == "" do %>
           <p class="bp-paper-edit-readonly">Configure {@label} to add content.</p>
         <% else %>
@@ -65,6 +69,123 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
     </div>
     """
   end
+
+  @doc """
+  The painted-copy wiring of a footnote preview: each note the reader paints
+  (`compose.ex` footnote_row_html/1 paints a map note with non-empty string
+  text, and nothing else) edits where it reads through the
+  BarkparkPaperPaintedCopy hook, writing its panel field `note-<i>-text`.
+  The reader HTML itself is unchanged. Other types get no wiring.
+  """
+  def painted_copy_attrs(%{"type" => "footnote"} = block, id) do
+    names =
+      block
+      |> Map.get("notes")
+      |> List.wrap()
+      |> Enum.with_index()
+      |> Enum.filter(fn {note, _} ->
+        is_map(note) and is_binary(Map.get(note, "text")) and Map.get(note, "text") != ""
+      end)
+      |> Enum.map_join(",", fn {_, index} -> "note-#{index}-text" end)
+
+    if names == "" or not is_list(Map.get(block, "notes")) do
+      %{}
+    else
+      %{
+        "id" => "technical-preview-" <> id,
+        "phx-hook" => "BarkparkPaperPaintedCopy",
+        "data-painted-copy" => "li",
+        "data-painted-copy-names" => names,
+        "data-painted-copy-form" => "technical-block-form-" <> id,
+        "data-painted-copy-label" => "Footnote"
+      }
+    end
+  end
+
+  # criteria-progress (PaperEditor's contextual editor): each painted row label
+  # (data_viz.ex criteria_progress_html/1 paints one row per map row, its label
+  # trimmed) writes the panel field `criterion-<i>-label`. A label the reader
+  # would repaint differently (not a trimmed, non-empty string) stays
+  # read-only, and the one aggregate "Total" row of detail "total" is never
+  # wired.
+  def painted_copy_attrs(%{"type" => "criteria-progress"} = block, id) do
+    rows = Map.get(block, "rows")
+
+    names =
+      rows
+      |> List.wrap()
+      |> Enum.with_index()
+      |> Enum.filter(fn {row, _} -> is_map(row) end)
+      |> Enum.map(fn {row, index} ->
+        label = Map.get(row, "label")
+
+        if is_binary(label) and label != "" and label == String.trim(label),
+          do: "criterion-#{index}-label",
+          else: ""
+      end)
+
+    if not is_list(rows) or Map.get(block, "detail") == "total" or Enum.all?(names, &(&1 == "")) do
+      %{}
+    else
+      %{
+        "id" => "criteria-progress-preview-" <> id,
+        "phx-hook" => "BarkparkPaperPaintedCopy",
+        "data-painted-copy" => ".bp-criteria-progress__l",
+        "data-painted-copy-names" => Enum.join(names, ","),
+        "data-painted-copy-form" => "criteria-progress-form-" <> id,
+        "data-painted-copy-label" => "Criterion label"
+      }
+    end
+  end
+
+  # api-endpoint (PaperEditor's contextual editor): compose.ex api_endpoint_html/1
+  # paints, in document order, the method badge (upcased), the path, then per
+  # map param a Name / In / Type / Required row. Each painted cell whose stored
+  # string it paints verbatim writes its panel field; the method only when it
+  # is stored upper-case, and the derived Required Yes/No never.
+  def painted_copy_attrs(%{"type" => "api-endpoint"} = block, id) do
+    verbatim = fn value, name ->
+      if is_binary(value) and value != "", do: name, else: ""
+    end
+
+    method = Map.get(block, "method")
+    path = Map.get(block, "path")
+
+    method_name =
+      if is_binary(method) and method == String.upcase(method),
+        do: verbatim.(method, "method"),
+        else: ""
+
+    params =
+      block
+      |> Map.get("params", [])
+      |> List.wrap()
+      |> Enum.with_index()
+      |> Enum.filter(fn {param, _} -> is_map(param) end)
+      |> Enum.flat_map(fn {param, i} ->
+        Enum.map(~w(name in type), &verbatim.(Map.get(param, &1), "param-#{i}-#{&1}")) ++ [""]
+      end)
+
+    names = [method_name, verbatim.(path, "path") | params]
+
+    if (blank?(method) and blank?(path)) or Enum.all?(names, &(&1 == "")) do
+      %{}
+    else
+      %{
+        "id" => "api-endpoint-preview-" <> id,
+        "phx-hook" => "BarkparkPaperPaintedCopy",
+        "data-painted-copy" =>
+          ".bp-api-endpoint__method, .bp-api-endpoint__path, .bp-api-endpoint__params tbody td",
+        "data-painted-copy-names" => Enum.join(names, ","),
+        "data-painted-copy-form" => "api-endpoint-form-" <> id,
+        "data-painted-copy-label" => "API endpoint field"
+      }
+    end
+  end
+
+  def painted_copy_attrs(_block, _id), do: %{}
+
+  defp blank?(value), do: not is_binary(value) or value == ""
 
   defp technical_label("diff"), do: "diff"
   defp technical_label("filetree"), do: "file tree"

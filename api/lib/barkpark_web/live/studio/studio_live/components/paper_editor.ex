@@ -31,6 +31,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   alias Barkpark.PortableDoc.Render.{Compose, Figures, SectionLayout}
   alias Barkpark.PortableDoc.Render.Components, as: RenderComponents
   alias BarkparkWeb.Studio.StudioLive.Blocks
+  alias BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
   alias Phoenix.LiveView.JS
 
@@ -3279,10 +3280,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
       <% "api-endpoint" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-api-endpoint-contextual-editor">
-          <div class="bp-paper-contextual-preview" data-test-id="paper-api-endpoint-preview">
+          <div
+            class="bp-paper-contextual-preview"
+            data-test-id="paper-api-endpoint-preview"
+            {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}
+          >
             <%= raw(Render.render_block(@block, %{style: :article})) %>
           </div>
-          <details id={"api-endpoint-controls-" <> @id} class="bp-paper-contextual-controls"
+          <details id={"api-endpoint-controls-" <> @id} class="bp-paper-contextual-controls bp-paper-contextual-controls--api-endpoint"
                    phx-mounted={JS.ignore_attributes("open")}>
             <summary class="bp-paper-contextual-toggle">Configure API endpoint</summary>
             <div class="bp-paper-contextual-panel">
@@ -3443,7 +3448,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
       <% "criteria-progress" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-criteria-progress-contextual-editor">
-          <div class="bp-paper-contextual-preview" data-test-id="paper-criteria-progress-preview">
+          <div
+            class="bp-paper-contextual-preview"
+            data-test-id="paper-criteria-progress-preview"
+            {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}
+          >
             <%= raw(Render.render_block(@block, %{style: :article})) %>
           </div>
           <details id={"criteria-progress-controls-" <> @id} class="bp-paper-contextual-controls"
