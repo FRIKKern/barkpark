@@ -242,6 +242,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     %{"blocks" => [%{"id" => "session-body", "type" => "paragraph", "content" => []}]}
   end
 
+  # A SHEET is born with ONE empty tab. `%{}` rendered fine — the grid paints a
+  # phantom "Sheet 1" when there are no tabs (sheet_grid/grid_data.ex) — but the
+  # session's op path looks tab 0 up for real (`Sheets.Core.get_tab/2` via
+  # session/ops.ex fetch_tab) and refused the FIRST keystroke with "1 op(s)
+  # rejected: the sheet has no tab 0", dropping the typed value (stranger walk,
+  # 2026-09-30). The seeded tab carries the same name the grid already shows.
+  def seed_new_doc_content("sheet"), do: %{"tabs" => [%{"name" => "Sheet 1", "cells" => %{}}]}
+
   def seed_new_doc_content(type) do
     if Content.blocks_type?(type), do: %{"blocks" => []}, else: %{}
   end
