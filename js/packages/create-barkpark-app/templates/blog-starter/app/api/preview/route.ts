@@ -1,5 +1,4 @@
 import { draftMode } from 'next/headers'
-import { NextResponse } from 'next/server'
 import { constantTimeEqual } from '../../../lib/constant-time-equal'
 
 // `constantTimeEqual` uses `node:crypto`, and this route is the boundary in
@@ -16,7 +15,10 @@ export const runtime = 'nodejs'
  * signed-URL flow, use `createDraftModeRoutes` from `@barkpark/nextjs/draft-mode`.
  *
  * The redirect target is same-origin only — external and protocol-relative paths
- * are rejected to prevent open redirects.
+ * are rejected to prevent open redirects. It is sent as a RELATIVE `Location`, the
+ * way `createDraftModeRoutes` does: under a self-hosted `next start`, `req.url`
+ * carries the server's bind host (localhost:<port>), so an absolute URL built from
+ * it sent every editor behind a real host or proxy to localhost.
  *
  * The secret comparison is CONSTANT-TIME (`lib/constant-time-equal.ts`). A plain
  * `!==` compares length first and then bytes with an early exit, leaking both
@@ -49,5 +51,5 @@ export async function GET(req: Request): Promise<Response> {
   const dm = await draftMode()
   dm.enable()
 
-  return NextResponse.redirect(new URL(redirectPath, url.origin), { status: 307 })
+  return new Response(null, { status: 307, headers: { Location: redirectPath } })
 }
