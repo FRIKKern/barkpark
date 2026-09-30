@@ -163,9 +163,7 @@ defmodule Barkpark.Content.Expand do
     |> Enum.group_by(fn {ref_type, _id} -> ref_type end, fn {_ref_type, id} -> id end)
     |> Enum.reduce(%{}, fn {ref_type, ids}, acc ->
       ids = Enum.uniq(ids)
-      # Memoized once per ref_type (was two get_schema per ref). A multi-type
-      # target resolves one schema per candidate type, and each document is
-      # redacted under its OWN type's schema.
+      # Memoized once per ref_type (was two get_schema per ref); per type for a multi-type target.
       schema_for = schema_resolver(ref_type, dataset, opts)
 
       # One scoped batch: the ids AND their `drafts.` twins together, so the
@@ -228,10 +226,7 @@ defmodule Barkpark.Content.Expand do
   end
 
   defp typed_doc(%{type: ref_type} = doc, ref_type), do: doc
-
-  defp typed_doc(%{type: type} = doc, targets) when is_list(targets),
-    do: if(type in targets, do: doc, else: nil)
-
+  defp typed_doc(%{type: t} = doc, targets) when is_list(targets), do: if(t in targets, do: doc)
   defp typed_doc(_doc, _ref_type), do: nil
 
   defp load_schemas(types, dataset, opts) do
