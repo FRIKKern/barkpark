@@ -77,5 +77,28 @@ hosts = [...el.querySelectorAll("li")];
 assert.equal(hosts[0].getAttribute("contenteditable"), null, "an unnamed row stays read-only");
 assert.equal(hosts[1].contentEditable, "plaintext-only");
 partial.destroyed();
+
+// A multiline host (a code-tabs panel) takes Enter as a newline; a one-line host
+// in the same preview still commits on Enter.
+el.innerHTML = `<div class="bp-code-tabs"><div class="bp-code-tabs__strip"><button class="bp-code-tabs__tab">JS</button></div>` +
+  `<div class="bp-code-tabs__panels"><div class="bp-code-tabs__panel"><pre>console.log(1)</pre></div></div></div>`;
+el.dataset.paintedCopy = ".bp-code-tabs__tab, .bp-code-tabs__panel > pre";
+el.dataset.paintedCopyNames = "note-0-text,note-3-text";
+el.dataset.paintedCopyMultiline = ".bp-code-tabs__panel > pre";
+const inserted = [];
+document.execCommand = (cmd, _ui, value) => { inserted.push([cmd, value]); return true; };
+const code = { ...window.BarkparkPaperEditorHooks.BarkparkPaperPaintedCopy, el };
+code.mounted();
+const [tab, pre] = [el.querySelector("button"), el.querySelector("pre")];
+assert.equal(tab.getAttribute("aria-multiline"), "false");
+assert.equal(pre.getAttribute("aria-multiline"), "true", "a code panel is a multiline host");
+const codeEnter = new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+pre.dispatchEvent(codeEnter);
+assert.equal(codeEnter.defaultPrevented, true);
+assert.deepEqual(inserted, [["insertText", "\n"]], "Enter in a code panel inserts a newline");
+const tabEnter = new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+tab.dispatchEvent(tabEnter);
+assert.equal(inserted.length, 1, "Enter in a one-line host never inserts text");
+code.destroyed();
 window.close();
 console.log("footnote painted copy: rows edit in place, write their own note field, survive a focused patch; mismatches refused");

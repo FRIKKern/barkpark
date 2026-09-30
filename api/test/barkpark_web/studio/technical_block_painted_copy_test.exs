@@ -117,6 +117,152 @@ defmodule BarkparkWeb.Studio.TechnicalBlockPaintedCopyTest do
            "a method the reader upcases is never written back from its painted form"
   end
 
+  # r2b census: route caption, gauge-list text, bar labels and code tabs.
+  defp painted_count(block, selector) do
+    block
+    |> Render.render_block(%{style: :article})
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query(selector)
+    |> Enum.count()
+  end
+
+  test "route wires its painted caption; the joined meta line stays panel-edited" do
+    block = %{
+      "id" => "r",
+      "type" => "route",
+      "polyline" => "}ujlJgxgcAyPqOgO~JsLc[wF{aAdJ{[hSeE~MzTbInh@aB~e@",
+      "sport" => "sykling",
+      "caption" => "Testrunden"
+    }
+
+    attrs = TechnicalBlockEditor.painted_copy_attrs(block, "r")
+    assert attrs["data-painted-copy-form"] == "route-form-r"
+    assert attrs["data-painted-copy-names"] == "caption"
+    assert painted_count(block, attrs["data-painted-copy"]) == 1
+
+    assert TechnicalBlockEditor.painted_copy_attrs(Map.put(block, "caption", " padded "), "r") ==
+             %{}
+
+    assert TechnicalBlockEditor.painted_copy_attrs(Map.delete(block, "caption"), "r") == %{}
+  end
+
+  test "gauge-list wires title, row labels and notes in document order (share mode only)" do
+    block = %{
+      "id" => "g",
+      "type" => "gauge-list",
+      "title" => "Coverage by surface",
+      "rows" => [
+        %{"label" => "Elixir", "note" => "source of truth", "value" => 2},
+        %{"label" => " Go ", "value" => 1},
+        %{"label" => "JS", "value" => 1, "note" => ""}
+      ]
+    }
+
+    attrs = TechnicalBlockEditor.painted_copy_attrs(block, "g")
+    assert attrs["data-painted-copy-form"] == "gauge-list-form-g"
+
+    assert attrs["data-painted-copy-names"] ==
+             "title,gauge-0-label,gauge-0-note,,gauge-2-label"
+
+    assert painted_count(block, attrs["data-painted-copy"]) == 5
+
+    untitled = TechnicalBlockEditor.painted_copy_attrs(Map.delete(block, "title"), "g")
+    assert untitled["data-painted-copy-names"] == "gauge-0-label,gauge-0-note,,gauge-2-label"
+    assert painted_count(Map.delete(block, "title"), untitled["data-painted-copy"]) == 4
+
+    assert TechnicalBlockEditor.painted_copy_attrs(%{block | "rows" => ["legacy"]}, "g") == %{}
+
+    assert TechnicalBlockEditor.painted_copy_attrs(
+             Map.merge(block, %{"mode" => "count", "snapshot" => []}),
+             "g"
+           ) == %{},
+           "count mode paints derived buckets, never wired"
+  end
+
+  test "bar-chart wires each painted bar label; values stay in the panel" do
+    block = %{
+      "id" => "b",
+      "type" => "bar-chart",
+      "values" => true,
+      "bars" => [%{"label" => "paragraph", "value" => 40}, %{"label" => "heading", "value" => 25}]
+    }
+
+    attrs = TechnicalBlockEditor.painted_copy_attrs(block, "b")
+    assert attrs["data-painted-copy-form"] == "bar-chart-form-b"
+    assert attrs["data-painted-copy-names"] == "bar-0-label,bar-1-label"
+    assert painted_count(block, attrs["data-painted-copy"]) == 2
+    assert TechnicalBlockEditor.painted_copy_attrs(%{block | "bars" => []}, "b") == %{}
+  end
+
+  test "code-tabs wires tab labels and each code panel (multiline) to their panel fields" do
+    block = %{
+      "id" => "ct",
+      "type" => "code-tabs",
+      "tabs" => [
+        %{"label" => "JS", "language" => "js", "value" => "console.log(1)"},
+        %{"label" => "Go", "language" => "go", "code" => "fmt.Println(1)\nreturn"}
+      ]
+    }
+
+    {html, el} = preview(block)
+    assert html =~ Render.render_block(block, %{style: :article})
+    assert LazyHTML.attribute(el, "phx-hook") == ["BarkparkPaperPaintedCopy"]
+    assert LazyHTML.attribute(el, "data-painted-copy-form") == ["technical-block-form-ct"]
+
+    assert LazyHTML.attribute(el, "data-painted-copy-names") ==
+             ["tab-0-label,tab-1-label,tab-0-value,tab-1-value"]
+
+    assert LazyHTML.attribute(el, "data-painted-copy-multiline") == [".bp-code-tabs__panel > pre"]
+    [selector] = LazyHTML.attribute(el, "data-painted-copy")
+    assert painted_count(block, selector) == 4
+
+    form = html |> LazyHTML.from_fragment() |> LazyHTML.query("form#technical-block-form-ct")
+
+    for name <- ~w(tab-0-label tab-1-label tab-0-value tab-1-value) do
+      assert form |> LazyHTML.query(~s([name="#{name}"])) |> Enum.count() == 1, name
+    end
+  end
+
+  test "tabs wires each section's painted label to its panel field; a placeholder label never" do
+    block = %{
+      "id" => "tb",
+      "type" => "tabs",
+      "tabs" => [
+        %{"id" => "p1", "label" => "macOS", "blocks" => []},
+        %{"id" => "p2", "label" => " ", "blocks" => []},
+        %{"id" => "p3", "label" => "Linux", "blocks" => []}
+      ]
+    }
+
+    html =
+      render_component(&BarkparkWeb.Studio.StudioLive.Components.PaperEditor.paper_block_fields/1,
+        block: block,
+        root_slug: "paper",
+        canvas_enabled: true,
+        paper_rev: 1
+      )
+
+    tree = LazyHTML.from_fragment(html)
+    preview = LazyHTML.query(tree, "[data-test-id='paper-tabs-preview']")
+    assert LazyHTML.attribute(preview, "phx-hook") == ["BarkparkPaperPaintedCopy"]
+    assert LazyHTML.attribute(preview, "data-painted-copy-form") == ["tabs-form-tb"]
+
+    assert LazyHTML.attribute(preview, "data-painted-copy-names") == [
+             "panel-0-label,,panel-2-label"
+           ]
+
+    # The painted label is exactly the stored label (no template whitespace), so
+    # copying the host's text into the field writes back what is stored.
+    labels = preview |> LazyHTML.query(".bp-tabs__label") |> Enum.map(&LazyHTML.text/1)
+    assert labels == ["macOS", "Tab 2", "Linux"]
+
+    form = LazyHTML.query(tree, "form#tabs-form-tb")
+
+    for name <- ~w(panel-0-label panel-2-label) do
+      assert form |> LazyHTML.query(~s([name="#{name}"])) |> Enum.count() == 1, name
+    end
+  end
+
   test "other technical types and a footnote with nothing painted get no wiring" do
     for block <- [
           %{"id" => "d", "type" => "diff", "diff" => "+x"},

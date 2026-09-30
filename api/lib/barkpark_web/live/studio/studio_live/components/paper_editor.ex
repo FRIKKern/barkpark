@@ -3240,7 +3240,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
       <% "route" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-route-contextual-editor">
-          <div class="bp-paper-contextual-preview" data-test-id="paper-route-preview">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-route-preview"
+               {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}>
             <%= raw(Render.render_block(@block, %{style: :article})) %>
           </div>
           <details id={"route-controls-" <> @id} class="bp-paper-contextual-controls"
@@ -4154,16 +4155,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "tabs" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-tabs-editor">
           <%= if editable_tabs?(@block) do %>
-            <div class="bp-tabs bp-tabs--editor" data-test-id="paper-tabs-preview">
+            <div class="bp-tabs bp-tabs--editor" data-test-id="paper-tabs-preview"
+                 {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}>
               <section
                 :for={{row, index} <- Enum.with_index(editable_tab_rows(@block))}
                 class="bp-tabs__section"
                 data-tab-row-id={row["id"]}
                 aria-label={tab_label(row, index)}
               >
-                <p class="bp-tabs__label">
-                  <%= tab_label(row, index) %>
-                </p>
+                <p class="bp-tabs__label"><%= tab_label(row, index) %></p>
                 <div class="bp-tabs__panel">
                   <%= for segment <- tab_body_segments(row, @canvas_enabled) do %>
                     <%= case segment do %>
@@ -4504,7 +4504,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
       <% "gauge-list" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-gauge-list-contextual-editor">
-          <div class="bp-paper-contextual-preview" data-test-id="paper-gauge-list-preview">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-gauge-list-preview"
+               {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}>
             <%= raw(Render.render_block(@block, %{style: :article})) %>
           </div>
           <details id={"gauge-list-controls-" <> @id}
@@ -4578,7 +4579,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
       <% "bar-chart" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-bar-chart-contextual-editor">
-          <div class="bp-paper-contextual-preview" data-test-id="paper-bar-chart-preview">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-bar-chart-preview"
+               {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}>
             <%= raw(Render.render_block(@block, %{style: :article})) %>
           </div>
           <details id={"paper-chart-controls-" <> @id} class="bp-paper-contextual-controls"
@@ -4951,7 +4953,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <%!-- Genuinely-unhandled types are read-only in the MVP (view/delete/reorder).
              `table` (editable-table) and `action` (editable-action, the CTA button) are
              now canvas-eligible and render inside the run, so they no longer reach this
-             per-block fallback. --%>
+             per-block fallback. Edit still paints what the reader paints (chat rows,
+             recorded transcripts): leaving the words out made Edit drop authored text
+             the reader shows (r2b click-to-edit census). --%>
+        <div class="bp-paper-contextual-preview" data-test-id="paper-readonly-preview">
+          <%= raw(Render.render_block(@block, %{style: :article})) %>
+        </div>
         <p class="bp-paper-edit-readonly">
           <%= @type %> blocks are not editable yet (view/delete/reorder only).
         </p>

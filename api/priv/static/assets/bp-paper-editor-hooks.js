@@ -5144,7 +5144,11 @@
       this._key = (event) => {
         const host = event.target.closest?.("[data-painted-copy-name]");
         if (!host || event.isComposing) return;
-        if (event.key === "Enter") {
+        if (event.key === "Enter" && host.dataset.paintedCopyMultiline === "true") {
+          // A code panel takes newlines as text (the reader paints white-space: pre).
+          event.preventDefault();
+          document.execCommand("insertText", false, "\n");
+        } else if (event.key === "Enter") {
           event.preventDefault();
           host.blur();
         } else if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "a") {
@@ -5205,12 +5209,15 @@
       const hosts = [...this.el.querySelectorAll(this.el.dataset.paintedCopy || ":not(*)")];
       if (!names.some(Boolean) || hosts.length !== names.length) return;
       const label = this.el.dataset.paintedCopyLabel || "Text";
+      const multiline = this.el.dataset.paintedCopyMultiline;
       hosts.forEach((host, index) => {
         if (!names[index]) return;
+        const lines = !!multiline && host.matches(multiline);
         host.contentEditable = "plaintext-only";
         host.setAttribute("role", "textbox");
         host.setAttribute("aria-label", `${label} ${index + 1}`);
-        host.setAttribute("aria-multiline", "false");
+        host.setAttribute("aria-multiline", lines ? "true" : "false");
+        if (lines) host.dataset.paintedCopyMultiline = "true";
         host.dataset.paintedCopyName = names[index];
         host.tabIndex = 0;
         host.style.cursor = "text";
