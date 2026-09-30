@@ -724,7 +724,7 @@ defmodule Barkpark.Accounts do
   @spec valid_totp?(User.t(), String.t()) :: boolean()
   def valid_totp?(%User{totp_enabled: true, totp_secret: secret} = user, code)
       when is_binary(secret) and is_binary(code),
-      do: NimbleTOTP.valid?(secret, code, totp_opts(user))
+      do: totp_attempt_allowed?(user) and NimbleTOTP.valid?(secret, code, totp_opts(user))
 
   def valid_totp?(_, _), do: false
 
@@ -798,7 +798,7 @@ defmodule Barkpark.Accounts do
   @spec verify_totp(User.t(), String.t()) :: {:ok, User.t()} | :error
   def verify_totp(%User{totp_enabled: true, totp_secret: secret} = user, code)
       when is_binary(secret) and is_binary(code) do
-    if NimbleTOTP.valid?(secret, code, totp_opts(user)) do
+    if totp_attempt_allowed?(user) and NimbleTOTP.valid?(secret, code, totp_opts(user)) do
       now = DateTime.truncate(DateTime.utc_now(), :microsecond)
       consume_totp_step(user, now)
     else
@@ -807,6 +807,27 @@ defmodule Barkpark.Accounts do
   end
 
   def verify_totp(_, _), do: :error
+
+  # task-4d52cfb35cbb0b08: THE PER-ACCOUNT TOTP ATTEMPT BUDGET. Every TOTP
+  # check (the Studio /login/mfa step, the JSON MFA doors, step-up, disable)
+  # spends one token from a per-user bucket: a burst of
+  # `@totp_attempt_capacity`, refilling about 30 a day. Past it even the right
+  # code is refused. Without it, POST /login/mfa (the :browser pipeline mounts
+  # no RateLimit, and a correct password resets the password lockout) let a
+  # password holder guess 6-digit codes as fast as the box answered. The
+  # cloud's twin is TwoFactorRateLimiter's daily bound. The key is per USER,
+  # never per IP, so rotating addresses buys nothing. The cost, stated: a
+  # password holder can spend the budget and hold the account's second step
+  # shut for a while; recovery codes and a password reset still work.
+  @totp_attempt_capacity 10
+  @totp_attempt_refill_per_sec 30 / 86_400
+
+  defp totp_attempt_allowed?(%User{id: id}) do
+    Barkpark.RateLimiter.check(Barkpark.RateLimiter.scoped_key(nil, {:totp_attempt, id}),
+      capacity: @totp_attempt_capacity,
+      refill_per_sec: @totp_attempt_refill_per_sec
+    ) == :ok
+  end
 
   # Atomic compare-and-swap on `last_totp_at`: advance to `now` ONLY if the row
   # still holds the value this caller read (`seen`). A concurrent verify that
