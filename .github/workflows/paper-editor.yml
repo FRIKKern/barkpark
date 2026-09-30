@@ -48,6 +48,26 @@ on:
       # re-frozen here is a new block this workflow must render, and without
       # this line the job that renders it cannot see it.
       - "js/packages/react/tests/fixtures/pd-golden/**"
+      # Every other file a suite under src/ READS from outside this tree
+      # (task-acfdeb338f8ef86e: bulldocs.html.heex went 26 of 60 commits without a
+      # run). HAND-KEPT, not derived by a check: when a suite adds a cross-tree
+      # read, add its sink here in BOTH arms. Re-derive the list with
+      #   grep -rhoE '"(\.\./)+[^"]+"' api/assets/paper-editor/src | sort -u
+      # plus the join(REPO, "...") literals, and diff it against these lines.
+      - "api/priv/static/assets/bp-paper-editor-hooks.js"
+      - "api/priv/static/assets/bp-media-picker.js"
+      - "api/priv/static/assets/bp-media-picker.css"
+      - "api/priv/static/assets/bp-reference-picker.js"
+      - "api/priv/static/assets/bp-asset-browser.js"
+      - "api/priv/static/assets/bp-search-intel.js"
+      - "api/priv/static/assets/phoenix.js"
+      - "api/priv/static/assets/phoenix_live_view.js"
+      - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
+      - "api/lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex"
+      - "api/test/support/fixtures/nested-list-carriers.json"
+      - "api/test/support/fixtures/paper-editor/**"
+      # __no_raw_nul.test.mjs scans the web demo's copy of the bundle too
+      - "web/public/bp-paper-editor.bundle.js"
       - ".github/workflows/paper-editor.yml"
   pull_request:
     paths:
@@ -67,6 +87,26 @@ on:
       # re-frozen here is a new block this workflow must render, and without
       # this line the job that renders it cannot see it.
       - "js/packages/react/tests/fixtures/pd-golden/**"
+      # Every other file a suite under src/ READS from outside this tree
+      # (task-acfdeb338f8ef86e: bulldocs.html.heex went 26 of 60 commits without a
+      # run). HAND-KEPT, not derived by a check: when a suite adds a cross-tree
+      # read, add its sink here in BOTH arms. Re-derive the list with
+      #   grep -rhoE '"(\.\./)+[^"]+"' api/assets/paper-editor/src | sort -u
+      # plus the join(REPO, "...") literals, and diff it against these lines.
+      - "api/priv/static/assets/bp-paper-editor-hooks.js"
+      - "api/priv/static/assets/bp-media-picker.js"
+      - "api/priv/static/assets/bp-media-picker.css"
+      - "api/priv/static/assets/bp-reference-picker.js"
+      - "api/priv/static/assets/bp-asset-browser.js"
+      - "api/priv/static/assets/bp-search-intel.js"
+      - "api/priv/static/assets/phoenix.js"
+      - "api/priv/static/assets/phoenix_live_view.js"
+      - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
+      - "api/lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex"
+      - "api/test/support/fixtures/nested-list-carriers.json"
+      - "api/test/support/fixtures/paper-editor/**"
+      # __no_raw_nul.test.mjs scans the web demo's copy of the bundle too
+      - "web/public/bp-paper-editor.bundle.js"
       - ".github/workflows/paper-editor.yml"
 
 concurrency:
