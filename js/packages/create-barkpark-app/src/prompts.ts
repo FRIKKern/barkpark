@@ -54,6 +54,20 @@ export function interactiveNameError(value: string): string | undefined {
   return projectNameError(value)
 }
 
+/**
+ * The `p.text` validator actually wired to the name prompt. An EMPTY entry is
+ * "press Enter to take the default": @clack/core runs `validate` on the raw
+ * value BEFORE its finalize step substitutes `defaultValue`, so validating ""
+ * refused the very default the prompt shows ("Invalid project name "" —
+ * provide a non-empty directory name.", stranger walk 2026-09-30). Empty
+ * passes here and clack fills in `my-barkpark-site`; anything typed —
+ * whitespace included — is validated as before.
+ */
+export function promptNameValidator(value: string | undefined): string | undefined {
+  if (value === undefined || value === '') return undefined
+  return interactiveNameError(value)
+}
+
 export async function runPrompts(inputs: PromptInputs): Promise<PromptAnswers> {
   p.intro('Barkpark')
 
@@ -83,7 +97,7 @@ export async function runPrompts(inputs: PromptInputs): Promise<PromptAnswers> {
         message: 'Project name?',
         placeholder: 'my-barkpark-site',
         defaultValue: 'my-barkpark-site',
-        validate: interactiveNameError,
+        validate: promptNameValidator,
       })
 
   if (p.isCancel(projectName)) {
