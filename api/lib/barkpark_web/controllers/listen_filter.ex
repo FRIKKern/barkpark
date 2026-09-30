@@ -1,0 +1,165 @@
+defmodule BarkparkWeb.ListenFilter do
+  @moduledoc """
+  The server-side narrowing of `GET /v1/data/listen/:dataset` (task-684369333a0f0deb).
+
+  The SDK (`client.listen(type, filter, {perspective})`) and `bp listen` have
+  always sent `?types=`, `filter[field]=value` and `?perspective=`. The
+  controller read none of them, so every subscriber got every mutation in
+  scope. This module parses them once at connect and decides per event.
+
+    * `?types=a,b`: only mutations whose `_type` is in the set. Absent or
+      blank means every type.
+    * `?perspective=`:
+      * `published` drops draft writes (a `drafts.` document id).
+      * `drafts` and `raw` pass both.
+      * Absent keeps today's stream, which is every event.
+      * Anything else is refused.
+    * `filter[field]=value`: equality on the document the subscriber is
+      allowed to see.
+      * A comma-separated value means "any of", which is how the SDK encodes
+        an array.
+      * A dotted field walks nested objects.
+      * An array field matches when any element equals, whether it is a bare
+        value or a `{_ref}` object.
+      * An operator form (`filter[f][op]=…`) is refused. The stream has no
+        query engine behind it, so honouring only some operators would be a
+        silent over-send.
+
+  ORDER IS LOAD-BEARING. `types` and `perspective` read only event metadata,
+  so they run first and skip the per-subscriber re-render. `filter` runs on the
+  REDACTED result, after `ListenController.redacted_result/4` or `live_result/4`.
+  A filter on a field the caller cannot see therefore never matches, so it
+  cannot be used to probe that field's value.
+
+  An event whose result is `nil` (nothing left to render) passes a `filter`.
+  The filter cannot be evaluated against it, and a subscriber keeping a cache
+  must not miss a removal.
+  """
+
+  @perspectives ["published", "drafts", "raw"]
+
+  defstruct types: nil, perspective: nil, filter: %{}
+
+  @type t :: %__MODULE__{
+          types: MapSet.t(String.t()) | nil,
+          perspective: String.t() | nil,
+          filter: %{optional(String.t()) => [String.t()]}
+        }
+
+  @doc "The `?perspective` values the listen route honours."
+  def perspectives, do: @perspectives
+
+  @doc """
+  Parse the listen query params. Returns `{:ok, filter}`, or
+  `{:error, {:perspective, value}}` / `{:error, {:filter, message, details}}`
+  for a request the stream must refuse before it opens.
+  """
+  @spec parse(map()) :: {:ok, t()} | {:error, term()}
+  def parse(params) when is_map(params) do
+    with {:ok, perspective} <- parse_perspective(Map.get(params, "perspective")),
+         {:ok, filter} <- parse_filter(Map.get(params, "filter")) do
+      {:ok,
+       %__MODULE__{
+         types: parse_types(Map.get(params, "types")),
+         perspective: perspective,
+         filter: filter
+       }}
+    end
+  end
+
+  defp parse_types(v) when is_binary(v) do
+    case v |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
+      [] -> nil
+      list -> MapSet.new(list)
+    end
+  end
+
+  defp parse_types(list) when is_list(list),
+    do: list |> Enum.filter(&is_binary/1) |> Enum.join(",") |> parse_types()
+
+  defp parse_types(_), do: nil
+
+  defp parse_perspective(nil), do: {:ok, nil}
+  defp parse_perspective(v) when v in @perspectives, do: {:ok, v}
+  defp parse_perspective(v), do: {:error, {:perspective, v}}
+
+  defp parse_filter(nil), do: {:ok, %{}}
+
+  defp parse_filter(map) when is_map(map) do
+    Enum.reduce_while(map, {:ok, %{}}, fn
+      {field, value}, {:ok, acc} when is_binary(field) and is_binary(value) ->
+        values = value |> String.split(",") |> Enum.map(&String.trim/1)
+        {:cont, {:ok, Map.put(acc, field, values)}}
+
+      {field, value}, _acc ->
+        {:halt,
+         {:error,
+          {:filter,
+           "the listen stream supports equality filters only " <>
+             "(filter[field]=value, comma-separated for any of); " <>
+             "filter[#{field}] carried #{inspect(value)}", %{parameter: "filter[#{field}]"}}}}
+    end)
+  end
+
+  defp parse_filter(other) do
+    {:error,
+     {:filter,
+      "the listen stream supports equality filters only (filter[field]=value); " <>
+        "got filter=#{inspect(other)}", %{parameter: "filter"}}}
+  end
+
+  @doc """
+  Metadata gate: `true` when the event's type and document id pass `types` and
+  `perspective`. Cheap, and runs before the per-subscriber re-render.
+  """
+  @spec pass_meta?(t(), %{type: term(), doc_id: term()}) :: boolean()
+  def pass_meta?(%__MODULE__{} = f, %{type: type, doc_id: doc_id}) do
+    type_ok?(f.types, type) and perspective_ok?(f.perspective, doc_id)
+  end
+
+  defp type_ok?(nil, _type), do: true
+  defp type_ok?(types, type), do: MapSet.member?(types, type)
+
+  defp perspective_ok?("published", doc_id) when is_binary(doc_id),
+    do: not String.starts_with?(doc_id, "drafts.")
+
+  defp perspective_ok?(_, _), do: true
+
+  @doc """
+  Content gate: `true` when the REDACTED result satisfies every `filter` clause.
+  A `nil` result passes (see the moduledoc).
+  """
+  @spec pass_result?(t(), map() | nil) :: boolean()
+  def pass_result?(%__MODULE__{filter: filter}, _result) when map_size(filter) == 0, do: true
+  def pass_result?(%__MODULE__{}, nil), do: true
+
+  def pass_result?(%__MODULE__{filter: filter}, result) when is_map(result) do
+    Enum.all?(filter, fn {field, wanted} -> matches?(dig(result, field), wanted) end)
+  end
+
+  def pass_result?(_, _), do: false
+
+  defp dig(doc, field) do
+    case Map.fetch(doc, field) do
+      {:ok, v} ->
+        v
+
+      :error ->
+        field
+        |> String.replace_prefix("content.", "")
+        |> String.split(".")
+        |> Enum.reduce_while(doc, fn seg, acc ->
+          case acc do
+            %{} -> {:cont, Map.get(acc, seg)}
+            _ -> {:halt, nil}
+          end
+        end)
+    end
+  end
+
+  defp matches?(nil, _wanted), do: false
+  defp matches?(list, wanted) when is_list(list), do: Enum.any?(list, &matches?(&1, wanted))
+  defp matches?(%{"_ref" => ref}, wanted), do: matches?(ref, wanted)
+  defp matches?(v, _wanted) when is_map(v), do: false
+  defp matches?(v, wanted), do: to_string(v) in wanted
+end
