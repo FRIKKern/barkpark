@@ -22,12 +22,20 @@ defmodule BarkparkWeb.WebhookController do
     end
   end
 
+  # task-c8214d77e91e73d5: a webhook created with no secret used to be stored
+  # secretless and deliver UNSIGNED, and nothing in the 201 said so. Every
+  # @barkpark/nextjs createWebhookHandler refuses an unsigned delivery, and there
+  # was no secret the caller could configure to match. Now a missing/blank
+  # secret is GENERATED here and returned ONCE as `secret` (rotate's contract).
+  # A caller-supplied secret is stored as given and never echoed back.
   def create(conn, %{"dataset" => dataset} = params) do
-    attrs = Map.put(params, "dataset", dataset)
+    {attrs, generated} = ensure_secret(Map.put(params, "dataset", dataset))
 
     with :ok <- refuse_audit_subscription(params),
          {:ok, wh} <- Webhooks.create_webhook(attrs, ScopeHelpers.scope_opts(conn)) do
-      conn |> put_status(201) |> json(%{webhook: render_webhook(wh)})
+      body = %{webhook: render_webhook(wh)}
+      body = if generated, do: Map.put(body, :secret, generated), else: body
+      conn |> put_status(201) |> json(body)
     else
       {:error, changeset} ->
         validation_failed(conn, changeset)
@@ -278,6 +286,15 @@ defmodule BarkparkWeb.WebhookController do
   # .ex:132 same idiom).
   defp parse_limit(_), do: nil
 
+  defp ensure_secret(attrs) do
+    if Dispatcher.blank_secret?(Map.get(attrs, "secret")) do
+      secret = generate_secret()
+      {Map.put(attrs, "secret", secret), secret}
+    else
+      {attrs, nil}
+    end
+  end
+
   defp generate_secret do
     "whsec_" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
   end
@@ -390,6 +407,12 @@ defmodule BarkparkWeb.WebhookController do
       events: wh.events,
       types: wh.types,
       active: wh.active,
+      # task-c8214d77e91e73d5: whether deliveries carry x-barkpark-signature. A
+      # webhook created before secrets were generated on create can still be
+      # secretless; it keeps delivering unsigned (never silently rotated — that
+      # would break a receiver that expects unsigned), and this flag is how a
+      # reader finds it. `bp webhook rotate` gives it a secret.
+      signed: not Dispatcher.blank_secret?(wh.secret),
       # Auto-disable substrate for the console panel: the consecutive terminal
       # give-up count, and when/why the endpoint was auto-disabled (nil until it
       # crosses the threshold). The panel renders these + calls the re-enable path.

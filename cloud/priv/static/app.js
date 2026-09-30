@@ -15518,6 +15518,12 @@
         closeModal();
         toast({ kind: "success", title: "Webhook created", body: url });
         loadWebhooks(root, bp, ds);
+        // task-c8214d77e91e73d5: the instance now GENERATES a signing secret for
+        // a webhook created without one and returns it exactly once, as rotate
+        // does. Show it the same way, or the endpoint is signed with a secret
+        // nobody can configure on the receiving side.
+        var created = r.data && r.data.data && r.data.data.secret;
+        if (created) showWebhookSecretModal(created);
         return;
       }
       if (btn) { btn.disabled = false; btn.textContent = "Create webhook"; }
