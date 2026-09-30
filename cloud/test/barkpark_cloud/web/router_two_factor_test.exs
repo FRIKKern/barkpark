@@ -270,7 +270,7 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
 
       assert json_body(call(:get, "/v1/me", nil, token))["user"]["two_factor_enabled"] == true
 
-      del = call(:delete, "/v1/account/two-factor", nil, token)
+      del = call(:delete, "/v1/account/two-factor", %{current_password: @password}, token)
       assert del.status == 200
       assert json_body(call(:get, "/v1/me", nil, token))["user"]["two_factor_enabled"] == false
     end
@@ -322,6 +322,72 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
       new_codes = json_body(conn)["recovery_codes"]
       assert length(new_codes) == 8
       assert MapSet.disjoint?(MapSet.new(old_codes), MapSet.new(new_codes))
+    end
+  end
+
+  # task-e4cdc0f2e7766e1a: turning 2FA OFF needs the current password OR a
+  # current authenticator code. A bare session used to be enough.
+  describe "DELETE /v1/account/two-factor re-authentication" do
+    defp two_factor_on?(user), do: Accounts.two_factor_enabled?(Accounts.get_user(user.id))
+
+    test "with 2FA on, a bare session is refused (401 reauth_failed) and 2FA stays on" do
+      {user, _team} = user_with_team()
+      {_codes, _secret, token} = enable_two_factor(user)
+
+      conn = call(:delete, "/v1/account/two-factor", nil, token)
+      assert conn.status == 401
+      assert json_body(conn)["error"] == "reauth_failed"
+      assert two_factor_on?(user)
+    end
+
+    test "a wrong password is refused and 2FA stays on" do
+      {user, _team} = user_with_team()
+      {_codes, _secret, token} = enable_two_factor(user)
+
+      conn = call(:delete, "/v1/account/two-factor", %{current_password: "wrong"}, token)
+      assert conn.status == 401
+      assert two_factor_on?(user)
+    end
+
+    test "a wrong authenticator code is refused and 2FA stays on" do
+      {user, _team} = user_with_team()
+      {_codes, _secret, token} = enable_two_factor(user)
+
+      conn = call(:delete, "/v1/account/two-factor", %{otp: "000000"}, token)
+      assert conn.status == 401
+      assert two_factor_on?(user)
+    end
+
+    test "the current password turns it off" do
+      {user, _team} = user_with_team()
+      {_codes, _secret, token} = enable_two_factor(user)
+
+      conn = call(:delete, "/v1/account/two-factor", %{current_password: @password}, token)
+      assert conn.status == 200
+      refute two_factor_on?(user)
+    end
+
+    test "a current authenticator code alone turns it off (an OAuth-only account has no password)" do
+      {user, _team} = user_with_team()
+      {_codes, secret, token} = enable_two_factor(user)
+
+      # Confirm may have spent this TOTP step; clear the high-water mark so the
+      # test measures the re-auth rule, not step timing.
+      BarkparkCloud.Repo.update_all(
+        Ecto.Query.from(u in BarkparkCloud.Accounts.User, where: u.id == ^user.id),
+        set: [two_factor_last_step: nil]
+      )
+
+      conn = call(:delete, "/v1/account/two-factor", %{otp: totp_code_stable!(secret)}, token)
+      assert conn.status == 200
+      refute two_factor_on?(user)
+    end
+
+    test "CONTROL: with 2FA off the route stays an idempotent 200 with no proof" do
+      {user, _team} = user_with_team()
+      token = login_token(user)
+
+      assert call(:delete, "/v1/account/two-factor", nil, token).status == 200
     end
   end
 end
