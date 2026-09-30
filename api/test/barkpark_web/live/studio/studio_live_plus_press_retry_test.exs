@@ -70,7 +70,7 @@ defmodule BarkparkWeb.Studio.StudioLivePlusPressRetryTest do
     # COUNT ONLY WHAT THIS TEST MADE. "production" is shared with every other
     # module, and not every row in it is sandboxed: ExactDraftDeleteTest
     # commits a `note` there through `Sandbox.unboxed_run/2` on purpose and
-    # leaves it as evidence. In a sequential run (CI's `--slowest 50`) that
+    # leaves it as evidence. In a sequential run (nightly's `--slowest 100`) that
     # row is already present when arm 4 counts notes, so a dataset-wide count
     # read 2 where this test made 1. Snapshot the ids present before the test
     # and count only the rest.

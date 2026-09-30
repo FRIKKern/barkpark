@@ -1954,12 +1954,15 @@ jobs:
         # See README "Phase 7: Bokbasen integration" and
         # docs/spec/bokbasen-api-contract.md "How to test" for details.
         # Do NOT add a CI job that requires real Bokbasen credentials.
-        # `--slowest 50` is OUTPUT ONLY (ExUnit prints the 50 slowest tests
-        # after the run; it changes no selection, no exit code, no timing).
-        # It exists because the per-module cost of this 900 s suite is
-        # UNMEASURED: the 43 stalls >=5 s that make up ~56% of the wall time
-        # are today located only by log timestamps, with the owning test
-        # inferred from adjacent lines. This names them.
+        # NO `--slowest` HERE (task-dee226be3107a98b). #15680 added `--slowest
+        # 50` believing it was output only. It is not: `mix help test` says
+        # `--slowest` "Automatically sets `--trace`", and `--trace` sets
+        # max_cases to 1. So every async module ran ONE AT A TIME. Main run
+        # 36775391161 printed "Finished in 1200.8 seconds (313.5s async, 887.3s
+        # sync)", with every async second paid serially, plus per-test trace
+        # output. The stall list it was added for is still produced every day
+        # by elixir-nightly.yml (`--slowest 100`, where serial timing is the
+        # point), so no measurement is lost; only the serialisation is.
         #
         # THE SELECTION IS READ FROM A FILE, and the ALL branch is the default
         # in three separate ways: a missing file, an empty file, and a file
@@ -1971,7 +1974,7 @@ jobs:
           sel="$GITHUB_WORKSPACE/elixir-impacted-selection.txt"
           if [ ! -s "$sel" ] || grep -qxF 'ALL' "$sel"; then
             echo "running the FULL suite"
-            mix test --slowest 50
+            mix test
             exit 0
           fi
           files=()
@@ -1981,11 +1984,11 @@ jobs:
           done <"$sel"
           if [ "${#files[@]}" -eq 0 ]; then
             echo "::warning::the selection file held no usable paths — running the FULL suite."
-            mix test --slowest 50
+            mix test
             exit 0
           fi
           echo "running ${#files[@]} selected test files"
-          mix test --slowest 50 "${files[@]}"
+          mix test "${files[@]}"
 
       # The selection is UPLOADED on every run, pass or fail. It is the only
       # record of what a given sha actually executed, and the attribution
