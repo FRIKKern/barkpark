@@ -713,6 +713,21 @@ func nearestSiblingVerb(n *manifest.TreeNoun, typed string) (string, bool) {
 // never says the noun is unknown (that was the bug), and it carries the fix in
 // the message itself — which matters because `-o json` renders only this string
 // in the error envelope and skips the usage help block entirely.
+// hiddenVerbTierNote is appended to a "no verb" refusal when the caller is below
+// the admin tier. The manifest tree is filtered BY TIER, so under a visible noun
+// a write verb (`bp doc create` at tier none) is simply absent — and `no verb
+// "create"` read as "bp cannot create documents", with nothing saying that a
+// credential would reveal it. The noun-level twin is suggestUnknownNoun's
+// tier-hidden branch; this is the same fact one level down. Empty at admin,
+// where the tree is complete and the refusal is a plain typo.
+func hiddenVerbTierNote(tier string) string {
+	if tier == "admin" {
+		return ""
+	}
+	return fmt.Sprintf(" (your auth tier is %s and the server hides the verbs it does not grant — "+
+		"`barkpark login` or --token <tok> with a stronger credential may reveal it)", authTierLabel(tier))
+}
+
 func noVerbMsg(n *manifest.TreeNoun, noun, typed string) string {
 	verbs := make([]string, 0, len(n.Verbs))
 	for _, c := range n.Verbs {
