@@ -64,7 +64,13 @@ defmodule Barkpark.PortableDoc.Synthesis do
     "composite" => "composite",
     "arrayOf" => "arrayOf",
     "codelist" => "codelist",
-    "localizedText" => "localizedText"
+    "localizedText" => "localizedText",
+    # v1 Sanity-style containers (task-cd9aefaf2f6068d6): an `array` rides the
+    # v2 arrayOf editor and an `object` the composite editor, with their element
+    # shape translated in v1_config/1. Falling back to field-string painted
+    # ["a","b"] as the text "ab" and let one keystroke write a string over a list.
+    "array" => "arrayOf",
+    "object" => "composite"
   }
 
   @default_field_block_type "field-string"
@@ -133,19 +139,28 @@ defmodule Barkpark.PortableDoc.Synthesis do
     case Map.fetch(content, name) do
       {:ok, value} ->
         field = Map.get(field_by_name, name, %{})
-        block_type = field_block_type(fget(field, "type"))
 
-        [
-          Map.merge(
-            %{
-              "id" => synth_id("f", name, idx),
-              "type" => block_type,
-              "fieldName" => name,
-              "value" => value
-            },
-            v2_block_config(block_type, field)
-          )
-        ]
+        case bound_block_shape(field, value) do
+          {:ok, block_type, config} ->
+            [
+              Map.merge(
+                %{
+                  "id" => synth_id("f", name, idx),
+                  "type" => block_type,
+                  "fieldName" => name,
+                  "value" => value
+                },
+                config
+              )
+            ]
+
+          # A v1 container whose shape no field-block can show truthfully (a
+          # mixed-type array, a non-string list, a value of the wrong kind) is
+          # left OUT of the block list: the stored value stays untouched and is
+          # never painted as a mangled string or overwritten through a wrong editor.
+          :unrepresentable ->
+            []
+        end
 
       :error ->
         []
@@ -229,6 +244,92 @@ defmodule Barkpark.PortableDoc.Synthesis do
 
   defp block_label(f), do: fget(f, "title") || fget(f, "name") || ""
 
+  # {:ok, block_type, config} for the bound block a field + value becomes, or
+  # :unrepresentable for a v1 container no field-block shows truthfully.
+  defp bound_block_shape(field, value) do
+    type = fget(field, "type")
+    block_type = field_block_type(type)
+
+    case type do
+      "array" ->
+        with {:ok, of} <- v1_element(fget(field, "of")),
+             true <- v1_list_fits?(of, value) do
+          {:ok, block_type,
+           %{
+             "label" => block_label(field),
+             "of" => of,
+             "ordered" => fget(field, "ordered") == true
+           }}
+        else
+          _ -> :unrepresentable
+        end
+
+      "object" ->
+        with {:ok, subfields} <- v1_fields(fget(field, "fields")),
+             true <- is_map(value) do
+          {:ok, block_type, %{"label" => block_label(field), "fields" => subfields}}
+        else
+          _ -> :unrepresentable
+        end
+
+      _ ->
+        {:ok, block_type, v2_block_config(block_type, field)}
+    end
+  end
+
+  # Element types an arrayOf row edits as text without changing the stored type.
+  @v1_text_elements ~w(string text slug url email)
+
+  # A v1 `of` is a LIST of allowed member types (Sanity style). Exactly one
+  # text-like or object member translates to the v2 element descriptor; a
+  # mixed list or any other member type has no truthful editor.
+  defp v1_element([member]) when is_map(member), do: v1_element(member)
+
+  defp v1_element(member) when is_map(member) do
+    case Map.get(member, "type") || Map.get(member, :type) do
+      t when t in @v1_text_elements ->
+        {:ok, %{"type" => "string"}}
+
+      "object" ->
+        with {:ok, fields} <- v1_fields(Map.get(member, "fields") || Map.get(member, :fields)) do
+          {:ok, %{"type" => "composite", "fields" => fields}}
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp v1_element(_), do: :error
+
+  # A v1 object's subfields as composite subfields: text-like leaves only (a
+  # nested container has no truthful leaf input here).
+  defp v1_fields([_ | _] = fields) do
+    fields
+    |> Enum.reduce_while({:ok, []}, fn f, {:ok, acc} ->
+      name = is_map(f) && (Map.get(f, "name") || Map.get(f, :name))
+      type = is_map(f) && (Map.get(f, "type") || Map.get(f, :type))
+
+      if is_binary(name) and type in @v1_text_elements do
+        title = Map.get(f, "title") || Map.get(f, :title) || name
+        {:cont, {:ok, acc ++ [%{"name" => name, "title" => title, "type" => "string"}]}}
+      else
+        {:halt, :error}
+      end
+    end)
+  end
+
+  defp v1_fields(_), do: :error
+
+  # The stored list must already be the element shape the editor writes back.
+  defp v1_list_fits?(%{"type" => "string"}, value) when is_list(value),
+    do: Enum.all?(value, &is_binary/1)
+
+  defp v1_list_fits?(%{"type" => "composite"}, value) when is_list(value),
+    do: Enum.all?(value, &is_map/1)
+
+  defp v1_list_fits?(_of, _value), do: false
+
   # Deterministic, collision-free synthetic ids so a re-synthesis of the same
   # doc yields identical block ids (idempotent in-memory open).
   defp synth_id(prefix, name, idx), do: "synth-#{prefix}-#{name}-#{idx}"
@@ -295,26 +396,34 @@ defmodule Barkpark.PortableDoc.Synthesis do
   defp scaffold_field_block(name, values, prefill, field_by_name, idx) do
     field = Map.get(field_by_name, name, %{})
     block_type = field_block_type(fget(field, "type"))
-    value = scaffold_value(name, values, prefill, block_type)
+    value = scaffold_value(name, values, prefill, block_type, fget(field, "type"))
 
-    [
-      Map.merge(
-        %{
-          "id" => synth_id("f", name, idx),
-          "type" => block_type,
-          "fieldName" => name,
-          "value" => value
-        },
-        v2_block_config(block_type, field)
-      )
-    ]
+    case bound_block_shape(field, value) do
+      {:ok, block_type, config} ->
+        [
+          Map.merge(
+            %{
+              "id" => synth_id("f", name, idx),
+              "type" => block_type,
+              "fieldName" => name,
+              "value" => value
+            },
+            config
+          )
+        ]
+
+      :unrepresentable ->
+        []
+    end
   end
 
-  defp scaffold_value(name, values, prefill, block_type) do
+  defp scaffold_value(name, values, prefill, block_type, field_type) do
     cond do
       Map.has_key?(values, name) -> Map.get(values, name)
       Map.has_key?(prefill, name) -> Map.get(prefill, name)
       block_type == "field-boolean" -> false
+      field_type == "array" -> []
+      field_type == "object" -> %{}
       true -> ""
     end
   end
