@@ -824,6 +824,12 @@ defmodule Barkpark.Content.Query do
 
   defp resolve_one_op(pair, _field, _dataset, _opts), do: pair
 
+  # BOTH stored reference shapes count (task-da600cdc8482d1ca): a bare id
+  # (`content->>k`, or an array holding the id) and a `{"_ref": id}` object
+  # (`content->k->>'_ref'`, or an array holding such an object). Which shape is
+  # canonical is the owner ruling on task-fcb752b43e11df9b; readers accept both,
+  # like `Edges.reference_target/1`. Nothing about storage changes here.
+  #
   # Scalar `reference` fields and `arrayOf` fields whose element is a reference.
   # Sanity's `references(^._id)` does not care which field carried the link, so
   # neither does this: every reference-shaped field on the type is a candidate.
@@ -843,7 +849,7 @@ defmodule Barkpark.Content.Query do
         query,
         [d],
         not fragment(
-          "EXISTS (SELECT 1 FROM documents f WHERE f.type = ? AND f.dataset IS NOT DISTINCT FROM ? AND f.dataset_id IS NOT DISTINCT FROM ? AND f.workspace_id IS NOT DISTINCT FROM ? AND f.project_id IS NOT DISTINCT FROM ? AND (EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE f.content ->> k = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE jsonb_typeof(f.content -> k) = 'array' AND f.content -> k @> to_jsonb((CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)))))",
+          "EXISTS (SELECT 1 FROM documents f WHERE f.type = ? AND f.dataset IS NOT DISTINCT FROM ? AND f.dataset_id IS NOT DISTINCT FROM ? AND f.workspace_id IS NOT DISTINCT FROM ? AND f.project_id IS NOT DISTINCT FROM ? AND (EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE f.content ->> k = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END) OR f.content -> k ->> '_ref' = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE jsonb_typeof(f.content -> k) = 'array' AND (f.content -> k @> to_jsonb((CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR f.content -> k @> jsonb_build_array(jsonb_build_object('_ref', (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)))))))",
           ^type,
           d.dataset,
           d.dataset_id,
@@ -853,7 +859,13 @@ defmodule Barkpark.Content.Query do
           d.doc_id,
           d.doc_id,
           d.doc_id,
+          d.doc_id,
+          d.doc_id,
+          d.doc_id,
           ^arrays,
+          d.doc_id,
+          d.doc_id,
+          d.doc_id,
           d.doc_id,
           d.doc_id,
           d.doc_id
@@ -864,7 +876,7 @@ defmodule Barkpark.Content.Query do
         query,
         [d],
         fragment(
-          "EXISTS (SELECT 1 FROM documents f WHERE f.type = ? AND f.dataset IS NOT DISTINCT FROM ? AND f.dataset_id IS NOT DISTINCT FROM ? AND f.workspace_id IS NOT DISTINCT FROM ? AND f.project_id IS NOT DISTINCT FROM ? AND (EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE f.content ->> k = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE jsonb_typeof(f.content -> k) = 'array' AND f.content -> k @> to_jsonb((CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)))))",
+          "EXISTS (SELECT 1 FROM documents f WHERE f.type = ? AND f.dataset IS NOT DISTINCT FROM ? AND f.dataset_id IS NOT DISTINCT FROM ? AND f.workspace_id IS NOT DISTINCT FROM ? AND f.project_id IS NOT DISTINCT FROM ? AND (EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE f.content ->> k = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END) OR f.content -> k ->> '_ref' = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE jsonb_typeof(f.content -> k) = 'array' AND (f.content -> k @> to_jsonb((CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR f.content -> k @> jsonb_build_array(jsonb_build_object('_ref', (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)))))))",
           ^type,
           d.dataset,
           d.dataset_id,
@@ -874,7 +886,13 @@ defmodule Barkpark.Content.Query do
           d.doc_id,
           d.doc_id,
           d.doc_id,
+          d.doc_id,
+          d.doc_id,
+          d.doc_id,
           ^arrays,
+          d.doc_id,
+          d.doc_id,
+          d.doc_id,
           d.doc_id,
           d.doc_id,
           d.doc_id

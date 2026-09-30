@@ -153,6 +153,51 @@ defmodule Barkpark.Content.ReferenceCountFilterTest do
     assert titles("category", @used, a) == ["Krim", "Poesi"]
   end
 
+  # task-da600cdc8482d1ca: a reference stored as a `{"_ref": id}` object (what
+  # the SDK, codegen and the starters write) counts exactly like a bare id. On
+  # main the SQL read only `content->>k` / `@> to_jsonb(id)`, so an SDK-written
+  # publication left its category in «uten utgivelser».
+  test "a scalar {_ref} reference counts like a bare id", %{a: a} do
+    doc!(
+      "publication",
+      "pub-ref",
+      %{
+        "title" => "SDK Noir",
+        "content" => %{"category" => %{"_ref" => "cat-unused", "_type" => "reference"}}
+      },
+      a
+    )
+
+    assert titles("category", @used, a) == ["Krim", "Poesi"]
+    assert titles("category", @unused, a) == []
+  end
+
+  test "an arrayOf {_ref} element counts like a bare id", %{a: a} do
+    doc!(
+      "publication",
+      "pub-arr-ref",
+      %{
+        "title" => "SDK Anthology",
+        "content" => %{"illustrators" => [%{"_ref" => "cat-unused", "_type" => "reference"}]}
+      },
+      a
+    )
+
+    assert titles("category", @used, a) == ["Krim", "Poesi"]
+    assert titles("category", @unused, a) == []
+  end
+
+  test "a {_ref} naming ANOTHER id does not count", %{a: a} do
+    doc!(
+      "publication",
+      "pub-ref-other",
+      %{"title" => "Elsewhere", "content" => %{"category" => %{"_ref" => "cat-nope"}}},
+      a
+    )
+
+    assert titles("category", @unused, a) == ["Poesi"]
+  end
+
   test "a type with no schema is a refusal, not two plausible-looking lists", %{a: a} do
     assert_raise Barkpark.Content.InvalidFilterError, fn ->
       Content.list_documents(
