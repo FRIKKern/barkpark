@@ -306,8 +306,12 @@ defmodule BarkparkCloud.Usage do
   # on an unreachable box) — but NOT into one identical map, because the inputs
   # mean two OPPOSITE things:
   #
-  #   * `:unmetered` / an absent input — nobody attempted a read (the box is not
-  #     live, or carries no admin token). "Not yet metered" is the honest word.
+  #   * `:unmetered` / an absent input — nobody attempted a read of the box, in
+  #     THREE cases: it is not live, the plane holds no admin token for it, or the
+  #     stored admin token would not decrypt (the plane failed on its own secret,
+  #     so the request never left it — the registry names that as
+  #     `decrypt_failed`; see `BarkparkCloud.UnavailableVocabulary`). "Not yet
+  #     metered" is the honest word for the box.
   #   * `{:error, reason}` / a shape we cannot trust — the read WAS attempted and
   #     it FAILED. `within_deadline/2` already mints `{:error, :exception}` for a
   #     real raise, distinct from `{:error, :deadline_exceeded}`; the fan-outs add
