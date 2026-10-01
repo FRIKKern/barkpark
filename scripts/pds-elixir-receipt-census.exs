@@ -436,7 +436,7 @@ defmodule PDS.Census do
   # RE-DERIVED BY RUN, never re-typed (PDS-D448a): the two moved rows below are the
   # output of `elixir scripts/pds-elixir-receipt-census.exs` from the repo root on the
   # tree this commit ships, amended in the SAME commit as the change that moved them.
-  # Lens unchanged (build-free AST, substring counts, @evidence_depth 6, @route_depth 12,
+  # Lens unchanged (build-free AST, substring counts, @evidence_depth 6, @route_depth = 12 (spelled with "=" so the ROUTE-DEPTH-TYPED-SIDE-REDS mutation anchor stays unique),
   # `transaction` NOT a write verb, corpus api/lib/**/*.ex = 842 files, CORPUS-INTACT
   # this run); engine of this re-derivation: Elixir 1.19.5 · Erlang/OTP 28
   # (erts 16.3.1) · aarch64-apple-darwin24.6.0, printed live by report_engine/0,
@@ -12958,7 +12958,7 @@ defmodule PDS.Census do
       # WHY A NARROWING AND NOT A WIDENING, MEASURED RATHER THAN PREFERRED. Two widenings
       # were tried first and BOTH left the fired set at exactly 6: admitting `:write`
       # beside `:read` in rcr_def_reads?/2, and raising its budget from @evidence_depth 6
-      # to @route_depth 12. Every call this arm already resolves that touches the store at
+      # to @route_depth = 12. Every call this arm already resolves that touches the store at
       # all touches it with a read, and no further depth reaches one. A mutant that moves
       # nothing proves nothing, so the shipped mutant is the one that was SEEN to move the
       # set.
@@ -14226,16 +14226,22 @@ defmodule PDS.Census do
     # in the expectation and that is measured, not assumed: the population rows are
     # derived from the swept closure rather than from the typed budget, so this mutation
     # leaves them untouched and that arm stays PASS.
+    # TWO HIGHER, NOT ONE LOWER (task-755822d797f272f4, measured 2026-10-01): the
+    # mistyped budget must be a SWEPT depth, because report_depth_sweep/2 reads the row
+    # AT the typed budget — one lower is not in @sweep ++ @beyond and the mutant crashed
+    # with a BadMapError before the arm could red. Two higher is swept and past the
+    # closure, so the arm reds by name. And no comment may spell the attribute and its
+    # value side by side (MUTATION ANCHOR AMBIGUOUS — two did, and this case failed on it).
     %{
       name: "ROUTE-DEPTH-TYPED-SIDE-REDS",
       corpus: :repo,
       argv: [],
       mut: {"@route_depth " <> Integer.to_string(@route_depth),
-            "@route_depth " <> Integer.to_string(@route_depth - 1)},
+            "@route_depth " <> Integer.to_string(@route_depth + 2)},
       exit: 1,
       expect: [
         "FAIL  ROUTE-DEPTH-IS-CLOSURE",
-        "@route_depth is typed #{@route_depth - 1} but the route relation closes at",
+        "@route_depth is typed #{@route_depth + 2} but the route relation closes at",
         "RE-DERIVE the literal, never re-type it"
       ],
       refute: ["PASS  ROUTE-DEPTH-IS-CLOSURE"],
@@ -14591,7 +14597,29 @@ defmodule PDS.Census do
     write_corpus!(dirs.repaired, @selftest_filler, :repaired)
     write_citation_corpora!(dirs.cite_pristine, dirs.cite_padded)
 
-    results = Enum.map(@selftest_cases, &run_selftest_case(&1, src, dirs, root))
+    # PROGRESS, ON STDERR, ONE LINE PER CASE (task-755822d797f272f4). Every case is a
+    # CHILD BEAM that compiles this ~1 MB file and censuses a corpus, run serially, and
+    # the verdict lines below print only after the last one — so a full run was silent
+    # for ~45 minutes with this parent at ~0% CPU (it only waits), and was reported as a
+    # hang. Stderr, so the stdout verdict a reader quotes is byte-for-byte unchanged.
+    total = length(@selftest_cases)
+
+    IO.puts(
+      :stderr,
+      "  running #{total} cases serially, one child BEAM each (each compiles this file; " <>
+        "roughly 20-40 s apiece) — progress below, verdicts on stdout at the end"
+    )
+
+    results =
+      @selftest_cases
+      |> Enum.with_index(1)
+      |> Enum.map(fn {c, i} ->
+        t0 = System.monotonic_time(:millisecond)
+        r = run_selftest_case(c, src, dirs, root)
+        secs = div(System.monotonic_time(:millisecond) - t0, 1000)
+        IO.puts(:stderr, "  [#{i}/#{total}] #{if r.ok?, do: "PASS", else: "FAIL"}  #{c.name}  (#{secs} s)")
+        r
+      end)
     File.rm_rf!(root)
 
     Enum.each(results, fn r ->
