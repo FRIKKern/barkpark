@@ -9,6 +9,7 @@ defmodule Barkpark.StudioChat.Runtime do
   events into durable chat rows.
   """
 
+  alias Barkpark.StudioChat.HostExecution
   alias Barkpark.StudioChat.Runtime.Claude
   alias Barkpark.StudioChat.RuntimeAdmission
   alias Barkpark.StudioChat.RuntimeTelemetry
@@ -379,9 +380,18 @@ defmodule Barkpark.StudioChat.Runtime do
   end
 
   def open(provider, opts) when is_map(opts) do
-    runtime = adapter(provider)
-    opts = managed_options(provider, opts)
-    if Map.get(opts, :resume, false), do: runtime.resume(opts), else: runtime.start(opts)
+    ws = Map.get(opts, :workspace_id)
+
+    # Backstop for every caller (task-6ca882967fd95dda): a managed turn that
+    # would run on the INSTANCE HOST is refused for a session a tenant
+    # workspace owns, whoever asked. `HostExecution` holds the rule.
+    if HostExecution.host_exec?(provider, ws) and not HostExecution.workspace_may_host_exec?(ws) do
+      {:error, :host_execution_not_permitted}
+    else
+      runtime = adapter(provider)
+      opts = managed_options(provider, opts)
+      if Map.get(opts, :resume, false), do: runtime.resume(opts), else: runtime.start(opts)
+    end
   end
 
   @doc "Dispatch one command to managed compute or a registered host."

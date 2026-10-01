@@ -32,8 +32,9 @@ defmodule BarkparkWeb.Studio.ClaudeChatTurnHandoffTest do
   @handler_id "claude-chat-turn-handoff-hold"
 
   setup do
-    ensure_default_scope!()
-    ws = create_workspace!("chat-handoff-ws-#{System.unique_integer([:positive])}")
+    # The turns run on the HOST (`:self_hosted`, the stub binary), which only
+    # the instance owner's Default workspace may (task-6ca882967fd95dda).
+    {ws, _proj} = ensure_default_scope!()
 
     {:ok, minter} =
       Auth.create_token(

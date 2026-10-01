@@ -78,9 +78,20 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render.Components
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.{Attachments, FleetHub, PlanPapers, QuestionAnswer, Recorder, Runtime}
+
+  alias Barkpark.StudioChat.{
+    Attachments,
+    FleetHub,
+    HostExecution,
+    PlanPapers,
+    QuestionAnswer,
+    Recorder,
+    Runtime
+  }
+
   alias Barkpark.Tenancy
   alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.HostExecutionGate
 
   # Wire bounds (charter "Security, validation, and transport verification
   # obligations"). These are the CHAT limits — NOT the endpoint-wide 100 MB
@@ -250,7 +261,8 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, content} <- validate_content(body),
-         %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)) do
+         %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
+         :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], session) do
       case ensure_and_send(id, session, content, conn) do
         :ok ->
           # Persist the user's OWN turn (D140). ensure_and_send has already derived
@@ -271,8 +283,16 @@ defmodule BarkparkWeb.ChatController do
       end
     else
       nil -> not_found(conn)
+      {:error, :host_execution_not_permitted} -> host_refused(conn)
       {:error, message} -> bad_request(conn, message)
     end
+  end
+
+  # task-6ca882967fd95dda: a managed turn on the INSTANCE HOST is the instance
+  # owner's alone (`HostExecution`). A permanent 403 that names the reason and
+  # the way out (cloud profile / registered host), never a retryable 503.
+  defp host_refused(conn) do
+    ErrorResponse.emit_custom(conn, 403, HostExecution.reason(), HostExecution.message())
   end
 
   # ── POST /v1/chat/sessions/:id/interrupt ───────────────────────────────────
@@ -311,7 +331,13 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, {request_id, decision}} <- validate_approval(body),
-         %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)) do
+         %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)),
+         # An ALLOW lets a host turn act; a deny always passes (task-6ca882967fd95dda).
+         :ok <-
+           if(decision == :allow,
+             do: HostExecutionGate.authorize_turn(conn.assigns[:api_token], stored),
+             else: :ok
+           ) do
       with recorder when is_pid(recorder) <- Recorder.whereis(id),
            {:ok, session} <- Recorder.session_pid(recorder) do
         # Soft-match the delivery (D31 seal). For the claude provider answer_approval
@@ -353,6 +379,7 @@ defmodule BarkparkWeb.ChatController do
       send_resp(conn, :no_content, "")
     else
       nil -> not_found(conn)
+      {:error, :host_execution_not_permitted} -> host_refused(conn)
       {:error, message} -> bad_request(conn, message)
     end
   end
