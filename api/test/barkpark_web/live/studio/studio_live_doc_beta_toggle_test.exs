@@ -160,6 +160,39 @@ defmodule BarkparkWeb.Studio.StudioLiveDocBetaToggleTest do
     assert classic_html =~ ~s(value="Round-Trip Title")
   end
 
+  # task-43fe1756e8ae8120. At phone width the Classic header's
+  # `bp-overflow-menu` collapses its rightmost children into a "•••" popover
+  # of CLONES whose click is forwarded to the ORIGINAL child. The toggle is a
+  # two-button GROUP: collapsed, its clone forwards the click to the group
+  # div, not to a button, so neither mode is reachable. Measured in headless
+  # Chrome at 390px: the toggle `[data-overflowed]`, box 0x0. The mode switch
+  # therefore renders OUTSIDE the overflow menu and is never collapsed.
+  test "the Classic/Beta toggle never renders inside the collapsible overflow menu",
+       %{conn: conn} do
+    {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post/toggle-demo-p3"))
+
+    doc = LazyHTML.from_document(html)
+    assert LazyHTML.query(doc, ~s([data-test-id="editor-mode-toggle"])) |> Enum.count() == 1
+
+    assert LazyHTML.query(doc, ~s(bp-overflow-menu [data-test-id="editor-mode-toggle"]))
+           |> Enum.count() == 0
+  end
+
+  # Same task: a LiveView patch morphs the overflow menu's children back to
+  # the server render, which never carries the JS-built "•••" trigger, so the
+  # trigger was stripped while children stayed `[data-overflowed]` — measured
+  # in headless Chrome at 390px: four hidden doc actions, ZERO "More actions"
+  # buttons in the document. The component must put a stripped trigger back.
+  test "bp-overflow-menu re-attaches its trigger after a LiveView child patch" do
+    js = File.read!(Path.join(:code.priv_dir(:barkpark), "static/assets/bp-overflow-menu.js"))
+
+    assert js =~ "new MutationObserver(",
+           "bp-overflow-menu.js no longer watches its children for LiveView patches"
+
+    assert js =~ "this._trigger.parentNode !== this",
+           "bp-overflow-menu.js no longer re-attaches a trigger a patch stripped"
+  end
+
   defp stored_blocks(doc_id) do
     {:ok, doc} = Content.get_document(doc_id, "post", @dataset)
     doc.content["blocks"]
