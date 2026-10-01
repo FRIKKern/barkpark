@@ -317,12 +317,12 @@ defmodule BarkparkWeb.StudioChrome do
 
       not can_create_in?(socket, ws) ->
         # NOT "sign in" — this principal IS signed in, it simply holds no
-        # membership here. The silent no-op this replaces was not a lie, but it
+        # write seat here (non-member, or a read-only member). The silent no-op this replaces was not a lie, but it
         # was not an answer either: the form just did nothing.
         put_flash(
           socket,
           :error,
-          "You are not a member of this workspace — ask an owner to add you before creating a project"
+          "You need write access in this workspace to create a project — ask an owner to add you"
         )
 
       true ->
@@ -545,18 +545,28 @@ defmodule BarkparkWeb.StudioChrome do
   # rendered it is #34 all over again).
   defp principal(socket), do: ScopeResolver.principal_from_assigns(socket.assigns)
 
-  # May THIS principal mint sibling tenancy inside `ws`? Membership, asked of
-  # the principal's OWN kind — `Tenancy.Auth.member?/2` reads a token id out of
-  # the "api_token" row space and a %User{} id out of the "user" row space, so
-  # this widens nothing. For a token it is byte-identical to `can_reach?/2`
-  # (that arm already IS `member?/2`); it exists so the account arm asks the
-  # SAME question instead of `can_reach?/2`'s anonymous fallback ("is this the
-  # workspace I am already mounted in?"), which every mounted account session
-  # answers yes to and which therefore gates nothing.
+  # May THIS principal mint sibling tenancy inside `ws`? A WRITE seat, asked of
+  # the principal's OWN kind — `Tenancy.Auth.authorize/3` reads a token id out
+  # of the "api_token" row space and a %User{} id out of the "user" row space,
+  # so this widens nothing. It is deliberately STRICTER than `can_reach?/2`
+  # (reach is membership; creating is a write), and it exists so the account
+  # arm asks a real question instead of `can_reach?/2`'s anonymous fallback
+  # ("is this the workspace I am already mounted in?"), which every mounted
+  # account session answers yes to and which therefore gates nothing.
+  #
+  # WRITE, not mere membership (r4a LiveView authz sweep). This is the socket
+  # twin of `WorkspaceController.create_project/2`, which asks
+  # `authorize(principal, ws.id, :write)` since
+  # arpss-w10-bl-readonly-member-creates-projects: `member?/2` alone admits a
+  # `["read"]` token (its role is "member"), and the surfaces this fallback
+  # serves (MediaLive, ApiTesterLive, AccountLive, plugin pages) carry no
+  # `Caps` gate, so a forged `create-project` minted a Project + Dataset the
+  # REST door refuses. `authorize/3` is the same single membership load plus
+  # the token's write conjunct; for a %User{} it is the role's :write grant.
   defp can_create_in?(socket, %{id: ws_id}) do
     case principal(socket) do
       nil -> false
-      principal -> Tenancy.Auth.member?(principal, ws_id)
+      principal -> Tenancy.Auth.authorize(principal, ws_id, :write) == :ok
     end
   end
 
