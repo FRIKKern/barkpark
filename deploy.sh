@@ -19,23 +19,23 @@ bp_git() {
 }
 # bp_git END
 
-# install_caddy_official BEGIN
+# install_caddy_pkg BEGIN
 # ONE Caddy installer, byte-identical in deploy.sh (and its go:embedded copy),
 # deploy/azure-base-install.sh, and — extracted from the embedded deploy.sh at
 # run time — internal/cli/setup/caddy.go. internal/cli/setup/caddy_test.go reds
 # if the copies drift (task-8fcdc94b07a9dc60).
 #
-# 1. The official apt repo FIRST, so a box keeps apt-managed Caddy updates.
-# 2. If that repo cannot be used, the SAME official package from the pinned
+# 1. The upstream apt repo FIRST, so a box keeps apt-managed Caddy updates.
+# 2. If that repo cannot be used, the SAME upstream package from the pinned
 #    GitHub release, verified against a pinned sha512 before it is installed.
 #    Measured 2026-10-01: cloudsmith signs caddy/stable's InRelease with subkey
 #    531A6B20FA058A70, expired 2024-03-30, so `apt-get update` exits 100
-#    (EXPKEYSIG; upstream caddyserver/caddy#8095). The repo's source list is
+#    (EXPKEYSIG; upstream caddyserver/caddy issue 8095). The repo's source list is
 #    then REMOVED, so it cannot fail every later `apt-get update` on the box.
 # BARKPARK_CADDY_SKIP_APT=1 skips step 1 (the harness uses it to keep step 2
 # tested after the upstream repo recovers). Bumping the fallback: version plus
 # both sha512 lines, from that release's caddy_<v>_checksums.txt.
-install_caddy_official() {
+install_caddy_pkg() {
   local v=2.11.4 arch sum deb
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq || true
@@ -44,10 +44,10 @@ install_caddy_official() {
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
     if apt-get update -qq && apt-get install -y -qq caddy; then
-      echo ">> caddy: installed from the official apt repo"
+      echo ">> caddy: installed from the upstream apt repo"
       return 0
     fi
-    echo "!! caddy: the official apt repo is unusable; removing its source list and installing the pinned v$v release .deb" >&2
+    echo "!! caddy: the upstream apt repo is unusable; removing its source list and installing the pinned v$v release .deb" >&2
     rm -f /etc/apt/sources.list.d/caddy-stable.list
   fi
   arch="$(dpkg --print-architecture)"
@@ -67,7 +67,7 @@ install_caddy_official() {
   rm -f "$deb"
   echo ">> caddy: installed v$v from the pinned, sha512-verified release .deb"
 }
-# install_caddy_official END
+# install_caddy_pkg END
 
 # Barkpark — Server deployment
 #
@@ -513,7 +513,7 @@ if [ "$PHX_SCHEME" = "https" ] && printf '%s' "$DOMAIN" | grep -q '[a-zA-Z]'; th
     echo ">> TLS: Caddy already installed — leaving its config untouched"
   else
     echo ">> TLS: installing Caddy for $DOMAIN..."
-    install_caddy_official || { echo "!! TLS: Caddy install failed (apt repo AND pinned release); see above" >&2; exit 1; }
+    install_caddy_pkg || { echo "!! TLS: Caddy install failed (apt repo AND pinned release); see above" >&2; exit 1; }
     cat > /etc/caddy/Caddyfile <<CADDYEOF
 $DOMAIN {
 	reverse_proxy localhost:$APP_PORT
