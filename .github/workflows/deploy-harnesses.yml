@@ -150,7 +150,7 @@ jobs:
           CADDY_VERSION: "2.11.4"
           CADDY_SHA512: "8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9"
         run: |
-          set -euo pipefail
+          set -eu
           tgz="caddy_${CADDY_VERSION}_linux_amd64.tar.gz"
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/$tgz" \
             "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/$tgz"
