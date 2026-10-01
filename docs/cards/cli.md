@@ -3,7 +3,7 @@
 
 Plugin-dynamic Go CLI in `internal/cli/`. The verb tree derives from the capabilities manifest (`/v1/capabilities`); `Execute()` in cli.go dispatches builtins then manifest verbs. Write bodies: declared args seed, `--set k=v` merges strings, `--set k:=json` sends TYPED JSON verbatim, `--file`/stdin overrides all bar a declared body arg (`bulldocs publish <slug>`), which merges over it. Write verbs (`doc create/patch/delete/publish/unpublish`) ride manifest `mutation_op`+`set_key` → `{mutations:[{op:…}]}` (buildBody). `--set` merges SHALLOW into `content` (`--set 'blocks:=[…]'`); a dotted key and `content:={…}` are both REFUSED; `k:=null` on `doc patch` DELETES k. Single-quote JSON args.
 
-Dev-loop builtins (scoped URLs `/w/<ws>/p/<project>/v1/…`, not flat BuildURL): `bp make schema <name>` prints a schema v2 skeleton; `bp make workflow <site>` prints the curl-only GitHub Actions builder TEMPLATE (prebuilt lane; contract in make_workflow.go's header); `bp seed <type> [--count N]` fakes drafts; `bp tinker`: query/doc/mutate REPL.
+Dev-loop builtins (scoped URLs `/w/<ws>/p/<project>/v1/…`, not flat BuildURL): `bp make schema <name>` prints a schema v2 skeleton; `bp make workflow <site>` prints the curl-only GitHub Actions builder TEMPLATE (prebuilt lane; contract in make_workflow.go's header); `bp seed <type> [--count N]` fakes drafts, pattern-valid; `bp tinker`: query/doc/mutate REPL.
 
 **Scaffy catalog-first** — check `scaffy/commands/` before hand-editing a repeated shape → scaffy/README.md.
 

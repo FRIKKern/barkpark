@@ -389,8 +389,12 @@ func generateDoc(s seedSchema, n int) map[string]any {
 func fakeValue(f seedField, n int) any {
 	switch f.Type {
 	case "string":
-		// A pattern (e.g. a slug regex) → slug-safe value; else a readable label.
-		if _, hasPattern := f.Validation["pattern"]; hasPattern {
+		// A pattern → a value that matches it (the server enforces it on
+		// publish); else a readable label.
+		if raw, hasPattern := f.Validation["pattern"]; hasPattern {
+			if v, ok := patternedString(raw, f.Name, n); ok {
+				return v
+			}
 			return fmt.Sprintf("%s-%d", slugify(f.Name), n)
 		}
 		return fmt.Sprintf("%s %d", titleCase(f.Name), n)
