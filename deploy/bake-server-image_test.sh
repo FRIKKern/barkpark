@@ -79,20 +79,20 @@ run_case() {
   echo "case: $name (rc=$RC)"
 }
 
-baked() { [ "$RC" = 97 ] && printf '%s' "$CALLS" | grep -q '^hcloud server create'; }
-skipped() { [ "$RC" = 0 ] && ! printf '%s' "$CALLS" | grep -q '^hcloud server create'; }
+baked() { [ "$RC" = 97 ] && grep -q '^hcloud server create' <<<"$CALLS"; }
+skipped() { [ "$RC" = 0 ] && ! grep -q '^hcloud server create' <<<"$CALLS"; }
 
 # 1. A fresh bake at main's commit: nothing to do (the old behaviour, kept).
 run_case "fresh + current" "$(images_json "$(iso_days_ago 1)" abc)" abc "$INERT_COMPARE"
-if skipped && printf '%s' "$OUT" | grep -q 'bake is current'; then pass "a 1-day-old current bake is skipped"; else fail "a 1-day-old current bake is skipped — $OUT"; fi
+if skipped && grep -q 'bake is current' <<<"$OUT"; then pass "a 1-day-old current bake is skipped"; else fail "a 1-day-old current bake is skipped — $OUT"; fi
 
 # 2. A fresh bake whose drift is box-irrelevant: still skipped (kept).
 run_case "fresh + inert drift" "$(images_json "$(iso_days_ago 1)" abc)" def "$INERT_COMPARE"
-if skipped && printf '%s' "$OUT" | grep -q 'box-irrelevant'; then pass "a 1-day-old bake with inert drift is skipped"; else fail "a 1-day-old bake with inert drift is skipped — $OUT"; fi
+if skipped && grep -q 'box-irrelevant' <<<"$OUT"; then pass "a 1-day-old bake with inert drift is skipped"; else fail "a 1-day-old bake with inert drift is skipped — $OUT"; fi
 
 # 3. THE ROW: an old bake at main's commit is REBAKED.
 run_case "old + current" "$(images_json "$(iso_days_ago 10)" abc)" abc "$INERT_COMPARE"
-if baked && printf '%s' "$OUT" | grep -q 'rebaking regardless of code drift'; then pass "a 10-day-old current bake is rebaked (age ceiling)"; else fail "a 10-day-old current bake is rebaked (age ceiling) — $OUT"; fi
+if baked && grep -q 'rebaking regardless of code drift' <<<"$OUT"; then pass "a 10-day-old current bake is rebaked (age ceiling)"; else fail "a 10-day-old current bake is rebaked (age ceiling) — $OUT"; fi
 
 # 4. THE ROW: an old bake with only inert drift is REBAKED.
 run_case "old + inert drift" "$(images_json "$(iso_days_ago 10)" abc)" def "$INERT_COMPARE"
