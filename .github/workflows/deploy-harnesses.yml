@@ -368,6 +368,10 @@ jobs:
       # cannot mistake it for merge protection.
       - name: systemd OnFailure handler harness
         run: bash deploy/systemd-onfailure_test.sh
+      # The warm-image bake's skip decision honours an age ceiling (stale apt
+      # index), proven offline with stubbed hcloud/curl/flock.
+      - name: Warm-image bake skip-decision harness
+        run: bash deploy/bake-server-image_test.sh
 
       # task-f35c835bf18712c8. deploy/slot-memory-peaks.sh shipped in PR #18488
       # with 35 offline checks and NO caller of any kind: `git grep -n
