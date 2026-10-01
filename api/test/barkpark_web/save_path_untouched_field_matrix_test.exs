@@ -209,6 +209,28 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
          }
        ]
      }, %{"s" => "x", "inner" => %{"k" => "v", "n" => 1}}},
+    {"localized_extra_lang", %{"type" => "localizedText", "languages" => ["nob", "eng"]},
+     %{"nob" => "Hei", "eng" => "Hi", "deu" => "Hallo"}},
+    {"codelist_code", %{"type" => "codelist", "codelistId" => "matrix:none", "version" => "1"},
+     "eng"},
+    {"comp_select_image",
+     %{
+       "type" => "composite",
+       "fields" => [
+         %{"name" => "kind", "type" => "select", "options" => [1, 2]},
+         %{"name" => "img", "type" => "image"},
+         %{"name" => "flag", "type" => "boolean"}
+       ]
+     },
+     %{
+       "kind" => 2,
+       "img" => %{
+         "_type" => "image",
+         "asset" => %{"_ref" => "image-x"},
+         "hotspot" => %{"x" => 0.5, "y" => 0.5}
+       },
+       "flag" => "true"
+     }},
     {"comp_number_string",
      %{"type" => "composite", "fields" => [%{"name" => "n", "type" => "number"}]}, %{"n" => "3"}},
     # ── a richText field edited by the block canvas (`editor: blocks`) ──────
@@ -331,8 +353,8 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
     assert_cells!(path, doc)
   end
 
-  defp assert_cells!(path, doc) do
-    case failing_cells(doc.content) do
+  defp assert_cells!(path, doc, except \\ []) do
+    case Enum.reject(failing_cells(doc.content), fn {name, _, _} -> name in except end) do
       [] ->
         :ok
 
@@ -532,6 +554,50 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
       |> post("/v1/data/mutate/#{@dataset}", Jason.encode!(%{"mutations" => [mutation]}))
 
     assert conn.status == 200, "mutate refused: #{conn.status} #{conn.resp_body}"
+  end
+
+  describe "Studio Classic array ops — the whole buffer is re-posted" do
+    # `Fields.array_op/2` (add / remove / move a row) re-posts the editor's
+    # WHOLE form buffer through `Shared.do_autosave/2` — every other field rides
+    # along in its buffer shape (a JSON true, an image as its JSON string, a
+    # datetime as its input value). The rest of the document must not move.
+    for {field, action, index, expected} <- [
+          {"arr_string", "remove_row", "1", ["a"]},
+          {"arr_string", "move_down", "0", ["b", "a"]},
+          {"arr_string", "add_row", nil, 3},
+          # The surviving row keeps its `{_ref, _key}` object and its float.
+          {"arr_comp_ref", "remove_row", "0",
+           [%{"title" => "two", "ref" => %{"_ref" => "a2", "_key" => "k2"}, "n" => 2.5}]},
+          {"arr_comp_ref", "move_down", "0",
+           [
+             %{"title" => "two", "ref" => %{"_ref" => "a2", "_key" => "k2"}, "n" => 2.5},
+             %{"title" => "one", "ref" => %{"_ref" => "a1"}, "n" => 1}
+           ]}
+        ] do
+      test "#{action} on #{field} leaves every other cell byte-identical",
+           %{type: type, token: token} do
+        doc_id = seed_draft!(type)
+        field = unquote(field)
+
+        {:ok, view, _html} =
+          live(editor_conn(token), scoped_studio("/d/#{@dataset}/studio/#{type}/#{doc_id}"))
+
+        params =
+          %{"action" => unquote(action), "field" => field, "path" => "doc[#{field}]"}
+          |> then(fn p -> if unquote(index), do: Map.put(p, "index", unquote(index)), else: p end)
+
+        render_click(view, "array_op", params)
+
+        doc = stored(type, doc_id)
+
+        case unquote(Macro.escape(expected)) do
+          n when is_integer(n) -> assert length(doc.content[field]) == n
+          list -> assert doc.content[field] === list
+        end
+
+        assert_cells!("classic_array_op_#{unquote(action)}_#{field}", doc, [field])
+      end
+    end
   end
 
   describe "Field canvas — a block op on a richText `editor: blocks` field" do
