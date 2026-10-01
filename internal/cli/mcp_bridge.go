@@ -343,7 +343,7 @@ func buildCommandTail(cmd manifest.Command, args map[string]any) []string {
 		if !ok {
 			continue
 		}
-		if f.Type == "bool" {
+		if f.IsSwitch() {
 			if isTruthy(v) {
 				tail = append(tail, "--"+f.Name)
 			}

@@ -1971,7 +1971,7 @@ func splitArgsWithManifest(m *manifest.Manifest, cmd manifest.Command, tail []st
 			if !ok {
 				return nil, nil, unknownFlagError(m, cmd, "--"+name, name)
 			}
-			if f.Type == "bool" {
+			if f.IsSwitch() {
 				// `--force=false` must not silently set the flag true: an inline
 				// value on a bool is a usage error, mirroring parseGlobals.
 				if hasInline {
@@ -2012,7 +2012,7 @@ func splitArgsWithManifest(m *manifest.Manifest, cmd manifest.Command, tail []st
 			if !ok {
 				return nil, nil, unknownFlagError(m, cmd, a, long)
 			}
-			if f.Type == "bool" {
+			if f.IsSwitch() {
 				if err := refuseRepeatedFlag(cmd, f, flags[long], "true"); err != nil {
 					return nil, nil, err
 				}
@@ -2073,7 +2073,7 @@ func refuseRepeatedFlag(cmd manifest.Command, f manifest.Flag, seen []string, ne
 	if len(seen) == 0 || flagAcceptsRepeat(f) {
 		return nil
 	}
-	if f.Type == "bool" {
+	if f.IsSwitch() {
 		return fmt.Errorf("flag --%s given twice for %s %s but is not repeatable; pass it once", f.Name, cmd.Noun, cmd.Verb)
 	}
 	return fmt.Errorf("flag --%s given twice for %s %s (%q then %q) but is not repeatable; bp will not silently keep just one of the two — pass it once", f.Name, cmd.Noun, cmd.Verb, seen[0], next)
@@ -2194,7 +2194,7 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 		if forwarded[f.Name] {
 			continue
 		}
-		if f.Type == "bool" {
+		if f.IsSwitch() {
 			// A set bool flag rides as `?name=true` (server reads the string).
 			if vals, ok := flags[f.Name]; ok && len(vals) > 0 && vals[len(vals)-1] == "true" {
 				q.Set(f.Name, "true")

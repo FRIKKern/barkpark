@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
@@ -175,7 +176,7 @@ func runSetup(out *writer, g globals, tail []string) int {
 	opts := setup.Options{
 		DryRun:       g.dryRun,
 		Confirm:      g.yes,
-		Out:          out.stdout,
+		Out:          setupStepOut(out, jsonOut),
 		Store:        configStoreAdapter{},
 		Wizard:       setup.Wizard,
 		JSON:         jsonOut,
@@ -624,4 +625,17 @@ func indexByte(s string, b byte) int {
 		}
 	}
 	return -1
+}
+
+// setupStepOut is where setup's step narration and child-process output go.
+// Under -o json, stdout is reserved for the ONE result object the help
+// promises, so the live mix / docker output and the ">> step" lines go to
+// stderr. Before this, `bp setup --target local --yes -o json` printed about
+// 11,800 lines of deps.get / ecto.reset output on stdout ahead of the JSON
+// object (stranger walk, 2026-10-01), so `| jq` failed on the first line.
+func setupStepOut(out *writer, jsonOut bool) io.Writer {
+	if jsonOut {
+		return out.stderr
+	}
+	return out.stdout
 }

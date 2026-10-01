@@ -24,7 +24,7 @@ describe.each([...AVAILABLE_TEMPLATES])('%s sitemap reads every page', (template
 
   it('getAllDocs follows hasMore with offset paging up to the sitemap cap', () => {
     const lib = read(template, 'lib/barkpark.ts')
-    expect(lib).toContain('export async function getAllDocs<T>(type: string)')
+    expect(lib).toMatch(/export async function getAllDocs<T>\(type: string(, order\?: string)?\)/)
     expect(lib).toContain('if (!env.result?.hasMore || page.length === 0) break')
     expect(lib).toContain('offset += page.length')
     expect(lib).toContain('export const SITEMAP_MAX_URLS = 50_000')

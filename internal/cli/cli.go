@@ -816,11 +816,25 @@ func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 	if active.Token != "" {
 		activeTokenLayer = tokenSourceSaved
 	}
+	// tokenHome is the server active.Token was SAVED for. THE BINDING below
+	// compares against it, not against active.Server: a repo file naming a server
+	// with no saved entry overlays only the server, so after the overlay
+	// active.Server is the repo's host while active.Token is still the credential
+	// saved for the config's own server. Comparing to the overlaid server let a
+	// cloned repository's .barkpark.json pick where a saved token goes.
+	tokenHome := active.Server
 	if repo, err := loadRepoFile(); err == nil {
 		before := active.Token
 		active = repo.overlayActive(cfg, active)
 		if active.Token != "" && active.Token != before {
 			activeTokenLayer = tokenSourceRepoFile
+		}
+		// The repo named a saved entry that carries a token: that token came with
+		// the entry, so its home is the entry's server.
+		if repo != nil && repo.Server != "" {
+			if entry, ok := cfg.FindServer(repo.Server); ok && entry.Token != "" {
+				tokenHome = entry.Server
+			}
 		}
 	}
 
@@ -954,9 +968,9 @@ func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 	// bakedDefaults() still floors the token and no invocation resolves an empty
 	// one — TestNoCLIInvocationResolvesAnEmptyToken still pins that, deliberately
 	// unchanged, because an anonymous tier is a separate contract change.
-	if srcs.Token == manifest.LayerActive && active.Server != "" && ctx.Server != "" &&
-		normalizeServerURL(active.Server) != normalizeServerURL(ctx.Server) {
-		prov.WithheldFrom = active.Server
+	if srcs.Token == manifest.LayerActive && tokenHome != "" && ctx.Server != "" &&
+		normalizeServerURL(tokenHome) != normalizeServerURL(ctx.Server) {
+		prov.WithheldFrom = tokenHome
 		prov.WithheldTail = tokenTail(ctx.Token)
 		ctx.Token = bakedDefaults().Token
 		srcs.Token = manifest.LayerDefault

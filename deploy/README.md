@@ -564,6 +564,24 @@ Add under **Settings → Secrets and variables → Actions**:
 | `GUERRILLA_HOST` | Content-instance IP — `157.180.90.121` |
 | `HETZNER_DNS_TOKEN` | Hetzner Cloud DNS-capable API token (the `barkpark.cloud`-zone project's token, NOT `CP_HOST`'s own server token — see `cloud/postfix/README.md` §1). Only used by `renew-mail-cert.yml`. |
 
+### Two Hetzner projects, two tokens — they never cross
+
+Barkpark's Hetzner footprint is split across two **disjoint** projects, each
+reachable only by its own token. A token for one sees nothing in the other: no
+error, just an empty list.
+
+| Project | What lives there | Token |
+|---|---|---|
+| **CP / fleet** | `barkpark-cp`, the warm pool, CP-provisioned managed boxes, `barkpark-fleet-support` boxes, `role=warm-image` bakes | `HCLOUD_TOKEN` in `/etc/barkpark-provisioner.env` on the CP; locally the `barkpark` hcloud context |
+| **guerrilla / DNS + content** | the `barkpark.cloud` DNS zone, the guerrilla content box, `barkpark-cms`, `polyflor-*` | `HETZNER_API_TOKEN` in an operator shell, `HETZNER_DNS_TOKEN` (secret above), `BARKPARK_DNS_HCLOUD_TOKEN` on the CP; locally the `main` hcloud context |
+
+**Never derive `HCLOUD_TOKEN` from `HETZNER_API_TOKEN` for fleet work.** It
+points at the wrong project: a census reads empty, and a teardown deletes
+nothing while the box keeps billing. The fleet proof scripts guard this:
+`scripts/pdf-p1-refire.sh` and `scripts/pdf-mvp0-journey-proof.sh` refuse to
+create a support box (`env:teardown-project-disjoint`) when the teardown token
+sees none of the CP's managed hosts.
+
 The workflow uses an `environment: production` — to require a click-to-approve
 before every prod deploy, add **required reviewers** to that environment in
 GitHub (Settings → Environments → production). Leaving it without reviewers keeps

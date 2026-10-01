@@ -3,7 +3,8 @@
  *
  * Barkpark's query API currently exposes per-type endpoints — these strings are
  * ready for the codegen + typed-query migration (ADR-003, Phase 8). Today they
- * are informational; pages call the typed helpers in `lib/barkpark.ts`.
+ * are informational and never run: pages call the typed helpers in
+ * `lib/barkpark.ts`, and `POST_ORDER` there carries the `publishedAt desc` order.
  */
 
 export const allPosts = `*[_type == "post" && defined(publishedAt)] | order(publishedAt desc)`

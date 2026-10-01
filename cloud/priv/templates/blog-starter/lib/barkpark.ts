@@ -49,15 +49,27 @@ const { barkparkFetch } = createBarkparkServer({
 
 export async function getDocs<T>(
   type: string,
-  opts: { limit?: number; offset?: number; perspective?: string } = {},
+  opts: { limit?: number; offset?: number; perspective?: string; order?: string } = {},
 ): Promise<T[]> {
   const env = await barkparkFetch<QueryEnvelope<T>>({
     type,
-    query: { filters: [], ...(opts.limit !== undefined ? { limit: opts.limit } : {}), ...(opts.offset !== undefined ? { offset: opts.offset } : {}) },
+    query: {
+      filters: [],
+      ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
+      ...(opts.offset !== undefined ? { offset: opts.offset } : {}),
+      ...(opts.order !== undefined ? { order: opts.order } : {}),
+    },
     ...(opts.perspective !== undefined ? { perspective: opts.perspective as Perspective } : {}),
   })
   return env.result?.documents ?? []
 }
+
+// "Latest posts" order: newest publishedAt first, creation time as the tie-break
+// so offset paging is stable. Without an explicit order the query route answers
+// `_updatedAt desc`, so fixing a typo in an old post moved it to the top of the
+// home page. Postgres sorts DESC with NULLS FIRST, so a post with no publishedAt
+// yet leads the list instead of disappearing from it.
+export const POST_ORDER = 'publishedAt:desc,_createdAt:desc'
 
 // The sitemap protocol's per-file URL cap.
 export const SITEMAP_MAX_URLS = 50_000
@@ -69,13 +81,13 @@ export const SITEMAP_MAX_URLS = 50_000
  * the rest out. This follows `hasMore` with the route's largest page (1000)
  * until the type is exhausted or the sitemap cap is reached.
  */
-export async function getAllDocs<T>(type: string): Promise<T[]> {
+export async function getAllDocs<T>(type: string, order?: string): Promise<T[]> {
   const out: T[] = []
   let offset = 0
   while (out.length < SITEMAP_MAX_URLS) {
     const env = await barkparkFetch<QueryEnvelope<T>>({
       type,
-      query: { filters: [], limit: 1000, offset },
+      query: { filters: [], limit: 1000, offset, ...(order !== undefined ? { order } : {}) },
     })
     const page = env.result?.documents ?? []
     out.push(...page)

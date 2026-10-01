@@ -123,8 +123,53 @@ defmodule Barkpark.Content.Papers.WritePathNormalizerTest do
         ]
       }
 
-      assert [%{"items" => [%{"text" => "lead boldtail"}]}] =
-               BlockOps.normalize_render_shapes([block])
+      assert [%{"items" => [item]}] = BlockOps.normalize_render_shapes([block])
+
+      # F4 (task-95e93702fdae9fd6): the plain text is ADDED for the readers and
+      # the author's inline structure is KEPT under `inline` (leaf dialect
+      # normalized). The old arm wrote `%{"text" => "lead boldtail"}` alone —
+      # the strong mark was destroyed on write. Mutation: drop the `inline`
+      # key from `rescue_inline_array/2` and this equality reds.
+      assert item == %{
+               "text" => "lead boldtail",
+               "inline" => [
+                 %{"type" => "text", "value" => "lead "},
+                 %{"type" => "strong", "children" => [%{"type" => "text", "value" => "bold"}]},
+                 %{"type" => "text", "value" => "tail"}
+               ]
+             }
+    end
+
+    test "F4: keeping the inline structure moves no render byte, and is idempotent" do
+      inline = [
+        %{"type" => "text", "value" => "see "},
+        %{
+          "type" => "link",
+          "href" => "https://x.test",
+          "children" => [%{"type" => "text", "value" => "docs"}]
+        }
+      ]
+
+      flat_notes = %{"type" => "notes", "items" => [%{"text" => "see docs"}]}
+      flat_cards = %{"type" => "cards", "items" => [%{"text" => "see docs"}]}
+      flat_pipe = %{"type" => "pipeline", "nodes" => [%{"title" => "see docs"}]}
+
+      [notes, cards, pipe] =
+        BlockOps.normalize_render_shapes([
+          %{"type" => "notes", "items" => [inline]},
+          %{"type" => "cards", "items" => [inline]},
+          %{"type" => "pipeline", "nodes" => [inline]}
+        ])
+
+      assert [%{"inline" => ^inline}] = notes["items"]
+      assert [%{"inline" => ^inline}] = cards["items"]
+      assert [%{"title" => "see docs", "inline" => ^inline}] = pipe["nodes"]
+
+      assert Render.render_blocks([notes]) == Render.render_blocks([flat_notes])
+      assert Render.render_blocks([cards]) == Render.render_blocks([flat_cards])
+      assert Render.render_blocks([pipe]) == Render.render_blocks([flat_pipe])
+
+      assert BlockOps.normalize_render_shapes([notes, cards, pipe]) == [notes, cards, pipe]
     end
 
     test "canonical map items pass byte-identical (notes, cards, pipeline)" do
@@ -218,6 +263,31 @@ defmodule Barkpark.Content.Papers.WritePathNormalizerTest do
       }
 
       assert BlockOps.normalize_render_shapes([block]) == [block]
+    end
+
+    # task-40529c5ad14ae43e (F5). The renderer coerces an explicit `nil` value
+    # to "" (render/inline.ex), so a JSON producer emitting `value: null` next
+    # to real `text` rendered hollow — and the old `Map.has_key?` guard read
+    # the null as "already canonical" and left it. Mutation: put the guard
+    # back to `Map.has_key?(leaf, "value")` and this test reds.
+    test "a value:null leaf carrying real text is rescued to the text" do
+      block = %{
+        "type" => "paragraph",
+        "content" => [
+          %{"type" => "text", "value" => nil, "text" => "rescued prose"},
+          %{
+            "type" => "strong",
+            "children" => [%{"type" => "text", "value" => nil, "text" => "bold"}]
+          }
+        ]
+      }
+
+      assert [%{"content" => [leaf, %{"children" => [nested]}]} = normalized] =
+               BlockOps.normalize_render_shapes([block])
+
+      assert leaf == %{"type" => "text", "value" => "rescued prose"}
+      assert nested == %{"type" => "text", "value" => "bold"}
+      assert Render.render_blocks([normalized]) =~ "rescued prose"
     end
 
     test "text-keyed leaves nested in mark-node children normalize" do

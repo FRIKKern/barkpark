@@ -227,6 +227,13 @@ var openLifecycleStates = map[string]bool{
 	"in_progress": true,
 }
 
+// terminalLifecycleStates are the closed states. A claim map left on such a
+// row records who held it last; it is never a live hold.
+var terminalLifecycleStates = map[string]bool{
+	"done":      true,
+	"cancelled": true,
+}
+
 // claimVerdict is the PURE decision at the center of this wrapper: given what
 // the read-back showed and who asked, name which of the causes it supports.
 // It never claims more than the read-back can prove.
@@ -253,6 +260,19 @@ var openLifecycleStates = map[string]bool{
 // "unknown" AND no queue gate AND an open row — a refusal with no explanation
 // anywhere, which is what task-eb2b6170e19f1611 tracks.
 func claimVerdict(requestedWorker, lifecycle string, claim apiclient.ClaimInfo, gate queueGate, serverArm string) string {
+	// WHETHER before WHO. The server refuses a done/cancelled row for its
+	// lifecycle before it consults any holder (its not_claimable_status arm runs
+	// first, task-4753f80a2ec47d03), and closing a row does not clear
+	// claim.worker. Calling that leftover worker a live holder ("wait for them")
+	// or telling the caller to re-claim prescribes a remedy that cannot work
+	// (task-f788ace33b5ff892).
+	if terminalLifecycleStates[lifecycle] {
+		v := fmt.Sprintf("genuinely not ready: lifecycle_status is %q, and a closed row has no live holder", lifecycle)
+		if claim.Present && claim.Worker != "" {
+			v += fmt.Sprintf(" (claim.worker=%s is left over from before it closed)", claim.Worker)
+		}
+		return v + "; reopen it with `bp task stage <id> open` first, then claim"
+	}
 	hasWorker := claim.Present && claim.Worker != ""
 	if !hasWorker {
 		if gate.gating() {

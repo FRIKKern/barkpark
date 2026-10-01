@@ -83,6 +83,19 @@
 # (c5) — a workflow that has NEVER produced a row is the worst case, and firing
 # one by hand would launder it.
 #
+# 2026-10-01 (task-e34feba79c5a4a9b) — "A push: ARM IS A RELIABLE TRIGGER" IS
+# TRUE ONLY WHILE SOMETHING IS PUSHED. Schedule run 36837787970 (08:40Z) red on
+# a healthy repo: main's tip 40d01aa48 had not moved since 04:30Z, every
+# push-armed critical workflow HAD fired on that push, and GitHub's scheduler
+# then delivered one beat in four hours — breakglass-watch 134m, main-red-owner
+# 250m, task-lease-renew 131m past bound. Nothing was broken except the premise:
+# on a quiet main the push arm has nothing to fire on, so cron is the workflow's
+# ONLY trigger, exactly as for main-gate-watch. So a push-armed workflow is
+# dispatched too, but ONLY when its push arm is provably IDLE: the newest
+# event=push run's head_sha IS the current main tip (push_arm_idle). If main
+# has moved past that sha the push arm MISSED a push — genuinely broken — and it
+# screams untouched; if the tip or the push row cannot be read, it screams too.
+#
 # ── 2026-09-20: WHAT "WATCHING MAIN" GUARANTEES, AND WHO DELIVERS IT ────────
 # (task-edebe459992b3574, by deploy-w3. The row was filed 2026-09-07 against a
 # 2026-08-09..2026-09-07 population; everything below is a RE-MEASUREMENT taken
@@ -534,7 +547,7 @@ read_runs() {
     # fired (`workflow_dispatch`). Same endpoint, same paginated REST shape, one
     # call per workflow exactly as before — the page is wider, not extra.
     out="$("$(gh_bin)" api "repos/$REPO/actions/workflows/$file/runs?per_page=${CRON_PROBE_RUNS_PER_PAGE:-60}" \
-             --jq ".workflow_runs[] | {path: \"$file\", status: .status, created_at: .created_at, event: .event}" 2>&1)"; grc=$?
+             --jq ".workflow_runs[] | {path: \"$file\", status: .status, created_at: .created_at, event: .event, head_sha: .head_sha}" 2>&1)"; grc=$?
     if [ "$grc" -ne 0 ]; then
       # A 404 IS AN ANSWER, and the opposite of a read fault: GitHub has no such
       # workflow, so it has certainly not fired. Passing that through as zero
@@ -542,7 +555,11 @@ read_runs() {
       # hiding behind a repo-wide UNKNOWN. Anything else — 403, a rate limit, a
       # transport error — is genuinely unreadable and must not be scored.
       if grep -qE 'HTTP 404|Not Found' <<<"$out"; then continue; fi
-      echo "  read failed for $file: $(printf '%s' "$out" | head -1)" >&2
+      # THE WHOLE ERROR, ON ONE LINE. gh prints the JSON error body before its
+      # own `gh: … (HTTP nnn)` summary, so `head -1` printed a bare `{` for all
+      # 32 failed reads of run 36808297147 and the cause (rate limit? outage?)
+      # was unrecoverable from the log.
+      echo "  read failed for $file: $(printf '%s' "$out" | tr -s '\n\t ' ' ' | cut -c1-400)" >&2
       rc=3
       continue
     fi
@@ -563,6 +580,35 @@ has_push_arm() { # <basename>
 }
 has_dispatch_arm() { # <basename>
   grep -qE '^[[:space:]]{2}workflow_dispatch:[[:space:]]*(#.*)?$' "$WORKFLOWS_DIR/$1"
+}
+
+# IS THE PUSH ARM IDLE? (task-e34feba79c5a4a9b) True only when the newest
+# event=push row for <file> carries head_sha == the live main tip: the push arm
+# fired on the commit main still sits at, so until the next merge cron is this
+# workflow's ONLY trigger and a dispatch is a rescue, not a laundering. Every
+# other answer is false — main moved past that sha (the arm missed a push), no
+# push row in the fetched page, no head_sha in the row (every hermetic fixture
+# that predates this), or the tip unreadable — so the scream stays the default.
+main_tip() {
+  "$(gh_bin)" api "repos/$REPO/commits/main" --jq '.sha' 2>/dev/null
+}
+push_arm_idle() { # <basename> <rows>
+  local file="$1" rows="$2" sha tip
+  sha="$(printf '%s\n' "$rows" | grep -F "\"$file\"" | python3 -c '
+import json, sys
+best = None
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    try: o = json.loads(line)
+    except json.JSONDecodeError: continue
+    if o.get("event") != "push" or not o.get("head_sha") or not o.get("created_at"): continue
+    if best is None or o["created_at"] > best[0]: best = (o["created_at"], o["head_sha"])
+print(best[1] if best else "")
+' 2>/dev/null)"
+  [ -n "$sha" ] || return 1
+  tip="$(main_tip)" || return 1
+  [ -n "$tip" ] && [ "$tip" = "$sha" ]
 }
 
 # IS A RUN ALREADY UNDER WAY? Measured while building this arm, 2026-09-06: five
@@ -706,7 +752,7 @@ EOF
 }
 
 check_overdue() {
-  local now rows rc=0 file class interval note newest age bound runid=""
+  local now rows rc=0 file class interval note newest age bound runid="" why
   now="$(now_epoch)" || { echo "cron-overdue-probe: --now is not an ISO-8601 Z timestamp" >&2; return 2; }
   rows="$(read_runs)" || { echo "UNKNOWN: the run list could not be read — that is not 'it fired'." >&2; return 3; }
   while IFS='|' read -r file class interval note; do
@@ -762,15 +808,20 @@ print(int(best) if best is not None else "")
       # THE DISPATCH ARM. Only for a CRON-ONLY critical workflow: one with no
       # push: arm (so cron really is its only automatic trigger) that does carry
       # workflow_dispatch:. A push-armed workflow past bound is genuinely broken
-      # and still screams, untouched.
-      if [ "$DISPATCH" = 1 ] && [ -f "$WORKFLOWS_DIR/$file" ] \
-         && ! has_push_arm "$file" && has_dispatch_arm "$file"; then
+      # and still screams, untouched — UNLESS its push arm is provably idle
+      # (push_arm_idle: it already fired on the tip main still sits at), which
+      # makes cron its only trigger until the next merge (task-e34feba79c5a4a9b).
+      why="it is cron-only"
+      if [ "$DISPATCH" = 1 ] && [ -f "$WORKFLOWS_DIR/$file" ] && has_dispatch_arm "$file" \
+         && { ! has_push_arm "$file" \
+              || { push_arm_idle "$file" "$rows" \
+                   && why="its push arm is idle (it already fired on main's current tip, so cron is its only trigger until the next merge)"; }; }; then
         if runid="$(in_flight "$file" "$now")"; then
           echo "  ok   $file (critical, every ${interval}m): newest scored run ${age}m old, past the ${bound}m bound — but run $runid is in flight RIGHT NOW, so this probe did not dispatch (a second queued run would cancel the first)"
           continue
         fi
         if runid="$(try_dispatch "$file" "$now")"; then
-          echo "  ok   $file (critical, every ${interval}m): newest run ${age}m old, past the ${bound}m bound — it is cron-only, so this probe DISPATCHED it: run $runid"
+          echo "  ok   $file (critical, every ${interval}m): newest run ${age}m old, past the ${bound}m bound — $why, so this probe DISPATCHED it: run $runid"
           continue
         fi
         echo "OVERDUE  $file (critical, every ${interval}m): newest run is ${age}m old, bound is ${OVERDUE_FACTOR}x = ${bound}m, and this probe's workflow_dispatch fallback FAILED — $runid" >&2
@@ -812,6 +863,9 @@ case "$1" in
     case "$2" in
       *event=workflow_dispatch*)
         [ "${STUB_RUN_APPEARS:-1}" = 1 ] && echo "99887766 2026-09-03T12:00:05Z" ;;
+      */commits/main)
+        [ -n "${STUB_MAIN_TIP:-}" ] || exit 1
+        printf '%s\n' "$STUB_MAIN_TIP" ;;
       *) [ -n "${STUB_IN_FLIGHT:-}" ] && printf '%s\n' "$STUB_IN_FLIGHT" ;;
     esac
     exit 0 ;;
@@ -1191,6 +1245,42 @@ STUB
     pass=$((pass+1)); echo "  ok   c8c a push-ARMED critical workflow past its bound SCREAMS exactly as before and is never dispatched: $(grep -o 'OVERDUE  task-lease-renew.*' <<<"$out")"
   else
     fail=$((fail+1)); echo "  FAIL c8c the dispatch arm weakened a push-armed workflow (rc=$rc, log=$(cat "$tmp/dispatch.log")):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c8h — A QUIET MAIN IS NOT A BROKEN PUSH ARM (task-e34feba79c5a4a9b). The
+  # shape of schedule run 36837787970: task-lease-renew's newest row is its PUSH
+  # run on the commit main STILL sits at, 92m old under a 60m bound, because
+  # nothing has merged since and GitHub's cron starved it. The push arm is idle,
+  # not broken: cron is its only trigger, so it is DISPATCHED like a cron-only one.
+  sed 's|"task-lease-renew.yml", "status": "in_progress", "created_at": "2026-09-03T11:50:00Z"}|"task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T10:28:00Z", "event": "push", "head_sha": "aaaa1111"}|' \
+    "$tmp/fresh.ndjson" > "$tmp/push-idle.ndjson"
+  : > "$tmp/dispatch.log"
+  out="$(STUB_MAIN_TIP=aaaa1111 STUB_LOG="$tmp/dispatch.log" RUNS_FILE="$tmp/push-idle.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$(grep -c '"head_sha": "aaaa1111"' "$tmp/push-idle.ndjson")" = "1" ] \
+     && [ "$rc" = "0" ] && grep -q 'task-lease-renew.yml.*push arm is idle.*DISPATCHED it: run 99887766' <<<"$out" \
+     && grep -q 'workflow run task-lease-renew.yml' "$tmp/dispatch.log"; then
+    pass=$((pass+1)); echo "  ok   c8h a push-armed workflow whose newest PUSH run is on main's current tip is idle, not broken — it is DISPATCHED: $(head -1 "$tmp/dispatch.log")"
+  else
+    fail=$((fail+1)); echo "  FAIL c8h an idle push arm on a quiet main still screamed (rc=$rc, log=$(cat "$tmp/dispatch.log")):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+  # c8h2 — …but main MOVED past that sha and the push arm did not fire on it:
+  # that is a push arm genuinely missing pushes. SCREAM, never dispatch.
+  : > "$tmp/dispatch.log"
+  out="$(STUB_MAIN_TIP=bbbb2222 STUB_LOG="$tmp/dispatch.log" RUNS_FILE="$tmp/push-idle.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$rc" = "1" ] && grep -q 'OVERDUE  task-lease-renew.yml' <<<"$out" \
+     && ! grep -q 'task-lease-renew' "$tmp/dispatch.log"; then
+    pass=$((pass+1)); echo "  ok   c8h2 …and when main has MOVED past the push run's sha the push arm missed a merge: it SCREAMS and is not dispatched"
+  else
+    fail=$((fail+1)); echo "  FAIL c8h2 a push arm that missed a merge was laundered (rc=$rc, log=$(cat "$tmp/dispatch.log")):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+  # c8h3 — and an UNREADABLE tip is not idleness: fail closed to the scream.
+  : > "$tmp/dispatch.log"
+  out="$(STUB_MAIN_TIP= STUB_LOG="$tmp/dispatch.log" RUNS_FILE="$tmp/push-idle.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$rc" = "1" ] && grep -q 'OVERDUE  task-lease-renew.yml' <<<"$out" \
+     && ! grep -q 'task-lease-renew' "$tmp/dispatch.log"; then
+    pass=$((pass+1)); echo "  ok   c8h3 …and an unreadable main tip is NOT read as idle — the scream stands"
+  else
+    fail=$((fail+1)); echo "  FAIL c8h3 an unreadable tip was read as an idle push arm (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/       /'
   fi
 
   # c8f — THE PROBE MUST NOT CANCEL THE WATCH IT PROTECTS. A run already in

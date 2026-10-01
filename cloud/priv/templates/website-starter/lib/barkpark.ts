@@ -47,10 +47,20 @@ const { barkparkFetch } = createBarkparkServer({
   serverToken: resolveServerToken(process.env),
 })
 
-export async function getDocs<T>(type: string): Promise<T[]> {
-  const env = await barkparkFetch<QueryEnvelope<T>>({ type })
+export async function getDocs<T>(type: string, opts: { order?: string } = {}): Promise<T[]> {
+  const env = await barkparkFetch<QueryEnvelope<T>>({
+    type,
+    ...(opts.order !== undefined ? { query: { filters: [], order: opts.order } } : {}),
+  })
   return env.result?.documents ?? []
 }
+
+// "Latest posts" order: newest publishedAt first, creation time as the tie-break
+// so offset paging is stable. Without an explicit order the query route answers
+// `_updatedAt desc`, so fixing a typo in an old post moved it to the top of the
+// home page. Postgres sorts DESC with NULLS FIRST, so a post with no publishedAt
+// yet leads the list instead of disappearing from it.
+export const POST_ORDER = 'publishedAt:desc,_createdAt:desc'
 
 // The sitemap protocol's per-file URL cap.
 export const SITEMAP_MAX_URLS = 50_000

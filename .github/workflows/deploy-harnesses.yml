@@ -50,6 +50,7 @@ on:
     # internal/** entries and their handle_errors-predicate reasoning.
     paths:
       - "deploy/**"
+      - "deploy.sh" # its install_caddy_pkg is what this job installs Caddy with
       - ".github/workflows/deploy-harnesses.yml"
       # instance-deploy_test.sh Case 16a drives the REAL self-update hand-off.
       - "scripts/self-update.sh"
@@ -60,6 +61,7 @@ on:
     branches: [main]
     paths:
       - "deploy/**"
+      - "deploy.sh" # its install_caddy_pkg is what this job installs Caddy with
       - ".github/workflows/deploy-harnesses.yml"
       # instance-deploy_test.sh Case 16a drives the REAL self-update hand-off.
       - "scripts/self-update.sh"
@@ -136,15 +138,18 @@ jobs:
         # raw 502s during a deploy instead of the maintenance page. This harness
         # exists to do REAL caddy validation, so it must validate against a Caddy
         # that can actually parse the config we ship. Assert the floor, loudly.
+        #
+        # THROUGH THE SAME INSTALLER EVERY BOX USES (task-16e58856f0182596):
+        # install_caddy_pkg, cut from deploy.sh between its BEGIN/END
+        # markers. Official apt repo first; when that repo is unusable (since
+        # 2026-10-01 cloudsmith signs it with EXPIRED subkey 531A6B20FA058A70,
+        # caddyserver/caddy issue 8095) the pinned, sha512-verified official release
+        # .deb. So this job exercises the production install path, not a copy.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-            | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-            | sudo tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-          sudo apt-get update
-          sudo apt-get install -y caddy
+          set -eu
+          sed -n '/^# install_caddy_pkg BEGIN/,/^# install_caddy_pkg END/p' deploy.sh > "$RUNNER_TEMP/caddy-fn.sh"
+          grep -q '^install_caddy_pkg() {' "$RUNNER_TEMP/caddy-fn.sh"
+          sudo bash -c ". '$RUNNER_TEMP/caddy-fn.sh'; install_caddy_pkg"
           command -v caddy
           caddy version
           # Heredoc floor (>= 2.7): fail LOUDLY here rather than let the deploy
@@ -155,6 +160,32 @@ jobs:
             echo "::error title=Caddy too old::caddy $ver cannot parse the heredoc maintenance block (needs >= 2.7)"
             exit 1
           fi
+      - name: Fresh-box Caddy install — install_caddy_pkg as root in clean ubuntu:24.04, both arms
+        # task-16e58856f0182596. A clean container is the closest thing to a
+        # bare provisioned box this job has. Arm 0 is the DEFAULT path (apt repo
+        # first, release .deb if it is unusable); arm 1 forces the release .deb
+        # (BARKPARK_CADDY_SKIP_APT=1) so that arm stays tested after the
+        # upstream repo recovers. Each must end with Caddy as an installed dpkg
+        # package, its systemd unit present, at the >= 2.7 heredoc floor.
+        run: |
+          set -eu
+          sed -n '/^# install_caddy_pkg BEGIN/,/^# install_caddy_pkg END/p' deploy.sh > "$RUNNER_TEMP/caddy-fn.sh"
+          for skip in 0 1; do
+            echo "== arm BARKPARK_CADDY_SKIP_APT=$skip"
+            docker run --rm -e BARKPARK_CADDY_SKIP_APT="$skip" \
+              -v "$RUNNER_TEMP/caddy-fn.sh:/caddy-fn.sh:ro" ubuntu:24.04 bash -euc '
+                . /caddy-fn.sh
+                install_caddy_pkg
+                st="$(dpkg -s caddy)"
+                grep -q "^Status: install ok installed" <<<"$st"
+                test -f /lib/systemd/system/caddy.service
+                v="$(caddy version)"
+                echo "caddy: $v"
+                [[ $v =~ v([0-9]+)\.([0-9]+) ]]
+                major="${BASH_REMATCH[1]}"; minor="${BASH_REMATCH[2]}"
+                [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 7 ]; }
+              '
+          done
       - name: Every deploy/*.sh parses and passes shellcheck -S warning (task-6f18e71a351f8081 D)
         # 17 files / 14k lines had ONE bash -n and zero shellcheck in CI. Zero-findings
         # gate: the two warnings that existed (SC2034 x2) were fixed in the same change,
@@ -368,6 +399,10 @@ jobs:
       # cannot mistake it for merge protection.
       - name: systemd OnFailure handler harness
         run: bash deploy/systemd-onfailure_test.sh
+      # The warm-image bake's skip decision honours an age ceiling (stale apt
+      # index), proven offline with stubbed hcloud/curl/flock.
+      - name: Warm-image bake skip-decision harness
+        run: bash deploy/bake-server-image_test.sh
 
       # task-f35c835bf18712c8. deploy/slot-memory-peaks.sh shipped in PR #18488
       # with 35 offline checks and NO caller of any kind: `git grep -n

@@ -3793,7 +3793,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
     * `notes`/`cards` ITEMS that arrive as bare strings (or inline arrays)
       become text maps, and `pipeline` NODES become TITLE maps (the key its
-      readers render) — the readers address item FIELDS
+      readers render; an inline array also keeps its structure under `inline`) — the readers address item FIELDS
       through `get/2`, which is nil on a binary, so the raw shape renders an
       EMPTY row while the paper answers 200 (live: `heggemsnes-act`). The arm
       is TYPE-KEYED, never generic over `items` — `byline` string items are
@@ -3804,7 +3804,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
       (render/inline.ex), so a text-keyed leaf renders as the empty string
       and a paragraph whose only leaf carries it VANISHES (live:
       `deploy-reliability-wave-4-2026-08-06`). Leaves already carrying a
-      `value` are left byte-identical.
+      STRING `value` are left byte-identical; a `value: null` leaf with real
+      `text` is rescued like a text-keyed one.
   """
   @spec normalize_render_shapes(list()) :: list()
   def normalize_render_shapes(blocks) when is_list(blocks) do
@@ -4320,17 +4321,24 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   # ONE widget item/node → the text-map dialect the readers understand. A map
   # (the canonical shape) is untouched; a bare string becomes `%{"text" => s}`;
-  # an inline ARRAY flattens to its plain text. An inline array with NO
-  # derivable text — or any other scalar — is left as-is: this is a rescue
-  # arm, never a destroyer.
+  # an inline ARRAY gets its plain text under `text` for today's readers. An
+  # inline array with NO derivable text — or any other scalar — is left as-is:
+  # this is a rescue arm, never a destroyer.
+  #
+  # POLICY for inline-array items and nodes (task-95e93702fdae9fd6, F4): the
+  # author's structure is NEVER flattened away. The plain text is ADDED under
+  # the key every reader renders (`text`, or `title` for pipeline nodes), and
+  # the original inline array — leaf dialect normalized, marks, links,
+  # wikilinks and code intact — is KEPT under the sibling key `inline`. No
+  # reader in either engine reads `inline` today, so render bytes are exactly
+  # what the flattening produced; a reader that learns rich item rendering
+  # reads `inline` and gets the markup back. Writing only the flattened text
+  # (the old behaviour) was one-way: the markup could never return.
+  @widget_inline_key "inline"
+
   defp normalize_widget_item(item) when is_binary(item), do: %{"text" => item}
 
-  defp normalize_widget_item(item) when is_list(item) do
-    case inline_plain_text(item) do
-      "" -> item
-      text -> %{"text" => text}
-    end
-  end
+  defp normalize_widget_item(item) when is_list(item), do: rescue_inline_array(item, "text")
 
   defp normalize_widget_item(item), do: item
 
@@ -4338,14 +4346,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # Same rescue discipline as normalize_widget_item, different key.
   defp normalize_pipeline_node(node) when is_binary(node), do: %{"title" => node}
 
-  defp normalize_pipeline_node(node) when is_list(node) do
-    case inline_plain_text(node) do
-      "" -> node
-      text -> %{"title" => text}
-    end
-  end
+  defp normalize_pipeline_node(node) when is_list(node), do: rescue_inline_array(node, "title")
 
   defp normalize_pipeline_node(node), do: node
+
+  defp rescue_inline_array(inline, text_key) do
+    case inline_plain_text(inline) do
+      "" -> inline
+      text -> %{text_key => text, @widget_inline_key => normalize_inline_nodes(inline)}
+    end
+  end
 
   # Flatten an inline array (or one inline node) to concatenated PLAIN text,
   # marks dropped: a leaf contributes its `value` (or TipTap `text`), a mark
@@ -4503,8 +4513,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp normalize_inline_nodes(nodes), do: Enum.map(nodes, &normalize_inline_node/1)
 
+  # A STRING `value` already wins at render and is left byte-identical. Any
+  # other value — an explicit `null` from a JSON producer, which the renderer
+  # coerces to "" — is no value at all, so the real `text` is rescued into it
+  # (task-40529c5ad14ae43e; a `Map.has_key?` guard read the null as canonical).
   defp normalize_inline_node(%{"type" => "text", "text" => text} = leaf) when is_binary(text) do
-    if Map.has_key?(leaf, "value") do
+    if is_binary(Map.get(leaf, "value")) do
       leaf
     else
       leaf |> Map.delete("text") |> Map.put("value", text)

@@ -290,6 +290,14 @@ type Flag struct {
 	Repeatable bool        `json:"repeatable,omitempty"`
 }
 
+// IsSwitch reports whether the flag is a value-less switch. The schema keeps
+// Type a free string, and the server spells switches both "bool" (most verbs)
+// and "boolean" (access.grant --single_use), so every CLI consumer asks this
+// instead of comparing Type to one spelling.
+func (f Flag) IsSwitch() bool {
+	return f.Type == "bool" || f.Type == "boolean"
+}
+
 // Parse decodes a manifest document. It rejects unknown top-level/structural
 // fields the same way the frozen schema's additionalProperties:false does, so a
 // typo or stray field fails fast instead of being silently dropped.
