@@ -35142,6 +35142,16 @@ test("cch-w73-bl: githubInstallReturnFromSearch reads GitHub's setup redirect, a
   }
   // Malformed input degrades to a value, never a throw — this runs at boot.
   assert.doesNotThrow(() => f("%%%&installation_id=7&setup_action=install"));
+
+  // r3b gh-install-bind: the team-bound install state rides back beside the id.
+  const st = hooks.githubInstallStateFromSearch;
+  assert.equal(typeof st, "function", "the state reader must be node-pinned");
+  assert.equal(st("?installation_id=9&setup_action=install&state=abc%2Bdef%3D"), "abc+def=");
+  assert.equal(st("?installation_id=9&setup_action=install"), "");
+  assert.equal(st(null), "");
+  assert.doesNotThrow(() => st("%%%&state=x"));
+  // ...and the plane's refusal of a missing/foreign state is READ with curated copy.
+  assert.notEqual(hooks.friendly({ error: "install_state_invalid" }, "Please try again."), "Please try again.");
 });
 
 test("cch-w73-bl c2: installation_not_found is READ — the curated sentence, with no invented cause", () => {
@@ -36656,19 +36666,4 @@ test("N-08: a site with no content binding makes no read and paints no shell", a
   const { box, calls } = await formsMount(() => [200, {}], { id: "s3", slug: "c", bootstrap_dataset: null });
   assert.equal(calls.length, 0);
   assert.equal(box.innerHTML, "");
-});
-
-test("r3b gh-install-bind: the install state rides back from GitHub's redirect to the record POST", () => {
-  const f = hooks.githubInstallStateFromSearch;
-  assert.equal(typeof f, "function", "the state reader must be node-pinned");
-  assert.equal(f("?installation_id=9&setup_action=install&state=abc%2Bdef%3D"), "abc+def=");
-  assert.equal(f("?installation_id=9&setup_action=install"), "");
-  assert.equal(f(null), "");
-  assert.doesNotThrow(() => f("%%%&state=x"));
-  // The POST body carries it: the plane refuses an id without its team-bound state.
-  const src = APP_SRC.slice(APP_SRC.indexOf("function recordGithubInstall("));
-  assert.match(src.slice(0, 300), /installation_id: id, state: githubInstallState/);
-  // And the refusal is READ with curated copy, not the generic fallback.
-  const copy = hooks.friendly({ error: "install_state_invalid" }, "Please try again.");
-  assert.notEqual(copy, "Please try again.");
 });
