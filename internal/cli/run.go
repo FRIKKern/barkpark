@@ -4547,6 +4547,7 @@ func isProd(ctx manifest.Context, m *manifest.Manifest) bool {
 func dryRun(out *writer, cmd manifest.Command, rawURL string, headers map[string]string, body []byte) int {
 	out.errf("dry-run: client-side preview only (server validate-only not available)")
 	redacted := redactHeaders(headers)
+	body = redactBody(cmd, body)
 
 	// Machine-readable modes emit the preview as a structured document so a
 	// `--dry-run -o json | jq` pipe stays parseable. The stderr notice above is
@@ -4607,6 +4608,65 @@ func redactHeaders(h map[string]string) map[string]string {
 		}
 	}
 	return out
+}
+
+// redactBody masks credential VALUES in a JSON request body the same way
+// redactHeaders masks credential headers, so a dry-run preview never prints a
+// secret: any string under a key naming a secret/token/password/api key, and a
+// `secret` command's `value` (`bp secret set <name> <value> --dry-run`). A body
+// with nothing to mask, or that is not JSON, is returned byte-identical.
+func redactBody(cmd manifest.Command, body []byte) []byte {
+	if len(body) == 0 {
+		return body
+	}
+	var parsed any
+	if json.Unmarshal(body, &parsed) != nil {
+		return body
+	}
+	changed := false
+	var walk func(v any) any
+	walk = func(v any) any {
+		switch t := v.(type) {
+		case map[string]any:
+			for k, val := range t {
+				if s, ok := val.(string); ok && s != "" && secretBodyKey(cmd, k) {
+					t[k] = "****"
+					changed = true
+					continue
+				}
+				t[k] = walk(val)
+			}
+			return t
+		case []any:
+			for i := range t {
+				t[i] = walk(t[i])
+			}
+			return t
+		}
+		return v
+	}
+	parsed = walk(parsed)
+	if !changed {
+		return body
+	}
+	out, err := json.Marshal(parsed)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+func secretBodyKey(cmd manifest.Command, key string) bool {
+	lk := strings.ToLower(key)
+	if cmd.Noun == "secret" && lk == "value" {
+		return true
+	}
+	for _, s := range []string{"secret", "token", "password", "api_key", "apikey"} {
+		if strings.Contains(lk, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func redact(v string) string {
