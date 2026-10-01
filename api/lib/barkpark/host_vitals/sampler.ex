@@ -54,11 +54,31 @@ defmodule Barkpark.HostVitals.Sampler do
 
   @impl true
   def init(_opts) do
-    # Prime :cpu_sup.util/0 so the first real reading measures an interval
-    # rather than since-boot. Wrapped: :os_mon may lag boot on some hosts.
-    _ = safe(fn -> :cpu_sup.util() end)
-    Process.send_after(self(), :tick, @tick_ms)
-    {:ok, %{}}
+    if enabled?() do
+      # Prime :cpu_sup.util/0 so the first real reading measures an interval
+      # rather than since-boot. Wrapped: :os_mon may lag boot on some hosts.
+      _ = safe(fn -> :cpu_sup.util() end)
+      {:ok, %{timer: Process.send_after(self(), :tick, @tick_ms)}}
+    else
+      {:ok, %{timer: nil}}
+    end
+  end
+
+  # DORMANT IN TEST (task-31dc7c0068696546). Every Studio LiveView embeds the
+  # sticky `BarkparkWeb.ServerVitalsLive`, which re-renders on each tick of THIS
+  # process with the MACHINE's CPU %, RAM, disk, load and uptime. Boot-started
+  # under `mix test`, the tick lands inside any test that compares two renders
+  # of the same page, and the page differs by bytes nothing in the test did:
+  # `BoardLiveTest` "the seen-set drops a repeated event" reddened main run
+  # 36554218282 and PR run 36747193823 that way, and reproduced locally 1 in 30
+  # with the diff `CPU 97% -> 94%, load 10.18 -> 9.68`. The shares-panel test
+  # (task-f0ad13818246990c) was narrowed for the same bytes; ~100 other
+  # whole-page compares carry the same coin flip. Gated OFF in config/test.exs,
+  # so the bar renders the honest all-nil frame (`—`); `sample/0` and
+  # `snapshot/0` stay callable and are tested directly. Defaults ON — dev and
+  # prod are unchanged. Same shape as the `BlockedSweeper` gate.
+  defp enabled? do
+    :barkpark |> Application.get_env(__MODULE__, []) |> Keyword.get(:enabled, true)
   end
 
   @impl true
@@ -69,8 +89,7 @@ defmodule Barkpark.HostVitals.Sampler do
     # yet (early boot) or is tearing down, the broadcast degrades to a no-op —
     # persistent_term is already updated, so snapshot/0 reads stay correct.
     safe(fn -> BarkparkWeb.Endpoint.broadcast(@topic, @event, snap) end)
-    Process.send_after(self(), :tick, @tick_ms)
-    {:noreply, state}
+    {:noreply, %{state | timer: Process.send_after(self(), :tick, @tick_ms)}}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}

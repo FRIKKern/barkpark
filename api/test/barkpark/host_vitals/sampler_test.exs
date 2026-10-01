@@ -46,4 +46,29 @@ defmodule Barkpark.HostVitals.SamplerTest do
   test "topic/0 is the shared broadcast topic" do
     assert Sampler.topic() == "server_vitals"
   end
+
+  # task-31dc7c0068696546. A ticking sampler re-renders every Studio page's
+  # footer with the machine's live vitals, so two renders of one unchanged page
+  # differ (BoardLiveTest, main run 36554218282: `CPU 97% -> 94%`). Under test
+  # the boot-started instance must arm NO tick; dev/prod must still tick.
+  describe "the tick is gated by config (dormant in test, ON by default)" do
+    test "the boot-started sampler arms no tick under test" do
+      pid = Process.whereis(Sampler)
+      assert is_pid(pid), "the sampler is a boot child; it must still be running (dormant)"
+      assert %{timer: nil} = :sys.get_state(pid)
+    end
+
+    test "enabled — the dev/prod default — init arms the tick; disabled arms nothing" do
+      saved = Application.get_env(:barkpark, Sampler)
+      on_exit(fn -> Application.put_env(:barkpark, Sampler, saved) end)
+
+      Application.delete_env(:barkpark, Sampler)
+      assert {:ok, %{timer: ref}} = Sampler.init([])
+      assert is_reference(ref), "with no config the sampler must tick (dev/prod unchanged)"
+      assert is_integer(Process.cancel_timer(ref))
+
+      Application.put_env(:barkpark, Sampler, enabled: false)
+      assert {:ok, %{timer: nil}} = Sampler.init([])
+    end
+  end
 end
