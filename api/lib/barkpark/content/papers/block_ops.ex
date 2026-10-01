@@ -4347,14 +4347,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp normalize_pipeline_node(node) when is_list(node), do: rescue_inline_array(node, "title")
 
+  defp normalize_pipeline_node(node), do: node
+
   defp rescue_inline_array(inline, text_key) do
     case inline_plain_text(inline) do
       "" -> inline
       text -> %{text_key => text, @widget_inline_key => normalize_inline_nodes(inline)}
     end
   end
-
-  defp normalize_pipeline_node(node), do: node
 
   # Flatten an inline array (or one inline node) to concatenated PLAIN text,
   # marks dropped: a leaf contributes its `value` (or TipTap `text`), a mark
