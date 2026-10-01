@@ -24,7 +24,7 @@ defmodule Barkpark.Content.Export do
   alias Barkpark.Content.{Document, Envelope}
 
   import Barkpark.Content.Scope,
-    only: [scope_to_workspace_or_global: 3, maybe_scope_to_grants: 2]
+    only: [scope_to_workspace_or_global: 3, maybe_scope_to_grants: 2, scope_to_owner: 2]
 
   @doc """
   Stream all documents for a dataset as envelope maps. Optionally filter by type.
@@ -66,6 +66,7 @@ defmodule Barkpark.Content.Export do
     |> then(fn q ->
       if type, do: where(q, [d], d.type == ^type), else: q
     end)
+    |> scope_owner_rows(dataset, opts)
     |> apply_perspective(Keyword.get(opts, :perspective, :raw))
     |> Repo.stream()
     |> Stream.transform(%{}, fn doc, schema_cache ->
@@ -111,6 +112,35 @@ defmodule Barkpark.Content.Export do
       )
 
     from(d in subquery(inner), order_by: [asc: d.inserted_at, asc: d.id])
+  end
+
+  # Owner-row narrowing (task-5bd361033523a8c1): the export reads exactly the
+  # rows the query path would for this caller. `Content.Query` narrows every
+  # `owner_scoped` type through `Scope.scope_to_owner/2`; an export spans types,
+  # so the owner_scoped ones present in the scoped base (the same
+  # `Content.owner_scoped?/3` predicate, as `Edges` does it) keep only the rows
+  # `scope_to_owner/2` admits for the caller, and every other type is untouched.
+  # Tokens and admins are a no-op inside scope_to_owner/2.
+  defp scope_owner_rows(query, dataset, opts) do
+    owner_scoped_types =
+      query
+      |> exclude(:order_by)
+      |> select([d], d.type)
+      |> distinct(true)
+      |> Repo.all()
+      |> Enum.filter(&Content.owner_scoped?(&1, dataset, opts))
+
+    case owner_scoped_types do
+      [] ->
+        query
+
+      types ->
+        visible_owned =
+          from(x in Document, where: x.type in ^types, select: x.id)
+          |> scope_to_owner(Keyword.get(opts, :caller_context))
+
+        where(query, [d], d.type not in ^types or d.id in subquery(visible_owned))
+    end
   end
 
   # Resolve (and memoise) the `%SchemaDefinition{}` for a type within one export.
