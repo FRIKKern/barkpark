@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { countDocs, getDocs } from '../lib/barkpark'
+import { POST_ORDER, countDocs, getDocs } from '../lib/barkpark'
 import { POSTS_PER_PAGE } from '../lib/queries'
 import { pageCount, resolvePageParam } from '../lib/page-param'
 import { Pagination } from './components/Pagination'
@@ -38,6 +38,7 @@ export default async function HomePage({ searchParams }: HomeProps) {
   const posts = await getDocs<Post>('post', {
     limit: POSTS_PER_PAGE,
     offset,
+    order: POST_ORDER,
   })
 
   return (

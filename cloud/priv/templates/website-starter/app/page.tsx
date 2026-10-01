@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { getDoc, getDocs } from '../lib/barkpark'
+import { POST_ORDER, getDoc, getDocs } from '../lib/barkpark'
 import { slugOf, type SlugValue } from '../lib/slug'
 
 interface Page {
@@ -19,7 +19,7 @@ interface Post {
 export default async function HomePage() {
   const [home, posts] = await Promise.all([
     getDoc<Page>('page', 'home'),
-    getDocs<Post>('post'),
+    getDocs<Post>('post', { order: POST_ORDER }),
   ])
 
   return (
