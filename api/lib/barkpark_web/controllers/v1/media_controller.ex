@@ -44,6 +44,7 @@ defmodule BarkparkWeb.V1.MediaController do
 
     record_opts = [
       actor_key: SearchIntel.actor_key(conn),
+      audience: SearchIntel.audience(conn),
       parent_event_id: SearchIntel.parent_event_id(conn),
       session_key: SearchIntel.session_key(conn),
       source: SearchIntel.source(conn, "explorer"),
@@ -263,7 +264,8 @@ defmodule BarkparkWeb.V1.MediaController do
         SearchIntel.actor_key(conn),
         prefix,
         limit: limit,
-        workspace_id: workspace_id(conn)
+        workspace_id: workspace_id(conn),
+        audience: SearchIntel.audience(conn)
       )
 
     json(conn, %{
