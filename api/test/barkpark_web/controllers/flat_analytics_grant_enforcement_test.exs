@@ -280,15 +280,16 @@ defmodule BarkparkWeb.FlatAnalyticsGrantEnforcementTest do
       assert body["total_documents"] == 2
     end
 
-    test "an OWNED token whose owner holds NO covering grant is not narrowed", ctx do
+    # task-e816e87770cd69ce: this USED to pin the owned, grantless token's
+    # "back-compat Default read" — the signup-PAT leak. It is now refused (403,
+    # not a member). The UNOWNED service token above keeps its full census.
+    test "an OWNED token whose owner holds NO covering grant is refused, not given Default",
+         ctx do
       {raw, _} = owned_token(register_user())
-      body = scoped_conn() |> analytics(raw, ctx.ds) |> json_response(200)
+      conn = scoped_conn() |> analytics(raw, ctx.ds)
 
-      assert ctx.out_type in types_in(body),
-             "OVER-REACH: an owned token with no grant must keep its back-compat " <>
-               "Default read"
-
-      assert body["total_documents"] == 2
+      assert conn.status == 403
+      refute conn.resp_body =~ to_string(ctx.out_type)
     end
 
     test "an anonymous caller is still 401 — the route stays token-required", ctx do
