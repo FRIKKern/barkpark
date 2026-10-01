@@ -135,8 +135,8 @@ func TestRunCommandRefusesUnreadableWriteReceipt(t *testing.T) {
 //	{"result":{transactionId,results}}   mutate_controller.ex:24
 //	{"ok":false,"reason":"no_ready"}     the tasks queue on an empty queue (2xx)
 //	{"ok":true,"doc":{doc_id,claim}}     the claim receipt
-//	{"accepted":true}                    chat_controller.ex:261 (202)
-//	{"request_id":…}                     chat_controller.ex:291 (202)
+//	{"accepted":true}                    chat_controller.ex:278 (202)
+//	{"request_id":…}                     chat_controller.ex:316 (202)
 //	{rev,id}                             the publish receipt
 //
 // wantStdout is the byte-for-byte capture from the PRE-FENCE binary through the
@@ -219,7 +219,7 @@ func TestWriteReceiptPassesUnknownKeys(t *testing.T) {
 
 // TestWriteReceiptDeclaredNoContentExemption covers the carve-out this fence
 // OWES an honest verb: `chat.approve` answers `send_resp(conn, :no_content,
-// "")` (chat_controller.ex:334), so "empty body ⇒ refuse" would red a real
+// "")` (chat_controller.ex:379), so "empty body ⇒ refuse" would red a real
 // write. 204/205 with an empty body is a DECLARED empty receipt at rc=0 — and
 // it is not silence either: main printed a BARE EMPTY LINE there. An
 // UNDECLARED empty 200 still refuses.
