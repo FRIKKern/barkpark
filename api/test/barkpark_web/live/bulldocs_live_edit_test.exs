@@ -1566,6 +1566,34 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
     end
   end
 
+  # Run-4 Lane B (task-d0918477b5a4fa4c): a canvas batch the hollow ratchet
+  # refuses answers with its reason and the STORED runs, so the host can put the
+  # author's view back on storage. The ratchet itself is unchanged.
+  test "a hollowing canvas batch is refused with its reason and the stored runs",
+       %{conn: conn, slug: slug} do
+    {:ok, view, _html} = live(writer_conn(conn), "/papers/#{slug}")
+    render_click(view, "paper-toggle-edit", %{})
+    request_id = Ecto.UUID.generate()
+
+    empty = fn id -> %{"op" => "patch-block", "id" => id, "patch" => %{"content" => []}} end
+
+    render_hook(view, "paper-ops", %{
+      "request_id" => request_id,
+      "if_rev" => assigns_of(view).paper_rev,
+      "container_kind" => "document",
+      "container_run_ids" => ["b-head", "b-body", "b-extra"],
+      "ops" => [empty.("b-body"), empty.("b-extra")]
+    })
+
+    assert_reply(view, %{saved: false, request_id: ^request_id} = reply)
+    assert reply[:rejected] == "halted"
+    assert reply[:reason] == Barkpark.Content.Papers.Hollow.ratchet_message()
+    assert Jason.encode!(reply[:runs]) =~ "Original body text"
+
+    {:ok, stored} = Content.get_document(slug, "paper", @dataset)
+    assert Jason.encode!(stored.content["blocks"]) =~ "Original body text"
+  end
+
   # The Edit/View toggle's visible label.
   defp toggle_label(html) do
     case Regex.run(~r/id="paper-edit-toggle"[^>]*>(.*?)<\/button>/s, html) do

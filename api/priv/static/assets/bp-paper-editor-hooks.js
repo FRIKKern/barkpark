@@ -711,6 +711,7 @@
       reviewRequired: options.reviewRequired === true,
       kind: options.kind,
       trackDraft: options.trackDraft,
+      terminalOnHalt: options.terminalOnHalt === true,
       historyDirection: options.historyDirection,
       historyStep: options.historyStep,
     });
@@ -1366,6 +1367,7 @@
         mutate(source, {
           requestId, payload, send, onResult, reviewRequired = false,
           kind = "forward", trackDraft = true, historyDirection = null, historyStep = null,
+          terminalOnHalt = false,
         }) {
           requestId ||= bpPaperRequestId();
           if (!requestId) return { requestId: null, promise: Promise.resolve(false) };
@@ -1384,7 +1386,7 @@
             }
             entry = {
               source, requestId, payload, send, onResult, reviewRequired, kind,
-              trackDraft, historyDirection, historyStep,
+              trackDraft, historyDirection, historyStep, terminalOnHalt,
               documentKey: record?.documentKey ?? documentKey,
               authoredRev: record?.authoredRev ?? confirmedRevision,
               ifRev: mutationQueue.length || (record?.documentKey ?? documentKey) !== documentKey
@@ -1532,6 +1534,24 @@
       coordinator._terminalMasterFailure = (entry, reply) => {
         if (entry.kind !== "master" || reply?.request_id !== entry.requestId) return false;
         if (!["master_not_found", "masters_unavailable", "invalid_master_request"].includes(reply?.rejected)) return false;
+        mutationQueue.shift();
+        mutationById.delete(entry.requestId);
+        mutationPaused = false;
+        coordinator._notifyResult(entry, false, reply);
+        coordinator._resolveWaiters(entry, false);
+        renderHistoryControls();
+        coordinator._pumpMutations();
+        return true;
+      };
+      // A canvas batch the server REFUSED with a lifecycle halt (the hollow
+      // ratchet: "a published paper cannot be hollowed out"). Resending the
+      // same batch is refused again, so pausing the queue behind it only
+      // stranded the author on a view storage never held. Settle it like the
+      // master refusal above; the canvas adapter (terminalOnHalt) resyncs its
+      // run to the stored blocks the reply carries.
+      coordinator._terminalHaltFailure = (entry, reply) => {
+        if (!entry.terminalOnHalt || reply?.request_id !== entry.requestId) return false;
+        if (reply?.rejected !== "halted") return false;
         mutationQueue.shift();
         mutationById.delete(entry.requestId);
         mutationPaused = false;
@@ -2381,7 +2401,8 @@
           mutationActive = false;
           coordinator.finishSave(token, saved);
           if (!saved && (coordinator._terminalHistoryFailure(entry, reply) ||
-              coordinator._terminalMasterFailure(entry, reply))) {
+              coordinator._terminalMasterFailure(entry, reply) ||
+              coordinator._terminalHaltFailure(entry, reply))) {
             renderSaveStatus(false);
             return;
           }
@@ -3721,7 +3742,38 @@
             }, {
               requestId: entry.requestId,
               reviewRequired: entry.conflictBlocks != null,
+              terminalOnHalt: true,
               onResult: (saved, result) => {
+                // The server REFUSED this batch with a lifecycle halt (the
+                // hollow ratchet). It is final, so drop it, and — unless the
+                // author has already typed past it (those edits are on their
+                // way and differ from the refused batch) — put the run back on
+                // the STORED blocks the reply carries, so what the author sees
+                // is what a reload shows. The server's reason rides bp-error;
+                // the halt banner shows it too.
+                if (!saved && result?.rejected === "halted" &&
+                    result?.request_id === entry.requestId) {
+                  this._sendingOps = false;
+                  this._opsFailed = false;
+                  this._opsReconnectRetryRequested = false;
+                  if (this._opsQueue[0] === entry) this._opsQueue.shift();
+                  refreshLeasePending();
+                  const haltedCanvas = this.el.querySelector("bp-paper-canvas");
+                  if (entry.seq != null) haltedCanvas?.discardInflightOps?.(entry.seq);
+                  const storedRun = (Array.isArray(result.runs) ? result.runs : [])
+                    .find((run) => run && this.el.id === `paper-canvas-${run.run_id}`);
+                  if (storedRun && Array.isArray(storedRun.blocks) &&
+                      !this._opsQueue.length && !haltedCanvas?.hasPendingChanges?.()) {
+                    haltedCanvas?.resolveConflictWithServerBlocks?.(storedRun.blocks);
+                  }
+                  this.el.dispatchEvent(new CustomEvent("bp-error", {
+                    detail: { code: "paper_ops_halted", error: result.reason || "" },
+                    bubbles: true,
+                    composed: true,
+                  }));
+                  sendNextOps();
+                  return;
+                }
                 if (saved && result?.retained_lease_overflow === true) {
                   this.el[PAPER_CANVAS_LEASE_OVERFLOW] = true;
                 } else if (saved && result &&
