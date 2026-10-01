@@ -467,7 +467,8 @@ defmodule BarkparkWeb.AppTokenController do
   defp mint(conn, params) do
     with {:ok, email} <- fetch_email(params),
          {:ok, permissions} <- fetch_permissions(params),
-         {:ok, workspace} <- resolve_workspace(params) do
+         {:ok, workspace} <- resolve_workspace(params),
+         :ok <- may_mint_into(conn.assigns.api_token, workspace) do
       # JIT MEMBER (charter D5): the identity first, then its member seat.
       # `create_membership` is idempotent-by-constraint — an existing seat hits
       # the unique index and is left as-is (the `Sso.jit_provision/3` pattern).
@@ -560,6 +561,35 @@ defmodule BarkparkWeb.AppTokenController do
           nil -> {:error, :workspace_not_found}
           workspace -> {:ok, workspace}
         end
+    end
+  end
+
+  # A WORKSPACE-BOUND admin bearer mints only into a workspace it administers —
+  # the predicate its revoke and list siblings already use
+  # (`Auth.administrable_by?` -> `Tenancy.Auth.workspace_admin?/2`). Without it a
+  # token bound to B minted (and JIT-seated an email) into A. A foreign workspace
+  # answers exactly like an unresolvable one, so the route confirms nothing about
+  # workspaces the caller cannot administer. An UNBOUND (instance-level) admin
+  # bearer — the Cloud control plane's stored per-instance credential — is
+  # unchanged, and so is one bound to the seeded Default workspace (the
+  # instance-admin binding the expiry suite names "fleet support").
+  defp may_mint_into(%{workspace_id: bound} = bearer, %{id: ws_id}) when is_binary(bound) do
+    cond do
+      instance_admin_binding?(bound) -> :ok
+      TenancyAuth.workspace_admin?(bearer, ws_id) -> :ok
+      true -> {:error, :workspace_not_found}
+    end
+  end
+
+  defp may_mint_into(_bearer, _workspace), do: :ok
+
+  # A token bound to the seeded Default workspace is the instance-level admin
+  # credential (the Cloud control plane's stored per-instance token, "fleet
+  # support"); only a token bound to ANOTHER workspace is a tenant's credential.
+  defp instance_admin_binding?(bound) do
+    case Tenancy.get_default_workspace() do
+      %{id: ^bound} -> true
+      _ -> false
     end
   end
 

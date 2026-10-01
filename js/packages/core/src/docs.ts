@@ -72,6 +72,16 @@ interface QueryResultBody<T> {
  *   point, not an oversight. Consumers that prefer an empty page can guard
  *   in-page (the D72 next-starter precedent).
  */
+const warnedTruncated = new Set<string>()
+
+function warnTruncated(type: string): void {
+  if (warnedTruncated.has(type)) return
+  warnedTruncated.add(type)
+  console.warn(
+    `[barkpark] docs('${type}').find() returned one page; more documents exist. Use .limit(n) (max 1000) or page with .findPage().`,
+  )
+}
+
 export function createDocsOperation<T = BarkparkDocument>(
   config: BarkparkClientConfig,
   type: string,
@@ -115,6 +125,10 @@ export function createDocsOperation<T = BarkparkDocument>(
   return createDocsBuilder<T>(
     async (state: BuilderState) => {
       const data = await read(state, [])
+      // A find() with no .limit() gets ONE server page (default 100). It used to
+      // drop the server's `hasMore`, so a type with 131 documents resolved 100
+      // with nothing said (stranger walk, 2026-10-01). Say it once per type.
+      if (state.limit === undefined && (data.result?.hasMore ?? data.hasMore)) warnTruncated(type)
       return data.result?.documents ?? data.documents ?? []
     },
     // count executor: same filters, but `?count=true` and a minimal page (the

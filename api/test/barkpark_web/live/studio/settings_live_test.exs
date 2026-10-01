@@ -459,6 +459,24 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       refute audited?("operatoronly", "reveal")
     end
 
+    test "with the allowlist armed, the named operator still reveals", %{view: view} do
+      Settings.put("operatorok", %{"api_key" => "operatorvisiblevalue"})
+      {:ok, %{id: admin_id}} = Barkpark.Auth.verify_token(@admin_token)
+      previous = Application.get_env(:barkpark, :operator_token_ids)
+      Application.put_env(:barkpark, :operator_token_ids, [admin_id])
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:barkpark, :operator_token_ids, previous),
+          else: Application.delete_env(:barkpark, :operator_token_ids)
+      end)
+
+      html = render_click(view, "reveal", %{"plugin_name" => "operatorok"})
+
+      assert html =~ "operatorvisiblevalue"
+      assert audited?("operatorok", "reveal")
+    end
+
     test "delete removes row + writes delete audit", %{view: view} do
       Settings.put("zapme", %{"k" => "v"})
 
