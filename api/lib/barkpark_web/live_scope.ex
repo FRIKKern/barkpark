@@ -373,6 +373,17 @@ defmodule BarkparkWeb.LiveScope do
   defp doc_scope("new-document", %{"type" => type}, _socket) when is_binary(type),
     do: %{type: type}
 
+  # `duplicate-doc` CREATES a document (a fresh id from `clone_document/4`), so
+  # it targets the TYPE like `new-document`, never the open doc's id — otherwise
+  # a grant naming one document admitted the clone of it (r4a LiveView authz
+  # sweep). No editor type → desk level, which a doc/type grant does not admit.
+  defp doc_scope("duplicate-doc", _params, socket) do
+    case socket.assigns[:editor_type] do
+      type when is_binary(type) -> %{type: type}
+      _ -> %{}
+    end
+  end
+
   defp doc_scope(_event, _params, socket) do
     case socket.assigns do
       %{editor_type: type, editor_doc: %{doc_id: doc_id}}
