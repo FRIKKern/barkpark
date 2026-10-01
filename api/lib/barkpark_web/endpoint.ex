@@ -162,6 +162,35 @@ defmodule BarkparkWeb.Endpoint do
     end
   end
 
+  # ── Low-trust doors cap the body AT THE PARSER (Run-4 Lane B) ─────────────
+  #
+  # The general cap is 100 MB (media uploads, imports). Two doors are reachable
+  # by callers with no account: the ANONYMOUS form-submission door and the
+  # OUTSIDER ticket door (`bptk_` keys). Their real caps — 64 KiB per form
+  # body, 64 KiB per ticket message, 10 MiB per attachment — lived only in the
+  # controllers, which run AFTER this parse, and a chunked request carries no
+  # `content-length` for a pre-check to read. So one anonymous client could
+  # make the server decode ~100 MB per request before the rate limit or the key
+  # check ran. These caps stop the read at the door's own ceiling (plus
+  # multipart slack for attachments); an oversize body gets the same enveloped
+  # 413 `payload_too_large` the general cap answers. Pinned by
+  # `test/barkpark_web/endpoint_low_trust_body_cap_test.exs`.
+  @general_body_length 100_000_000
+  @forms_submission_body_length 64 * 1024
+  @ticket_attachment_body_length 11 * 1024 * 1024
+  @ticket_body_length 1_000_000
+
+  defp body_length(%Plug.Conn{
+         path_info: ["v1", "plugins", "forms", "w", _, "p", _, "d", _, "sites", _, "submissions"]
+       }),
+       do: @forms_submission_body_length
+
+  defp body_length(%Plug.Conn{path_info: ["v1", "tickets", _id, "attachments"]}),
+    do: @ticket_attachment_body_length
+
+  defp body_length(%Plug.Conn{path_info: ["v1", "tickets" | _]}), do: @ticket_body_length
+  defp body_length(_conn), do: @general_body_length
+
   defp parse_body(conn, _opts) do
     try do
       Plug.Parsers.call(
@@ -170,7 +199,7 @@ defmodule BarkparkWeb.Endpoint do
           parsers: [:urlencoded, :multipart, :json],
           pass: ["*/*"],
           json_decoder: Phoenix.json_library(),
-          length: 100_000_000,
+          length: body_length(conn),
           # Tee the RAW body into conn.assigns[:raw_body] ONLY on the GitHub
           # webhook path, so BarkparkWeb.Plugs.GithubWebhookSignature can verify
           # the HMAC over the exact bytes GitHub signed. Every other path reads
