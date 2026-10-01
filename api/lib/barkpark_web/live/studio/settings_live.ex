@@ -536,6 +536,17 @@ defmodule BarkparkWeb.Studio.SettingsLive do
            "Plugin credentials are installation-wide — viewing or managing them requires installation-admin authority."
          )}
 
+      # The REST twin (GET|PUT|DELETE /v1/plugins/settings/:name) sits behind
+      # RequirePlatformOperator; this LiveView door applies the same tier, so an
+      # armed operator allowlist cannot be walked around through Studio.
+      not BarkparkWeb.Plugs.RequirePlatformOperator.permits?(principal) ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Plugin credentials are installation-wide — viewing or managing them requires the platform operator."
+         )}
+
       true ->
         fun.()
     end

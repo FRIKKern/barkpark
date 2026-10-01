@@ -179,16 +179,25 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
     end
   end
 
+  # Plugin settings are instance-wide connector credentials: REST serves them only
+  # behind RequirePlatformOperator, so the LiveView reveal applies the same tier
+  # (any admin of the Default workspace reached it before).
   def handle_event("reveal", %{"name" => field_name}, socket) do
-    user_id = current_user_id(socket)
-    field = Enum.find(socket.assigns.fields, &(&1.name == field_name))
+    if BarkparkWeb.Plugs.RequirePlatformOperator.permits?(socket.assigns[:api_token]) do
+      user_id = current_user_id(socket)
+      field = Enum.find(socket.assigns.fields, &(&1.name == field_name))
 
-    case field && reveal_value(field, user_id) do
-      {:ok, value} when is_binary(value) and value != "" ->
-        {:noreply, assign(socket, revealed: Map.put(socket.assigns.revealed, field_name, value))}
+      case field && reveal_value(field, user_id) do
+        {:ok, value} when is_binary(value) and value != "" ->
+          {:noreply,
+           assign(socket, revealed: Map.put(socket.assigns.revealed, field_name, value))}
 
-      _ ->
-        {:noreply, put_flash(socket, :error, "Nothing stored for #{field_name}.")}
+        _ ->
+          {:noreply, put_flash(socket, :error, "Nothing stored for #{field_name}.")}
+      end
+    else
+      {:noreply,
+       put_flash(socket, :error, "Revealing plugin credentials requires the platform operator.")}
     end
   end
 
