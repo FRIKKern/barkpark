@@ -12,7 +12,7 @@ A Next.js 15 marketing site powered by [Barkpark](https://github.com/barkpark/ba
 - `docker-compose.yml` bundling the Phoenix API + PostgreSQL
 - Sample schemas (`page`, `post`, `author`, `contact`) + seed script
 - SEO out of the box: per-page metadata + OpenGraph, `sitemap.ts`, `robots.ts`, `metadataBase`
-- Graceful states: branded `not-found.tsx`, an `error.tsx` boundary, and a `loading.tsx` skeleton
+- Graceful states: a branded `not-found.tsx` served with a real 404 status, and an `error.tsx` boundary
 
 ## Quick start
 

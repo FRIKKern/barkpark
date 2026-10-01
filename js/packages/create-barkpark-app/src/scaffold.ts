@@ -18,11 +18,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
  *   app/api/barkpark/webhook/route.ts      package.json.tmpl
  *   app/error.tsx                          postcss.config.js
  *   app/globals.css                        tsconfig.json
- *   app/loading.tsx                        barkpark.config.ts.tmpl
- *   app/not-found.tsx                      docker-compose.yml
- *   app/robots.ts                          docker-compose.override.yml.example
- *   lib/format-date.ts                     lib/resolve-server-token.ts
- *   lib/slug.ts
+ *   app/not-found.tsx                      barkpark.config.ts.tmpl
+ *   app/robots.ts                          docker-compose.yml
+ *   lib/format-date.ts                     docker-compose.override.yml.example
+ *   lib/slug.ts                            lib/resolve-server-token.ts
  *
  * Everything else stays in the starter dir because it is INTENTIONALLY VARIANT
  * — it differs today (app/layout.tsx, app/page.tsx, lib/csp.ts, middleware.ts,
