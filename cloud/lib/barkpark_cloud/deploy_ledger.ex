@@ -3830,7 +3830,10 @@ defmodule BarkparkCloud.DeployLedger do
   # A run -> a journey. Sorted on the SAME key the window used, so the head this
   # reads and the head the run number was computed from cannot disagree.
   defp journey_row(run) do
-    sorted = Enum.sort_by(run, &{&1.inserted_at, &1.id})
+    # task-0284692b2db7f02e: a DateTime inside a tuple sorts STRUCTURALLY (day
+    # before month), so a run spanning a month boundary picked the wrong head and
+    # last. Key on the microsecond epoch instead.
+    sorted = Enum.sort_by(run, &{DateTime.to_unix(&1.inserted_at, :microsecond), &1.id})
     head = hd(sorted)
     last = List.last(sorted)
 

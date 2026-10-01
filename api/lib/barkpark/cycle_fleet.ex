@@ -2581,7 +2581,7 @@ defmodule Barkpark.CycleFleet do
          authority_evidence: current_admission && lifecycle_admission(current_admission),
          quarantines:
            quarantines
-           |> Enum.sort_by(&{&1.inserted_at, &1.id})
+           |> Enum.sort_by(&chronological_key/1)
            |> Enum.map(&lifecycle_quarantine/1),
          superseded: Enum.map(superseded, &lifecycle_wave(&1, lifecycle_status.(&1))),
          historical_ancestry:
@@ -2640,12 +2640,19 @@ defmodule Barkpark.CycleFleet do
 
   defp maybe_put_canonical_origin(authority, _workspace, _project), do: authority
 
+  # task-0284692b2db7f02e: oldest-first by inserted_at, id as tiebreak. A
+  # `{%DateTime{}, id}` tuple sorts STRUCTURALLY (day before month), which put
+  # 2026-09-24 after 2026-10-01; the microsecond epoch orders chronologically.
+  @doc false
+  def chronological_key(%{inserted_at: %DateTime{} = at, id: id}),
+    do: {DateTime.to_unix(at, :microsecond), id}
+
   @doc "Project the immutable retrieval attribution seed for every assignment in one cycle wave."
   @spec assignment_attributions(map()) :: [map()]
   def assignment_attributions(scope) when is_map(scope) do
     scope
     |> list_assignments()
-    |> Enum.sort_by(&{&1.inserted_at, &1.id})
+    |> Enum.sort_by(&chronological_key/1)
     |> Enum.map(&assignment_attribution/1)
   end
 
