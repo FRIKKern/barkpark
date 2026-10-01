@@ -416,7 +416,12 @@ defmodule BarkparkWeb.QueryController do
       # opaque, NON-retryable 500. `{backlinks: [], count: 0}` would be worse —
       # a caller cannot tell it from "this document is referenced by nothing".
       read_region(:backlinks, "backlinks/2 (dataset=#{inspect(dataset)} id=#{inspect(id)})", fn ->
-        backlinks = Content.Graph.reverse_referencers(id, [dataset: dataset] ++ scope_opts(conn))
+        opts = [dataset: dataset] ++ scope_opts(conn)
+
+        backlinks =
+          id
+          |> Content.Graph.reverse_referencers(opts)
+          |> redact_backlink_content(dataset, opts)
 
         json(conn, %{
           result: %{backlinks: backlinks, count: length(backlinks)},
@@ -461,6 +466,49 @@ defmodule BarkparkWeb.QueryController do
     else
       {:error, :not_found}
     end
+  end
+
+  # A backlink row's `description` / `event_type` are lifted from the
+  # referencing document's `content` by `Graph.reverse_referencers/2`. Every
+  # other read sends content through `Envelope.render/3`, which drops a private
+  # / owner_only / readable_by field; this route handed it out raw (found in
+  # the task-3c68de39a19285c4 authz sweep, graph.ex ~1370). The gate lives HERE,
+  # on the one JSON route that emits both fields, rather than inside
+  # `reverse_referencers/2`: that function feeds the anonymous paper readers
+  # under a pinned statement budget (reader_query_baseline_test.exs), and a
+  # per-type schema read there blows it. One schema read per SOURCE type, and
+  # only for rows that carry one of the two fields.
+  defp redact_backlink_content(rows, dataset, opts) do
+    ctx = Keyword.get(opts, :caller_context) || CallerContext.anonymous()
+
+    if match?(%CallerContext{is_admin: true}, ctx) do
+      rows
+    else
+      types =
+        for r <- rows, r.description != nil or r.event_type != nil, uniq: true, do: r.type
+
+      schemas =
+        Map.new(types, fn type ->
+          case Content.Schema.get_schema_for_redaction(type, dataset, opts) do
+            {:ok, schema} -> {type, schema}
+            _ -> {type, nil}
+          end
+        end)
+
+      Enum.map(rows, fn r ->
+        schema = Map.get(schemas, r.type)
+
+        r
+        |> gate_backlink_field(:description, "description", schema, ctx)
+        |> gate_backlink_field(:event_type, "event_type", schema, ctx)
+      end)
+    end
+  end
+
+  defp gate_backlink_field(row, key, field, schema, ctx) do
+    if Map.get(row, key) != nil and not Envelope.field_readable?(schema, field, ctx),
+      do: Map.put(row, key, nil),
+      else: row
   end
 
   @doc """
