@@ -225,13 +225,21 @@ defmodule BarkparkCloud.Notifications do
     # before this gate.
     case normalize_keys(attrs)["smtp_host"] do
       host when is_binary(host) and host != "" ->
-        if SafeUrl.literal_internal_host?(host),
+        if internal_relay?(host),
           do: {:error, internal_relay_changeset(settings)},
           else: do_update_settings(settings, attrs)
 
       _ ->
         do_update_settings(settings, attrs)
     end
+  end
+
+  # The one TEST seam: the transport-manifest suite drives a guaranteed-refusing
+  # relay on loopback port 1 (instant, never leaves the machine). Nothing in
+  # config/runtime.exs sets this; it defaults to false everywhere.
+  defp internal_relay?(host) do
+    SafeUrl.literal_internal_host?(host) and
+      not Application.get_env(:barkpark_cloud, :allow_internal_smtp_relay, false)
   end
 
   defp internal_relay_changeset(settings) do
@@ -1819,7 +1827,7 @@ defmodule BarkparkCloud.Notifications do
   # platform transport instead of leaking a half-built config.
   defp smtp_override(%EmailSettings{} = s) do
     with {:ok, relay} <- decrypt(s.smtp_host_encrypted),
-         false <- SafeUrl.literal_internal_host?(relay),
+         false <- internal_relay?(relay),
          {:ok, username} <- decrypt(s.smtp_username_encrypted),
          {:ok, password} <- decrypt(s.smtp_password_encrypted) do
       {:ok,
