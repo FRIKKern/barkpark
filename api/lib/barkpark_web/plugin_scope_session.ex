@@ -320,9 +320,14 @@ defmodule BarkparkWeb.PluginScopeSession do
         {:cont, socket}
 
       # Anonymous grant with no item token → the SECTION-share arm granted the
-      # whole scope. Deliberately untouched (`Sharing.shared?/4` semantics).
+      # whole scope. Its reach is unchanged (`Sharing.shared?/4` semantics),
+      # but the share is RE-CHECKED here like an item link is (r4a LiveView
+      # authz sweep): the signed session outlives the share, so without this a
+      # removed section share kept opening every paper in the scope on a
+      # live_redirect, a reconnect or a replayed join, and an open socket kept
+      # streaming. The liveness tick re-runs this same clause.
       is_nil(session[@session_share_token]) ->
-        {:cont, socket}
+        if section_shared?(session, params), do: {:cont, socket}, else: deny(socket)
 
       item_token_binds?(params, session) ->
         {:cont, socket}
