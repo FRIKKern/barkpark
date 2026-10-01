@@ -2906,6 +2906,70 @@ else
 fi
 echo
 
+# ── case ERE: the fork-free glob_to_ere emits the sed spelling's ERE ────────
+# task-94379622c9572d2c. glob_to_ere used to be three `printf | sed` forms;
+# it is now done in bash so `--match` stops paying two forks per glob. The
+# ERE is what elixir.yml dispatches on, so the two spellings must agree BYTE
+# FOR BYTE. The reference below is the sed spelling verbatim; the candidate
+# is extracted from the live script, so an edit to either side is measured.
+echo "case ERE: fork-free glob_to_ere == the sed spelling, byte for byte"
+ere_ref() {
+  local g="$1" body
+  case "$g" in
+    */'**')
+      body="${g%/**}"
+      printf '^%s(/|$)' "$(printf '%s' "$body" | sed -e 's/[][\\.^$*+?(){}|]/\\&/g')"
+      ;;
+    *'*'*)
+      printf '^%s$' "$(printf '%s' "$g" |
+        sed -e 's/[][\\.^$+?(){}|]/\\&/g' \
+            -e 's/\*\*/@@ELIXIRDSTAR@@/g' \
+            -e 's,\*,[^/]*,g' \
+            -e 's,@@ELIXIRDSTAR@@,.*,g')"
+      ;;
+    *)
+      printf '^%s$' "$(printf '%s' "$g" | sed -e 's/[][\\.^$*+?(){}|]/\\&/g')"
+      ;;
+  esac
+}
+ere_src="$(awk '/^ere_escape_var\(\) \{/{on=1} on{print} on && /^glob_to_ere\(\) \{/{last=1} last && /^\}/{exit}' "$SCRIPT")"
+if ! printf '%s\n' "$ere_src" | grep -q '^glob_to_ere() {'; then
+  no "could not extract ere_escape_var..glob_to_ere from $SCRIPT — the case would measure nothing"
+else
+  eval "$ere_src"
+  ere_globs="$(
+    {
+      bash "$SCRIPT" --print-set test
+      bash "$SCRIPT" --print-set test --literal
+      bash "$SCRIPT" --print-set compile
+      printf '%s\n' 'a/b' 'a/**' 'a/*.ex' 'a/**/*.ex' '**' '*' 'a**b' 'a/*/b/**' \
+        'x.y+z?(a){b}|c^d$e[f]g\h' 'weird\*star/**' 'dir with space/**' 'a/b-*.{sh,exs}'
+    } | LC_ALL=C sort -u
+  )"
+  ere_n=0
+  ere_bad=""
+  while IFS= read -r g; do
+    [ -n "$g" ] || continue
+    ere_n=$((ere_n + 1))
+    [ "$(ere_ref "$g")" = "$(glob_to_ere "$g")" ] || ere_bad="$ere_bad $g"
+  done <<EOF
+$ere_globs
+EOF
+  if [ -z "$ere_bad" ] && [ "$ere_n" -ge 100 ]; then
+    ok "all $ere_n globs (the real compile/test sets + 12 edge cases) emit the identical ERE"
+  else
+    no "$ere_n globs compared; differing:$ere_bad"
+  fi
+  # CAN IT RED: a candidate that forgets to escape `.` must be caught.
+  eval "$(printf '%s\n' "$ere_src" | sed "s/'\\.' | //")"
+  if [ "$(ere_ref 'a/b.ex')" != "$(glob_to_ere 'a/b.ex')" ]; then
+    ok "control: a candidate that does not escape '.' DIFFERS — the comparison can red"
+  else
+    no "control: the mutated candidate still matched; the comparison is vacuous"
+  fi
+fi
+echo
+
 echo "----"
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1
