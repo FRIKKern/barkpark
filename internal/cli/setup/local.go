@@ -556,7 +556,10 @@ func localSteps(plan SetupPlan, lc localContext, envValue string, envSet bool, a
 		if profile == ProfileClean {
 			seedCmd += " -e BARKPARK_SEED_ADMIN_TOKEN=****"
 			if adminToken != "" {
-				seedArgv = append(seedArgv, "-e", "BARKPARK_SEED_ADMIN_TOKEN="+adminToken)
+				// NAME only: `docker compose exec -e NAME` takes the value from the
+				// docker client's own environment (the step's Env below), so the
+				// admin token never appears in a process command line (ps).
+				seedArgv = append(seedArgv, "-e", "BARKPARK_SEED_ADMIN_TOKEN")
 			}
 		}
 		seedArgv = append(seedArgv, "api", "mix", "ecto.reset")
@@ -581,6 +584,7 @@ func localSteps(plan SetupPlan, lc localContext, envValue string, envSet bool, a
 				Cmd:   seedCmd,
 				Argv:  seedArgv,
 				Dir:   lc.root,
+				Env:   seedEnv, // the docker client reads BARKPARK_SEED_ADMIN_TOKEN from here
 			}, MapErr: wrapEctoResetErr},
 			localStep{
 				step: step{Title: "wait for the API to answer on " + localServerURL},

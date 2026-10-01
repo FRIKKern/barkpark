@@ -3,6 +3,7 @@ package setup
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,14 +129,12 @@ func executeDeploy(plan SetupPlan, opts Options) error {
 	// Clean profile: mint the admin token at execute time and thread it into
 	// the seed via the ssh env prefix; the chained connect persists it verified.
 	adminToken := ""
-	realPrefix := displayPrefix
 	if profile == ProfileClean {
 		tok, terr := GenerateAdminToken()
 		if terr != nil {
 			return fmt.Errorf("setup deploy: %w", terr)
 		}
 		adminToken = tok
-		realPrefix = strings.Replace(displayPrefix, "BARKPARK_SEED_ADMIN_TOKEN=****", "BARKPARK_SEED_ADMIN_TOKEN="+adminToken, 1)
 	}
 
 	// Stream the installer (the rendered line keeps the redacted prefix).
@@ -144,7 +143,7 @@ func executeDeploy(plan SetupPlan, opts Options) error {
 		fmt.Fprintf(w, "   %s\n", rendered)
 	}
 	ctx := context.Background()
-	if err := streamSSHInstaller(ctx, w, host, realPrefix, scriptPath); err != nil {
+	if err := streamSSHInstaller(ctx, w, host, displayPrefix, adminToken, scriptPath); err != nil {
 		return fmt.Errorf("setup deploy: installer failed: %w", err)
 	}
 
@@ -339,18 +338,35 @@ func locateDeployScript() (string, error) {
 // streamSSHInstaller runs `ssh <host> '<env> bash -s'` with deploy.sh piped on
 // stdin, streaming the remote output live to w. This is the real outbound action
 // — only reached behind opts.Confirm.
-func streamSSHInstaller(ctx context.Context, w writerLike, host, envPrefix, scriptPath string) error {
+func streamSSHInstaller(ctx context.Context, w writerLike, host, envPrefix, adminToken, scriptPath string) error {
 	f, err := os.Open(scriptPath)
 	if err != nil {
 		return fmt.Errorf("open deploy.sh: %w", err)
 	}
 	defer f.Close()
 
-	s := step{
-		Title: "stream deploy.sh into the remote shell",
-		Argv:  []string{"ssh", host, envPrefix + " bash -s"},
-	}
+	s, preamble := sshInstallerInvocation(host, envPrefix, adminToken)
 	// runStep does not feed stdin; build the command directly here so we can
-	// wire the script as stdin.
-	return runStepWithStdin(ctx, asWriter(w), s, f)
+	// wire the script as stdin (behind the token preamble).
+	return runStepWithStdin(ctx, asWriter(w), s, io.MultiReader(strings.NewReader(preamble), f))
+}
+
+// sshInstallerInvocation is the ssh step and the stdin preamble that precedes
+// deploy.sh. The generated admin token NEVER rides the argv: an argv is visible
+// to every user of both machines in `ps` while the installer runs. The
+// command-line env prefix keeps its redacted `BARKPARK_SEED_ADMIN_TOKEN=****`
+// form out (it would override the export), and the remote shell receives the
+// token as an `export` line on stdin, ahead of the script `bash -s` reads.
+func sshInstallerInvocation(host, envPrefix, adminToken string) (step, string) {
+	prefix := strings.TrimSpace(strings.Replace(envPrefix, "BARKPARK_SEED_ADMIN_TOKEN=****", "", 1))
+	prefix = strings.Join(strings.Fields(prefix), " ")
+	preamble := ""
+	if adminToken != "" {
+		// GenerateAdminToken yields bp_admin_ + base64url: no shell metacharacters.
+		preamble = "export BARKPARK_SEED_ADMIN_TOKEN='" + adminToken + "'\n"
+	}
+	return step{
+		Title: "stream deploy.sh into the remote shell",
+		Argv:  []string{"ssh", host, prefix + " bash -s"},
+	}, preamble
 }
