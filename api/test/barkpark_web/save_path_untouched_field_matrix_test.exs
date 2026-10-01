@@ -587,6 +587,48 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
     end
   end
 
+  describe "SDK read-modify-write and publish" do
+    # The client round trip: GET the document envelope, change one field, and
+    # `createOrReplace` it with every other key exactly as read. A read
+    # serialisation that reshaped a value (a projected body, a normalised
+    # datetime, an expanded reference) would land here as a write.
+    test "GET envelope → createOrReplace with only `probe` changed", %{type: type, token: token} do
+      doc_id = seed_draft!(type)
+
+      envelope =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> get("/v1/data/doc/#{@dataset}/#{type}/#{DraftId.draft_id(doc_id)}?perspective=drafts")
+        |> json_response(200)
+
+      doc = Map.get(envelope, "result") || Map.get(envelope, "document") || envelope
+
+      body =
+        doc
+        |> Map.reject(fn {k, _} ->
+          String.starts_with?(k, "_") or k in ["status", "content"]
+        end)
+        |> Map.merge(doc["content"] || %{})
+        |> Map.merge(%{
+          "_id" => DraftId.draft_id(doc_id),
+          "_type" => type,
+          "title" => doc["title"],
+          "probe" => @probe_after
+        })
+
+      mutate!(token, %{"createOrReplace" => body})
+      assert_matrix!("sdk_read_modify_write", stored(type, doc_id))
+    end
+
+    test "publish copies every cell byte-identical", %{type: type} do
+      doc_id = seed_draft!(type)
+      {:ok, _} = Content.publish_document(doc_id, type, @dataset, source: :api)
+      {:ok, pub} = Content.get_document(DraftId.published_id(doc_id), type, @dataset)
+      assert pub.content["probe"] == @probe_before
+      assert_cells!("publish", pub)
+    end
+  end
+
   describe "REST /v1/data/mutate patch (also `bp doc patch --set`)" do
     test "patch.set of only `probe`", %{type: type, token: token} do
       doc_id = seed_draft!(type)
