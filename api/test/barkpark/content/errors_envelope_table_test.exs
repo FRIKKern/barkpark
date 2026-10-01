@@ -126,6 +126,11 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"malformed_blocks",
        {:error, {:malformed_blocks, %{"blocks" => ["blocks[0] must be an object"]}}}, "malformed",
        400, [:details]},
+      # An object naming no known mutation verb (task-2f601b4f24e9af66): still
+      # `malformed` 400, now naming the received keys and the accepted verbs.
+      {"unknown_mutation_verb",
+       {:error, {:unknown_mutation_verb, ["frobnicate"], ["create", "patch"]}}, "malformed", 400,
+       [:details]},
       {"unsupported_if_match_for_batch", {:error, :unsupported_if_match_for_batch},
        "unsupported_if_match_for_batch", 400, []},
       {"invalid_filter_op", {:error, {:invalid_filter_op, "status", "bogus"}}, "invalid_filter",
