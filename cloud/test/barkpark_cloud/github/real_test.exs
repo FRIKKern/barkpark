@@ -75,6 +75,19 @@ defmodule BarkparkCloud.GitHub.RealTest do
       assert {"X-GitHub-Api-Version", "2022-11-28"} in req.headers
     end
 
+    test "access_token_request {:repo_read, name} — narrowed to one repo, contents:read only" do
+      req = Real.access_token_request("42", "the.jwt.token", {:repo_read, "private-repo"})
+
+      assert req.method == :post
+      assert req.url == "https://api.github.com/app/installations/42/access_tokens"
+      assert {"Authorization", "Bearer the.jwt.token"} in req.headers
+
+      assert Jason.decode!(req.body) == %{
+               "repositories" => ["private-repo"],
+               "permissions" => %{"contents" => "read"}
+             }
+    end
+
     test "get_installation_request" do
       req = Real.get_installation_request("42", "jwt")
       assert req.method == :get

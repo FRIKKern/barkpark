@@ -10925,8 +10925,11 @@ defmodule BarkparkCloud.Web.Router do
   # tampered handle, an unexpected seam return) leaves the anonymous source
   # untouched, so a public repo keeps deploying and a private one fails at the
   # builder with the honest terminal repo-inaccessible reason.
+  # The clone credential is REPO-SCOPED and READ-ONLY (r3b sweep): the box runs
+  # arbitrary build code, so it gets a token for this site's repo with
+  # contents:read, never the installation's full-permission, every-repo token.
   defp put_clone_token(source, site) do
-    case GitHub.installation_token_for(site.team_id) do
+    case GitHub.repo_read_token_for(site.team_id, site.github_repo) do
       {:ok, token} when is_binary(token) and token != "" ->
         Map.put(source, :token, token)
 

@@ -73,6 +73,18 @@ defmodule BarkparkCloud.GitHub.Real do
   end
 
   @impl true
+  def exchange_repo_read_token(installation_id, repo_name) when is_binary(repo_name) do
+    with {:ok, jwt} <- app_jwt(),
+         {:ok, decoded} <-
+           request(access_token_request(installation_id, jwt, {:repo_read, repo_name})) do
+      case decoded do
+        %{"token" => token} when is_binary(token) -> {:ok, token}
+        _ -> {:error, :unexpected_response}
+      end
+    end
+  end
+
+  @impl true
   def create_repo(installation_id, name, private?)
       when is_binary(name) and is_boolean(private?) do
     with {:ok, %{account_login: owner}} <- get_installation(installation_id),
@@ -151,6 +163,25 @@ defmodule BarkparkCloud.GitHub.Real do
   @doc "Pure request map for `POST /app/installations/:id/access_tokens` (App-JWT auth)."
   def access_token_request(installation_id, jwt) do
     build_request(:post, "/app/installations/#{installation_id}/access_tokens", jwt_auth(jwt), "")
+  end
+
+  @doc """
+  Pure request map for a REPO-SCOPED, READ-ONLY installation token: GitHub's
+  access_tokens body narrows `repositories` to the one repo and `permissions`
+  to `contents: read`. The build clone credential (see
+  `GitHub.repo_read_token_for/2`).
+  """
+  def access_token_request(installation_id, jwt, {:repo_read, repo_name})
+      when is_binary(repo_name) do
+    body =
+      Jason.encode!(%{"repositories" => [repo_name], "permissions" => %{"contents" => "read"}})
+
+    build_request(
+      :post,
+      "/app/installations/#{installation_id}/access_tokens",
+      jwt_auth(jwt),
+      body
+    )
   end
 
   @doc """
