@@ -41,6 +41,41 @@ defmodule BarkparkWeb.SchemaShowNotFoundTest do
     assert error["hint"] =~ "/v1/schemas/#{@dataset}"
   end
 
+  # The same wrong noun on DELETE, found by the API conformance sweep
+  # (task-8bcb0d89c2a1c869's sweep): DELETE of a missing schema answered
+  # "document not found" with the document-id hint.
+  test "DELETE of a missing schema answers 404 not_found naming the schema, not a document",
+       %{conn: conn, token: token} do
+    body =
+      conn
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> delete("/v1/schemas/#{@dataset}/nosuchtype")
+      |> json_response(404)
+
+    error = body["error"] || body
+    assert error["code"] == "not_found"
+    assert error["message"] =~ "schema"
+    assert error["message"] =~ "nosuchtype"
+    refute error["message"] =~ "document"
+    refute error["hint"] =~ "document _id"
+  end
+
+  test "CONTROL: DELETE of an existing schema still answers 200 with the receipt", %{
+    conn: conn,
+    token: token
+  } do
+    {:ok, _} =
+      Content.upsert_schema(%{"name" => "gone", "title" => "Gone", "fields" => []}, @dataset)
+
+    body =
+      conn
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> delete("/v1/schemas/#{@dataset}/gone")
+      |> json_response(200)
+
+    assert body["deleted"] == "gone"
+  end
+
   test "CONTROL: an existing schema still answers 200 with the schema", %{
     conn: conn,
     token: token

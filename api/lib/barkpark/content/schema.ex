@@ -440,14 +440,34 @@ defmodule Barkpark.Content.Schema do
             # A concurrent double-DELETE would raise Ecto.StaleEntryError (→ 500).
             # stale_error_field turns the race into {:error, :not_found} (rendered 404).
             case Repo.delete(schema, stale_error_field: :id) do
-              {:error, cs} -> if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
-              ok -> ok
+              {:error, cs} ->
+                if stale?(cs), do: schema_not_found(name, dataset), else: {:error, cs}
+
+              ok ->
+                ok
             end
         end
+
+      # The bare `{:error, :not_found}` renders "document not found" with a hint
+      # to check a document `_id`. What is missing here is a SCHEMA, the same
+      # wrong noun task-8d46c1fe49954697 fixed on `GET /v1/schemas/:ds/:name`,
+      # found on DELETE by the API conformance sweep (task-8bcb0d89c2a1c869's
+      # sibling). Shaped here, not in SchemaController.delete/2, because that
+      # action is an anchored PDS exclusion row whose body must not move.
+      {:error, :not_found} ->
+        schema_not_found(name, dataset)
 
       error ->
         error
     end
+  end
+
+  defp schema_not_found(name, dataset) do
+    {:error,
+     {:not_found,
+      "schema not found: no schema named #{inspect(name)} in dataset #{inspect(dataset)}",
+      hint:
+        "Check the schema name and dataset in the URL — GET /v1/schemas/#{dataset} lists the schemas you can read here."}}
   end
 
   # Count every document of `name` in the dataset scope (all perspectives, all
