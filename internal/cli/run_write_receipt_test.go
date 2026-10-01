@@ -135,8 +135,8 @@ func TestRunCommandRefusesUnreadableWriteReceipt(t *testing.T) {
 //	{"result":{transactionId,results}}   mutate_controller.ex:24
 //	{"ok":false,"reason":"no_ready"}     the tasks queue on an empty queue (2xx)
 //	{"ok":true,"doc":{doc_id,claim}}     the claim receipt
-//	{"accepted":true}                    chat_controller.ex:278 (202)
-//	{"request_id":…}                     chat_controller.ex:316 (202)
+//	{"accepted":true}                    ChatController.create_message/2 (202)
+//	{"request_id":…}                     ChatController.interrupt/2 (202)
 //	{rev,id}                             the publish receipt
 //
 // wantStdout is the byte-for-byte capture from the PRE-FENCE binary through the
