@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next'
-import { getDocs } from '../lib/barkpark'
+import { getAllDocs } from '../lib/barkpark'
 import { slugOf, type SlugValue } from '../lib/slug'
 
 // Public site URL — set NEXT_PUBLIC_SITE_URL in production so the emitted URLs
@@ -35,9 +35,9 @@ const when = (iso?: string): Date | undefined => {
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   try {
     const [posts, authors, tags] = await Promise.all([
-      getDocs<Post>('post'),
-      getDocs<Author>('author'),
-      getDocs<Tag>('tag'),
+      getAllDocs<Post>('post'),
+      getAllDocs<Author>('author'),
+      getAllDocs<Tag>('tag'),
     ])
 
     return [
