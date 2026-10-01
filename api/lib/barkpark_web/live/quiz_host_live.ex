@@ -14,7 +14,7 @@ defmodule BarkparkWeb.QuizHostLive do
   alias Barkpark.Quiz
 
   @impl true
-  def mount(%{"pin" => pin} = params, _session, socket) do
+  def mount(%{"pin" => pin} = params, session, socket) do
     if connected?(socket) do
       # `Quiz.ensure_room/1` is specced `{:ok, pid()} | {:error, term()}` and
       # returns `{:error, :max_children}` BY DESIGN once `Quiz.RoomSupervisor`
@@ -31,7 +31,7 @@ defmodule BarkparkWeb.QuizHostLive do
       # refusals render different copy: a budget refusal is about THIS visitor
       # and clears on its own; a capacity refusal is about the service.
       case Quiz.ensure_room(pin, connect_info(socket)) do
-        {:ok, _pid} -> mount_room(pin, params, socket)
+        {:ok, _pid} -> mount_room(pin, params, host_key(session), socket)
         {:error, reason} -> {:ok, assign(unavailable_assigns(socket, pin), error: reason)}
       end
     else
@@ -40,7 +40,7 @@ defmodule BarkparkWeb.QuizHostLive do
   end
 
   # The connected mount once the room is live.
-  defp mount_room(pin, params, socket) do
+  defp mount_room(pin, params, host_key, socket) do
     # Bind an optional `?quiz=<id>` so a Studio publish of that quiz reaches
     # this live room in under a second (charter Vision + Decision M). This is
     # the first production call site of `bind_quiz/3`. The default dataset
@@ -50,7 +50,9 @@ defmodule BarkparkWeb.QuizHostLive do
     # (the room keeps its default question) and is idempotent across refresh,
     # so there is no error branch to render.
     case params["quiz"] do
-      qid when is_binary(qid) and qid != "" -> Quiz.bind_quiz(pin, qid)
+      # Bound as THIS host session: a second browser (a player who read the PIN
+      # off the projector) cannot swap a live room's quiz (task-680f88266f783346).
+      qid when is_binary(qid) and qid != "" -> Quiz.bind_quiz_as_host(pin, qid, host_key)
       _ -> :ok
     end
 
@@ -66,6 +68,14 @@ defmodule BarkparkWeb.QuizHostLive do
        error: nil
      )}
   end
+
+  # The host browser's identity: a hash of its session CSRF token (per browser
+  # session, signed cookie). Absent → nil, which can claim an unowned PIN but
+  # never displace a live host.
+  defp host_key(%{"_csrf_token" => token}) when is_binary(token) and token != "",
+    do: :crypto.hash(:sha256, token) |> Base.url_encode64(padding: false)
+
+  defp host_key(_session), do: nil
 
   # The pre-connect skeleton AND the base for the capacity-refusal state.
   defp unavailable_assigns(socket, pin) do
