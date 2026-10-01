@@ -438,6 +438,27 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert audited?("revealme", "reveal")
     end
 
+    # The REST twin sits behind RequirePlatformOperator; with the operator
+    # allowlist ARMED and this admin not on it, the Studio reveal refuses too
+    # (task-a1c518158045be04).
+    test "an armed operator allowlist refuses the reveal to a non-operator admin", %{view: view} do
+      Settings.put("operatoronly", %{"api_key" => "operatorsecretvalue"})
+      previous = Application.get_env(:barkpark, :operator_token_ids)
+      Application.put_env(:barkpark, :operator_token_ids, [Ecto.UUID.generate()])
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:barkpark, :operator_token_ids, previous),
+          else: Application.delete_env(:barkpark, :operator_token_ids)
+      end)
+
+      html = render_click(view, "reveal", %{"plugin_name" => "operatoronly"})
+
+      refute html =~ "operatorsecretvalue"
+      assert html =~ "requires the platform operator"
+      refute audited?("operatoronly", "reveal")
+    end
+
     test "delete removes row + writes delete audit", %{view: view} do
       Settings.put("zapme", %{"k" => "v"})
 
