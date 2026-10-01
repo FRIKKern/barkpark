@@ -138,26 +138,39 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
         _ -> @default_dataset
       end
 
-    # M1 read-your-writes: a live session's memory is authoritative — ask it
-    # to persist its debounced state before the read. Cheap, and a no-op
-    # when no session is live for this sheet. A FAILED persist means the
-    # row below is stale — surface a clean 503 instead of serving it; the
-    # session keeps retrying on its debounce, so the hint is honest.
-    case Barkpark.Plugins.Sheets.Session.flush(slug, dataset) do
-      :ok ->
-        with {:error, :not_found} <-
-               Content.get_document(Content.draft_id(slug), "sheet", dataset, scope),
-             {:error, :not_found} <-
-               Content.get_document(Content.published_id(slug), "sheet", dataset, scope) do
-          {:error, :not_found, "not_found",
-           "no sheet #{inspect(slug)} in dataset #{inspect(dataset)}"}
-        else
-          {:ok, doc} -> {:ok, doc}
-        end
+    # AUTHORIZE FIRST: read the row in the caller's own scope. Only a sheet
+    # this caller may export gets its live session flushed. The flush used to
+    # run BEFORE this read and sweep EVERY tenant's session for the slug, so a
+    # foreign token could force-persist another workspace's live sheet and
+    # learn from a 503 that the slug was live somewhere (Run-4 Lane B).
+    with {:ok, doc} <- read_sheet(slug, dataset, scope) do
+      # M1 read-your-writes: a live session's memory is authoritative — ask
+      # THIS row's session (keyed by the row's own workspace, the key the ops
+      # door and the Studio grid use) to persist its debounced state, then
+      # read again. A no-op when no session is live. A FAILED persist means
+      # the row is stale — surface a clean 503 instead of serving it; the
+      # session keeps retrying on its debounce, so the hint is honest.
+      case Barkpark.Plugins.Sheets.Session.flush(slug, dataset, doc.workspace_id) do
+        :ok ->
+          read_sheet(slug, dataset, scope)
 
-      {:error, _reason} ->
-        {:error, :service_unavailable, "flush_failed",
-         "the sheet's latest edits could not be persisted — retry in a few seconds"}
+        {:error, _reason} ->
+          {:error, :service_unavailable, "flush_failed",
+           "the sheet's latest edits could not be persisted — retry in a few seconds"}
+      end
+    end
+  end
+
+  # Draft first, published fallback — both in the caller's scope.
+  defp read_sheet(slug, dataset, scope) do
+    with {:error, :not_found} <-
+           Content.get_document(Content.draft_id(slug), "sheet", dataset, scope),
+         {:error, :not_found} <-
+           Content.get_document(Content.published_id(slug), "sheet", dataset, scope) do
+      {:error, :not_found, "not_found",
+       "no sheet #{inspect(slug)} in dataset #{inspect(dataset)}"}
+    else
+      {:ok, doc} -> {:ok, doc}
     end
   end
 
