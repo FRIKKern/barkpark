@@ -28,7 +28,7 @@ defmodule BarkparkWeb.Studio.WorkspaceReachabilityParityTest do
 
   ALSO PINNED, and the reason this is not a three-line dedup:
   `StudioChrome.can_create_in?/2` sits seven lines above `can_reach?/2` and is
-  DELIBERATELY a different question — membership asked of the principal's OWN
+  DELIBERATELY a different question — a write seat asked of the principal's OWN
   kind on BOTH arms, so the account arm does not inherit the anonymous "is this
   the workspace I am already mounted in?" fallback that every mounted account
   session answers yes to. `does not fold in the create gate` asserts it is still
@@ -150,8 +150,11 @@ defmodule BarkparkWeb.Studio.WorkspaceReachabilityParityTest do
                "precisely so the account arm does not inherit can_reach?/2's " <>
                "anonymous 'already mounted here' fallback."
 
-      assert src =~ "Tenancy.Auth.member?(principal, ws_id)",
-             "can_create_in?/2's account arm must stay a membership test"
+      # r4a: a WRITE seat (`authorize/3 :write`), not bare `member?/2` — the
+      # socket twin of the REST create_project fix (a read-only member must not
+      # mint projects). Still asked of the principal's OWN kind on both arms.
+      assert src =~ "Tenancy.Auth.authorize(principal, ws_id, :write) == :ok",
+             "can_create_in?/2 must stay a principal-own-kind seat test (write tier)"
     end
   end
 
