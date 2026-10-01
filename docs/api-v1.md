@@ -92,12 +92,12 @@ All three create kinds write the **draft** row. On a **published `task`** id tha
 
 **`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`; `ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted.
 
-The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`:
+The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`; missing `id`/`type` → 422 `validation_failed`:
 
 - **`publish`** — copies `drafts.<id>` to `<id>`, deletes the draft.
 - **`unpublish`** — moves `<id>` back to `drafts.<id>`.
 - **`discardDraft`** — deletes `drafts.<id>` without touching the published document.
-- **`delete`** — deletes both `<id>` and `drafts.<id>` if they exist. Requires `type` (else `400 malformed`); honors `ifRevisionID`.
+- **`delete`** — deletes `<id>` and `drafts.<id>` if they exist; honors `ifRevisionID`.
 
 **Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish (or paper-ingest 200) may add non-blocking `warnings:[{code,severity,message}]` (`label_norm`, `schema_validation`).
 
