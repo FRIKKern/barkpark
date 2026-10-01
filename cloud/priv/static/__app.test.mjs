@@ -33204,7 +33204,7 @@ const CCHW65_MUST_ANSWER = [
   "github_error", "invalid_name",
   // cch-w73-bl: the install return leg made this 422 human-reachable and paid it
   // with a curated sentence; pinned here so a later deletion is not invisible.
-  "installation_not_found",
+  "installation_not_found", "install_state_invalid",
   // task-71082f5541c13b53 (N-08): every /v1/sites/:id/forms route's 409 when
   // the instance has no forms plugin; the inbox paints this sentence as its
   // own state, so a deletion must red here.
@@ -35142,6 +35142,16 @@ test("cch-w73-bl: githubInstallReturnFromSearch reads GitHub's setup redirect, a
   }
   // Malformed input degrades to a value, never a throw — this runs at boot.
   assert.doesNotThrow(() => f("%%%&installation_id=7&setup_action=install"));
+
+  // r3b gh-install-bind: the team-bound install state rides back beside the id.
+  const st = hooks.githubInstallStateFromSearch;
+  assert.equal(typeof st, "function", "the state reader must be node-pinned");
+  assert.equal(st("?installation_id=9&setup_action=install&state=abc%2Bdef%3D"), "abc+def=");
+  assert.equal(st("?installation_id=9&setup_action=install"), "");
+  assert.equal(st(null), "");
+  assert.doesNotThrow(() => st("%%%&state=x"));
+  // ...and the plane's refusal of a missing/foreign state is READ with curated copy.
+  assert.notEqual(hooks.friendly({ error: "install_state_invalid" }, "Please try again."), "Please try again.");
 });
 
 test("cch-w73-bl c2: installation_not_found is READ — the curated sentence, with no invented cause", () => {
@@ -35169,7 +35179,7 @@ test("cch-w73-bl c1+c5 THE ROUND TRIP: an install redirect POSTs the id and the 
   // stateful DELETE arm puts it there, exactly as a person who had disconnected
   // would be), so a card that ends up connected can only have got there through
   // this POST.
-  const { h, nodes, calls, box } = await w73Realm(null, "?installation_id=41234567&setup_action=install");
+  const { h, nodes, calls, box } = await w73Realm(null, "?installation_id=41234567&setup_action=install&state=sealed-abc");
   h.disconnectGithub();
   await w49s6Settle();
   assert.ok(nodes["#github-card"].innerHTML.includes("Connect GitHub"),
@@ -35185,8 +35195,9 @@ test("cch-w73-bl c1+c5 THE ROUND TRIP: an install redirect POSTs the id and the 
   assert.equal(posts.length, 1,
     "EXACTLY one POST /v1/github/installations must reach the wire; got " + posts.length +
       " (paths seen: " + calls.map((c) => c.method + " " + c.path).join(", ") + ")");
-  assert.deepEqual(posts[0].body, { installation_id: "41234567" },
-    "the id GitHub sent must be the id the plane is asked to record");
+  // r3b gh-install-bind: the team-bound state GitHub echoed rides back with it.
+  assert.deepEqual(posts[0].body, { installation_id: "41234567", state: "sealed-abc" },
+    "the id (and the install state) GitHub sent must be what the plane is asked to record");
 
   const card = nodes["#github-card"].innerHTML;
   assert.ok(card.includes("acme-engineering"), "the card must name the account the fixture connected: " + JSON.stringify(card.slice(0, 300)));
@@ -35197,7 +35208,7 @@ test("cch-w73-bl c1+c5 THE ROUND TRIP: an install redirect POSTs the id and the 
   assert.ok(!/can&#39;t confirm|can't confirm/.test(toasts), "…and is NOT told we could not confirm");
   // The site screen's one-shot readiness band learned the deployment fact for free.
   assert.equal(h.githubReadinessState(), "ready", "a 201 proves the deployment IS configured");
-  assert.equal(box.location.search, "?installation_id=41234567&setup_action=install",
+  assert.equal(box.location.search, "?installation_id=41234567&setup_action=install&state=sealed-abc",
     "…and with no history object the scrub degraded to a no-op rather than throwing");
 });
 
@@ -35262,7 +35273,7 @@ test("cch-w73-bl c6 CONTROL: removing the recording path reds this guard BY NAME
   // the one api() call that carries the installation back to the plane is turned
   // into a no-op that keeps every other rung — the parse, the scrub, the toast,
   // the repaint — intact. A guard that only watched the toast would stay green.
-  const anchor = 'return api("POST", "/v1/github/installations", { installation_id: id }).then(function (r) {';
+  const anchor = 'return api("POST", "/v1/github/installations", { installation_id: id, state: githubInstallState }).then(function (r) {';
   assert.equal(APP_SRC.split(anchor).length, 2, "the mutation anchor must occur EXACTLY once");
   const mutant = APP_SRC.replace(anchor,
     'return Promise.resolve({ ok: true, status: 201, data: {} }).then(function (r) {');

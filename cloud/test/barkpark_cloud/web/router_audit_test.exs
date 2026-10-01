@@ -1238,7 +1238,11 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       configure_github()
       {user, team, token} = logged_in()
 
-      conn = call(:post, "/v1/github/installations", %{installation_id: "4242"}, token)
+      state = BarkparkCloud.GitHub.install_state(team, user.id)
+
+      conn =
+        call(:post, "/v1/github/installations", %{installation_id: "4242", state: state}, token)
+
       assert conn.status == 201
 
       assert [ev] = events(team, "github.installation_connected")

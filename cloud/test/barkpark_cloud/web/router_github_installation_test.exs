@@ -69,6 +69,13 @@ defmodule BarkparkCloud.Web.RouterGithubInstallationTest do
 
   defp body(conn), do: Jason.decode!(conn.resp_body)
 
+  # The record POST carries the team+user-bound install state the plane sealed
+  # into the install link (GitHub.install_url/2), exactly as the console relays it.
+  defp post_body(team, user, id),
+    do: %{installation_id: id, state: GitHub.install_state(team, user.id)}
+
+  defp team_of(user), do: hd(Accounts.list_user_teams(user))
+
   # Simulate a wired GitHub App (id + private key present) so `configured?/0` is
   # true. The client stays the in-memory Fake, so validation is €0.
   defp configure_github do
@@ -120,7 +127,12 @@ defmodule BarkparkCloud.Web.RouterGithubInstallationTest do
       {user, _team} = user_with_team("owner")
 
       conn =
-        call(:post, "/v1/github/installations", %{installation_id: "4242"}, login_token(user))
+        call(
+          :post,
+          "/v1/github/installations",
+          post_body(team_of(user), user, "4242"),
+          login_token(user)
+        )
 
       assert conn.status == 503
       assert body(conn)["error"] == "feature_not_configured"
@@ -131,7 +143,12 @@ defmodule BarkparkCloud.Web.RouterGithubInstallationTest do
       {user, team} = user_with_team("owner")
 
       conn =
-        call(:post, "/v1/github/installations", %{installation_id: "4242"}, login_token(user))
+        call(
+          :post,
+          "/v1/github/installations",
+          post_body(team_of(user), user, "4242"),
+          login_token(user)
+        )
 
       assert conn.status == 201
 
@@ -163,7 +180,7 @@ defmodule BarkparkCloud.Web.RouterGithubInstallationTest do
         call(
           :post,
           "/v1/github/installations",
-          %{installation_id: Fake.invalid_installation_id()},
+          post_body(team, user, Fake.invalid_installation_id()),
           login_token(user)
         )
 
@@ -177,7 +194,12 @@ defmodule BarkparkCloud.Web.RouterGithubInstallationTest do
       {user, _team} = user_with_team("member")
 
       conn =
-        call(:post, "/v1/github/installations", %{installation_id: "4242"}, login_token(user))
+        call(
+          :post,
+          "/v1/github/installations",
+          post_body(team_of(user), user, "4242"),
+          login_token(user)
+        )
 
       assert conn.status == 403
     end
@@ -231,6 +253,95 @@ defmodule BarkparkCloud.Web.RouterGithubInstallationTest do
       # B's disconnect is a 404 and leaves A intact.
       assert call(:delete, "/v1/github/installation", nil, token_b).status == 404
       assert GitHub.connected?(team_a)
+    end
+  end
+
+  describe "POST /v1/github/installations — the id must be bound to the caller's team" do
+    # The plane validates an id with GET /app/installations/:id under the APP's
+    # JWT, which answers for EVERY install of the App. Without a binding, team
+    # B's admin could record team A's installation id and drive A's org.
+
+    test "another team's admin cannot record an id with no state" do
+      configure_github()
+      {a_user, a_team} = user_with_team("owner")
+      {b_user, b_team} = user_with_team("admin")
+
+      assert call(
+               :post,
+               "/v1/github/installations",
+               post_body(a_team, a_user, "4242"),
+               login_token(a_user)
+             ).status ==
+               201
+
+      conn =
+        call(:post, "/v1/github/installations", %{installation_id: "4242"}, login_token(b_user))
+
+      assert conn.status == 422
+      assert body(conn)["error"] == "install_state_invalid"
+      assert GitHub.installation_for(b_team) == nil
+    end
+
+    test "another team's state (stolen from A's install link) does not bind B" do
+      configure_github()
+      {a_user, a_team} = user_with_team("owner")
+      {b_user, b_team} = user_with_team("admin")
+
+      a_state = GitHub.install_state(a_team, a_user.id)
+
+      conn =
+        call(
+          :post,
+          "/v1/github/installations",
+          %{installation_id: "4242", state: a_state},
+          login_token(b_user)
+        )
+
+      assert conn.status == 422
+      assert body(conn)["error"] == "install_state_invalid"
+      assert GitHub.installation_for(b_team) == nil
+    end
+
+    test "a tampered or another user's state is refused; the caller's own state records" do
+      configure_github()
+      {user, team} = user_with_team("owner")
+      other = user_fixture()
+
+      for bad <- ["garbage", GitHub.install_state(team, other.id), ""] do
+        conn =
+          call(
+            :post,
+            "/v1/github/installations",
+            %{installation_id: "4242", state: bad},
+            login_token(user)
+          )
+
+        assert conn.status == 422, "state #{inspect(bad)} must be refused"
+        assert body(conn)["error"] == "install_state_invalid"
+      end
+
+      assert GitHub.installation_for(team) == nil
+
+      assert call(
+               :post,
+               "/v1/github/installations",
+               post_body(team, user, "4242"),
+               login_token(user)
+             ).status ==
+               201
+    end
+
+    test "the install link a member reads carries a state that verifies for that member's team" do
+      configure_github()
+      {user, team} = user_with_team("owner")
+
+      url = body(call(:get, "/v1/github/installation", nil, login_token(user)))["install_url"]
+      assert url =~ "https://github.com/apps/bp-deploy/installations/new?state="
+
+      state =
+        url |> URI.parse() |> Map.fetch!(:query) |> URI.decode_query() |> Map.fetch!("state")
+
+      assert GitHub.verify_install_state(state, team, user.id) == :ok
     end
   end
 end

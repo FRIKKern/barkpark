@@ -767,6 +767,7 @@ const PIN = [
   // all; the leg made it human-reachable and the sentence was paid in the same
   // diff that deleted its wire-vs-reader census row.
   { key: "MAP|ERRORS.installation_not_found", verdict: "CONSULTED", copy: "Barkpark can't see that GitHub installation any more — it w..." },
+  { key: "MAP|ERRORS.install_state_invalid", verdict: "CONSULTED", copy: "That GitHub install link was started by another account or..." },
   // githubInstallOutcome's two TOAST sentences. AUTHORED, both, and neither is
   // a refusal CAUSE: the first is the console's own success line for a 201 it
   // verified (installation.connected === true and nothing less), the second is

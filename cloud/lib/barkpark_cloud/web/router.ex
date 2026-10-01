@@ -6558,8 +6558,14 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 200, github_installation_json(%{connected: false, account_login: nil}))
 
       true ->
-        state = GitHub.connection_state(conn.assigns.current_team)
-        json(conn, 200, github_installation_json(state))
+        team = conn.assigns.current_team
+        state = GitHub.connection_state(team)
+
+        json(
+          conn,
+          200,
+          github_installation_json(state, team, conn.assigns.current_user.id)
+        )
     end
   end
 
@@ -6625,6 +6631,18 @@ defmodule BarkparkCloud.Web.Router do
 
       not valid_installation_id?(conn.body_params["installation_id"]) ->
         json(conn, 422, %{error: "installation_id_required"})
+
+      # The id must come back with the team-bound `state` this plane sealed into
+      # the install link (GitHub.install_url/2): the existence check below is
+      # answered by the App's own JWT and so proves nothing about WHOSE install
+      # it is. A missing, foreign-team, foreign-user, tampered or expired state is
+      # the same 422 and nothing is written.
+      GitHub.verify_install_state(
+        conn.body_params["state"],
+        conn.assigns.current_team,
+        conn.assigns.current_user.id
+      ) != :ok ->
+        json(conn, 422, %{error: "install_state_invalid"})
 
       true ->
         team = conn.assigns.current_team
@@ -15067,6 +15085,12 @@ defmodule BarkparkCloud.Web.Router do
       configured: GitHub.configured?(),
       install_url: GitHub.install_url()
     }
+  end
+
+  # The team member's read: the install link carries the team+user-bound
+  # `state` the record POST requires back (GitHub.install_url/2).
+  defp github_installation_json(state, team, user_id) do
+    %{github_installation_json(state) | install_url: GitHub.install_url(team, user_id)}
   end
 
   # A GitHub installation id arrives as JSON — GitHub uses a numeric id, but the
