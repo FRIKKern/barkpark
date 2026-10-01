@@ -79,7 +79,11 @@
       });
     })();
   </script>
-  <title>Barkpark Studio</title>
+  <%!-- The LiveViews assign page_title ("Media Library", "Workspace Settings", …);
+        a static <title> threw it away, so every Studio tab read the same. The
+        default carries NO site name: live_title appends the suffix to it too
+        (same pattern as sheets.html.heex / bulldocs.html.heex). --%>
+  <.live_title default="Studio" suffix=" · Barkpark">{assigns[:page_title]}</.live_title>
   <style>
     /* ── Inter — self-hosted chrome font (variable woff2 in priv/static/fonts/,
        served at /fonts/ by Plug.Static). One file carries weights 100–900;
