@@ -1059,8 +1059,11 @@
     /* Boolean fields render as a labeled switch (Sanity-style), not a bare
        checkbox. The real checkbox stays in the DOM (form semantics, a11y,
        keyboard toggle) but is visually replaced by the track + thumb; the
-       On/Off text states the value in words. */
-    .form-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+       On/Off text states the value in words. `position: relative` makes the
+       switch the hidden checkbox's containing block — without it the checkbox
+       lays out on <html>, outside any page scroller, and focusing one below
+       the fold scrolls the whole Studio shell off-screen. */
+    .form-switch { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
     .form-switch input[type="checkbox"] {
       position: absolute; width: 1px; height: 1px; opacity: 0;
     }
