@@ -1904,9 +1904,15 @@
     }
     .bp-desk-search-input:focus { outline: none; box-shadow: none; }
     .bp-desk-search-input::placeholder { color: var(--fg-muted); }
+    /* The pane's own clear button is the one clear control; hide the native
+       type="search" cancel glyph that rendered a second x beside it. */
+    .bp-desk-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
     /* A hit is an <a>, so it needs the row's block layout and its own link
-       reset; the rest of the row look comes from .pane-doc-item above. */
-    .bp-desk-search-hit {
+       reset; the rest of the row look comes from .pane-doc-item above.
+       Compound selector on purpose: the later `.pane-doc-item { padding: 0 }`
+       (doc rows moved their padding onto an inner button) otherwise zeroes a
+       hit's padding and leaves 21px rows flush against the pane edge. */
+    .pane-doc-item.bp-desk-search-hit {
       display: flex; align-items: center; justify-content: space-between; gap: 8px;
       padding: 8px 12px; text-decoration: none;
     }
