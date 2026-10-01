@@ -37,7 +37,25 @@ defmodule Barkpark.CoupledArtifactsTest do
   # drive the mutation arm — never to decide anything.
   @shared_sentence "acceptance criterion"
 
-  defp couplings, do: CoupledArtifacts.derive(@repo_root)
+  # ONE derivation per module. `derive/1` parses every workflow and script in
+  # the repo (about 1.8 s), and the helpers below used to re-run it on every
+  # call: about ten derivations per run, 17 s for this module on main run
+  # 36775391161. The tree does not change between tests of one run, so every
+  # test now reads the one real derivation. The fixtures the mutation arms build
+  # are still derived fresh, because they are different inputs.
+  setup_all do
+    %{derived_couplings: CoupledArtifacts.derive(@repo_root)}
+  end
+
+  setup %{derived_couplings: cs} do
+    Process.put({__MODULE__, :couplings}, cs)
+    :ok
+  end
+
+  defp couplings do
+    Process.get({__MODULE__, :couplings}) ||
+      flunk("the module setup did not hand this test the derivation")
+  end
 
   defp openapi_coupling do
     Enum.find(couplings(), &("docs/openapi.json" in &1.artifacts))

@@ -429,6 +429,16 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       # Schema management is admin-tier + scoped, matching schema.apply.
       assert cmd["auth_tier"] == "admin"
     end
+
+    # The refusal for a schema that still has documents names `?force=true` as
+    # its override; the manifest must declare the flag or bp can never send it.
+    test "declares the bool force flag the schema_has_documents refusal names", %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "schema.delete")
+      force = Enum.find(cmd["flags"] || [], &(&1["name"] == "force"))
+      assert force, "schema.delete declares no force flag"
+      # "bool" is the type bp parses as a valueless switch (`--force`).
+      assert force["type"] == "bool"
+    end
   end
 
   describe "workspace.project-ls command" do

@@ -6,13 +6,16 @@ import { resolveServerToken } from './resolve-server-token'
 import { slugOf, type SlugValue } from './slug'
 
 // Envelope shapes returned by the /v1/data endpoints. `result.count` is the
-// TOTAL number of matching documents (not just the page you fetched).
+// number of documents IN THIS PAGE, not the corpus total — the total comes
+// back as `result.total`, and only when the query asks `?count=true`.
 export interface QueryResult<T> {
   count: number
   offset: number
   limit: number
   perspective: string
   documents: T[]
+  /** The server's own truncation answer: true when rows exist past this page. */
+  hasMore?: boolean
 }
 
 export interface DocEnvelope<T> {
@@ -56,14 +59,40 @@ export async function getDocs<T>(
   return env.result?.documents ?? []
 }
 
+// The sitemap protocol's per-file URL cap.
+export const SITEMAP_MAX_URLS = 50_000
+
+/**
+ * EVERY document of a type, page by page — for the sitemap. `getDocs` reads one
+ * page (the query route's default is 100 rows) and its envelope's `hasMore` was
+ * never read, so a site with 101+ posts published a sitemap that silently left
+ * the rest out. This follows `hasMore` with the route's largest page (1000)
+ * until the type is exhausted or the sitemap cap is reached.
+ */
+export async function getAllDocs<T>(type: string): Promise<T[]> {
+  const out: T[] = []
+  let offset = 0
+  while (out.length < SITEMAP_MAX_URLS) {
+    const env = await barkparkFetch<QueryEnvelope<T>>({
+      type,
+      query: { filters: [], limit: 1000, offset },
+    })
+    const page = env.result?.documents ?? []
+    out.push(...page)
+    if (!env.result?.hasMore || page.length === 0) break
+    offset += page.length
+  }
+  return out.slice(0, SITEMAP_MAX_URLS)
+}
+
 export async function countDocs(type: string): Promise<number> {
-  // Read the envelope's TRUE total-match count — a single small fetch — instead
-  // of counting one page of documents (which caps at the page size).
-  const env = await barkparkFetch<QueryEnvelope<{ _id: string }>>({
-    type,
-    query: { filters: [], limit: 1 },
-  })
-  return env.result?.count ?? 0
+  // The TRUE total-match count. The query envelope's `count` is the size of the
+  // PAGE (a `limit: 1` read answers 1); the total arrives only as `total`, and
+  // only with `?count=true`. Reading `count` made this return 1 for any
+  // non-empty type, so the home rendered one page and no page links — 133 posts
+  // showed 5 (stranger walk, 2026-10-01). barkparkFetch's query has no count
+  // option; the SDK's docs(type).count() asks `?count=true` and reads `total`.
+  return barkparkClient.withConfig({ token: resolveServerToken(process.env) }).docs(type).count()
 }
 
 export async function getDocById<T>(type: string, id: string, draft = false): Promise<T | null> {

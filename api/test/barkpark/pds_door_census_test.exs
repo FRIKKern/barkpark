@@ -103,7 +103,20 @@ defmodule Barkpark.PdsDoorCensusTest do
     {check_out, check_rc} =
       System.cmd(bash, [census, "--check"], cd: root, stderr_to_stdout: true)
 
-    {:ok, census: census, bash: bash, root: root, check_out: check_out, check_rc: check_rc}
+    # ONE `--selftest` too, for the same reason: two cases below ran the identical
+    # `--selftest` (4.8 s each on main run 36775391161). It takes no input but
+    # its own fixtures, so both cases read one real run.
+    {selftest_out, selftest_rc} =
+      System.cmd(bash, [census, "--selftest"], cd: root, stderr_to_stdout: true)
+
+    {:ok,
+     census: census,
+     bash: bash,
+     root: root,
+     check_out: check_out,
+     check_rc: check_rc,
+     selftest_out: selftest_out,
+     selftest_rc: selftest_rc}
   end
 
   # Reads one of the census's own printed count lines, e.g. `UNDISPOSED : 0 of 20`.
@@ -118,8 +131,7 @@ defmodule Barkpark.PdsDoorCensusTest do
   end
 
   test "the door census's --selftest is GREEN, and its fraud arm is one of the arms", ctx do
-    {out, rc} =
-      System.cmd(ctx.bash, [ctx.census, "--selftest"], cd: ctx.root, stderr_to_stdout: true)
+    {out, rc} = {ctx.selftest_out, ctx.selftest_rc}
 
     assert rc == 0, "expected `bash #{@census_rel} --selftest` to exit 0, got #{rc}:\n#{out}"
 
@@ -724,8 +736,7 @@ defmodule Barkpark.PdsDoorCensusTest do
   end
 
   test "the class vocabulary is D637's five plus HUMAN-GATE, and 'the fence' is not one", ctx do
-    {out, rc} =
-      System.cmd(ctx.bash, [ctx.census, "--selftest"], cd: ctx.root, stderr_to_stdout: true)
+    {out, rc} = {ctx.selftest_out, ctx.selftest_rc}
 
     assert rc == 0
 

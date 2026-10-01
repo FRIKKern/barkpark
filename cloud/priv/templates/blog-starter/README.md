@@ -13,7 +13,7 @@ A Next.js 15 blog starter powered by [Barkpark](https://github.com/barkpark/bark
 - Schemas: `post`, `author`, `tag` + seed script with sample content
 - Paginated home feed, author pages, tag archives, draft-mode preview with `useOptimisticDocument`
 - SEO out of the box: per-page metadata + OpenGraph, `sitemap.ts`, `robots.ts`, `metadataBase`
-- Graceful states: branded `not-found.tsx`, an `error.tsx` boundary, and a `loading.tsx` skeleton
+- Graceful states: a branded `not-found.tsx` served with a real 404 status, and an `error.tsx` boundary
 
 ## Quick start
 
@@ -82,7 +82,7 @@ app/
   api/preview/route.ts         enable draftMode()
   api/exit-preview/route.ts    disable draftMode()
   sitemap.ts / robots.ts       SEO discovery (absolute URLs from NEXT_PUBLIC_SITE_URL)
-  not-found.tsx / error.tsx / loading.tsx   branded 404 / error boundary / skeleton
+  not-found.tsx / error.tsx    branded 404 / error boundary
 lib/
   barkpark.ts                  typed server-only fetchers
   queries.ts                   reusable query strings

@@ -118,7 +118,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     # can gate the bounded-pool self-subquery below. Facets + count stay on the
     # FULL match set (not the ranking pool): the user wants "this query matched
     # 1.2k items across these facets", not "the top 500 break down this way".
-    {count, facets} = count_and_facets(base)
+    {count, facets} = count_and_facets(base, scope, opts)
 
     # Bounded ranking pool: for real queries, narrow to a cheap-signal candidate
     # set BEFORE running the expensive ranking ORDER BY. Browse stays unbounded
@@ -242,13 +242,26 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # a bit is 1 when that column is aggregated AWAY in the current set. So a set
   # grouping ONLY `type` has status/author/category away → 0111 = 7; `()` (all
   # away) → 1111 = 15.
+  #
+  # THE AUTHOR AND CATEGORY SETS CARRY `type` TOO (task-3c68de39a19285c4, the
+  # facet half). `author_text` / `category_text` are `content->>'author'` /
+  # `content->>'category'`, and a type may declare either field private /
+  # owner_only / readable_by. A facet label IS that field's value, so emitting
+  # it for a caller who cannot read the field echoes a private value by name
+  # (results are redacted by `Envelope.render/3`; facets never were). Grouping
+  # `(type, author_text)` lets the fold keep only the types where
+  # `Envelope.field_readable?/3` says this caller may read the field, then sum
+  # the surviving per-type buckets per label. For a caller who can read every
+  # type's field (an admin, or no type declaring it) the buckets are the same
+  # totals as before. (type, author) away-bits: status + category → 0101 = 5;
+  # (type, category): status + author → 0110 = 6.
   @g_type 0b0111
   @g_status 0b1011
-  @g_author 0b1101
-  @g_category 0b1110
+  @g_type_author 0b0101
+  @g_type_category 0b0110
   @g_total 0b1111
 
-  defp count_and_facets(base) do
+  defp count_and_facets(base, scope, opts) do
     rows =
       base
       |> exclude(:order_by)
@@ -263,28 +276,50 @@ defmodule Barkpark.Search.DocumentsRetriever do
       |> group_by(
         [d],
         fragment(
-          "GROUPING SETS ((?), (?), (?), (?), ())",
+          "GROUPING SETS ((?), (?), (?, ?), (?, ?), ())",
           d.type,
           d.status,
+          d.type,
           d.author_text,
+          d.type,
           d.category_text
         )
       )
       |> Repo.all()
+
+    readable = facet_readability(rows, scope, opts)
 
     init = %{count: 0, type: [], status: [], author: [], category: []}
 
     acc =
       Enum.reduce(rows, init, fn row, acc ->
         case row.g do
-          @g_total -> %{acc | count: row.count}
-          @g_type -> %{acc | type: [{row.type, row.count} | acc.type]}
-          @g_status -> %{acc | status: [{row.status, row.count} | acc.status]}
-          @g_author -> %{acc | author: [{row.author, row.count} | acc.author]}
-          @g_category -> %{acc | category: [{row.category, row.count} | acc.category]}
-          _ -> acc
+          @g_total ->
+            %{acc | count: row.count}
+
+          @g_type ->
+            %{acc | type: [{row.type, row.count} | acc.type]}
+
+          @g_status ->
+            %{acc | status: [{row.status, row.count} | acc.status]}
+
+          @g_type_author ->
+            if readable.({row.type, "author"}),
+              do: %{acc | author: [{row.author, row.count} | acc.author]},
+              else: acc
+
+          @g_type_category ->
+            if readable.({row.type, "category"}),
+              do: %{acc | category: [{row.category, row.count} | acc.category]},
+              else: acc
+
+          _ ->
+            acc
         end
       end)
+
+    # The per-type author/category buckets fold back to one bucket per label.
+    acc = %{acc | author: sum_by_label(acc.author), category: sum_by_label(acc.category)}
 
     facets =
       %{}
@@ -294,6 +329,44 @@ defmodule Barkpark.Search.DocumentsRetriever do
       |> put_facet("category", acc.category)
 
     {acc.count, facets}
+  end
+
+  # {type, field} -> may THIS caller read that field on that type? Resolved once
+  # per type that actually contributed an author/category bucket, through the
+  # same `Envelope.field_readable?/3` the query route's filter gate and the
+  # highlighter use. A type whose schema does not resolve reads as `nil` schema,
+  # which `field_readable?/3` treats as undeclared (public).
+  defp facet_readability(rows, scope, opts) do
+    # A nil caller is the anonymous PUBLIC-ONLY principal on this path (the
+    # visibility gate above already treats it so); `field_readable?/3` would
+    # fail it closed even for an UNDECLARED field, which would blank a public
+    # facet. Reading it as `anonymous/0` keeps undeclared fields public and
+    # every declared private/owner_only/readable_by field hidden.
+    ctx = Keyword.get(opts, :caller_context) || Barkpark.Content.CallerContext.anonymous()
+
+    types =
+      for %{g: g, type: t} <- rows, g in [@g_type_author, @g_type_category], uniq: true, do: t
+
+    schemas =
+      Map.new(types, fn t ->
+        schema =
+          case Barkpark.Content.Schema.get_schema_for_redaction(t, scope, opts) do
+            {:ok, s} -> s
+            _ -> nil
+          end
+
+        {t, schema}
+      end)
+
+    fn {type, field} ->
+      Barkpark.Content.Envelope.field_readable?(Map.get(schemas, type), field, ctx)
+    end
+  end
+
+  defp sum_by_label(rows) do
+    rows
+    |> Enum.group_by(fn {label, _} -> label end, fn {_, count} -> count end)
+    |> Enum.map(fn {label, counts} -> {label, Enum.sum(counts)} end)
   end
 
   # Shape a dimension's `{label, count}` rows into the `meta.facets` bucket list:

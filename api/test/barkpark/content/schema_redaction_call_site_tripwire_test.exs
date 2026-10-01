@@ -140,7 +140,16 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
                               "barkpark_web/controllers/tasks_controller.ex:seal_ctx",
                               "barkpark/content/export.ex:fetch_schema",
                               "barkpark/content/mutations.ex:echo_schema",
-                              "barkpark/tasks/query.ex:load_task_schema"
+                              "barkpark/tasks/query.ex:load_task_schema",
+                              # search facets: the schema feeds
+                              # Envelope.field_readable?/3 to drop an author /
+                              # category bucket the caller may not read
+                              # (task-3c68de39a19285c4)
+                              "barkpark/search/documents_retriever.ex:facet_readability",
+                              # backlinks: the source type's schema feeds
+                              # Envelope.field_readable?/3 to drop a private
+                              # description / event_type (task-3c68de39a19285c4)
+                              "barkpark_web/controllers/query_controller.ex:redact_backlink_content"
                             ])
 
   setup_all do

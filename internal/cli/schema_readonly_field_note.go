@@ -41,6 +41,13 @@ func emitSchemaReadonlyFieldNote(out *writer, cmd manifest.Command, status int, 
 	}
 	for _, f := range fields {
 		name, _ := f["name"].(string)
+		if name == reservedStatusField {
+			// A document's status lives on its ROW (draft/published); the
+			// Studio's Classic save drops a content field of this name on every
+			// save (Content.Forms), so its value silently disappears on the
+			// first unrelated edit (stranger walk, 2026-10-01).
+			out.errf("bp: field %q shares its name with the document's own status (draft/published), which lives on the document row — the Studio drops a content field named %q on every save. Rename it (e.g. %q).", name, name, "state")
+		}
 		switch f["type"] {
 		case "array":
 			out.errf("bp: field %q is type \"array\", which Studio shows read-only (API-managed). For a list editors can edit in Studio, declare it as %s.", name, arrayOfSpelling(f["of"]))
@@ -49,6 +56,10 @@ func emitSchemaReadonlyFieldNote(out *writer, cmd manifest.Command, status int, 
 		}
 	}
 }
+
+// reservedStatusField is the one content field name the Studio's save path
+// reserves for the document row.
+const reservedStatusField = "status"
 
 // arrayOfSpelling renders the editable `arrayOf` declaration for an `array`
 // field's `of`: Sanity writes a LIST of member types, `arrayOf` takes ONE

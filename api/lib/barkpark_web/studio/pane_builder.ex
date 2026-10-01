@@ -422,7 +422,9 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
         plugin_filter = if is_map(node.filter), do: node.filter, else: %{}
         list_opts = [perspective: :drafts, filter_map: plugin_filter] ++ scope(opts)
-        {docs, filter_error} = list_documents_preflighted(type_name, dataset, list_opts)
+
+        {docs, has_more, filter_error} =
+          list_page_preflighted(type_name, dataset, list_opts, opts)
 
         doc_pane = %{
           title: node.title || (schema && schema.title) || type_name,
@@ -433,6 +435,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           desk_groups: [],
           active_desk: nil,
           filter_error: filter_error,
+          has_more: has_more,
           items: doc_items(docs, schema),
           selected: Enum.at(rest, 0)
         }
@@ -498,7 +501,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
             order -> Keyword.put(list_opts, :order, order)
           end
 
-        {docs, filter_error} = list_documents_preflighted(type_name, dataset, list_opts)
+        {docs, has_more, filter_error} =
+          list_page_preflighted(type_name, dataset, list_opts, opts)
 
         doc_pane = %{
           title: node.title || (schema && schema.title) || type_name,
@@ -509,6 +513,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           desk_groups: desk_groups,
           active_desk: active_group && Map.get(active_group, "name"),
           filter_error: filter_error,
+          has_more: has_more,
           items: doc_items(docs, schema),
           selected: Enum.at(rest, 0)
         }
@@ -1113,21 +1118,54 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # `rescue` — a rescue would also swallow genuine builder bugs, re-creating the
   # silence this whole change removes, one layer up. Anything OTHER than a bad
   # filter still crashes loudly.
+  # A desk list pane's page (Studio desk pagination). `list_documents/3` read a
+  # 100-row page and dropped the truncation fact, so a type with 131 documents
+  # showed "100" and no way past the 100th (stranger walk, 2026-10-01).
+  # `list_documents_page/3` answers `has_more` for one extra row; the page size
+  # grows per type through the `:list_limits` the LiveView threads in
+  # ("Show more"), capped by the query layer's own 1000-row limit.
+  @desk_page 100
+  @doc false
+  def desk_page, do: @desk_page
+
+  defp list_page_preflighted(type_name, dataset, list_opts, opts) do
+    limit = opts |> Keyword.get(:list_limits, %{}) |> Map.get(type_name, @desk_page)
+
+    case filter_refusal(list_opts) do
+      nil ->
+        {docs, has_more} =
+          Content.list_documents_page(type_name, dataset, Keyword.put(list_opts, :limit, limit))
+
+        {docs, has_more, nil}
+
+      refusal ->
+        {[], false, refusal}
+    end
+  end
+
   defp list_documents_preflighted(type_name, dataset, list_opts) do
+    case filter_refusal(list_opts) do
+      nil -> {Content.list_documents(type_name, dataset, list_opts), nil}
+      refusal -> {[], refusal}
+    end
+  end
+
+  # nil when the list's filter is one the builder accepts, else the sentence the
+  # pane shows in place of its documents.
+  defp filter_refusal(list_opts) do
     filter_map = Keyword.get(list_opts, :filter_map, %{})
 
     case Content.Query.validate_filter_map(filter_map) do
       :ok ->
-        {Content.list_documents(type_name, dataset, list_opts), nil}
+        nil
 
       {:error, {nil, :not_a_map}} ->
-        {[], "This list's saved filter is malformed and was not applied. No documents are shown."}
+        "This list's saved filter is malformed and was not applied. No documents are shown."
 
       {:error, {field, op}} ->
-        {[],
-         "This list's saved filter uses an unsupported operator #{inspect(op)} on " <>
-           "#{inspect(to_string(field))}, so it could not be applied. No documents are shown — " <>
-           "fix the filter in this type's schema (desk groups)."}
+        "This list's saved filter uses an unsupported operator #{inspect(op)} on " <>
+          "#{inspect(to_string(field))}, so it could not be applied. No documents are shown — " <>
+          "fix the filter in this type's schema (desk groups)."
     end
   end
 

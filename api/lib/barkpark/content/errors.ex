@@ -327,7 +327,13 @@ defmodule Barkpark.Content.Errors do
                          "chat_unsupported",
                          # 503: creating the session row/spawn failed — a store
                          # defect distinct from runtime availability.
-                         "chat_create_failed"
+                         "chat_create_failed",
+                         # 403: a managed turn, instance-global chat scope or the
+                         # host terminal would reach the INSTANCE HOST for a
+                         # caller who is not the instance owner — permanent; the
+                         # way out is the cloud profile or a registered host
+                         # (task-6ca882967fd95dda, StudioChat.HostExecution).
+                         "host_execution_not_permitted"
                        ])
 
   def to_envelope(reason), do: to_envelope(reason, nil)
@@ -659,6 +665,25 @@ defmodule Barkpark.Content.Errors do
   # reusing the registered code keeps `known_codes/0` (and therefore the
   # OpenAPI `Error.code` enum + docs/api-v1.md §9) unchanged. `details.blocks`
   # names every offending path so a client can fix the exact element.
+  # A mutation object naming no known verb (Content.Mutations,
+  # task-2f601b4f24e9af66). Still the generic `malformed` 400 (an unknown verb
+  # is genuinely malformed, not a 422), but the message names the received keys
+  # and the accepted verbs.
+  defp build({:error, {:unknown_mutation_verb, received, supported}})
+       when is_list(received) and is_list(supported) do
+    shown =
+      if received == [],
+        do: "an empty mutation object",
+        else: Enum.map_join(received, ", ", &inspect/1)
+
+    %{
+      code: "malformed",
+      message: "unknown mutation kind: #{shown} — expected one of " <> Enum.join(supported, ", "),
+      status: 400,
+      details: %{received: received, supported: supported}
+    }
+  end
+
   defp build({:error, {:malformed_blocks, details}}),
     do: %{
       code: "malformed",

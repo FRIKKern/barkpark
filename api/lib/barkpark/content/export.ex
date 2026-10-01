@@ -24,7 +24,7 @@ defmodule Barkpark.Content.Export do
   alias Barkpark.Content.{Document, Envelope}
 
   import Barkpark.Content.Scope,
-    only: [scope_to_workspace_or_global: 3, maybe_scope_to_grants: 2]
+    only: [scope_to_workspace_or_global: 3, maybe_scope_to_grants: 2, scope_to_owner: 2]
 
   @doc """
   Stream all documents for a dataset as envelope maps. Optionally filter by type.
@@ -66,12 +66,81 @@ defmodule Barkpark.Content.Export do
     |> then(fn q ->
       if type, do: where(q, [d], d.type == ^type), else: q
     end)
-    |> order_by([d], asc: d.inserted_at)
+    |> scope_owner_rows(dataset, opts)
+    |> apply_perspective(Keyword.get(opts, :perspective, :raw))
     |> Repo.stream()
     |> Stream.transform(%{}, fn doc, schema_cache ->
       {schema, schema_cache} = fetch_schema(schema_cache, doc.type, dataset, opts)
       {[Envelope.render(doc, schema, caller_context)], schema_cache}
     end)
+  end
+
+  # ── the perspective (task-c14e213b4a7b0ef1) ────────────────────────────────
+  #
+  # The same three lenses `Content.Query` serves, applied to the whole-dataset
+  # stream. The default is `:raw`, every row, which is what this builder always
+  # streamed. Callers choose the lens; `ExportController` picks the per-tier
+  # default.
+  #
+  #   :raw       every row, drafts and published alike.
+  #   :published `doc_id NOT LIKE 'drafts.%'`, the predicate
+  #              `Query.apply_perspective(:published)` uses.
+  #   :drafts    draft-over-published: ONE row per logical document, the
+  #              `drafts.` twin when it exists and the published row otherwise.
+  #              This is `Query.list_with_drafts_merged/4`'s DISTINCT ON,
+  #              widened by `type`, because one export spans types and a doc id
+  #              is only unique within one.
+  #
+  # Every lens keeps the stream's insertion order.
+  defp apply_perspective(query, :raw), do: order_by(query, [d], asc: d.inserted_at)
+
+  defp apply_perspective(query, :published) do
+    query
+    |> where([d], not like(d.doc_id, "drafts.%"))
+    |> order_by([d], asc: d.inserted_at)
+  end
+
+  defp apply_perspective(query, :drafts) do
+    inner =
+      from(d in query,
+        distinct: [d.type, fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)],
+        order_by: [
+          d.type,
+          fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+          fragment("CASE WHEN ? LIKE 'drafts.%' THEN 0 ELSE 1 END", d.doc_id)
+        ]
+      )
+
+    from(d in subquery(inner), order_by: [asc: d.inserted_at, asc: d.id])
+  end
+
+  # Owner-row narrowing (task-5bd361033523a8c1): the export reads exactly the
+  # rows the query path would for this caller. `Content.Query` narrows every
+  # `owner_scoped` type through `Scope.scope_to_owner/2`; an export spans types,
+  # so the owner_scoped ones present in the scoped base (the same
+  # `Content.owner_scoped?/3` predicate, as `Edges` does it) keep only the rows
+  # `scope_to_owner/2` admits for the caller, and every other type is untouched.
+  # Tokens and admins are a no-op inside scope_to_owner/2.
+  defp scope_owner_rows(query, dataset, opts) do
+    owner_scoped_types =
+      query
+      |> exclude(:order_by)
+      |> select([d], d.type)
+      |> distinct(true)
+      |> Repo.all()
+      |> Enum.filter(&Content.owner_scoped?(&1, dataset, opts))
+
+    case owner_scoped_types do
+      [] ->
+        query
+
+      types ->
+        visible_owned =
+          from(x in Document, where: x.type in ^types, select: x.id)
+          |> scope_to_owner(Keyword.get(opts, :caller_context))
+
+        where(query, [d], d.type not in ^types or d.id in subquery(visible_owned))
+    end
   end
 
   # Resolve (and memoise) the `%SchemaDefinition{}` for a type within one export.

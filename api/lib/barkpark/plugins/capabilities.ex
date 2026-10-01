@@ -1411,6 +1411,17 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/schemas/:dataset/:name",
         "admin",
         args: [arg("name", true, "string", "Schema/type name to delete.")],
+        # The server refuses a schema that still has documents
+        # (`schema_has_documents`) and names `?force=true` as the override; with no
+        # flag here bp could never send it, so the refusal's own remedy was
+        # unreachable from the CLI (stranger walk, 2026-10-01).
+        flags: [
+          flag(
+            "force",
+            "bool",
+            "Delete the schema even though documents of this type exist (they are orphaned, not deleted)."
+          )
+        ],
         writes: true,
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"

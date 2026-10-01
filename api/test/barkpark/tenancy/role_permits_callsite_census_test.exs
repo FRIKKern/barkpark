@@ -120,15 +120,24 @@ defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
   # provenance rule.
   @resolver_doors ~w(role_permits? seat_capabilities)
 
+  # ONE scan of lib/, shared by the census tests. Each test used to re-read
+  # and re-strip every lib/**/*.ex file (3.3 s + 3.6 s for two of them on main
+  # run 36775391161). The tree does not change between tests of one run, so the
+  # repeat walks bought nothing. Every assertion still reads the full live scan.
+  setup_all do
+    %{sites: callsites(), files: source_files()}
+  end
+
   describe "role_permits?/3 call-site census" do
-    test "the call-site set on lib/ is exactly the pinned set, each with stated membership provenance" do
-      assert MapSet.new(callsites(), fn {path, fun, _line} -> {path, fun} end) ==
+    test "the call-site set on lib/ is exactly the pinned set, each with stated membership provenance",
+         %{sites: sites} do
+      assert MapSet.new(sites, fn {path, fun, _line} -> {path, fun} end) ==
                MapSet.new(Map.keys(@expected_callsites)),
              """
              The set of functions calling Tenancy.Auth.role_permits?/3 or
              Tenancy.Auth.seat_capabilities/3 changed.
 
-             Found:    #{inspect(Enum.sort(Enum.map(callsites(), fn {p, f, l} -> "#{p}:#{l} in #{f}" end)), pretty: true)}
+             Found:    #{inspect(Enum.sort(Enum.map(sites, fn {p, f, l} -> "#{p}:#{l} in #{f}" end)), pretty: true)}
              Expected: #{inspect(Enum.sort(Map.keys(@expected_callsites)), pretty: true)}
 
              Both doors answer TRUE for a built-in role name REGARDLESS of the workspace
@@ -143,24 +152,27 @@ defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
              """
     end
 
-    test "the census is non-vacuous — a broken grep must FAIL, not pass empty" do
+    test "the census is non-vacuous — a broken grep must FAIL, not pass empty", %{
+      sites: sites,
+      files: files
+    } do
       # An equality assertion against a non-empty literal already refuses an
       # empty census, but the instrument itself is asserted here so a wildcard
       # that stops matching (a moved test cwd, a renamed lib/) reds with a
       # message that names the instrument rather than the invariant.
-      files = source_files()
       assert length(files) > 100, "source scan found only #{length(files)} lib/**/*.ex files"
 
       assert Enum.any?(files, &String.ends_with?(&1, "lib/barkpark/tenancy/auth.ex")),
              "the scan did not reach auth.ex — the census cannot be trusted"
 
-      refute Enum.empty?(callsites()), "the call-site scan found ZERO sites"
+      refute Enum.empty?(sites), "the call-site scan found ZERO sites"
       assert map_size(@expected_callsites) == 4
     end
 
-    test "the raw call-expression count is pinned, so a second call in a pinned function also reds" do
-      assert length(callsites()) == @expected_call_count,
-             "call expressions: #{inspect(Enum.map(callsites(), fn {p, f, l} -> "#{p}:#{l} in #{f}" end))}"
+    test "the raw call-expression count is pinned, so a second call in a pinned function also reds",
+         %{sites: sites} do
+      assert length(sites) == @expected_call_count,
+             "call expressions: #{inspect(Enum.map(sites, fn {p, f, l} -> "#{p}:#{l} in #{f}" end))}"
     end
 
     test "every pinned site states a membership load in its provenance" do

@@ -1321,6 +1321,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     {panes, editor} =
       PaneBuilder.build(socket.assigns.dataset, socket.assigns.nav_path,
         desk: socket.assigns[:nav_desk],
+        list_limits: socket.assigns[:desk_list_limits] || %{},
         scope: ScopeHelpers.scope_opts(socket),
         scope_prefix: socket.assigns[:scope_prefix] || ""
       )

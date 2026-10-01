@@ -189,11 +189,14 @@ func schemaSkeleton(name string) (string, error) {
 				RefType: "author",
 			},
 			{
+				// NOT "status": a document's status lives on its row, and the
+				// Studio drops a content field of that name on every save
+				// (stranger walk, 2026-10-01 — the skeleton used to suggest it).
 				Comment: "single-choice enum; list the allowed values in options.",
-				Name:    "status",
-				Title:   "Status",
+				Name:    "category",
+				Title:   "Category",
 				Type:    "select",
-				Options: []string{"draft", "published", "archived"},
+				Options: []string{"news", "guide", "review"},
 			},
 			{
 				Comment: "media reference (asset id); upload via `bp media upload`.",

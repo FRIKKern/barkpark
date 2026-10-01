@@ -27,7 +27,14 @@ defmodule Barkpark.StudioChat.RecorderTasksEnablementTest do
   setup do
     prev = Application.get_env(:barkpark, :claude_chat)
     prev_demo = Application.get_env(:barkpark, :public_demo_studio)
-    Application.put_env(:barkpark, :claude_chat, enabled: true, command: {"cat", []})
+    # Both sessions are TENANT-owned, and a tenant session may not run on the
+    # instance host (task-6ca882967fd95dda): the turns ride the cloud profile.
+    Application.put_env(:barkpark, :claude_chat,
+      enabled: true,
+      command: {"cat", []},
+      execution_profile: :cloud
+    )
+
     Application.put_env(:barkpark, :public_demo_studio, false)
 
     on_exit(fn ->

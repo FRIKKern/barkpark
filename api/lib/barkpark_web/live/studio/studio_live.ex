@@ -380,6 +380,19 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("desk-search", params, socket), do: DeskSearch.search(params, socket)
   def handle_event("desk-search-clear", _params, socket), do: DeskSearch.clear(socket)
 
+  # "Show more" on a truncated desk list: grow THAT type's page by one desk
+  # page, up to the query layer's 1000-row cap, and rebuild the panes.
+  def handle_event("desk-list-more", %{"type" => type}, socket) when is_binary(type) do
+    page = BarkparkWeb.Studio.PaneBuilder.desk_page()
+    limits = socket.assigns[:desk_list_limits] || %{}
+    next = min(Map.get(limits, type, page) + page, 1000)
+
+    {:noreply,
+     socket
+     |> assign(:desk_list_limits, Map.put(limits, type, next))
+     |> Shared.rebuild_panes()}
+  end
+
   def handle_event("new-document", params, socket), do: Fields.new_document(params, socket)
   def handle_event("save", params, socket), do: Fields.save(params, socket)
   def handle_event("reload-remote-doc", _params, socket), do: Fields.reload_remote_doc(socket)

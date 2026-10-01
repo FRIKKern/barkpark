@@ -11,7 +11,10 @@ import { fetchSchema } from './fetch-schema'
 import { generateTypes } from './generate'
 import { schemaEnvelopeSchema, type BarkparkCodegenConfig } from './types'
 
+declare const __CODEGEN_VERSION__: string
+
 const cli = cac('barkpark')
+cli.version(typeof __CODEGEN_VERSION__ !== 'undefined' ? __CODEGEN_VERSION__ : '0.0.0-dev')
 
 // `assertScopedPair` used to live here, so only the CLI was protected while
 // `fetchSchema` — exported from the package root — silently mis-scoped. It now
@@ -105,7 +108,9 @@ async function loadConfig(configPath?: string): Promise<Partial<BarkparkCodegenC
 function parseTimeoutMs(raw: string, source: string): number {
   const n = Number(raw)
   if (!Number.isInteger(n) || n < 0) {
-    throw new Error(`Invalid ${source} value "${raw}": expected a non-negative integer of milliseconds (0 disables).`)
+    throw new Error(
+      `Invalid ${source} value "${raw}": expected a non-negative integer of milliseconds (0 disables).`,
+    )
   }
   return n
 }
@@ -139,10 +144,13 @@ export async function resolveConfig(options: GenerateCliOptions): Promise<Barkpa
   // emits types for the wrong (unscoped) content model. Enforce both-or-neither.
   assertScopedPair(merged.workspace, merged.project)
 
-  if (!merged.dataset) throw new Error('Missing dataset: pass --dataset or set it in barkpark.config.')
+  if (!merged.dataset)
+    throw new Error('Missing dataset: pass --dataset or set it in barkpark.config.')
   if (!merged.output) throw new Error('Missing output: pass --output or set it in barkpark.config.')
   if (!merged.apiUrl) {
-    throw new Error('Missing apiUrl: pass --api-url, set BARKPARK_API_URL, or set it in barkpark.config.')
+    throw new Error(
+      'Missing apiUrl: pass --api-url, set BARKPARK_API_URL, or set it in barkpark.config.',
+    )
   }
   return merged as BarkparkCodegenConfig
 }
@@ -271,4 +279,25 @@ cli
   })
 
 cli.help()
+
+// A mistyped command (`barkpark genrate`) or no command at all used to print
+// nothing and exit 0 — a CI step "succeeded" without writing barkpark.types.ts
+// (stranger walk, 2026-10-01). cac leaves both unmatched; say so and fail.
+cli.on('command:*', () => {
+  process.stderr.write(
+    `barkpark: unknown command "${cli.args.join(' ')}" — run \`barkpark --help\` for the commands\n`,
+  )
+  process.exitCode = 1
+})
+
 cli.parse()
+
+if (
+  !cli.matchedCommand &&
+  cli.args.length === 0 &&
+  !cli.options['help'] &&
+  !cli.options['version']
+) {
+  cli.outputHelp()
+  process.exitCode = 1
+}

@@ -438,6 +438,45 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert audited?("revealme", "reveal")
     end
 
+    # The REST twin sits behind RequirePlatformOperator; with the operator
+    # allowlist ARMED and this admin not on it, the Studio reveal refuses too
+    # (task-a1c518158045be04).
+    test "an armed operator allowlist refuses the reveal to a non-operator admin", %{view: view} do
+      Settings.put("operatoronly", %{"api_key" => "operatorsecretvalue"})
+      previous = Application.get_env(:barkpark, :operator_token_ids)
+      Application.put_env(:barkpark, :operator_token_ids, [Ecto.UUID.generate()])
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:barkpark, :operator_token_ids, previous),
+          else: Application.delete_env(:barkpark, :operator_token_ids)
+      end)
+
+      html = render_click(view, "reveal", %{"plugin_name" => "operatoronly"})
+
+      refute html =~ "operatorsecretvalue"
+      assert html =~ "requires the platform operator"
+      refute audited?("operatoronly", "reveal")
+    end
+
+    test "with the allowlist armed, the named operator still reveals", %{view: view} do
+      Settings.put("operatorok", %{"api_key" => "operatorvisiblevalue"})
+      {:ok, %{id: admin_id}} = Barkpark.Auth.verify_token(@admin_token)
+      previous = Application.get_env(:barkpark, :operator_token_ids)
+      Application.put_env(:barkpark, :operator_token_ids, [admin_id])
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:barkpark, :operator_token_ids, previous),
+          else: Application.delete_env(:barkpark, :operator_token_ids)
+      end)
+
+      html = render_click(view, "reveal", %{"plugin_name" => "operatorok"})
+
+      assert html =~ "operatorvisiblevalue"
+      assert audited?("operatorok", "reveal")
+    end
+
     test "delete removes row + writes delete audit", %{view: view} do
       Settings.put("zapme", %{"k" => "v"})
 
@@ -1102,14 +1141,17 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert Barkpark.Tenancy.workspace_theme(ws_after) == "evergreen"
       assert Map.has_key?(Barkpark.Tenancy.workspace_plugin_settings(ws_after), "onixedit")
 
-      # The toggle is a server-derived flip: a second click round-trips back to
-      # self-hosted, never trusting a client-supplied value.
+      # The toggle is a server-derived flip, never trusting a client-supplied
+      # value. The flip BACK to self-hosted would run this tenant workspace's
+      # chat on the instance host, which only the instance owner's Default
+      # workspace may (task-6ca882967fd95dda): refused, named, nothing written.
       {:ok, view2, _html} = live(conn, ep_settings_url(ws, proj))
-      render_click(view2, "toggle_execution_profile", %{"ws" => ws.id})
+      html2 = render_click(view2, "toggle_execution_profile", %{"ws" => ws.id})
+      assert html2 =~ "reserved for the instance owner"
 
       assert Barkpark.Tenancy.workspace_chat_settings(Barkpark.Tenancy.get_workspace_by_id(ws.id))[
                "execution_profile"
-             ] == "self_hosted"
+             ] == "cloud"
     end
 
     test "a garbage persisted profile never propagates — a flip yields a known-good value", %{

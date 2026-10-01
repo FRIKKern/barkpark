@@ -122,6 +122,27 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
   end
 
   @doc """
+  The plug's admission rule as a predicate, for doors that are not plugged
+  routes (the Studio LiveView reveal of instance-wide plugin credentials): true
+  when the allowlist is UNSET (single-tenant — the plug lets every admin through
+  too), else only for a bearer the allowlist names. Non-token principals have no
+  token id and are admitted by the email arm only through a token, so they are
+  refused once the allowlist is armed.
+  """
+  @spec permits?(term()) :: boolean()
+  def permits?(principal) do
+    case allowlist() do
+      %{emails: [], token_ids: []} -> true
+      %{emails: emails, token_ids: ids} -> operator_principal?(principal, emails, ids)
+    end
+  end
+
+  defp operator_principal?(%Barkpark.Auth.ApiToken{} = token, emails, ids),
+    do: operator?(token, emails, ids)
+
+  defp operator_principal?(_principal, _emails, _ids), do: false
+
+  @doc """
   The configured operator allowlist, read from Application env at RUNTIME (so a
   release can be reconfigured without a recompile, and so a test can arm it with
   `Application.put_env/3`).

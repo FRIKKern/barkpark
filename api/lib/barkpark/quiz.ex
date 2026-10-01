@@ -69,6 +69,11 @@ defmodule Barkpark.Quiz do
     to: Barkpark.Quiz.Bridge,
     as: :bind
 
+  @doc "Bind on behalf of a host surface (`Bridge.bind_as_host/4`): first host owns the PIN."
+  defdelegate bind_quiz_as_host(pin, quiz_id, host_key, dataset \\ "production"),
+    to: Barkpark.Quiz.Bridge,
+    as: :bind_as_host
+
   @doc "Report a player's normalized `0.0..1.0` cursor position (fire-and-forget)."
   defdelegate move(pin, player_id, x, y), to: Room
 

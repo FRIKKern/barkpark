@@ -4789,7 +4789,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # silently inherit the Default workspace's execution profile (D205).
     store_session = get_session_in_tenancy(socket, store_id)
 
-    with {:ok, recorder} <-
+    # task-6ca882967fd95dda: a managed turn on the INSTANCE HOST is the instance
+    # owner's alone — with the operator allowlist armed, a non-operator Studio
+    # admin is refused here (the Runtime.open backstop covers tenant sessions).
+    with :ok <-
+           BarkparkWeb.HostExecutionGate.authorize_turn(
+             socket.assigns[:api_token] || socket.assigns[:current_user],
+             %{
+               provider: socket.assigns.provider,
+               execution_target: socket.assigns.execution_target,
+               owner_workspace_id: store_session && store_session.owner_workspace_id
+             }
+           ),
+         {:ok, recorder} <-
            Recorder.ensure(%{
              session_id: store_id,
              provider: socket.assigns.provider,
@@ -8281,6 +8293,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp spawn_error_text(:disabled),
     do: "Claude chat is not enabled on this host."
+
+  defp spawn_error_text(:host_execution_not_permitted),
+    do: Barkpark.StudioChat.HostExecution.message()
 
   defp spawn_error_text(:binary_not_found),
     do:

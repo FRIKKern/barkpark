@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { barkparkMetadata } from '@barkpark/nextjs'
-import { getDocBySlug, getDocs } from '../../../lib/barkpark'
+import { getAllDocs, getDocBySlug } from '../../../lib/barkpark'
 import { slugOf, type SlugValue } from '../../../lib/slug'
 
 interface Tag {
@@ -44,7 +44,9 @@ export default async function TagPage({
   const tag = await getDocBySlug<Tag>('tag', slug)
   if (!tag) notFound()
 
-  const allPosts = await getDocs<Post>('post')
+  // Every post, not one page: getDocs reads the query route's default page
+  // (100 rows), so filtering it here dropped every match past the first 100.
+  const allPosts = await getAllDocs<Post>('post')
   const posts = allPosts.filter((p) => p.tags?.some((t) => t._ref === tag._id))
 
   return (

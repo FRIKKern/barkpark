@@ -95,7 +95,6 @@ describe('shared template composition', () => {
         'app/api/barkpark/webhook/route.ts',
         'app/error.tsx',
         'app/globals.css',
-        'app/loading.tsx',
         'app/not-found.tsx',
         'app/robots.ts',
         'barkpark.config.ts.tmpl',
@@ -114,7 +113,7 @@ describe('shared template composition', () => {
 
   it('every shared file is byte-identical between the two generated apps', async () => {
     const sharedRels = (await listFiles(SHARED_DIR)).map(destRel)
-    expect(sharedRels.length).toBe(17)
+    expect(sharedRels.length).toBe(16)
 
     const differing: string[] = []
     for (const rel of sharedRels) {

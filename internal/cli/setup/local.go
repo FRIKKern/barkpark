@@ -556,7 +556,10 @@ func localSteps(plan SetupPlan, lc localContext, envValue string, envSet bool, a
 		if profile == ProfileClean {
 			seedCmd += " -e BARKPARK_SEED_ADMIN_TOKEN=****"
 			if adminToken != "" {
-				seedArgv = append(seedArgv, "-e", "BARKPARK_SEED_ADMIN_TOKEN="+adminToken)
+				// NAME only: `docker compose exec -e NAME` takes the value from the
+				// docker client's own environment (the step's Env below), so the
+				// admin token never appears in a process command line (ps).
+				seedArgv = append(seedArgv, "-e", "BARKPARK_SEED_ADMIN_TOKEN")
 			}
 		}
 		seedArgv = append(seedArgv, "api", "mix", "ecto.reset")
@@ -581,6 +584,7 @@ func localSteps(plan SetupPlan, lc localContext, envValue string, envSet bool, a
 				Cmd:   seedCmd,
 				Argv:  seedArgv,
 				Dir:   lc.root,
+				Env:   seedEnv, // the docker client reads BARKPARK_SEED_ADMIN_TOKEN from here
 			}, MapErr: wrapEctoResetErr},
 			localStep{
 				step: step{Title: "wait for the API to answer on " + localServerURL},
@@ -637,17 +641,38 @@ func localSteps(plan SetupPlan, lc localContext, envValue string, envSet bool, a
 	)
 }
 
+// openPhxLog opens the dev server's log for append, owner-only: the log carries
+// request logs and any error that echoes parameters, and the server runs with the
+// setup's seed environment. Directory 0700, file 0600 — and an existing file or
+// directory left looser by an older bp is tightened (OpenFile's mode applies only
+// on create).
+func openPhxLog(logPath string) (*os.File, error) {
+	dir := filepath.Dir(logPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("create %s: %w", dir, err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("chmod %s: %w", dir, err)
+	}
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open phx log %s: %w", logPath, err)
+	}
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("chmod phx log %s: %w", logPath, err)
+	}
+	return f, nil
+}
+
 // startPhoenixBackground starts `mix phx.server` detached (own session, output
 // to ~/.barkpark/phx.log) so it survives bp exiting, and returns immediately —
 // waitServerUp gates the connect chain on the server actually answering.
 func startPhoenixBackground(w writerLike, apiDir string, env []string) error {
 	logPath := phxLogPath()
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return fmt.Errorf("create %s: %w", filepath.Dir(logPath), err)
-	}
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := openPhxLog(logPath)
 	if err != nil {
-		return fmt.Errorf("open phx log %s: %w", logPath, err)
+		return err
 	}
 	defer f.Close()
 
