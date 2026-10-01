@@ -119,7 +119,16 @@ defmodule BarkparkCloud.Workers.TokenExpiryWarningWorker do
     case Notifications.deliver_token_expiring(to, token.name, token.expires_at) do
       {:ok, _} ->
         # Spend the budget only now that the mail is out. See the moduledoc.
-        _ = Accounts.claim_pat_expiry_warning(token.id, now)
+        # The claim's result is READ, not discarded (task-db39f46df0b3ac21).
+        # `false` means the row was already stamped or is no longer a PAT —
+        # reachable only when a second run raced this one between the select
+        # and the stamp, i.e. the owner may have been mailed twice. Say so.
+        unless Accounts.claim_pat_expiry_warning(token.id, now) do
+          Logger.warning(
+            "TokenExpiryWarningWorker: token #{token.id} was mailed but its expiry_warned_at claim was lost (already stamped by a concurrent run, or no longer a pat)"
+          )
+        end
+
         %{acc | warned: acc.warned + 1}
 
       {:error, why} ->

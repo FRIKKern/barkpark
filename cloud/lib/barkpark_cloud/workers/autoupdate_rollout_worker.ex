@@ -228,15 +228,35 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
       :ok
   end
 
+  # The in-flight marker's write result is READ, not discarded
+  # (task-db39f46df0b3ac21). An unmarked box is invisible to the settle path and
+  # does not hold the serial-of-1 gate, so a failed mark is logged at ERROR
+  # naming the box rather than passed over in silence. (Today the changeset
+  # carries no validation, so a failure surfaces as a raise into `advance/0`'s
+  # rescue; this arm keeps a future validation from silently re-opening it.)
+  defp mark_in_flight(bp) do
+    case Registry.mark_autoupdate_triggered(bp) do
+      {:ok, _} ->
+        :ok
+
+      {:error, why} ->
+        Logger.error(
+          "autoupdate: #{bp.slug} was triggered but its in-flight marker did not persist: #{inspect(why)} — the settle path cannot see it"
+        )
+
+        :error
+    end
+  end
+
   defp trigger_candidate(bp) do
     case Registry.trigger_self_update(bp) do
       {:ok, 202, _body} ->
-        _ = Registry.mark_autoupdate_triggered(bp)
+        mark_in_flight(bp)
 
         Logger.info("autoupdate: triggered #{bp.slug} (HTTP 202) → #{bp.update_latest_release}")
 
       {:ok, 409, _body} ->
-        _ = Registry.mark_autoupdate_triggered(bp)
+        mark_in_flight(bp)
 
         Logger.warning(
           "autoupdate: #{bp.slug} already had a run in flight (HTTP 409 already_running) — NOT started by this tick; waiting for it to settle"
