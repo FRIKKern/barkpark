@@ -724,10 +724,22 @@ defmodule Barkpark.Content.Mutations do
   # mislabelled).
   @id_type_verbs ~w(publish unpublish discardDraft delete deleteExactDraft patch)
 
+  # Every verb an `apply_one/3` head above accepts. An object naming NONE of
+  # them is still a 400 malformed (task-2f601b4f24e9af66). The code and status
+  # stay, but the message now names what was sent and what is accepted, so a
+  # typo'd verb does not send the caller into content/mutations.ex. A KNOWN verb
+  # with a bad payload keeps the generic 400; see the note above.
+  @mutation_verbs ~w(create createOrReplace createIfNotExists replace patch publish unpublish discardDraft delete deleteExactDraft)
+
   defp apply_one(mutation, _dataset, _opts) when is_map(mutation) do
     case missing_id_type(mutation) do
-      {verb, missing} -> {:error, {:missing_mutation_fields, verb, missing}}
-      nil -> {:error, :malformed}
+      {verb, missing} ->
+        {:error, {:missing_mutation_fields, verb, missing}}
+
+      nil ->
+        if Enum.any?(Map.keys(mutation), &(&1 in @mutation_verbs)),
+          do: {:error, :malformed},
+          else: {:error, {:unknown_mutation_verb, Enum.sort(Map.keys(mutation)), @mutation_verbs}}
     end
   end
 

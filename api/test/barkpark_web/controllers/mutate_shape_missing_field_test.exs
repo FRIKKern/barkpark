@@ -128,13 +128,20 @@ defmodule BarkparkWeb.MutateShapeMissingFieldTest do
 
   # ── NEGATIVE ARM: genuinely malformed bodies keep the generic 400 ───────────
 
-  test "an unknown verb is still a bare 400 malformed", %{conn: conn} do
+  # Still a 400 malformed, never a 422 (an unknown verb is genuinely
+  # malformed). Since task-2f601b4f24e9af66 the message names what was sent and
+  # what is accepted, so a typo'd verb is actionable without reading the code.
+  test "an unknown verb is still a 400 malformed, and names the verb and the accepted set",
+       %{conn: conn} do
     resp = mutate(conn, %{"frobnicate" => %{"id" => "x", "type" => "post"}})
 
     assert resp.status == 400
     err = error(resp)
     assert err["code"] == "malformed"
-    assert err["message"] == "request body is malformed"
+    assert err["message"] =~ ~s(unknown mutation kind: "frobnicate")
+    assert err["message"] =~ "createOrReplace"
+    assert err["details"]["received"] == ["frobnicate"]
+    assert "patch" in err["details"]["supported"]
   end
 
   test "a known verb whose payload is not a map is still a bare 400", %{conn: conn} do
