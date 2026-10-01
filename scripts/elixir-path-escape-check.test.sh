@@ -1971,6 +1971,28 @@ emit("escape_if", str(esc.get("if", "")))
 emit("escape_needs", ",".join(esc.get("needs", [])))
 for n in ("mix-test", "mix-prod-compile", "validation-perf"):
     emit(f"if::{n}", str(jobs.get(n, {}).get("if", "")))
+# ── the Test PARTITIONS (task-8345bf4c2ca2b989) ──────────────────────────
+# The matrix list and TEST_PARTITIONS are two spellings of one number, and the
+# gate's fold trusts the number. They must agree, and the list must be 1..N.
+mt = jobs.get("mix-test", {})
+parts = ((mt.get("strategy") or {}).get("matrix") or {}).get("partition")
+total = str((mt.get("env") or {}).get("TEST_PARTITIONS", ""))
+emit("test_partitions_agree",
+     isinstance(parts, list) and total.isdigit() and int(total) >= 1
+     and parts == list(range(1, int(total) + 1)))
+# A matrix job's outputs are last-writer-wins, so the refusal channel may not
+# ride one ALONE: the job output stays (and stays bound as V_TEST, the shape
+# gate-refusal-vocabulary-check requires), and the per-cell records the gate
+# downloads and folds worst-first on top of it are the authority.
+emit("mix_test_outputs", ",".join(sorted((mt.get("outputs") or {}).keys())))
+gsteps = agg.get("steps", []) or []
+emit("gate_run_steps", sum(1 for st in gsteps if "run" in st))
+emit("cells_downloaded", any("download-artifact" in str(st.get("uses", ""))
+                             and "mix-test-cell-p" in str((st.get("with") or {}).get("pattern", ""))
+                             for st in gsteps))
+dec = next((st for st in gsteps if "run" in st), {})
+emit("v_test_bound_in_env", "V_TEST" in (dec.get("env") or {}))
+emit("cells_env", str((dec.get("env") or {}).get("MIX_TEST_CELLS", "")))
 out.close()
 PY
   python3 "$EMIT" "$WF" "$FACTS"
@@ -2031,6 +2053,17 @@ PY
   assert_fact escape_if ""
   assert_fact escape_needs ""
   assert_fact "if::mix-test" "needs.changes.outputs.test == 'true'"
+  # The Test partitions fold fail-closed (task-8345bf4c2ca2b989): the list and
+  # the number agree, the (last-writer-wins) job output is kept but is not the
+  # authority, the per-cell records are downloaded, and Decide stays the
+  # aggregator's ONE run step (every shape harness extracts it by that rule)
+  # and folds them itself.
+  assert_fact test_partitions_agree True
+  assert_fact mix_test_outputs "verdict"
+  assert_fact gate_run_steps 1
+  assert_fact cells_downloaded True
+  assert_fact v_test_bound_in_env True
+  assert_fact cells_env '${{ runner.temp }}/mix-test-cells'
   assert_fact "if::mix-prod-compile" "needs.changes.outputs.compile == 'true'"
   assert_fact "if::validation-perf" "needs.changes.outputs.compile == 'true'"
   # …and every decide() call's THIRD positional (the gate) matches what the
@@ -2221,11 +2254,27 @@ PY
 # a pass that proves nothing, which is the exact defect class this epic exists
 # to remove. Follow-up assertions read the file.
 GATE_OUT="$TMPROOT/gate.out"
+# cells <dir> <partition>:<of>:<verdict>... — the per-partition records the
+# mix-test matrix uploads and elixir-gate downloads (task-8345bf4c2ca2b989).
+cells() {
+  local dir="$1" spec p o v
+  shift
+  mkdir -p "$dir"
+  for spec in "$@"; do
+    IFS=: read -r p o v <<<"$spec"
+    mkdir -p "$dir/mix-test-cell-p$p-$RANDOM"
+    printf 'partition=%s\nof=%s\nverdict=%s\n' "$p" "$o" "$v" >"$(ls -d "$dir"/mix-test-cell-p"$p"-* | tail -1)/cell.txt"
+  done
+}
+CELLS_OK="$TMPROOT/cells-ok"
+cells "$CELLS_OK" "1:2:MEASURED-CLEAN" "2:2:"
 gate() {
   local label="$1" want="$2"
   shift 2
   local rc
-  env -i PATH="$PATH" HOME="$HOME" "$@" bash --noprofile --norc "$AGG" >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
+  # MIX_TEST_CELLS defaults to a complete clean set; a case that passes its
+  # own MIX_TEST_CELLS overrides it (env's later assignment wins).
+  env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" "$@" bash --noprofile --norc "$AGG" >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
   if [ "$rc" -eq "$want" ]; then
     ok "$label -> exit $rc"
   else
@@ -2287,6 +2336,46 @@ gate_names() {
 gate "full run, all green" 0 \
   R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=true O_TEST=true
+
+# (a2) THE PARTITIONS (task-8345bf4c2ca2b989). A matrix whose cells all
+#      SUCCEEDED can still be half a suite: a partition dropped from the matrix
+#      is simply absent. So a missing record is red and names mix-test, and
+#      a refusal in a LATER cell survives the fold instead of being overwritten
+#      the way a last-writer-wins job output would overwrite it.
+CELLS_MISSING="$TMPROOT/cells-missing"
+cells "$CELLS_MISSING" "1:2:MEASURED-CLEAN"
+gate "a Test partition never reported (matrix [1] of 2)" 1 \
+  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
+  O_COMPILE=true O_TEST=true MIX_TEST_CELLS="$CELLS_MISSING"
+gate_says "partition 2 of 2 reported 0 times" "…and says which partition is missing"
+gate_names "mix-test (partitions incomplete)" "validation-perf"
+CELLS_NONE="$TMPROOT/cells-none"
+mkdir -p "$CELLS_NONE"
+# A refusal is red on its OWN annotation ("an instrument REFUSED TO MEASURE"),
+# not the allow-set one `gate` looks for, so these two arms read it directly.
+gate_refused() {
+  local label="$1" rc
+  shift
+  env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" "$@" bash --noprofile --norc "$AGG" >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
+  if [ "$rc" -eq 1 ]; then ok "$label -> exit 1"; else no "$label -> exit $rc, wanted 1"; fi
+  if grep -qF -- "::error title=Elixir gate RED — an instrument REFUSED TO MEASURE" "$GATE_OUT" \
+     || grep -qF -- "::error title=Elixir gate RED — a refusal reached the aggregate" "$GATE_OUT"; then
+    ok "  …and reached its own REFUSED verdict line"
+  else
+    no "  …but printed NO refusal verdict line — the step body crashed rather than decided"
+    sed 's/^/        /' "$GATE_OUT" >&2
+  fi
+}
+gate_refused "no Test partition uploaded a record" \
+  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
+  O_COMPILE=true O_TEST=true MIX_TEST_CELLS="$CELLS_NONE"
+gate_says "no partition uploaded a record" "…and says no record arrived"
+CELLS_REFUSED="$TMPROOT/cells-refused"
+cells "$CELLS_REFUSED" "1:2:MEASURED-CLEAN" "2:2:REFUSED"
+gate_refused "a later Test partition REFUSED" \
+  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
+  O_COMPILE=true O_TEST=true MIX_TEST_CELLS="$CELLS_REFUSED"
+gate_says "REFUSED mix-test" "…and the refusal from partition 2 survives the fold"
 
 # (b) a legitimate docs-only skip greens the required context
 gate "docs-only PR, expensive jobs legitimately skipped" 0 \

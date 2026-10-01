@@ -1406,7 +1406,10 @@ jobs:
     if: needs.changes.outputs.test == 'true'
     outputs:
       # REFUSED when any instrument in this job exited 2 — see the refusal
-      # channel note on the last step. Read by `elixir-gate` as V_TEST.
+      # channel note on the last steps. Read by `elixir-gate` as V_TEST. This
+      # is a matrix, and matrix outputs are last-writer-wins, so it is NOT the
+      # authority: the per-cell records (`mix-test-cell-p<N>`) are, folded in
+      # `elixir-gate` worst-first together with this value.
       verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     # BLOCKING since 2026-06-10: the remediation this job waited on is done —
@@ -1439,6 +1442,12 @@ jobs:
       SECRET_KEY_BASE: ci-secret-key-base-not-used-in-test-env-just-needs-64-chars-padding
       BARKPARK_CLOAK_KEY: ci-cloak-key-32-chars-padding-aaa
       PREVIEW_JWT_SECRET: ci-preview-jwt-secret-not-used-padding
+      # `mix test --partitions` reads MIX_TEST_PARTITION, and config/test.exs
+      # suffixes the test database with it (barkpark_test1, barkpark_test2).
+      # Each cell has its own postgres service, so the suffix only has to be
+      # consistent within one cell, which it is: DB setup and Test share it.
+      MIX_TEST_PARTITION: ${{ matrix.partition }}
+      TEST_PARTITIONS: "2"
     strategy:
       fail-fast: false
       matrix:
@@ -1458,6 +1467,20 @@ jobs:
         # known residual in docs/ops/PROD_OPS.md.
         otp: ["27.0"]
         elixir: ["1.18.4"]
+        # THE TEST PARTITIONS (task-8345bf4c2ca2b989). The serial ExUnit time
+        # is the job's critical path: main run 36775391161 printed "Finished
+        # in 1200.8 seconds (313.5s async, 887.3s sync)". Sync modules run
+        # one at a time whatever max_cases says, so the only lever that
+        # scales is to split the FILES across runners. `mix test --partitions`
+        # does that deterministically, one cell per partition.
+        #
+        # THIS LIST AND `TEST_PARTITIONS` BELOW MUST AGREE. They are not derived
+        # from each other (a matrix cannot read `env`), so `elixir-gate` checks
+        # them. Every cell uploads a record naming its partition and the total
+        # it was told, and the gate refuses unless it holds EXACTLY the
+        # partitions 1..total. A cell dropped from this list is RED, never a
+        # silently smaller suite.
+        partition: [1, 2]
     defaults:
       run:
         working-directory: api
@@ -1509,10 +1532,14 @@ jobs:
       # that always reports "clean" would satisfy a can-it-red test while
       # measuring nothing.
       - name: The unreachable-assert-message guard must be able to fail
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/unreachable-assert-message-check.sh --selftest
 
       - name: No NEW unreachable assert messages (never-worse ratchet)
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/unreachable-assert-message-check.sh
 
@@ -1523,6 +1550,8 @@ jobs:
       # .md/.go-only commit runs neither check. Needs only git + elixir + mix,
       # all on PATH here, and no deps — so it rides BEFORE deps/compile too.
       - name: The pre-commit hook refuses an unreachable assert message
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/pre-commit-hook.test.sh
 
@@ -1556,10 +1585,14 @@ jobs:
       # scratch copy — without those, a scanner that always reports "clean"
       # would satisfy a can-it-red test while measuring nothing.
       - name: The comment-status-literal guard must be able to fail
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/comment-status-literal-check.sh --selftest
 
       - name: No NEW status literals in comments (never-worse ratchet)
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/comment-status-literal-check.sh
 
@@ -1582,10 +1615,14 @@ jobs:
       # without the second arm a scanner that reports "clean" unconditionally
       # would satisfy a can-it-red test while measuring nothing.
       - name: The client-ip resolver guard must be able to fail
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/run-instrument.sh client-ip-resolver-selftest -- bash scripts/client-ip-resolver-check.sh --selftest
 
       - name: No conn.remote_ip read outside the canonical resolver
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/run-instrument.sh client-ip-resolver -- bash scripts/client-ip-resolver-check.sh
 
@@ -1624,10 +1661,14 @@ jobs:
       # but 25 assertion arms, because 12 splits into 12a/12b/12c and it is the
       # arms the harness tallies in its own "PASSED: n of n cases" line.
       - name: The test-env-leak guard must be able to fail
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/test-env-leak-gate.test.sh
 
       - name: No NEW unrestored global-state mutation in api/test (never-worse ratchet)
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/test-env-leak-gate.sh
 
@@ -1693,6 +1734,8 @@ jobs:
       # requires that neither shrink can produce a pass. A tripwire nobody has
       # watched fail is not a tripwire.
       - name: Prove the tripwire can fail (guard --selftest)
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         run: bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" test-build-cache-guard-selftest -- bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" --selftest
         working-directory: .
 
@@ -1765,7 +1808,8 @@ jobs:
         run: rm -rf _build/test/lib/barkpark
 
       - name: Save compiled dependency artifacts (test)
-        if: steps.test_depbuild_audit.outputs.mode == 'rebuild'
+        # One writer per cache key: partition 1 saves, the others only restore.
+        if: matrix.partition == 1 && steps.test_depbuild_audit.outputs.mode == 'rebuild'
         uses: actions/cache/save@v4
         with:
           path: api/_build/test/lib
@@ -1883,6 +1927,8 @@ jobs:
       # ALL is the safe answer, and reddening a required context because an
       # optimisation is unavailable would be the wrong trade.
       - name: Is the compile-closure instrument alive?
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         id: xref-probe
         working-directory: .
         continue-on-error: true
@@ -1969,9 +2015,10 @@ jobs:
         # and narrow on a verdict nobody produced.
         run: |
           sel="$GITHUB_WORKSPACE/elixir-impacted-selection.txt"
+          echo "partition ${MIX_TEST_PARTITION} of ${TEST_PARTITIONS}"
           if [ ! -s "$sel" ] || grep -qxF 'ALL' "$sel"; then
             echo "running the FULL suite"
-            mix test --slowest 50
+            mix test --slowest 50 --partitions "$TEST_PARTITIONS"
             exit 0
           fi
           files=()
@@ -1981,11 +2028,11 @@ jobs:
           done <"$sel"
           if [ "${#files[@]}" -eq 0 ]; then
             echo "::warning::the selection file held no usable paths — running the FULL suite."
-            mix test --slowest 50
+            mix test --slowest 50 --partitions "$TEST_PARTITIONS"
             exit 0
           fi
           echo "running ${#files[@]} selected test files"
-          mix test --slowest 50 "${files[@]}"
+          mix test --slowest 50 --partitions "$TEST_PARTITIONS" "${files[@]}"
 
       # The selection is UPLOADED on every run, pass or fail. It is the only
       # record of what a given sha actually executed, and the attribution
@@ -1997,7 +2044,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: elixir-impacted-selection
+          # Partition 1 keeps the historical name, which elixir-main-red-attribution
+          # reads. The selection is computed identically in every cell. The other
+          # cells need their own names because upload-artifact v4 refuses a
+          # duplicate name inside one run.
+          name: elixir-impacted-selection${{ matrix.partition != 1 && format('-p{0}', matrix.partition) || '' }}
           path: elixir-impacted-selection.txt
           if-no-files-found: warn
           retention-days: 30
@@ -2021,7 +2072,8 @@ jobs:
         # but a broken compile does not cascade into a bogus "stale artifact"
         # red that says nothing true. The gate is unchanged in strength — only
         # its position moved. Do NOT move it back above `mix test`.
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
+        # ONE-TIME: not a test shard. Partition 1 only.
+        if: ${{ !cancelled() && matrix.partition == 1 && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
         run: |
           mix barkpark.openapi
           cd ..
@@ -2070,7 +2122,8 @@ jobs:
         # (task-openapi-drift-chronic): runs AFTER `mix test`, on the same
         # build-succeeded-but-ignore-the-test-result condition, so a red suite
         # does not hide stale fixtures.
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
+        # ONE-TIME: not a test shard. Partition 1 only.
+        if: ${{ !cancelled() && matrix.partition == 1 && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
         run: |
           mix barkpark.paper_components.gen_golden_parity
           cd ..
@@ -2116,7 +2169,8 @@ jobs:
         # never be able to suppress it. Unguarded, a one-byte docs/openapi.json
         # drift would skip the boot bar entirely — a fresh instance of the exact
         # failure mode that left this bar red on main for weeks (see above).
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
+        # ONE-TIME: not a test shard. Partition 1 only.
+        if: ${{ !cancelled() && matrix.partition == 1 && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
         run: mix test --only boot_test test/barkpark/plugin_free_boot_test.exs
 
       # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
@@ -2128,11 +2182,36 @@ jobs:
       # so drop a refusal that happened after a clean measurement.
       # EMPTY is not MEASURED-CLEAN: it means the job never reached a
       # channelled step, and `elixir-gate` reads it that way.
+      #
+      # THE JOB OUTPUT IS NOT ENOUGH ANY MORE (task-8345bf4c2ca2b989). This job
+      # is a matrix now, and a matrix job's `outputs:` hold whichever cell set
+      # them LAST, so a REFUSED in one partition could be overwritten by a
+      # later cell. The output is kept, published by partition 1 only because
+      # the channelled guards run there, and it stays bound in `elixir-gate`
+      # as V_TEST (gate-refusal-vocabulary-check requires that shape). But the
+      # AUTHORITY is the per-cell record below: every cell writes one, and
+      # `elixir-gate` folds them worst-first together with V_TEST, and refuses
+      # unless every partition reported.
       - name: Publish this job's refusal verdict
         id: verdict
-        if: always()
+        if: always() && matrix.partition == 1
         working-directory: ${{ github.workspace }}
         run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
+      - name: Record this partition for the gate
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir -p mix-test-cell
+          printf 'partition=%s\nof=%s\nverdict=%s\n' \
+            "${{ matrix.partition }}" "${TEST_PARTITIONS}" "${BP_STEP_VERDICT:-}" \
+            > mix-test-cell/cell.txt
+          cat mix-test-cell/cell.txt
+      - name: Upload this partition's record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mix-test-cell-p${{ matrix.partition }}
+          path: mix-test-cell/cell.txt
 
   mix-prod-compile:
     # The merge gate. See docs/ops/merge-gates.md.
@@ -2654,6 +2733,21 @@ jobs:
     needs: [changes, mix-test, mix-prod-compile, validation-perf, path-escape, format]
     runs-on: ubuntu-latest
     steps:
+      # ── THE TEST PARTITIONS' RECORDS (task-8345bf4c2ca2b989) ─────────────
+      # `needs.mix-test.result` folds the matrix: any failed or cancelled cell
+      # makes it non-success. It cannot say that EVERY partition existed, and a
+      # cell dropped from the matrix is simply absent while the rest succeed
+      # over half a suite. Nor can the matrix carry the refusal channel, because
+      # job outputs are last-writer-wins. Both ride per-cell records, folded at
+      # the top of Decide below. This download is best-effort ON PURPOSE: a
+      # missing record is judged there, and red, not here.
+      - name: Download the Test partitions' records
+        if: always() && needs.mix-test.result != 'skipped'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mix-test-cell-p*
+          path: ${{ runner.temp }}/mix-test-cells
       - name: Decide (fail-closed over every upstream result)
         env:
           R_CHANGES: ${{ needs.changes.result }}
@@ -2675,7 +2769,12 @@ jobs:
           # never reads an empty V_* as MEASURED.
           V_ESCAPE: ${{ needs.path-escape.outputs.verdict }}
           V_FORMAT: ${{ needs.format.outputs.verdict }}
+          # mix-test is a matrix, and its outputs are last-writer-wins, so
+          # V_TEST alone could lose a refusal. It is folded worst-first with the
+          # per-partition records at the top of the run body
+          # (task-8345bf4c2ca2b989), and the records are the authority.
           V_TEST: ${{ needs.mix-test.outputs.verdict }}
+          MIX_TEST_CELLS: ${{ runner.temp }}/mix-test-cells
           V_PROD: ${{ needs.mix-prod-compile.outputs.verdict }}
           # NOT a second verdict — R_FORMAT above is the verdict. This is the
           # NAMES, so the ::error:: (the only line the check-run API carries)
@@ -2683,6 +2782,63 @@ jobs:
           F_IN_DIFF: ${{ needs.format.outputs.unformatted_in_diff }}
         run: |
           set -euo pipefail
+
+          # ── fold the Test partitions (task-8345bf4c2ca2b989) ─────────────
+          # Every record is `partition=<n>`, `of=<total>`, `verdict=<channel>`.
+          # P_TEST is `ok` only if the partitions present are EXACTLY 1..total,
+          # each once, and every cell agrees on the total. Anything else, no
+          # records included, is `no` with the reason in P_TEST_WHY. V_TEST
+          # starts from the (last-writer-wins) job output and every record is
+          # folded into it worst-first, so a refusal in ANY cell survives.
+          V_TEST="${V_TEST:-}"; P_TEST="no"; P_TEST_WHY=""
+          if [ "${R_TEST:-}" = "skipped" ]; then
+            P_TEST="skipped"
+          else
+            shopt -s nullglob
+            cell_records=("${MIX_TEST_CELLS:-/nonexistent}"/*/cell.txt)
+            shopt -u nullglob
+            if [ "${#cell_records[@]}" -eq 0 ]; then
+              P_TEST_WHY="no partition uploaded a record"
+              # A SUCCESS with no record is a refusal to measure; a failed
+              # matrix is already red and needs no second word.
+              if [ "${R_TEST:-}" = "success" ]; then V_TEST="UNKNOWN"; fi
+            else
+              cell_of=""; cell_seen=""
+              for r in "${cell_records[@]}"; do
+                cp_="$(sed -n 's/^partition=//p' "$r")"
+                co_="$(sed -n 's/^of=//p' "$r")"
+                cv_="$(sed -n 's/^verdict=//p' "$r")"
+                echo "partition record: partition=${cp_} of=${co_} verdict=${cv_:-<empty>}"
+                case "${cp_}${co_}" in
+                  '' | *[!0-9]*) P_TEST_WHY="${P_TEST_WHY}unreadable record ${r}; "; continue ;;
+                esac
+                if [ -z "$cell_of" ]; then cell_of="$co_"
+                elif [ "$cell_of" != "$co_" ]; then P_TEST_WHY="${P_TEST_WHY}cells disagree on the total (${cell_of} vs ${co_}); "; fi
+                cell_seen="${cell_seen} ${cp_}"
+                case "$cv_" in
+                  REFUSED | UNKNOWN) V_TEST="REFUSED" ;;
+                  MEASURED-DEFECT) [ "$V_TEST" = "REFUSED" ] || V_TEST="MEASURED-DEFECT" ;;
+                  MEASURED-CLEAN) [ -n "$V_TEST" ] || V_TEST="MEASURED-CLEAN" ;;
+                  '') : ;;
+                  *) V_TEST="REFUSED"; P_TEST_WHY="${P_TEST_WHY}unrecognised verdict '${cv_}' from partition ${cp_}; " ;;
+                esac
+              done
+              if [ -n "$cell_of" ] && [ "$cell_of" -ge 1 ]; then
+                for i in $(seq 1 "$cell_of"); do
+                  n_="$(printf '%s\n' $cell_seen | grep -cx "$i" || true)"
+                  [ "$n_" = 1 ] || P_TEST_WHY="${P_TEST_WHY}partition ${i} of ${cell_of} reported ${n_} times; "
+                done
+                for p_ in $cell_seen; do
+                  { [ "$p_" -ge 1 ] && [ "$p_" -le "$cell_of" ]; } || P_TEST_WHY="${P_TEST_WHY}partition ${p_} is outside 1..${cell_of}; "
+                done
+              else
+                P_TEST_WHY="${P_TEST_WHY}no usable total; "
+              fi
+              [ -n "$P_TEST_WHY" ] || P_TEST="ok"
+            fi
+          fi
+          echo "Test partitions: ${P_TEST}${P_TEST_WHY:+ — ${P_TEST_WHY}}"
+          echo
 
           echo "dispatcher outputs: compile='${O_COMPILE}' test='${O_TEST}'"
           echo
@@ -2830,6 +2986,16 @@ jobs:
           decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
           decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"
           decide "mix-test"                "${R_TEST}"    "${O_TEST}"
+          # Every partition must have reported (task-8345bf4c2ca2b989). A result
+          # of success over a MISSING partition is half a suite, so it is red.
+          # Judged only where the matrix itself succeeded: a failed or
+          # cancelled mix-test is already red above, and naming it twice would
+          # say nothing new.
+          if [ "${R_TEST:-}" = "success" ] && [ "$P_TEST" != "ok" ]; then
+            echo "  FAIL    mix-test partitions: ${P_TEST_WHY:-the fold did not complete}"
+            bad=1
+            reds="${reds:+${reds}, }mix-test (partitions incomplete)"
+          fi
           decide "mix-prod-compile"        "${R_PROD}"    "${O_COMPILE}"
           decide "validation-perf"         "${R_PERF}"    "${O_COMPILE}"
           # DIFF-SCOPED. This job fails only when a file the PR TOUCHES is

@@ -84,6 +84,15 @@ no() {
 has() { grep -q -F -- "$2" <<<"$1"; }
 
 TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/gate-announces-skips.XXXXXX")"
+# elixir-gate's Decide body folds the Test partitions' records first
+# (task-8345bf4c2ca2b989) and is red without them, so every elixir run below
+# gets the complete clean set a green mix-test matrix uploads (other gates
+# ignore the variable). elixir-path-escape-check.test.sh proves the fold.
+CELLS_OK="$TMPROOT/mix-test-cells"
+for part in 1 2; do
+  mkdir -p "$CELLS_OK/mix-test-cell-p$part"
+  printf 'partition=%s\nof=2\nverdict=\n' "$part" >"$CELLS_OK/mix-test-cell-p$part/cell.txt"
+done
 cleanup() { rm -rf "$TMPROOT"; }
 trap cleanup EXIT
 
@@ -481,7 +490,7 @@ run_gate() {
   # occurrence of a name, so a caller passing its own V_SOBELOW overrides this
   # (the docs-only arms do exactly that, with the empty value a never-dispatched
   # job really publishes).
-  env -i PATH="$PATH" HOME="$HOME" V_SOBELOW=MEASURED-CLEAN "$@" bash --noprofile --norc "$script" >"$OUT" 2>&1 && rc=0 || rc=$?
+  env -i PATH="$PATH" HOME="$HOME" V_SOBELOW=MEASURED-CLEAN MIX_TEST_CELLS="$CELLS_OK" "$@" bash --noprofile --norc "$script" >"$OUT" 2>&1 && rc=0 || rc=$?
   if [ "$rc" -ne "$want" ]; then
     no "$label -> exit $rc, wanted $want"
     sed 's/^/        /' "$OUT" >&2
@@ -695,7 +704,7 @@ red_names() {
   # occurrence of a name, so a caller passing its own V_SOBELOW overrides this
   # (the docs-only arms do exactly that, with the empty value a never-dispatched
   # job really publishes).
-  env -i PATH="$PATH" HOME="$HOME" V_SOBELOW=MEASURED-CLEAN "$@" bash --noprofile --norc "$script" >"$OUT" 2>&1 && rc=0 || rc=$?
+  env -i PATH="$PATH" HOME="$HOME" V_SOBELOW=MEASURED-CLEAN MIX_TEST_CELLS="$CELLS_OK" "$@" bash --noprofile --norc "$script" >"$OUT" 2>&1 && rc=0 || rc=$?
   if [ "$rc" -ne 1 ]; then
     no "$label -> exit $rc, wanted 1 (this input must be RED)"
     sed 's/^/        /' "$OUT" >&2
