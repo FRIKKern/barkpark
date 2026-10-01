@@ -412,11 +412,10 @@ defmodule Barkpark.Plugins.Sheets.Session do
   whatever workspace each is keyed under — to persist.
 
   This is deliberately NOT `flush(slug, dataset, nil)`. `flush/3` addresses one
-  key; this sweeps them all, which is what a read-your-writes barrier at a door
-  that has already authorized its own tenant (the export controller) needs: it
-  must not miss the Studio's workspace-keyed session just because it does not
-  name the workspace. It moves NO data between tenants — each session persists
-  its OWN content to its OWN scope — so the sweep leaks nothing.
+  key; this sweeps them all. It moves NO data between tenants — each session
+  persists its OWN content to its OWN scope — but it IS a cross-tenant side
+  effect, so a request door must not call it: the export controller authorizes
+  the row first and flushes only that row's key with `flush/3` (Run-4 Lane B).
 
   Returns `:ok` when every live session persisted (including "none was live"),
   or the FIRST `{:error, reason}` so the caller still refuses to serve a stale
