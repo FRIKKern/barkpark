@@ -176,16 +176,79 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
      %{"s" => "x", "unknown" => "keep me"}},
     # ── localizedText ──────────────────────────────────────────────────────
     {"localized", %{"type" => "localizedText", "languages" => ["nob", "eng"]},
-     %{"nob" => "Hei", "eng" => "Hi"}}
+     %{"nob" => "Hei", "eng" => "Hi"}},
+    # ── nested shapes ──────────────────────────────────────────────────────
+    {"arr_comp_ref",
+     %{
+       "type" => "arrayOf",
+       "of" => %{
+         "type" => "composite",
+         "fields" => [
+           %{"name" => "title", "type" => "string"},
+           %{"name" => "ref", "type" => "reference"},
+           %{"name" => "n", "type" => "number"}
+         ]
+       }
+     },
+     [
+       %{"title" => "one", "ref" => %{"_ref" => "a1"}, "n" => 1},
+       %{"title" => "two", "ref" => %{"_ref" => "a2", "_key" => "k2"}, "n" => 2.5}
+     ]},
+    {"comp_nested",
+     %{
+       "type" => "composite",
+       "fields" => [
+         %{"name" => "s", "type" => "string"},
+         %{
+           "name" => "inner",
+           "type" => "composite",
+           "fields" => [
+             %{"name" => "k", "type" => "string"},
+             %{"name" => "n", "type" => "number"}
+           ]
+         }
+       ]
+     }, %{"s" => "x", "inner" => %{"k" => "v", "n" => 1}}},
+    {"comp_number_string",
+     %{"type" => "composite", "fields" => [%{"name" => "n", "type" => "number"}]}, %{"n" => "3"}},
+    # ── a richText field edited by the block canvas (`editor: blocks`) ──────
+    {"rich_canvas", %{"type" => "richText", "editor" => "blocks"},
+     %{
+       "blocks" => [
+         %{
+           "id" => "rc-1",
+           "type" => "paragraph",
+           "content" => [%{"type" => "text", "value" => "canvas"}]
+         }
+       ],
+       "html" => "<p>canvas</p>"
+     }}
   ]
 
   @probe_before "probe before"
   @probe_after "probe after"
 
+  @canvas_before %{
+    "blocks" => [
+      %{
+        "id" => "pc-1",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "before"}]
+      }
+    ],
+    "html" => "<p>before</p>"
+  }
+
   defp schema_fields do
     [
       %{"name" => "title", "title" => "Title", "type" => "string"},
-      %{"name" => "probe", "title" => "Probe", "type" => "string"}
+      %{"name" => "probe", "title" => "Probe", "type" => "string"},
+      %{
+        "name" => "probe_canvas",
+        "title" => "Probe canvas",
+        "type" => "richText",
+        "editor" => "blocks"
+      }
       | Enum.map(@cells, fn {name, decl, _} ->
           Map.merge(decl, %{"name" => name, "title" => name})
         end)
@@ -193,7 +256,7 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
   end
 
   defp seed_content do
-    Enum.reduce(@cells, %{"probe" => @probe_before}, fn
+    Enum.reduce(@cells, %{"probe" => @probe_before, "probe_canvas" => @canvas_before}, fn
       {_name, _decl, :absent}, acc -> acc
       {name, _decl, value}, acc -> Map.put(acc, name, value)
     end)
@@ -265,7 +328,10 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
     # POSITIVE CONTROL: the unrelated edit actually landed, so "nothing moved"
     # cannot come from a save that never happened.
     assert doc.content["probe"] == @probe_after, "#{path}: the probe edit did not land"
+    assert_cells!(path, doc)
+  end
 
+  defp assert_cells!(path, doc) do
     case failing_cells(doc.content) do
       [] ->
         :ok
@@ -466,6 +532,59 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
       |> post("/v1/data/mutate/#{@dataset}", Jason.encode!(%{"mutations" => [mutation]}))
 
     assert conn.status == 200, "mutate refused: #{conn.status} #{conn.resp_body}"
+  end
+
+  describe "Field canvas — a block op on a richText `editor: blocks` field" do
+    # `apply_field_block_ops/6` is the save path of the per-field canvas: it
+    # rewrites `content[field]` and must touch nothing else.
+    test "editing `probe_canvas` leaves every cell byte-identical", %{type: type} do
+      doc_id = seed_draft!(type)
+
+      op = %{
+        "op" => "patch-block",
+        "id" => "pc-1",
+        "patch" => %{"content" => [%{"type" => "text", "value" => "after"}]}
+      }
+
+      {:ok, _} =
+        Content.apply_field_block_ops(
+          DraftId.draft_id(doc_id),
+          type,
+          "probe_canvas",
+          [op],
+          @dataset
+        )
+
+      doc = stored(type, doc_id)
+      assert doc.content["probe_canvas"]["html"] =~ "after", "the canvas edit did not land"
+      assert doc.content["probe"] == @probe_before
+      assert_cells!("field_canvas", doc)
+    end
+  end
+
+  describe "Studio Classic form — one row of an arrayOf-of-composite edited" do
+    test "the edited row's untouched subfields and the untouched row keep their shapes",
+         %{type: type, token: token} do
+      doc_id = seed_draft!(type)
+
+      {:ok, view, _html} =
+        live(editor_conn(token), scoped_studio("/d/#{@dataset}/studio/#{type}/#{doc_id}"))
+
+      overrides =
+        deep_merge(browser_sanitised(render(view)), %{
+          "doc" => %{"probe" => @probe_after},
+          "doc[arr_comp_ref][0].title" => "one — edited"
+        })
+
+      view |> form("#editor-form") |> render_change(overrides)
+
+      rows = stored(type, doc_id).content["arr_comp_ref"]
+
+      assert [
+               %{"title" => "one — edited", "ref" => %{"_ref" => "a1"}, "n" => 1},
+               %{"title" => "two", "ref" => %{"_ref" => "a2", "_key" => "k2"}, "n" => 2.5}
+             ] === rows
+    end
   end
 
   describe "REST /v1/data/mutate patch (also `bp doc patch --set`)" do
