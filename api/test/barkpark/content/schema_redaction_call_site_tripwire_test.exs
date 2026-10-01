@@ -88,6 +88,10 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
     "barkpark/tasks/query.ex:row_field_visibility_gate" => "explicit [] — unscoped global read",
     "barkpark/plugins/tasks.ex:task_schema_present?" => "unscoped 2-arity presence probe",
     "barkpark/plugins/tickets.ex:ticket_schema_present?" => "unscoped 2-arity presence probe",
+    "barkpark/plugins/quiz.ex:schema_present?" =>
+      "unscoped 2-arity presence probe (desk item gate)",
+    "barkpark/plugins/forms.ex:schema_present?" =>
+      "unscoped 2-arity presence probe (desk item gate)",
     "barkpark/plugins/tasks/web/board_live.ex:peek_schema" =>
       "explicit [] — unscoped global read",
     "barkpark/content/edges.ex:disconnect_one_source" => "unscoped 2-arity, edge write path",
