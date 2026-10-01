@@ -974,6 +974,10 @@ func TestExecuteBarkparksDefaultStaysCurrentTeam(t *testing.T) {
 
 func TestExecuteBarkparksKindStaysLocalWithCloudSession(t *testing.T) {
 	withTempConfigHome(t)
+	// Out of the repository: its .barkpark.json pins another server, and a
+	// saved credential is (correctly) withheld from that host with a notice on
+	// the captured output.
+	t.Chdir(t.TempDir())
 
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
