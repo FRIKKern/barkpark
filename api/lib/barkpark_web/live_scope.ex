@@ -46,6 +46,10 @@ defmodule BarkparkWeb.LiveScope do
   alias Barkpark.Tenancy
   alias BarkparkWeb.Studio.ReturnTo
 
+  # The {workspace_slug, project_slug, dataset} triple `resolve_and_authorize/2`
+  # last admitted. Written ONLY there; `reauthorize/3` compares the URL with it.
+  @authorized_scope :live_scope_authorized_scope
+
   def on_mount(:resolve, params, _session, socket) do
     case resolve_and_authorize(socket, params) do
       {:ok, socket} ->
@@ -72,15 +76,22 @@ defmodule BarkparkWeb.LiveScope do
   # comparison is a map lookup, not a query, so the hot path (pane nav within one
   # dataset) still short-circuits; re-authorization fires ONLY on a real dataset
   # change.
+  #
+  # COMPARED AGAINST THE AUTHORIZED STAMP, NOT THE LIVE ASSIGNS (r4a LiveView
+  # authz sweep). This used to compare the URL with `current_workspace` /
+  # `current_project` / `dataset` — but StudioLive's `switch-project` and
+  # `switch-workspace` handlers WRITE the new project/workspace into those
+  # assigns before they push_patch, so the patch compared the new URL with the
+  # new assigns, matched, and skipped `authorize_read/4`. Shares are per
+  # project and both events are on `@readonly_events`, so an anonymous
+  # `:docs`-share viewer could switch into an UNSHARED sibling project (same
+  # dataset slug) and read it. `@authorized_scope` is written only by
+  # `resolve_and_authorize/2`, so no LiveView handler can make a scope look
+  # already-authorized.
   defp reauthorize(params, _uri, socket) do
-    ws = socket.assigns[:current_workspace]
-    proj = socket.assigns[:current_project]
-
     same_scope? =
-      is_map(ws) and is_map(proj) and
-        Map.get(ws, :slug) == params["workspace_slug"] and
-        Map.get(proj, :slug) == params["project_slug"] and
-        socket.assigns[:dataset] == params["dataset"]
+      socket.assigns[@authorized_scope] ==
+        {params["workspace_slug"], params["project_slug"], params["dataset"]}
 
     if same_scope? do
       {:cont, socket}
@@ -108,6 +119,7 @@ defmodule BarkparkWeb.LiveScope do
           scope_prefix: "/w/#{ws.slug}/p/#{proj.slug}",
           share_access: if(grade == :share_read, do: :read, else: nil)
         )
+        |> assign(@authorized_scope, {ws_slug, proj_slug, params["dataset"]})
         |> assign_grant_scope(grade)
 
       {:ok, maybe_attach_readonly_gate(socket, grade)}
