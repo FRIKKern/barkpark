@@ -171,7 +171,7 @@ are load-bearing for a client:
 | `GET /v1/data/revision/:ds/:id` | `{revision}` | predates the envelope |
 | `GET /v1/data/analytics/:dataset` | `{dataset, total_documents, types, recent_activity}` | flat stats shape |
 | `GET /v1/data/listen/:dataset` | SSE stream | not a JSON body |
-| `GET /v1/data/export/:dataset` | NDJSON stream | not a JSON body |
+| `GET /v1/data/export/:dataset` | NDJSON; `?perspective` default raw (write) / published (read) | not a JSON body |
 
 **`?filterresponse=false` — or `Accept: ...+filterresponse=false` — strips the
 envelope** and returns the inner payload flat: `{documents, count, ...}` for a
