@@ -59,6 +59,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   alias Barkpark.Plugins.Settings
   alias Barkpark.Plugins.Settings.Masking
   alias Barkpark.Structure
+  alias Barkpark.StudioChat.HostExecution
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
@@ -614,23 +615,37 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         chat = Tenancy.workspace_chat_settings(ws)
         next = if chat["execution_profile"] == "cloud", do: "self_hosted", else: "cloud"
 
-        if next in ~w(cloud self_hosted) do
-          merged = Map.put(chat, "execution_profile", next)
+        cond do
+          # task-6ca882967fd95dda: `self_hosted` runs this workspace's chat on
+          # the INSTANCE HOST — selectable only for the Default workspace, by the
+          # instance owner (`HostExecution`). `cloud` stays every admin's choice.
+          next == "self_hosted" and
+              not (HostExecution.workspace_may_host_exec?(ws.id) and
+                       BarkparkWeb.HostExecutionGate.instance_principal?(principal)) ->
+            {:noreply, put_flash(socket, :error, HostExecution.message())}
 
-          case Tenancy.set_workspace_chat_settings(ws.id, merged) do
-            {:ok, updated} ->
-              {:noreply,
-               socket
-               |> assign(:current_workspace, updated)
-               |> assign(:execution_profile, next)
-               |> put_flash(:info, execution_profile_flash(next))}
+          next in ~w(cloud self_hosted) ->
+            save_execution_profile(socket, ws, chat, next)
 
-            {:error, _} ->
-              {:noreply, put_flash(socket, :error, "Could not save the execution profile.")}
-          end
-        else
-          {:noreply, put_flash(socket, :error, "Unknown execution profile.")}
+          true ->
+            {:noreply, put_flash(socket, :error, "Unknown execution profile.")}
         end
+    end
+  end
+
+  defp save_execution_profile(socket, ws, chat, next) do
+    merged = Map.put(chat, "execution_profile", next)
+
+    case Tenancy.set_workspace_chat_settings(ws.id, merged) do
+      {:ok, updated} ->
+        {:noreply,
+         socket
+         |> assign(:current_workspace, updated)
+         |> assign(:execution_profile, next)
+         |> put_flash(:info, execution_profile_flash(next))}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Could not save the execution profile.")}
     end
   end
 

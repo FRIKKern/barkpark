@@ -308,6 +308,10 @@ var codeExit = map[string]int{
 	"workspace_suspended":    exitAuth, // 403, errors.ex:348
 	"bundle_import_disabled": exitAuth, // 403, workspace_controller.ex:450
 
+	// 403, chat_controller.ex host_refused/1: a host turn, :global chat or the host
+	// terminal for a caller who is not the instance owner (task-6ca882967fd95dda).
+	"host_execution_not_permitted": exitAuth,
+
 	// 404 → not-found.
 	"webhook_not_found": exitNotFound, // 404, webhook_controller.ex:288
 	"event_not_found":   exitNotFound, // 404, webhook_controller.ex:280

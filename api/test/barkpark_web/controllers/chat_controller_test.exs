@@ -2110,6 +2110,11 @@ defmodule BarkparkWeb.ChatControllerTest do
       {:ok, _} = Auth.create_token(raw_a, "plan-conn-a", @dataset, ["read", "chat"], ws_a.id)
       {:ok, _} = Auth.create_token(raw_b, "plan-conn-b", @dataset, ["read", "chat"], ws_b.id)
 
+      # A tenant's turns ride the cloud profile — a tenant-owned session may not
+      # act on the instance host (task-6ca882967fd95dda), so the owner's ALLOW
+      # below is only honoured off-host.
+      {:ok, _} = Tenancy.set_workspace_chat_settings(ws_a.id, %{"execution_profile" => "cloud"})
+
       # ws-A creates the session over the wire, so it is stamped owner ws-A
       owned =
         json_conn(raw_a) |> post("/v1/chat/sessions", Jason.encode!(%{})) |> json_response(201)

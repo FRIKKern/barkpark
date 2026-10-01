@@ -9,8 +9,10 @@ defmodule BarkparkWeb.Plugs.RequireChatAccess do
   ## Scope resolution (Connectors charter D18/D19a)
 
     * a token carrying the global `admin` permission => `:global`
-      (UNCHANGED instance-global authority — the live admin token and `bp chat`
-      keep reading/controlling every session on the instance, D21)
+      (instance-global authority — the live admin token and `bp chat` keep
+      reading/controlling every session on the instance, D21) — but only for an
+      instance principal: with the platform operator allowlist armed, only a
+      token it names (task-6ca882967fd95dda, `BarkparkWeb.HostExecutionGate`)
     * a workspace-bound token carrying the `chat` permission =>
       `{:workspace, workspace_id}` (a Connector confined to its own tenant)
     * neither => 403 (canonical request-id envelope, same shape as RequireAdmin)
@@ -32,18 +34,38 @@ defmodule BarkparkWeb.Plugs.RequireChatAccess do
   def init(opts), do: opts
 
   def call(conn, _opts) do
-    case chat_scope(conn.assigns[:api_token]) do
-      nil ->
-        env = Barkpark.Content.Errors.to_envelope({:error, :forbidden}, conn)
+    token = conn.assigns[:api_token]
 
-        conn
-        |> put_status(env.status)
-        |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
-        |> halt()
+    case chat_scope(token) do
+      nil when not is_nil(token) ->
+        if Auth.has_permission?(token, "admin") do
+          # An admin-bit token refused ONLY by the operator allowlist: say why.
+          BarkparkWeb.ErrorResponse.emit_custom(
+            conn,
+            403,
+            Barkpark.StudioChat.HostExecution.reason(),
+            "Instance-wide chat is reserved for the platform operator on this instance."
+          )
+          |> halt()
+        else
+          forbidden(conn)
+        end
+
+      nil ->
+        forbidden(conn)
 
       scope ->
         assign(conn, :chat_scope, scope)
     end
+  end
+
+  defp forbidden(conn) do
+    env = Barkpark.Content.Errors.to_envelope({:error, :forbidden}, conn)
+
+    conn
+    |> put_status(env.status)
+    |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
+    |> halt()
   end
 
   # `:global` for a global-admin token (D21 authority preserved); otherwise a
@@ -52,7 +74,12 @@ defmodule BarkparkWeb.Plugs.RequireChatAccess do
 
   defp chat_scope(token) do
     cond do
-      Auth.has_permission?(token, "admin") ->
+      # Instance-global chat reach is instance-host reach (task-6ca882967fd95dda):
+      # with the operator allowlist armed, an admin-bit token outside it no
+      # longer gets `:global` — it falls through to its workspace binding (if it
+      # carries `chat`) or is refused.
+      Auth.has_permission?(token, "admin") and
+          BarkparkWeb.HostExecutionGate.instance_principal?(token) ->
         :global
 
       Auth.has_permission?(token, "chat") and not is_nil(token.workspace_id) ->

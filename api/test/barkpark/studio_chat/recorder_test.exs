@@ -2386,6 +2386,14 @@ defmodule Barkpark.StudioChat.RecorderTest do
       id = Ecto.UUID.generate()
       {:ok, _} = StudioChat.create_session(%{id: id, mode: "plan"}, {:workspace, ws})
 
+      # A tenant-owned session may not run on the instance host
+      # (task-6ca882967fd95dda) — the tenant's turn rides the cloud profile.
+      Application.put_env(
+        :barkpark,
+        :claude_chat,
+        Keyword.put(Application.get_env(:barkpark, :claude_chat), :execution_profile, :cloud)
+      )
+
       {:ok, recorder} =
         Recorder.ensure(%{session_id: id, mode: "plan", resume: false, workspace_id: ws})
 

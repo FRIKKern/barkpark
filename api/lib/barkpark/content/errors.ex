@@ -327,7 +327,13 @@ defmodule Barkpark.Content.Errors do
                          "chat_unsupported",
                          # 503: creating the session row/spawn failed — a store
                          # defect distinct from runtime availability.
-                         "chat_create_failed"
+                         "chat_create_failed",
+                         # 403: a managed turn, instance-global chat scope or the
+                         # host terminal would reach the INSTANCE HOST for a
+                         # caller who is not the instance owner — permanent; the
+                         # way out is the cloud profile or a registered host
+                         # (task-6ca882967fd95dda, StudioChat.HostExecution).
+                         "host_execution_not_permitted"
                        ])
 
   def to_envelope(reason), do: to_envelope(reason, nil)

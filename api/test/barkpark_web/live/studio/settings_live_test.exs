@@ -1141,14 +1141,17 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert Barkpark.Tenancy.workspace_theme(ws_after) == "evergreen"
       assert Map.has_key?(Barkpark.Tenancy.workspace_plugin_settings(ws_after), "onixedit")
 
-      # The toggle is a server-derived flip: a second click round-trips back to
-      # self-hosted, never trusting a client-supplied value.
+      # The toggle is a server-derived flip, never trusting a client-supplied
+      # value. The flip BACK to self-hosted would run this tenant workspace's
+      # chat on the instance host, which only the instance owner's Default
+      # workspace may (task-6ca882967fd95dda): refused, named, nothing written.
       {:ok, view2, _html} = live(conn, ep_settings_url(ws, proj))
-      render_click(view2, "toggle_execution_profile", %{"ws" => ws.id})
+      html2 = render_click(view2, "toggle_execution_profile", %{"ws" => ws.id})
+      assert html2 =~ "reserved for the instance owner"
 
       assert Barkpark.Tenancy.workspace_chat_settings(Barkpark.Tenancy.get_workspace_by_id(ws.id))[
                "execution_profile"
-             ] == "self_hosted"
+             ] == "cloud"
     end
 
     test "a garbage persisted profile never propagates — a flip yields a known-good value", %{
