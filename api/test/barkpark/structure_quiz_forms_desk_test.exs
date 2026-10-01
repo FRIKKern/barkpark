@@ -47,7 +47,7 @@ defmodule Barkpark.StructureQuizFormsDeskTest do
     assert Barkpark.Plugins.Quiz.desk_items("structure_quiz_desk_absent") == []
   end
 
-  test "Forms lists its endpoint and submission types once their schemas exist" do
+  test "Forms lists its submissions inbox once the schema exists — never the endpoints" do
     dataset = "structure_forms_desk"
 
     Enum.each(
@@ -61,8 +61,7 @@ defmodule Barkpark.StructureQuizFormsDeskTest do
       |> Enum.filter(&(&1.type == :document_list))
       |> Enum.map(& &1.doc_type)
 
-    assert "form_endpoint" in types
-    assert "form_submission" in types
+    assert types == ["form_submission"]
     assert Barkpark.Plugins.Forms.desk_items("structure_forms_desk_absent") == []
   end
 end

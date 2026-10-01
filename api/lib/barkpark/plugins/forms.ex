@@ -42,20 +42,26 @@ defmodule Barkpark.Plugins.Forms do
     [{:check, Contract, :validate}]
   end
 
-  # The desk entries: the endpoints an author configures and the inbox the
-  # anonymous posts land in. Without them neither type was reachable from the
-  # desk until a document existed (the …Rest census lists only populated
-  # types). Each is gated on its schema existing in the dataset.
+  # The desk entry: the submissions inbox the anonymous posts land in. Without
+  # it the type was unreachable from the desk until a submission existed (the
+  # …Rest census lists only populated types). Gated on the schema existing.
+  # Endpoints are deliberately NOT listed: Cloud provisions them at the
+  # deterministic id `Contract.endpoint_doc_id/1`, and a desk "New document"
+  # would mint a random id that `Intake.resolve_endpoint/4` never finds.
   @impl Barkpark.Plugin
   def desk_items(dataset) do
-    [
-      {Contract.endpoint_type(), "Form endpoints", "send"},
-      {Contract.submission_type(), "Form submissions", "inbox"}
-    ]
-    |> Enum.filter(fn {type, _label, _icon} -> schema_present?(type, dataset) end)
-    |> Enum.map(fn {type, label, icon} ->
-      %{type: :document_list, label: label, doc_type: type, icon: icon}
-    end)
+    if schema_present?(Contract.submission_type(), dataset) do
+      [
+        %{
+          type: :document_list,
+          label: "Form submissions",
+          doc_type: Contract.submission_type(),
+          icon: "inbox"
+        }
+      ]
+    else
+      []
+    end
   end
 
   defp schema_present?(name, dataset) do
