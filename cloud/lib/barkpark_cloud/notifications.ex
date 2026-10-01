@@ -217,6 +217,33 @@ defmodule BarkparkCloud.Notifications do
   def update_settings(team, attrs) do
     settings = get_or_create_settings(team)
 
+    # r3b sweep: the team relay is dialled by the CONTROL PLANE with the team's
+    # credentials, and the delivery log tells refused from timed-out — so an
+    # unchecked host made a team admin's settings form a probe of the plane's own
+    # network (127.0.0.1, 10.x, 169.254.169.254). Refuse an internal name or a
+    # private IP literal at save; smtp_override/1 re-checks at send for rows saved
+    # before this gate.
+    case normalize_keys(attrs)["smtp_host"] do
+      host when is_binary(host) and host != "" ->
+        if SafeUrl.literal_internal_host?(host),
+          do: {:error, internal_relay_changeset(settings)},
+          else: do_update_settings(settings, attrs)
+
+      _ ->
+        do_update_settings(settings, attrs)
+    end
+  end
+
+  defp internal_relay_changeset(settings) do
+    settings
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.add_error(
+      :smtp_host,
+      "must be a public mail relay, not an internal address"
+    )
+  end
+
+  defp do_update_settings(settings, attrs) do
     changeset_attrs =
       attrs
       |> normalize_keys()
@@ -1792,6 +1819,7 @@ defmodule BarkparkCloud.Notifications do
   # platform transport instead of leaking a half-built config.
   defp smtp_override(%EmailSettings{} = s) do
     with {:ok, relay} <- decrypt(s.smtp_host_encrypted),
+         false <- SafeUrl.literal_internal_host?(relay),
          {:ok, username} <- decrypt(s.smtp_username_encrypted),
          {:ok, password} <- decrypt(s.smtp_password_encrypted) do
       {:ok,
