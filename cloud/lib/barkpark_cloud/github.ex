@@ -237,6 +237,44 @@ defmodule BarkparkCloud.GitHub do
   end
 
   @doc """
+  The BUILD clone credential for `full_name` ("owner/repo"): an installation
+  token narrowed to that one repository with `contents: read` (r3b sweep). The
+  unscoped `installation_token_for/1` token carries the App's full permissions
+  over every repo the installation reaches; a box running arbitrary build code
+  must never hold that. Same error ladder as `installation_token_for/1`, plus
+  `{:error, :scoped_token_unsupported}` when the configured client cannot mint a
+  scoped token — the caller then clones anonymously, never broadly.
+  """
+  @spec repo_read_token_for(Team.t() | binary(), String.t()) ::
+          {:ok, String.t()} | {:error, term}
+  def repo_read_token_for(team, full_name) when is_binary(full_name) do
+    repo_name = full_name |> String.split("/") |> List.last()
+    mod = client()
+
+    cond do
+      not configured?() ->
+        {:error, :not_configured}
+
+      not (Code.ensure_loaded?(mod) and function_exported?(mod, :exchange_repo_read_token, 2)) ->
+        {:error, :scoped_token_unsupported}
+
+      true ->
+        case installation_for(team) do
+          nil ->
+            {:error, :no_installation}
+
+          %Installation{} = inst ->
+            case reveal_installation_id(inst) do
+              {:ok, id} -> mod.exchange_repo_read_token(id, repo_name)
+              :error -> {:error, :installation_unreadable}
+            end
+        end
+    end
+  end
+
+  def repo_read_token_for(_team, _full_name), do: {:error, :no_repo}
+
+  @doc """
   The repos the team's GitHub App installation can access — the "Import Git
   Repository" picker's data source (gh-4). Resolves the team's installation,
   reveals its handle server-side, and lists through the client seam.

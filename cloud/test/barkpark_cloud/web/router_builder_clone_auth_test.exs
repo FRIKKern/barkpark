@@ -138,7 +138,14 @@ defmodule BarkparkCloud.Web.RouterBuilderCloneAuthTest do
     call(:post, "/v1/builder/claim", %{worker_id: worker}, agent_token(site))
   end
 
+  # The clone credential is the REPO-SCOPED read token for the site's repo
+  # (r3b sweep), never the installation's broad token.
   defp fake_token do
+    {:ok, token} = GitHub.client().exchange_repo_read_token(@installation_id, "private-repo")
+    token
+  end
+
+  defp broad_token do
     {:ok, token} = GitHub.client().exchange_installation_token(@installation_id)
     token
   end
@@ -259,6 +266,23 @@ defmodule BarkparkCloud.Web.RouterBuilderCloneAuthTest do
     setup do
       configure_github()
       :ok
+    end
+
+    # r3b sweep: the box runs arbitrary build code, so the token it is handed
+    # must reach ONLY this site's repo, read-only — never the installation-wide,
+    # full-permission token the deploy-button path uses to create and push repos.
+    test "the clone token is the repo-scoped read token, never the installation-wide one" do
+      {_user, _team, site} = connected_site()
+      sha = String.duplicate("cd", 20)
+      {:ok, _dep} = Registry.create_deployment(site, %{git_ref: sha, artifact_url: nil})
+
+      source = json_body(claim(site))["source"]
+
+      refute source["token"] == broad_token(),
+             "the claim handed the box the installation-wide token"
+
+      {:ok, scoped} = GitHub.client().exchange_repo_read_token(@installation_id, "private-repo")
+      assert source["token"] == scoped
     end
 
     test "tenant-facing deployment reads never carry the clone source or the token" do

@@ -46,6 +46,14 @@ defmodule BarkparkCloud.GitHub.Fake do
   end
 
   @impl true
+  def exchange_repo_read_token(installation_id, repo_name) when is_binary(repo_name) do
+    case positive_id(installation_id) do
+      {:ok, id} -> {:ok, "ghs_fake_ro_" <> digest({id, repo_name})}
+      :error -> {:error, :not_found}
+    end
+  end
+
+  @impl true
   def create_repo(installation_id, name, private?)
       when is_binary(name) and is_boolean(private?) do
     with {:ok, id} <- positive_id(installation_id) do

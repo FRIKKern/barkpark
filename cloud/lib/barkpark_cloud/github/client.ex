@@ -74,6 +74,18 @@ defmodule BarkparkCloud.GitHub.Client do
               {:ok, installation_token} | {:error, term}
 
   @doc """
+  Mint a short-lived installation access token NARROWED to one repository
+  (`repo_name`, the bare name — not owner/name) with `contents: read` only. The
+  BUILD clone credential: a box running a site's build must not hold a token
+  that can read or push every repo the installation reaches. Optional — a
+  client without it makes the clone path ride anonymously rather than broad.
+  """
+  @callback exchange_repo_read_token(installation_id, repo_name :: String.t()) ::
+              {:ok, installation_token} | {:error, term}
+
+  @optional_callbacks exchange_repo_read_token: 2
+
+  @doc """
   Create a repo named `name` (`private?` true/false) under the installation's
   account. Returns `{:ok, %{"full_name" => …}}` (the created repo) or an error.
   """
