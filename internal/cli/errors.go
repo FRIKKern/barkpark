@@ -1414,7 +1414,12 @@ func (e apiError) hint() string {
 		// ANOTHER worker, or one that is done/cancelled/blocked-by-deps. The fix is
 		// not "re-claim to advance the epoch" — it is either wait for the holder, or
 		// (if the holder is YOU) re-claim under your own id to renew the lease.
-		return "the task isn't claimable — someone else holds it or it isn't ready; if YOU hold it, re-claim with your own worker id to renew the lease"
+		//
+		// WHETHER before WHO (task-f788ace33b5ff892): the server refuses a
+		// done/cancelled row for its lifecycle before it looks at any holder, so
+		// the reopen remedy comes first and the re-claim advice is limited to a
+		// row that is still open.
+		return "the task isn't claimable — if the message names a done/cancelled lifecycle_status, reopen it with `bp task stage <id> open` first; if another worker holds it, wait or ask them to release it; if YOU hold an open row, re-claim with your own worker id to renew the lease"
 	case "doc_changed_since_claim":
 		// TWO wordings, chosen by what the body ACTUALLY carried. The old single
 		// wording promised "the 409 body names current_rev + changed_fields" and
