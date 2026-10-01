@@ -33,7 +33,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
     {:noreply, assign(socket, show_history: false, revisions: [])}
   end
 
-  def restore_revision(%{"id" => rev_id}, socket) do
+  # The revision must belong to the document OPEN in the editor (r4a LiveView
+  # authz sweep). `Content.restore_revision/4` writes `drafts.<rev.doc_id>` —
+  # the revision's OWN document — under the open editor's type, while the write
+  # checks around this event (`LiveScope.attach_write_gate/2`, the grant
+  # target ladder) look only at the open document. Without this check a
+  # doc-scoped write grantee could restore ANOTHER document's revision by id,
+  # and any member could write a draft under the wrong type.
+  def restore_revision(%{"id" => rev_id}, socket) when is_binary(rev_id) do
+    if revision_of_open_doc?(rev_id, socket) do
+      do_restore_revision(rev_id, socket)
+    else
+      {:noreply, put_flash(socket, :error, "Failed to restore")}
+    end
+  end
+
+  def restore_revision(_params, socket),
+    do: {:noreply, put_flash(socket, :error, "Failed to restore")}
+
+  defp revision_of_open_doc?(rev_id, socket) do
+    with %{doc_id: open_id} when is_binary(open_id) <- socket.assigns[:editor_doc],
+         type when is_binary(type) <- socket.assigns[:editor_type],
+         {:ok, rev} <-
+           Content.get_revision(rev_id, socket.assigns.dataset, ScopeHelpers.scope_opts(socket)) do
+      rev.type == type and Content.published_id(rev.doc_id) == Content.published_id(open_id)
+    else
+      _ -> false
+    end
+  end
+
+  defp do_restore_revision(rev_id, socket) do
     type = socket.assigns[:editor_type]
 
     case Content.restore_revision(rev_id, type, socket.assigns.dataset, Shared.hook_opts(socket)) do
