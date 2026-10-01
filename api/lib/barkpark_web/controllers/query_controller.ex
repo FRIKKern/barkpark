@@ -554,6 +554,13 @@ defmodule BarkparkWeb.QueryController do
       Keyword.get(opts, :workspace_id),
       Keyword.get(opts, :project_id)
     )
+    # task-e6939d27b7e0b3aa: the same row narrowing every document read applies
+    # (`Content.Query`): owner-scoped rows of other owners, and — for a
+    # grant-derived caller (`AssignGrantScope` sits on this route) — only the
+    # grant's ladder. Without these a grantee got the census of EVERY type and
+    # dataset in the workspace, outside the grant it holds.
+    |> Scope.scope_to_owner(Keyword.get(opts, :caller_context))
+    |> Scope.maybe_scope_to_grants(opts)
     |> scope_counts_to_dataset(dataset, opts)
     |> Repo.all()
     |> Map.new()
