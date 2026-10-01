@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { getDocById, getDocs } from '../../../lib/barkpark'
+import { getAllDocs, getDocById } from '../../../lib/barkpark'
 import { slugOf, type SlugValue } from '../../../lib/slug'
 
 interface Author {
@@ -46,7 +46,9 @@ export default async function AuthorPage({
   const author = await getDocById<Author>('author', id)
   if (!author) notFound()
 
-  const allPosts = await getDocs<Post>('post')
+  // Every post, not one page: getDocs reads the query route's default page
+  // (100 rows), so filtering it here dropped every match past the first 100.
+  const allPosts = await getAllDocs<Post>('post')
   const posts = allPosts.filter((p) => p.author?._ref === id)
 
   return (
