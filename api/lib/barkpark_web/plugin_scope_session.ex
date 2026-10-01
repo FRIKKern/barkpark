@@ -251,10 +251,51 @@ defmodule BarkparkWeb.PluginScopeSession do
       |> assign_scope(:current_workspace, session[@session_ws_id], session[@session_ws_slug])
       |> assign_scope(:current_project, session[@session_proj_id], session[@session_proj_slug])
 
-    case confine_item_share(params, session, socket) do
-      {:cont, socket} -> {:cont, maybe_arm_share_liveness(socket, params, session)}
-      {:halt, socket} -> {:halt, socket}
+    cond do
+      session_scope_mismatch?(params, session) ->
+        {:cont, attach_hook(socket, :plugin_scope_url_rebind, :handle_params, &rebind_via_http/3)}
+
+      true ->
+        case confine_item_share(params, session, socket) do
+          {:cont, socket} -> {:cont, maybe_arm_share_liveness(socket, params, session)}
+          {:halt, socket} -> {:halt, socket}
+        end
     end
+  end
+
+  # ── Session scope must name the URL's scope (r4a LiveView authz sweep) ────
+  #
+  # The session scope was written ONCE, at dead render, for the URL of THAT
+  # request. A socket can later mount a DIFFERENT URL in the same live_session —
+  # a `live_redirect`, or a join replaying an old `data-phx-session` — and the
+  # session scope travels with it unchanged. The URL-reading gates
+  # (`LiveAuth :scoped_admin`, the router pipeline) and the data this hook
+  # scopes the LiveView to could then name two different workspaces: a reader
+  # whose membership in A was revoked still read A's papers under a
+  # workspace-B URL, and a `:scoped_admin` check passed against B while the
+  # plugin read A.
+  #
+  # A mismatch is not answered from the socket at all: the hook sends the
+  # browser to the SAME URL over HTTP, so the router pipeline (membership,
+  # share and item-link gates) runs and `build/1` writes a session for that
+  # URL. Only the redirect is ever rendered; the stale scope never reaches a
+  # template.
+  defp session_scope_mismatch?(params, session) when is_map(params) do
+    slug_differs?(params["workspace_slug"], session[@session_ws_slug]) or
+      slug_differs?(params["project_slug"], session[@session_proj_slug])
+  end
+
+  defp session_scope_mismatch?(_params, _session), do: false
+
+  defp slug_differs?(url_slug, session_slug) when is_binary(url_slug) and is_binary(session_slug),
+    do: url_slug != session_slug
+
+  defp slug_differs?(_url_slug, _session_slug), do: false
+
+  defp rebind_via_http(_params, uri, socket) do
+    %URI{path: path, query: query} = URI.parse(uri)
+    to = if is_binary(query) and query != "", do: path <> "?" <> query, else: path
+    {:halt, redirect(socket, to: to)}
   end
 
   defp assign_scope(socket, _key, nil, _slug), do: socket
