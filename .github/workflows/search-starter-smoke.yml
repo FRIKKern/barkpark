@@ -247,7 +247,7 @@ jobs:
       # IS the dependency declaration.
       - name: Cache Playwright browsers
         if: steps.decide.outputs.touched == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-1.59.1
