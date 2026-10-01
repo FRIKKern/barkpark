@@ -152,14 +152,14 @@ func CaddySteps(opts CaddyOpts) []step {
 	)
 }
 
-// caddyInstallFunc is the install_caddy_official shell function, cut out of
+// caddyInstallFunc is the install_caddy_pkg shell function, cut out of
 // the go:embedded deploy.sh between its BEGIN/END markers — ONE installer for
 // deploy.sh, deploy/azure-base-install.sh and this step, so a fix to the Caddy
 // install path (2026-10-01: the official apt repo signs with an EXPIRED subkey,
-// caddyserver/caddy#8095, task-8fcdc94b07a9dc60) cannot land in one copy and
+// caddyserver/caddy issue 8095, task-8fcdc94b07a9dc60) cannot land in one copy and
 // miss another. Empty only if the markers vanish, which caddy_test.go reds on.
 func caddyInstallFunc() string {
-	const begin, end = "# install_caddy_official BEGIN\n", "# install_caddy_official END\n"
+	const begin, end = "# install_caddy_pkg BEGIN\n", "# install_caddy_pkg END\n"
 	src := string(assets.DeployScript)
 	i := strings.Index(src, begin)
 	if i < 0 {
@@ -172,7 +172,7 @@ func caddyInstallFunc() string {
 	return src[i : i+j+len(end)]
 }
 
-// caddyInstallStep installs Caddy with install_caddy_official: the official apt
+// caddyInstallStep installs Caddy with install_caddy_pkg: the official apt
 // repo first (a box keeps apt-managed updates), and — when that repo cannot be
 // used — the same official package from the pinned GitHub release, verified
 // against a pinned sha512. It is one shell beat: a single `bash -lc` that
@@ -188,7 +188,7 @@ func caddyInstallStep() step {
 	// function's first act is `apt-get update`, before any install.
 	// DEBIAN_FRONTEND=noninteractive is exported inside the function so apt never
 	// blocks on a prompt over the non-interactive ssh shell.
-	script := caddyInstallFunc() + "command -v caddy >/dev/null 2>&1 || install_caddy_official"
+	script := caddyInstallFunc() + "command -v caddy >/dev/null 2>&1 || install_caddy_pkg"
 	argv := []string{"bash", "-lc", script}
 	return step{
 		Title: "install Caddy (skip when baked; else the official apt repo, else the pinned verified release)",

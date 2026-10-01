@@ -316,7 +316,7 @@ on:
       - "deploy/site-deploy-node.sh"
       # deploy/azure-base-install.sh: internal/cli/setup/caddy_test.go's
       # TestCaddyInstallFunc_OneInstallerEverywhere asserts it carries the
-      # install_caddy_official block byte-identical to deploy.sh's (task-16e58856f0182596).
+      # install_caddy_pkg block byte-identical to deploy.sh's (task-16e58856f0182596).
       - "deploy/azure-base-install.sh"
       # Starter manifests: internal/template/template_test.go's TestRealManifests
       # loads and validates every checked-in barkpark.template.json and asserts

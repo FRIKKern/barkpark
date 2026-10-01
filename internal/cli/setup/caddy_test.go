@@ -120,11 +120,11 @@ func TestCaddySteps_CommandsAndEnv(t *testing.T) {
 	joined := allCmds(steps)
 
 	// 1. install Caddy: the official apt repo first, else the pinned,
-	//    sha512-verified release .deb (install_caddy_official, task-8fcdc94b07a9dc60).
+	//    sha512-verified release .deb (install_caddy_pkg, task-8fcdc94b07a9dc60).
 	mustContainOne(t, steps, "apt-get install -y -qq caddy")
 	mustContainOne(t, steps, "caddy-stable.list")
 	mustContainOne(t, steps, "sha512sum -c")
-	mustContainOne(t, steps, "command -v caddy >/dev/null 2>&1 || install_caddy_official")
+	mustContainOne(t, steps, "command -v caddy >/dev/null 2>&1 || install_caddy_pkg")
 
 	// 2. write the Caddyfile to /etc/caddy/Caddyfile.
 	mustContainOne(t, steps, "/etc/caddy/Caddyfile")
@@ -296,7 +296,7 @@ func findArgvContaining(argvs [][]string, sub string) []string {
 }
 
 // TestCaddyInstallFunc_OneInstallerEverywhere pins the single-installer
-// invariant (task-8fcdc94b07a9dc60): the install_caddy_official block cut from
+// invariant (task-8fcdc94b07a9dc60): the install_caddy_pkg block cut from
 // the go:embedded deploy.sh is non-empty, carries BOTH arms (official apt repo,
 // then the pinned sha512-verified release .deb for amd64 AND arm64), and is
 // byte-identical to the copy in deploy/azure-base-install.sh. A fix that lands
@@ -304,10 +304,10 @@ func findArgvContaining(argvs [][]string, sub string) []string {
 func TestCaddyInstallFunc_OneInstallerEverywhere(t *testing.T) {
 	fn := caddyInstallFunc()
 	if fn == "" {
-		t.Fatal("install_caddy_official BEGIN/END markers not found in the embedded deploy.sh")
+		t.Fatal("install_caddy_pkg BEGIN/END markers not found in the embedded deploy.sh")
 	}
 	for _, want := range []string{
-		"install_caddy_official() {",
+		"install_caddy_pkg() {",
 		"dl.cloudsmith.io/public/caddy/stable/gpg.key",
 		"rm -f /etc/apt/sources.list.d/caddy-stable.list",
 		"amd64) sum=",
@@ -316,7 +316,7 @@ func TestCaddyInstallFunc_OneInstallerEverywhere(t *testing.T) {
 		"github.com/caddyserver/caddy/releases/download/v",
 	} {
 		if !strings.Contains(fn, want) {
-			t.Errorf("install_caddy_official lacks %q", want)
+			t.Errorf("install_caddy_pkg lacks %q", want)
 		}
 	}
 	azure, err := os.ReadFile(filepath.Join("..", "..", "..", "deploy", "azure-base-install.sh"))
@@ -324,6 +324,6 @@ func TestCaddyInstallFunc_OneInstallerEverywhere(t *testing.T) {
 		t.Fatalf("read deploy/azure-base-install.sh: %v", err)
 	}
 	if !strings.Contains(string(azure), fn) {
-		t.Error("deploy/azure-base-install.sh does not carry a byte-identical install_caddy_official block — copy it from deploy.sh")
+		t.Error("deploy/azure-base-install.sh does not carry a byte-identical install_caddy_pkg block — copy it from deploy.sh")
 	}
 }
