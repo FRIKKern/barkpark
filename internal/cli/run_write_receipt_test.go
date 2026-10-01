@@ -219,7 +219,7 @@ func TestWriteReceiptPassesUnknownKeys(t *testing.T) {
 
 // TestWriteReceiptDeclaredNoContentExemption covers the carve-out this fence
 // OWES an honest verb: `chat.approve` answers `send_resp(conn, :no_content,
-// "")` (chat_controller.ex:379), so "empty body ⇒ refuse" would red a real
+// "")` (chat_controller.ex:ChatController.approval/2), so "empty body ⇒ refuse" would red a real
 // write. 204/205 with an empty body is a DECLARED empty receipt at rc=0 — and
 // it is not silence either: main printed a BARE EMPTY LINE there. An
 // UNDECLARED empty 200 still refuses.
