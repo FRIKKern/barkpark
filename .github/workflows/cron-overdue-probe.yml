@@ -26,7 +26,9 @@
 # workflow past bound it now runs `gh workflow run <file> --ref main`, prints the
 # dispatched run id, and reds only if the dispatch fails or the run never shows.
 # That is why the permissions block below asks for `actions: write`. A workflow
-# that carries a push: arm is NOT dispatched — past bound, it still screams.
+# that carries a push: arm is NOT dispatched — past bound, it still screams —
+# unless that arm is IDLE: its newest push run is on the commit main still sits
+# at, so on a quiet main cron is its only trigger (task-e34feba79c5a4a9b).
 # Nor does it dispatch on top of a run already in flight: main-gate-watch's
 # concurrency group keeps one pending run and a newer one cancels the older, so
 # five rapid dispatches during development left four `cancelled` runs — a tip
