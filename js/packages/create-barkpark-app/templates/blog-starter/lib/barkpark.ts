@@ -6,7 +6,8 @@ import { resolveServerToken } from './resolve-server-token'
 import { slugOf, type SlugValue } from './slug'
 
 // Envelope shapes returned by the /v1/data endpoints. `result.count` is the
-// TOTAL number of matching documents (not just the page you fetched).
+// number of documents IN THIS PAGE, not the corpus total — the total comes
+// back as `result.total`, and only when the query asks `?count=true`.
 export interface QueryResult<T> {
   count: number
   offset: number
@@ -57,13 +58,13 @@ export async function getDocs<T>(
 }
 
 export async function countDocs(type: string): Promise<number> {
-  // Read the envelope's TRUE total-match count — a single small fetch — instead
-  // of counting one page of documents (which caps at the page size).
-  const env = await barkparkFetch<QueryEnvelope<{ _id: string }>>({
-    type,
-    query: { filters: [], limit: 1 },
-  })
-  return env.result?.count ?? 0
+  // The TRUE total-match count. The query envelope's `count` is the size of the
+  // PAGE (a `limit: 1` read answers 1); the total arrives only as `total`, and
+  // only with `?count=true`. Reading `count` made this return 1 for any
+  // non-empty type, so the home rendered one page and no page links — 133 posts
+  // showed 5 (stranger walk, 2026-10-01). barkparkFetch's query has no count
+  // option; the SDK's docs(type).count() asks `?count=true` and reads `total`.
+  return barkparkClient.withConfig({ token: resolveServerToken(process.env) }).docs(type).count()
 }
 
 export async function getDocById<T>(type: string, id: string, draft = false): Promise<T | null> {

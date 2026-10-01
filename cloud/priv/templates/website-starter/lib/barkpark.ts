@@ -6,7 +6,8 @@ import { resolveServerToken } from './resolve-server-token'
 import { slugOf, type SlugValue } from './slug'
 
 // Envelope shapes returned by the /v1/data endpoints. `result.count` is the
-// TOTAL number of matching documents (not just the page you fetched).
+// number of documents IN THIS PAGE, not the corpus total — the total comes
+// back as `result.total`, and only when the query asks `?count=true`.
 export interface QueryResult<T> {
   count: number
   offset: number

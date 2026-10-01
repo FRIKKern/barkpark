@@ -141,12 +141,17 @@ describe('the template derives totalPages from the corpus, not from the cursor',
     expect(/limit:\s*POSTS_PER_PAGE\s*[,}]/.test(src)).toBe(true)
   })
 
-  it('countDocs reads the envelope total rather than counting a page of documents', async () => {
+  it('countDocs reads the TRUE total (?count=true), not the page size', async () => {
     const src = await fs.readFile(path.join(BLOG, 'lib', 'barkpark.ts'), 'utf8')
     expect(src).toContain('export async function countDocs')
-    // It must return the envelope's count, not documents.length (which caps at
-    // the page size and would silently re-introduce the fudge one layer down).
-    expect(/return\s+env\.result\?\.count/.test(src)).toBe(true)
-    expect(/countDocs[\s\S]*?documents\.length/.test(src)).toBe(false)
+    const body = src.slice(src.indexOf('export async function countDocs'))
+    const fn = body.slice(0, body.indexOf('\n}\n') + 2)
+    // The envelope's `count` is the PAGE size — a `limit: 1` read answers 1 —
+    // so the old `return env.result?.count` made every non-empty blog one page
+    // long (stranger walk, 2026-10-01: 133 posts, 5 shown, no page links). The
+    // total is `result.total` under `?count=true`, which the SDK's count() asks.
+    expect(fn).toMatch(/\.docs\(type\)\.count\(\)/)
+    expect(fn).not.toMatch(/result\?\.count/)
+    expect(fn).not.toMatch(/documents\.length/)
   })
 })
