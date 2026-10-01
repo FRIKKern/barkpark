@@ -1370,6 +1370,16 @@
       if (next) this._select(next);
     }
 
+    // The processing-status badge. Its variant follows the status: a "failed"
+    // asset (StuckProcessingSweeper writes it) must not wear the green "ready"
+    // styling, which it did while both call sites hardcoded the variant.
+    _procBadge(status) {
+      const proc = String(status || "ready").toLowerCase();
+      const variant =
+        proc === "processing" ? "processing" : proc === "failed" ? "failed" : "ready";
+      return this._statusBadge(proc, variant);
+    }
+
     _statusBadge(label, variant) {
       return (
         '<span class="bp-ae-badge bp-ae-badge--' +
@@ -1409,7 +1419,7 @@
         esc(doc.title || fi.originalName || doc._id) +
         "</h3>" +
         '<div class="bp-ae-inspector-status">' +
-        this._statusBadge(payload.bp_processing_status || "ready", "ready") +
+        this._procBadge(payload.bp_processing_status) +
         this._statusBadge(doc.visibility || payload.bp_visibility || "public", "visibility") +
         "</div>" +
         '<dl class="bp-ae-meta">' +
@@ -1583,9 +1593,8 @@
 
       const statusEl = this._inspectorBody.querySelector(".bp-ae-inspector-status");
       if (statusEl && detail) {
-        const proc = (payload.bp_processing_status || "ready").toLowerCase();
         let badges =
-          this._statusBadge(proc, proc === "processing" ? "processing" : "ready") +
+          this._procBadge(payload.bp_processing_status) +
           this._statusBadge(detail.visibility || payload.bp_visibility || "public", "visibility");
         if (isCheckedOut) badges += this._statusBadge("Locked", "lock");
         statusEl.innerHTML = badges;
