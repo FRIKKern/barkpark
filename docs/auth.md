@@ -31,7 +31,7 @@ lacking `write` gets `403`; reads stay available.
 |---|---|---|
 | `read` | Reads on private datasets / schemas | `…/v1/data/query/*` (flat alias `/v1/data/query/*`), `/media` |
 | `write` | Mutations (create/patch/publish/unpublish/delete) | `POST …/v1/data/mutate/:dataset` (flat alias under `/v1`) |
-| `public-read` | Anonymous-equivalent GET-only reads | Strict-list match on `permissions == ["public-read"]` (`PublicRead`); also satisfies `:read`. Mint: `mix barkpark.rotate_public_read` / `POST …/v1/tokens` |
+| `public-read` | Anonymous-equivalent GET-only reads | Membership, `"public-read" in permissions` (`PublicRead`), not list equality; also satisfies `:read`. Mint: `mix barkpark.rotate_public_read` / `POST …/v1/tokens` |
 | `chat` | Drive `/v1/chat` sessions of THIS workspace | `/v1/chat/*`; 403 if unbound; minted only by `create_chat_token/3` |
 | `ops` | Operate the Bokbasen publish pipeline | `/admin/onixedit/bokbasen` (old `/admin/bokbasen` 301s) |
 | `admin` | The above + plugin-settings reveal/audit + schema CRUD | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/webhooks/*` |
