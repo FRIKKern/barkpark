@@ -107,6 +107,10 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
     |> Map.fetch!("result")
   end
 
+  # The un-asserted response, for the refusal arms (task-e816e87770cd69ce).
+  defp raw_query(conn, raw, ds, type),
+    do: conn |> auth(raw) |> get("/v1/data/query/#{ds}/#{type}")
+
   defp titles(result), do: result["documents"] |> Enum.map(& &1["title"]) |> Enum.sort()
 
   # ── 1 + 5. Grantee sees EXACTLY the grant scope; containment ⊆ ─────────────
@@ -162,12 +166,21 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
       assert titles(query(scoped_conn(), raw, @granted_ds, "post")) == ["in-scope"]
     end
 
-    test "an owned token whose owner has NO covering grant is NOT narrowed" do
+    # task-e816e87770cd69ce: this USED to pin "no grant → full Default read,
+    # byte-identical to unowned". An owned, workspace-less token whose owner is
+    # neither a Default member nor a grantee is a signup PAT, and that full
+    # Default read was the leak. It is now refused on the flat routes (403, not
+    # a member); an UNOWNED legacy token keeps its back-compat read.
+    test "an owned token whose owner has NO covering grant is refused, not given Default" do
       user = register_user()
       {raw, _} = owned_token(user)
-      # no grant bound → no flag → full Default read, byte-identical to unowned
-      assert titles(query(scoped_conn(), raw, @other_ds, "post")) == ["wrong-dataset"]
-      assert titles(query(scoped_conn(), raw, @granted_ds, "post")) == ["in-scope"]
+
+      for ds <- [@other_ds, @granted_ds] do
+        resp = raw_query(scoped_conn(), raw, ds, "post")
+        assert resp.status == 403
+        refute resp.resp_body =~ "wrong-dataset"
+        refute resp.resp_body =~ "in-scope"
+      end
     end
   end
 
@@ -216,47 +229,33 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
   # caller is not narrowed. No grace, no stale narrowing carried into the next
   # request.
   #
-  # NOTE on "zero rows": the flat back-compat route's grants NARROW a token that
-  # already holds the Default read — they never GATE it (ratified above by
-  # "byte-identical for non-grantees"). So a lapsed grant reverts to that
-  # back-compat read, NOT to zero rows; the sole-access "expired ⇒ no rows"
-  # scenario is the SCOPED non-member route (ResolveWorkspace 403), already
-  # proven by access_enforcement_test + scoped_studio_mount_test. What the flat
-  # HTTP surface uniquely proves here: the grant's narrowing is LIVE — an ACTIVE
-  # grant denies the out-of-scope dataset (zero rows), and the instant it expires
-  # or is revoked that denial lifts (the stale scope does not persist).
+  # task-e816e87770cd69ce: a lapsed grant USED to revert the owned token to the
+  # full back-compat Default read ("the out-of-scope deny lifts"), so revoking a
+  # narrow grant WIDENED the owner to the whole workspace. A non-member owner
+  # with no ACTIVE grant is now refused on the flat routes (403), exactly as on
+  # the scoped routes. What these prove: the grant is LIVE — the instant it
+  # expires or is revoked it stops granting anything (no stale scope, and no
+  # widening).
   describe "expiry + revocation are live at the flat HTTP surface" do
-    test "an EXPIRED grant stops narrowing — the out-of-scope deny lifts, back-compat returns",
+    test "an EXPIRED grant stops granting — the owner is refused, never widened",
          %{ws: ws, project: project} do
       user = register_user()
       {raw, _} = owned_token(user)
       past = DateTime.add(DateTime.utc_now(), -3600, :second)
       bind_grant!(ws, user, grant_ladder(project, %{expires_at: past}))
 
-      # An ACTIVE grant would deny this out-of-scope dataset (zero rows — proven
-      # in "fail-closed" above). The EXPIRED grant does not narrow, so the read
-      # reverts to the token's back-compat Default view — the row is visible.
-      assert titles(query(scoped_conn(), raw, @other_ds, "post")) == ["wrong-dataset"]
-
-      # And byte-identical to an owned token with NO grant at all (no residue).
-      {plain_raw, _} = owned_token(register_user())
-
-      assert query(scoped_conn(), raw, @granted_ds, "post") ==
-               query(scoped_conn(), plain_raw, @granted_ds, "post")
+      assert raw_query(scoped_conn(), raw, @other_ds, "post").status == 403
+      assert raw_query(scoped_conn(), raw, @granted_ds, "post").status == 403
     end
 
-    test "a REVOKED grant stops narrowing — the out-of-scope deny lifts, back-compat returns",
+    test "a REVOKED grant stops granting — the owner is refused, never widened",
          %{ws: ws, project: project} do
       user = register_user()
       {raw, _} = owned_token(user)
       bind_grant!(ws, user, grant_ladder(project, %{revoked_at: DateTime.utc_now()}))
 
-      assert titles(query(scoped_conn(), raw, @other_ds, "post")) == ["wrong-dataset"]
-
-      {plain_raw, _} = owned_token(register_user())
-
-      assert query(scoped_conn(), raw, @granted_ds, "post") ==
-               query(scoped_conn(), plain_raw, @granted_ds, "post")
+      assert raw_query(scoped_conn(), raw, @other_ds, "post").status == 403
+      assert raw_query(scoped_conn(), raw, @granted_ds, "post").status == 403
     end
   end
 end
