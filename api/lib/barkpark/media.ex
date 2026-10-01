@@ -1117,9 +1117,15 @@ defmodule Barkpark.Media do
           |> limit(1)
           |> Repo.one()
 
+        # A key is CLAIMED by its published `path` AND by the stored
+        # `object_key` its bytes live at (r2-lane-c authz sweep, 2026-10-01).
+        # A second claimant of a flat path holds its bytes at a tenant SHADOW
+        # key `d/<dataset_id>/<path>` that no row carries as its `path`; asked
+        # only about paths, a third workspace saw that shadow as "unclaimed"
+        # and wrote straight onto another tenant's object.
         foreign? =
           MediaFile
-          |> where([m], m.path == ^relative_path)
+          |> where([m], m.path == ^relative_path or m.object_key == ^relative_path)
           |> where([m], is_nil(m.workspace_id) or m.workspace_id != ^workspace_id)
           |> Repo.exists?()
 
