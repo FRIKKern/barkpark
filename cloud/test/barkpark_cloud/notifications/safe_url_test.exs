@@ -118,4 +118,32 @@ defmodule BarkparkCloud.Notifications.SafeUrlTest do
       refute SafeUrl.private_address?({0x2001, 0x4860, 0, 0, 0, 0, 0, 0x8888})
     end
   end
+
+  describe "literal_internal_host?/1 (a bare relay host, no DNS)" do
+    test "internal names and private IP literals are internal" do
+      for h <- [
+            "localhost",
+            "LOCALHOST.",
+            "relay.internal",
+            "box.local",
+            "127.0.0.1",
+            "10.1.2.3",
+            "169.254.169.254",
+            "192.168.0.1",
+            "::1",
+            "[::1]",
+            "0.0.0.0"
+          ] do
+        assert SafeUrl.literal_internal_host?(h), "#{h} must read internal"
+      end
+    end
+
+    test "public names and public literals are not; non-strings are not" do
+      for h <- ["smtp.example.com", "8.8.8.8", "smtp.gmail.com"] do
+        refute SafeUrl.literal_internal_host?(h), "#{h} must not read internal"
+      end
+
+      refute SafeUrl.literal_internal_host?(nil)
+    end
+  end
 end
