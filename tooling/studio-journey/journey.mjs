@@ -166,6 +166,11 @@ import { spawn } from "node:child_process";
 
 // ── caps (ms) ────────────────────────────────────────────────────────────────
 const DEVTOOLS_CAP = 15000; // Chrome writing DevToolsActivePort
+// Bounded bring-up retry (task-9d05992ac229c42c): on runner image 20260901 the
+// FIRST headless launch can miss the window; search-smoke's journey-smoke.mjs
+// logged 'bring-up succeeded on attempt 2/2' on that image the same day.
+const BRINGUP_ATTEMPTS = 2; // bounded: unbounded turns a dead runner into a slower lie
+const STDERR_TAIL_CAP = 4000; // Chrome is chatty; the fatal line is in the tail
 const NAV_CAP = 30000; // a navigation settling (D230: 6–20s TTFB under load)
 const SETTLE_CAP = 15000; // a DOM predicate becoming true
 const HYDRATE_CAP = 25000; // the canvas going from 0 blocks to real blocks
@@ -3754,8 +3759,7 @@ async function withChrome(fn) {
         : "no Chrome/Chromium found on any known path. Set CHROME=/path/to/chrome.",
     );
   }
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "studio-journey-"));
-  let chrome = null, cdp = null;
+  let profile = null, chrome = null, cdp = null;
 
   const teardown = async () => {
     if (cdp) {
@@ -3778,31 +3782,48 @@ async function withChrome(fn) {
         }
       }
     }
-    try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ }
+    if (profile) { try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ } }
   };
 
   try {
-    chrome = spawn(chromeBin, [
-      "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
-      "--no-first-run", "--no-default-browser-check", "--disable-extensions",
-      "--disable-background-networking", "--window-size=1500,1000",
-      `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank",
-    ], { stdio: "ignore" });
-    // A spawn failure arrives as an 'error' EVENT, not a throw. Unhandled, it
-    // takes the whole process down with exit 1. Swallowed here so the missing
-    // DevToolsActivePort below becomes the GUARD, which is the correct class.
-    chrome.on("error", () => { /* surfaced as the DevToolsActivePort guard */ });
-
-    const portFile = path.join(profile, "DevToolsActivePort");
+    // A fresh profile EVERY attempt (reusing one would re-race the same
+    // DevToolsActivePort path against a still-dying Chrome), and Chrome's
+    // stderr is KEPT: the old `stdio: "ignore"` threw away the line that says
+    // why it did not start.
+    const reasons = [];
     let devPort = null;
-    for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
-      try {
-        const raw = fs.readFileSync(portFile, "utf8").split("\n");
-        if (raw[0] && Number(raw[0])) { devPort = Number(raw[0]); break; }
-      } catch { /* not written yet */ }
-      await pause(100); // polling for the port file, capped
+    for (let attempt = 1; attempt <= BRINGUP_ATTEMPTS && !devPort; attempt++) {
+      profile = fs.mkdtempSync(path.join(os.tmpdir(), "studio-journey-"));
+      let tail = "";
+      chrome = spawn(chromeBin, [
+        "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
+        "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+        "--disable-background-networking", "--window-size=1500,1000",
+        `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank",
+      ], { stdio: ["ignore", "ignore", "pipe"] });
+      // A spawn failure arrives as an 'error' EVENT, not a throw. Unhandled, it
+      // takes the whole process down with exit 1. Swallowed here so the missing
+      // DevToolsActivePort below becomes the GUARD, which is the correct class.
+      chrome.on("error", () => { /* surfaced as the DevToolsActivePort guard */ });
+      chrome.stderr.on("data", (d) => { tail = (tail + d).slice(-STDERR_TAIL_CAP); });
+
+      const portFile = path.join(profile, "DevToolsActivePort");
+      for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
+        try {
+          const raw = fs.readFileSync(portFile, "utf8").split("\n");
+          if (raw[0] && Number(raw[0])) { devPort = Number(raw[0]); break; }
+        } catch { /* not written yet */ }
+        await pause(100); // polling for the port file, capped
+      }
+      if (devPort) {
+        if (attempt > 1) process.stdout.write(`>> chrome  bring-up succeeded on attempt ${attempt}/${BRINGUP_ATTEMPTS}\n`);
+        break;
+      }
+      reasons.push(`   attempt ${attempt}/${BRINGUP_ATTEMPTS}: no DevToolsActivePort in ${DEVTOOLS_CAP}ms; chrome stderr tail:\n${tail.trim() || "(empty)"}\n`);
+      await teardown(); // reaps this attempt's Chrome and removes its profile (cdp is still null)
+      chrome = null; profile = null;
     }
-    if (!devPort) guard("Chrome never wrote DevToolsActivePort — the browser did not start");
+    if (!devPort) guard(`Chrome never wrote DevToolsActivePort — the browser did not start (${BRINGUP_ATTEMPTS} attempt(s))\n${reasons.join("")}`);
 
     const version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
     process.stdout.write(`>> chrome  ${chromeBin}\n>> build   ${version.Browser} · node ${process.version}\n`);
