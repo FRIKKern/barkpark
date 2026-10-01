@@ -68,13 +68,13 @@ done
 if [ "$same" = 1 ]; then ok "reversed + duplicated input -> identical cells"; else no "input order changed a cell"; fi
 
 echo "case 3: weights steer — the two heaviest files never share a cell"
-a_cell="$(grep -lx 'test/a_test.exs' "$TMP"/cell.* | head -1)"
-b_cell="$(grep -lx 'test/b_test.exs' "$TMP"/cell.* | head -1)"
+a_cell="$(grep -lx 'test/a_test.exs' "$TMP"/cell.*)" || a_cell=""
+b_cell="$(grep -lx 'test/b_test.exs' "$TMP"/cell.*)" || b_cell=""
 if [ -n "$a_cell" ] && [ "$a_cell" != "$b_cell" ]; then ok "a (120 s) and b (45.5 s) are in different cells"; else no "a and b share $a_cell"; fi
 
 echo "case 4: a file the weights never saw is placed, and a gone file costs nothing"
-if cat "$TMP"/cell.* | grep -qx 'test/new_test.exs'; then ok "new_test.exs is in a cell"; else no "new_test.exs was dropped"; fi
-if cat "$TMP"/cell.* | grep -qx 'test/gone_test.exs'; then no "a weights-only path was run"; else ok "gone_test.exs (weights only) is not run"; fi
+if grep -qx 'test/new_test.exs' "$TMP"/cell.*; then ok "new_test.exs is in a cell"; else no "new_test.exs was dropped"; fi
+if grep -qx 'test/gone_test.exs' "$TMP"/cell.*; then no "a weights-only path was run"; else ok "gone_test.exs (weights only) is not run"; fi
 plan="$(ELIXIR_PARTITION_P1_EXTRA=0 bash "$SCRIPT" --plan 3 "$TMP/w.tsv" <"$TMP/cands.txt")"
 total="$(printf '%s\n' "$plan" | awk -F'\t' '{ s += $2 } END { printf "%.1f", s }')"
 # known 225.2 s + new file at the median known weight (8.00 or 9.00 → 9.00 for 10 values: the 5th of sorted)

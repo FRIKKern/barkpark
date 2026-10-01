@@ -113,7 +113,10 @@ case "$mode" in
     # the fail-closed proof: every candidate exactly once, every cell in 1..n
     got="$(printf '%s\n' "$plan" | cut -f3 | LC_ALL=C sort)"
     [ "$got" = "$cands" ] || die "the computed cells do not cover the candidates exactly once — refusing"
-    bad="$(printf '%s\n' "$plan" | cut -f1 | awk -v n="$n" '$1 < 1 || $1 > n' | head -1)"
+    # every out-of-range cell is printed (no truncating reader: house D37),
+    # and the first is named.
+    bad="$(awk -F'\t' -v n="$n" '$1 < 1 || $1 > n { print $1 }' <<<"$plan")"
+    bad="${bad%%$'\n'*}"
     [ -z "$bad" ] || die "a file was assigned to cell $bad, outside 1..$n — refusing"
     printf '%s\n' "$plan" | awk -F'\t' -v k="$k" '$1 == k { print $3 }'
     ;;
