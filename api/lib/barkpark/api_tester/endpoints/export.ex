@@ -37,6 +37,13 @@ defmodule Barkpark.ApiTester.Endpoints.Export do
           type: :string,
           default: "",
           notes: "Exact match by document type (e.g., 'post'). Omit to export all types."
+        },
+        %{
+          name: "perspective",
+          type: :string,
+          default: "",
+          notes:
+            "published (no drafts.* rows), drafts (draft-over-published, one row per document) or raw (every row). Omitted: raw for a write/admin caller (the backup), published for a read-only one. Anything else is 400."
         }
       ],
       body_example: nil,

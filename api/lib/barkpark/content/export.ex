@@ -66,12 +66,51 @@ defmodule Barkpark.Content.Export do
     |> then(fn q ->
       if type, do: where(q, [d], d.type == ^type), else: q
     end)
-    |> order_by([d], asc: d.inserted_at)
+    |> apply_perspective(Keyword.get(opts, :perspective, :raw))
     |> Repo.stream()
     |> Stream.transform(%{}, fn doc, schema_cache ->
       {schema, schema_cache} = fetch_schema(schema_cache, doc.type, dataset, opts)
       {[Envelope.render(doc, schema, caller_context)], schema_cache}
     end)
+  end
+
+  # ── the perspective (task-c14e213b4a7b0ef1) ────────────────────────────────
+  #
+  # The same three lenses `Content.Query` serves, applied to the whole-dataset
+  # stream. The default is `:raw`, every row, which is what this builder always
+  # streamed. Callers choose the lens; `ExportController` picks the per-tier
+  # default.
+  #
+  #   :raw       every row, drafts and published alike.
+  #   :published `doc_id NOT LIKE 'drafts.%'`, the predicate
+  #              `Query.apply_perspective(:published)` uses.
+  #   :drafts    draft-over-published: ONE row per logical document, the
+  #              `drafts.` twin when it exists and the published row otherwise.
+  #              This is `Query.list_with_drafts_merged/4`'s DISTINCT ON,
+  #              widened by `type`, because one export spans types and a doc id
+  #              is only unique within one.
+  #
+  # Every lens keeps the stream's insertion order.
+  defp apply_perspective(query, :raw), do: order_by(query, [d], asc: d.inserted_at)
+
+  defp apply_perspective(query, :published) do
+    query
+    |> where([d], not like(d.doc_id, "drafts.%"))
+    |> order_by([d], asc: d.inserted_at)
+  end
+
+  defp apply_perspective(query, :drafts) do
+    inner =
+      from(d in query,
+        distinct: [d.type, fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)],
+        order_by: [
+          d.type,
+          fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+          fragment("CASE WHEN ? LIKE 'drafts.%' THEN 0 ELSE 1 END", d.doc_id)
+        ]
+      )
+
+    from(d in subquery(inner), order_by: [asc: d.inserted_at, asc: d.id])
   end
 
   # Resolve (and memoise) the `%SchemaDefinition{}` for a type within one export.

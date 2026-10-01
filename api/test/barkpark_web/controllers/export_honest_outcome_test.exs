@@ -53,6 +53,9 @@ defmodule BarkparkWeb.ExportHonestOutcomeTest do
     doc
   end
 
+  # The streamed exports below pass `?perspective=raw`: their fixtures are
+  # drafts, and a read-only token's export now defaults to `published`
+  # (task-c14e213b4a7b0ef1). This file's subject is the stream's outcome.
   defp export(path) do
     scoped_conn()
     |> put_req_header("authorization", "Bearer #{@token}")
@@ -86,7 +89,7 @@ defmodule BarkparkWeb.ExportHonestOutcomeTest do
   test "a well-formed ?type still filters the export" do
     doc!("drafts.p1", "one")
 
-    conn = export("/v1/data/export/#{@dataset}?type=post")
+    conn = export("/v1/data/export/#{@dataset}?type=post&perspective=raw")
 
     assert conn.status == 200
     assert [line] = lines(conn.resp_body)
@@ -101,7 +104,7 @@ defmodule BarkparkWeb.ExportHonestOutcomeTest do
 
     {body, log} =
       with_log(fn ->
-        conn = export("/v1/data/export/#{@dataset}")
+        conn = export("/v1/data/export/#{@dataset}?perspective=raw")
         assert conn.status == 200
         conn.resp_body
       end)
@@ -131,7 +134,7 @@ defmodule BarkparkWeb.ExportHonestOutcomeTest do
 
     {body, log} =
       with_log(fn ->
-        conn = export("/v1/data/export/#{@dataset}")
+        conn = export("/v1/data/export/#{@dataset}?perspective=raw")
         assert conn.status == 200
         conn.resp_body
       end)
