@@ -136,15 +136,27 @@ jobs:
         # raw 502s during a deploy instead of the maintenance page. This harness
         # exists to do REAL caddy validation, so it must validate against a Caddy
         # that can actually parse the config we ship. Assert the floor, loudly.
+        #
+        # NOT the cloudsmith apt repo any more (task-8fcdc94b07a9dc60): from
+        # 2026-10-01T02:15Z its InRelease is signed by subkey 531A6B20FA058A70,
+        # which the served gpg.key marks EXPIRED (2024-03-30), so `apt-get update`
+        # exits 100 (EXPKEYSIG) and this job red three main runs in a row on a
+        # third-party key, not on our code. The harness needs one thing — a
+        # caddy >= 2.7 BINARY on PATH — so it takes the upstream release tarball,
+        # PINNED by version and verified against a PINNED sha512 (from that
+        # release's caddy_<v>_checksums.txt). A tampered or swapped asset fails
+        # `sha512sum -c`; bumping Caddy is an edit to these two lines.
+        env:
+          CADDY_VERSION: "2.11.4"
+          CADDY_SHA512: "8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9"
         run: |
-          sudo apt-get update
-          sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-            | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-            | sudo tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-          sudo apt-get update
-          sudo apt-get install -y caddy
+          set -euo pipefail
+          tgz="caddy_${CADDY_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$tgz" \
+            "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/$tgz"
+          echo "${CADDY_SHA512}  $RUNNER_TEMP/$tgz" | sha512sum -c -
+          tar -xzf "$RUNNER_TEMP/$tgz" -C "$RUNNER_TEMP" caddy
+          sudo install -m 0755 "$RUNNER_TEMP/caddy" /usr/local/bin/caddy
           command -v caddy
           caddy version
           # Heredoc floor (>= 2.7): fail LOUDLY here rather than let the deploy
