@@ -151,7 +151,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
               ONIX: <code><%= onix_el %></code>
             </span>
           <% end %>
-          <%= render_subfield(assigns, sub) %>
+          <%= render_subfield_guarded(assigns, sub) %>
           <%= for err <- own_findings(@errors, sub.name) do %>
             <span class="error" data-error-for={sub.name}><%= err %></span>
           <% end %>
@@ -160,6 +160,37 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           <% end %>
         </div>
       <% end %>
+    </div>
+    """
+  end
+
+  # A SCALAR subfield handed a STRUCTURED stored value — a `{"_ref": …}` in a
+  # reference subfield with no target type, a Sanity slug object in a string
+  # subfield, a list in a select — reached `to_string/1` in the leaf input and
+  # crashed the WHOLE document route (Run-4 save-path matrix, cell
+  # `composite.ref`). Render it read-only with NO input, the same idiom
+  # `FieldInputs.input/1` uses at the top level; the save then never posts the
+  # subfield and `Forms` keeps the stored value byte-identical.
+  @structured_ok_subfield_types ~w(composite arrayOf codelist localizedText image)
+
+  defp render_subfield_guarded(assigns, %{type: t} = sub)
+       when t not in @structured_ok_subfield_types do
+    case get_value(assigns.value, sub.name, nil) do
+      v when (is_map(v) and not (t == "reference" and is_map_key(v, "_ref"))) or is_list(v) ->
+        structured_readonly(%{name: sub.name, json: Jason.encode!(v, pretty: true)})
+
+      _ ->
+        render_subfield(assigns, sub)
+    end
+  end
+
+  defp render_subfield_guarded(assigns, sub), do: render_subfield(assigns, sub)
+
+  defp structured_readonly(assigns) do
+    ~H"""
+    <div data-readonly-field={@name} data-structured-value>
+      <pre class="bp-input" style="margin:0;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @json %></pre>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — stored as structured data this field's editor cannot show; saved unchanged</span>
     </div>
     """
   end
@@ -303,7 +334,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     if types == [] do
       leaf_input(%{
         field: sub,
-        value: get_value(assigns.value, sub.name, ""),
+        value:
+          BarkparkWeb.Components.FieldInputs.reference_id(get_value(assigns.value, sub.name, "")),
         input_name: child_path(assigns.path, sub.name),
         input_id: input_id(assigns.path, assigns.field.name, sub.name),
         on_change: assigns.on_change,
