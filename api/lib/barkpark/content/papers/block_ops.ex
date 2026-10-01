@@ -3804,7 +3804,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
       (render/inline.ex), so a text-keyed leaf renders as the empty string
       and a paragraph whose only leaf carries it VANISHES (live:
       `deploy-reliability-wave-4-2026-08-06`). Leaves already carrying a
-      `value` are left byte-identical.
+      STRING `value` are left byte-identical; a `value: null` leaf with real
+      `text` is rescued like a text-keyed one.
   """
   @spec normalize_render_shapes(list()) :: list()
   def normalize_render_shapes(blocks) when is_list(blocks) do
@@ -4503,8 +4504,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp normalize_inline_nodes(nodes), do: Enum.map(nodes, &normalize_inline_node/1)
 
+  # A STRING `value` already wins at render and is left byte-identical. Any
+  # other value — an explicit `null` from a JSON producer, which the renderer
+  # coerces to "" — is no value at all, so the real `text` is rescued into it
+  # (task-40529c5ad14ae43e; a `Map.has_key?` guard read the null as canonical).
   defp normalize_inline_node(%{"type" => "text", "text" => text} = leaf) when is_binary(text) do
-    if Map.has_key?(leaf, "value") do
+    if is_binary(Map.get(leaf, "value")) do
       leaf
     else
       leaf |> Map.delete("text") |> Map.put("value", text)

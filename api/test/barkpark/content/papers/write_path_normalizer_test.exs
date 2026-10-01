@@ -220,6 +220,31 @@ defmodule Barkpark.Content.Papers.WritePathNormalizerTest do
       assert BlockOps.normalize_render_shapes([block]) == [block]
     end
 
+    # task-40529c5ad14ae43e (F5). The renderer coerces an explicit `nil` value
+    # to "" (render/inline.ex), so a JSON producer emitting `value: null` next
+    # to real `text` rendered hollow — and the old `Map.has_key?` guard read
+    # the null as "already canonical" and left it. Mutation: put the guard
+    # back to `Map.has_key?(leaf, "value")` and this test reds.
+    test "a value:null leaf carrying real text is rescued to the text" do
+      block = %{
+        "type" => "paragraph",
+        "content" => [
+          %{"type" => "text", "value" => nil, "text" => "rescued prose"},
+          %{
+            "type" => "strong",
+            "children" => [%{"type" => "text", "value" => nil, "text" => "bold"}]
+          }
+        ]
+      }
+
+      assert [%{"content" => [leaf, %{"children" => [nested]}]} = normalized] =
+               BlockOps.normalize_render_shapes([block])
+
+      assert leaf == %{"type" => "text", "value" => "rescued prose"}
+      assert nested == %{"type" => "text", "value" => "bold"}
+      assert Render.render_blocks([normalized]) =~ "rescued prose"
+    end
+
     test "text-keyed leaves nested in mark-node children normalize" do
       block = %{
         "type" => "paragraph",
