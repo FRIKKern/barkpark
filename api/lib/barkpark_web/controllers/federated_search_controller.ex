@@ -31,11 +31,22 @@ defmodule BarkparkWeb.FederatedSearchController do
     # fail-open catch-all and returned drafts to anonymous callers by default.
     perspective = AnonPerspective.resolve(conn, params)
 
+    # Media ceiling (r2-lane-c authz sweep, 2026-10-01): the media leg's
+    # "may see non-public assets?" answer is the TIER-AWARE
+    # `MediaAccess.authenticated?/1` — the one the V1 media controller keys its
+    # clamp on — never mere token PRESENCE. A `public-read` site token is a real
+    # token but a public-tier caller. And the ceiling is applied IN THE QUERY
+    # (`visibility_clamp: :public`), so a private asset never enters the page,
+    # its highlight snippets or `total`; the post-filter below is kept as a
+    # second wall using the same answer.
+    media_authed? = MediaAccess.authenticated?(conn)
+    media_clamp = if media_authed?, do: [], else: [visibility_clamp: :public]
+
     results =
       surfaces
       |> Enum.map(fn surface ->
         Task.async(fn ->
-          search_surface(surface, dataset, q, limit, params, scope, perspective)
+          search_surface(surface, dataset, q, limit, params, scope, perspective, media_clamp)
         end)
       end)
       |> Enum.map(&Task.await(&1, 30_000))
@@ -93,7 +104,8 @@ defmodule BarkparkWeb.FederatedSearchController do
       perspective: to_string(perspective),
       results:
         Map.new(results, fn r ->
-          {r.surface, surface_payload(r, CallerContext.from_conn(conn), params["view"])}
+          {r.surface,
+           surface_payload(r, CallerContext.from_conn(conn), params["view"], media_authed?)}
         end),
       searchEventId: search_event_id,
       ms: ms
@@ -110,7 +122,8 @@ defmodule BarkparkWeb.FederatedSearchController do
            scope: scope
          },
          caller_context,
-         view
+         view,
+         _media_authed?
        ) do
     # The documents surface rides the SAME shared hit-envelope builder as
     # REST/loopback/WS search (AXI R3), re-keyed to this surface's historical
@@ -135,10 +148,11 @@ defmodule BarkparkWeb.FederatedSearchController do
            dataset: dataset,
            scope: scope
          },
-         caller_context,
+         _caller_context,
          # Media hits are AssetResponse renders, not documents — the brief
          # document-card view does not apply (out of scope for AXI R3).
-         _view
+         _view,
+         media_authed?
        ) do
     docs = Media.asset_docs_for_files(files, dataset, scope)
     render_opts = [include_urls: true]
@@ -157,8 +171,7 @@ defmodule BarkparkWeb.FederatedSearchController do
     # `HitEnvelope.build/5`).
     visible_files =
       Enum.filter(files, fn file ->
-        MediaAccess.visibility(Map.get(docs, file.id)) == "public" or
-          authenticated_caller?(caller_context)
+        MediaAccess.visibility(Map.get(docs, file.id)) == "public" or media_authed?
       end)
 
     dropped = length(files) - length(visible_files)
@@ -187,7 +200,8 @@ defmodule BarkparkWeb.FederatedSearchController do
   defp surface_payload(
          %{surface: _surface, hits: hits, total: total, meta: meta},
          _caller_context,
-         _view
+         _view,
+         _media_authed?
        ) do
     %{
       hits: hits,
@@ -198,7 +212,7 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp search_surface("documents", dataset, q, limit, params, scope, perspective) do
+  defp search_surface("documents", dataset, q, limit, params, scope, perspective, _media_clamp) do
     type = bin(params["type"])
 
     opts =
@@ -221,14 +235,14 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp search_surface("media", dataset, q, limit, params, scope, _perspective) do
+  defp search_surface("media", dataset, q, limit, params, scope, _perspective, media_clamp) do
     opts =
       [
         q: q,
         limit: limit,
         offset: 0,
         sort: params["sort"] || "relevance"
-      ] ++ scope
+      ] ++ scope ++ media_clamp
 
     {files, total, _facets, meta} = Media.search_files(dataset, opts)
 
@@ -242,7 +256,7 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp search_surface(surface, _dataset, _q, _limit, _params, _scope, _perspective) do
+  defp search_surface(surface, _dataset, _q, _limit, _params, _scope, _perspective, _media_clamp) do
     %{surface: surface, hits: [], total: 0, meta: %{}}
   end
 
@@ -258,17 +272,6 @@ defmodule BarkparkWeb.FederatedSearchController do
       end
     end
   end
-
-  # Authenticated, per `Barkpark.Content.CallerContext`: a verified `%User{}`
-  # session OR a verified `%ApiToken{}` — either sets `user_id`/`token_id`.
-  # `CallerContext.anonymous/0` has both `nil`, which is what `from_conn/1`
-  # returns when `Plugs.OptionalToken` (the `:api` pipeline's terminal plug)
-  # saw no credential. Mirrors the `auth` input `delivery_ok?/3` takes.
-  defp authenticated_caller?(%CallerContext{token_id: token_id, user_id: user_id}) do
-    not is_nil(token_id) or not is_nil(user_id)
-  end
-
-  defp authenticated_caller?(_), do: false
 
   defp parse_surfaces(nil), do: @default_surfaces
 
