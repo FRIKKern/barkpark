@@ -373,6 +373,12 @@ func SaveConfig(c *Config) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("mkdir config dir %s: %w", dir, err)
 	}
+	// MkdirAll is a no-op on an existing directory, and other writers (the cmux
+	// hook's <config>/barkpark/cmux) may have created it 0755 first: tighten it
+	// before the token file lands in it.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("chmod config dir %s: %w", dir, err)
+	}
 	path := filepath.Join(dir, "config.json")
 	// Marshal through configPersist (which has NO MarshalJSON) so the persisted
 	// 0600 file carries the REAL tokens. Marshalling c directly would hit
