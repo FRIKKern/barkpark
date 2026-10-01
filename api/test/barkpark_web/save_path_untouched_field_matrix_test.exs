@@ -283,7 +283,7 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
   end
 
   defp editor_conn(token),
-    do: build_conn() |> Plug.Test.init_test_session(%{"api_token" => token})
+    do: scoped_conn() |> Plug.Test.init_test_session(%{"api_token" => token})
 
   defp classic_edit_probe!(token, type, doc_id) do
     {:ok, view, _html} =
@@ -455,7 +455,7 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
 
   defp mutate!(token, mutation) do
     conn =
-      build_conn()
+      scoped_conn()
       |> put_req_header("authorization", "Bearer " <> token)
       |> put_req_header("content-type", "application/json")
       |> post("/v1/data/mutate/#{@dataset}", Jason.encode!(%{"mutations" => [mutation]}))
