@@ -570,8 +570,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   "reference"}`, api-v1.md), so documents written through the JS SDK or
   `bp --set 'author:={"_ref":…}'` carry it. Rendered raw, that map crashed the
   whole editor with `Phoenix.HTML.Safe not implemented for Map` (a 500 on the
-  document route; stranger walk 2026-09-30). The id it names is shown instead;
-  saving from Studio then stores the bare string.
+  document route; stranger walk 2026-09-30). The id it names is shown instead,
+  and a Classic save keeps the stored object (an edit replaces its `_ref`) —
+  `Forms` preserve guard.
 
   `nil` and anything with no readable id render as `""` (an empty picker).
   """

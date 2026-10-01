@@ -154,6 +154,29 @@ defmodule Barkpark.Content.Forms do
             acc
         end
 
+      # A REFERENCE stored as an object (`{"_ref": id, …}` — what `bp seed`, the
+      # SDK and `--set 'author:={"_ref":…}'` write) renders through the picker's
+      # hidden input as the bare id (`FieldInputs.reference_id/1`) and posts it
+      # back. The save stored that bare string, so editing ONLY the title of a
+      # seeded post rewrote `author: {"_ref": "seed-author-3"}` to
+      # `"seed-author-3"` and every `post.author?._ref` reader dropped the post.
+      # Same rule as the clauses around it, and NO new value contract
+      # (task-fcb752b43e11df9b stays the owner's): an untouched reference keeps
+      # its stored value byte-identical; an EDITED one is written in the shape
+      # it was stored in (the object, `_ref` replaced, sibling keys kept). A
+      # bare-string or empty stored value, and a cleared ("") post, are left
+      # exactly as before.
+      %{"type" => "reference", "name" => key}, acc when is_binary(key) ->
+        case {Map.fetch(acc, key), Map.get(base_content, key)} do
+          {{:ok, posted}, %{"_ref" => ref} = stored} when is_binary(posted) and posted != "" ->
+            if posted == ref,
+              do: Map.put(acc, key, stored),
+              else: Map.put(acc, key, Map.put(stored, "_ref", posted))
+
+          _ ->
+            acc
+        end
+
       # A NUMBER or BOOLEAN stored in a field whose Classic input is a string
       # control (string/slug/text/url/…) renders as its string form and posts
       # it back unchanged — and the save stored that string, flipping `42` to
