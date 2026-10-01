@@ -81,13 +81,10 @@ defmodule BarkparkWeb.Contract.FederatedGrantDenyTest do
     raw
   end
 
-  defp federated_titles(raw) do
+  defp federated(raw) do
     scoped_conn()
     |> put_req_header("authorization", "Bearer #{raw}")
     |> get("/v1/search/#{@ds}?q=#{@term}&surfaces=documents")
-    |> json_response(200)
-    |> get_in(["results", "documents", "hits"])
-    |> Enum.map(& &1["title"])
   end
 
   test "a grant-only principal fails closed to Default scope — the grant never widens federated",
@@ -103,11 +100,17 @@ defmodule BarkparkWeb.Contract.FederatedGrantDenyTest do
       type: "post"
     })
 
-    titles = federated_titles(raw)
+    resp = federated(raw)
 
-    # non-vacuous: the Default-scope doc proves the search actually ran
-    assert "#{@term} default" in titles
-    # DENY: the grant-covered other-workspace doc is never widened in
-    refute "#{@term} granted-workspace secret" in titles
+    # task-e816e87770cd69ce: this principal is an owner-bound, WORKSPACE-LESS
+    # token whose owner is NOT a Default member and holds no grant covering
+    # Default. It used to fall through to the back-compat Default read (the
+    # assertion that the Default doc came back pinned that leak); it is now
+    # refused before any search runs — fail-closed is STRONGER than the old
+    # "reads only Default". The deny property this file exists for still holds:
+    # the grant-covered other-workspace doc never appears.
+    assert resp.status == 403
+    assert Jason.decode!(resp.resp_body)["error"]["reason"] == "not_a_member"
+    refute resp.resp_body =~ "granted-workspace secret"
   end
 end

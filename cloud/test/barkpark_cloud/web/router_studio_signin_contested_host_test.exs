@@ -91,7 +91,9 @@ defmodule BarkparkCloud.Web.RouterStudioSigninContestedHostTest do
 
   test "the resolver returns the CLAIMANT, not the older ghost row" do
     c = contested()
-    assert c.ghost.inserted_at < c.customer.inserted_at
+    # DateTime.compare, never `<`: structural term order compares `day` before
+    # `month` and went red at the 2026-10-01 month boundary (task-0284692b2db7f02e).
+    assert DateTime.compare(c.ghost.inserted_at, c.customer.inserted_at) == :lt
     assert Registry.get_barkpark_by_public_host(c.host).id == c.customer.id
   end
 

@@ -36,15 +36,30 @@ defmodule BarkparkWeb.ExportController do
   require Logger
 
   alias Barkpark.Content
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Repo
-  alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.{AnonPerspective, ErrorResponse, ReadPerspective}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
+  # task-c14e213b4a7b0ef1: `?perspective` was never read, so `bp export
+  # --perspective published`, the raw route and the SDK's
+  # exportDataset({perspective: "published"}) all streamed every draft.
+  @perspectives ["published", "drafts", "raw"]
+
   def export(conn, %{"dataset" => dataset} = params) do
-    case validate_type(params["type"]) do
-      {:ok, type} ->
-        stream_export(conn, dataset, type)
+    with {:ok, type} <- validate_type(params["type"]),
+         {:ok, perspective} <- resolve_perspective(conn, params) do
+      stream_export(conn, dataset, type, perspective)
+    else
+      {:refuse_perspective, value} ->
+        # Refused before `send_chunked/2`, the same door and envelope every
+        # other read route uses for an unsupported `?perspective`.
+        ReadPerspective.refuse(conn, value, @perspectives,
+          message:
+            "unsupported perspective #{inspect(value)} for export — supported values are " <>
+              "published, drafts and raw"
+        )
 
       :error ->
         # Refused BEFORE `send_chunked/2` — the status line is still ours to
@@ -66,8 +81,49 @@ defmodule BarkparkWeb.ExportController do
   defp validate_type(type) when is_binary(type), do: {:ok, type}
   defp validate_type(_other), do: :error
 
-  defp stream_export(conn, dataset, type) do
-    opts = if(type, do: [type: type], else: []) ++ scope_opts(conn)
+  # WHICH LENS, AND WHO GETS WHICH DEFAULT.
+  #
+  # An explicit, supported `?perspective` is honoured, except that a caller
+  # `AnonPerspective` pins to published (a `public-read` token or no token) is
+  # pinned here too. The `:require_token` pipeline already refuses those callers
+  # this route, so the pin is defence in depth, not the fence.
+  #
+  # No `?perspective` means a per-tier default. docs/api-v1.md never stated
+  # one, and the SDK documents "server default raw":
+  #
+  #   * an EDITOR (a write/admin token, or an admin/owner/editor session) gets
+  #     `raw`. That is the backup this verb exists for, and it is byte-identical
+  #     to every export taken before this change.
+  #   * everyone else (a `read` token) gets `published`, the same default
+  #     `/v1/data/query` has always given that tier. A read-only reader who
+  #     wants drafts asks for them, exactly as on the query route.
+  defp resolve_perspective(conn, params) do
+    case ReadPerspective.unsupported(params, @perspectives) do
+      nil ->
+        cond do
+          AnonPerspective.anon_pinned?(conn) -> {:ok, :published}
+          is_binary(params["perspective"]) -> {:ok, AnonPerspective.parse(params["perspective"])}
+          editor?(conn) -> {:ok, :raw}
+          true -> {:ok, :published}
+        end
+
+      bad ->
+        {:refuse_perspective, bad}
+    end
+  end
+
+  @editor_roles ~w(write admin owner editor)
+
+  defp editor?(conn) do
+    case Keyword.get(scope_opts(conn), :caller_context) do
+      %CallerContext{is_admin: true} -> true
+      %CallerContext{roles: roles} when is_list(roles) -> Enum.any?(roles, &(&1 in @editor_roles))
+      _ -> false
+    end
+  end
+
+  defp stream_export(conn, dataset, type, perspective) do
+    opts = if(type, do: [type: type], else: []) ++ [perspective: perspective] ++ scope_opts(conn)
 
     conn =
       conn

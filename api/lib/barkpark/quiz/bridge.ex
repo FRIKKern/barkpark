@@ -123,6 +123,20 @@ defmodule Barkpark.Quiz.Bridge do
     do: GenServer.call(__MODULE__, {:bind, pin, quiz_id, dataset})
 
   @doc """
+  Bind on behalf of a HOST surface, identified by an opaque `host_key` (the host
+  browser session's key). The first host to bind a live PIN owns it; a later
+  bind from a different key is refused with `{:error, :not_host}`, so a player
+  who reads the PIN off the projector cannot open `/quiz/host/:pin?quiz=…` and
+  swap the room's quiz. The same host rebinding (a refresh, a new `?quiz=`) is
+  unchanged. Ownership ends with the room (`drop_pin/2`). A nil key can claim an
+  UNOWNED pin but never displace an owner.
+  """
+  @spec bind_as_host(String.t(), String.t(), String.t() | nil, String.t()) ::
+          :ok | {:error, :not_host}
+  def bind_as_host(pin, quiz_id, host_key, dataset \\ @default_dataset),
+    do: GenServer.call(__MODULE__, {:bind_as_host, pin, quiz_id, host_key, dataset})
+
+  @doc """
   The current binding index, `%{quiz_id => %{pin => dataset}}`.
 
   Read-only introspection over state that is otherwise invisible — the GC
@@ -186,6 +200,19 @@ defmodule Barkpark.Quiz.Bridge do
       end
 
     {:reply, :ok, put_in(state.bindings[quiz_id], pins)}
+  end
+
+  def handle_call({:bind_as_host, pin, quiz_id, host_key, dataset}, from, state) do
+    owners = Map.get(state, :host_keys, %{})
+
+    case Map.fetch(owners, pin) do
+      {:ok, owner} when owner != host_key or is_nil(owner) ->
+        {:reply, {:error, :not_host}, state}
+
+      _ ->
+        state = Map.put(state, :host_keys, Map.put(owners, pin, host_key))
+        handle_call({:bind, pin, quiz_id, dataset}, from, state)
+    end
   end
 
   def handle_call(:bindings, _from, state), do: {:reply, state.bindings, state}
@@ -305,7 +332,12 @@ defmodule Barkpark.Quiz.Bridge do
         end
       end)
 
-    %{state | bindings: bindings, rooms: Map.delete(state.rooms, pin)}
+    %{
+      state
+      | bindings: bindings,
+        rooms: Map.delete(state.rooms, pin)
+    }
+    |> Map.put(:host_keys, Map.delete(Map.get(state, :host_keys, %{}), pin))
   end
 
   # Join every document-list topic this dataset needs, each exactly once. If

@@ -96,6 +96,13 @@ defmodule BarkparkWeb.Plugs.AssignGrantScope do
   # (Layer-2 `scope_to_grants` narrows the actual rows) or nil. Fail-closed: no
   # covering grant → nil. from_user/2 already filters to ACTIVE grants (not
   # revoked/expired, single-use not spent) in-query.
+  @doc false
+  # task-e816e87770cd69ce: `DeriveWorkspaceFromToken` asks the SAME coverage
+  # question before letting an owner-bound, workspace-less token fall through to
+  # the Default workspace, so admission there and here cannot disagree.
+  @spec grant_covers_read?(User.t() | nil, binary()) :: boolean()
+  def grant_covers_read?(user, workspace_id), do: not is_nil(grant_read_ctx(user, workspace_id))
+
   defp grant_read_ctx(%User{id: uid}, workspace_id) when is_binary(uid) do
     ctx = CallerContext.from_user(uid)
 

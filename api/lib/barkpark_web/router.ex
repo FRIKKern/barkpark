@@ -3437,23 +3437,40 @@ defmodule BarkparkWeb.Router do
     # `private:` exempts the LIST from DeriveWorkspaceFromToken's archive halt —
     # a token bound to an archived workspace must still be able to SEE it
     # (marked `archived_at`) to restore it. See that plug's moduledoc.
+    #
+    # `barkpark_workspaceless_token_allowed` (task-e816e87770cd69ce): every route in
+    # this scope does its OWN membership reasoning and never reads the Default
+    # workspace, so an owner-bound token with NO workspace — a signup PAT — may
+    # use them. That is how such a user creates their FIRST workspace. The
+    # plug refuses that token everywhere else on the flat routes.
     get("/workspaces", WorkspaceController, :index,
-      private: %{barkpark_archived_workspace_exempt: true}
+      private: %{
+        barkpark_archived_workspace_exempt: true,
+        barkpark_workspaceless_token_allowed: true
+      }
     )
 
-    get("/workspaces/:workspace_slug/projects", WorkspaceController, :projects)
+    get("/workspaces/:workspace_slug/projects", WorkspaceController, :projects,
+      private: %{barkpark_workspaceless_token_allowed: true}
+    )
 
     get(
       "/workspaces/:workspace_slug/projects/:project_slug/datasets",
       WorkspaceController,
-      :datasets
+      :datasets,
+      private: %{barkpark_workspaceless_token_allowed: true}
     )
 
     # Create surface: any authenticated token may create a workspace (becomes
     # its owner-member, + Default project + production dataset); project
     # creation is member-gated (non-member → 404, no existence leak).
-    post("/workspaces", WorkspaceController, :create)
-    post("/workspaces/:workspace_slug/projects", WorkspaceController, :create_project)
+    post("/workspaces", WorkspaceController, :create,
+      private: %{barkpark_workspaceless_token_allowed: true}
+    )
+
+    post("/workspaces/:workspace_slug/projects", WorkspaceController, :create_project,
+      private: %{barkpark_workspaceless_token_allowed: true}
+    )
   end
 
   # ── Workspace DELETE — admin-gated destructive teardown ─────────────────

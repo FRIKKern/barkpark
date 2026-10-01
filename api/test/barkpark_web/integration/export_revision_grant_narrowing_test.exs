@@ -111,7 +111,10 @@ defmodule BarkparkWeb.Integration.ExportRevisionGrantNarrowingTest do
   end
 
   defp base(ws, proj), do: "/w/#{ws.slug}/p/#{proj.slug}/v1/data"
-  defp export_path(ws, proj), do: "#{base(ws, proj)}/export/#{@ds}"
+  # `?perspective=raw`: the fixture documents are drafts, and a read-only
+  # caller's export now defaults to `published` (task-c14e213b4a7b0ef1). This
+  # file's subject is grant narrowing, so it asks for every row.
+  defp export_path(ws, proj), do: "#{base(ws, proj)}/export/#{@ds}?perspective=raw"
 
   defp history_path(ws, proj, doc),
     do: "#{base(ws, proj)}/history/#{@ds}/#{doc.type}/#{doc.doc_id}"
