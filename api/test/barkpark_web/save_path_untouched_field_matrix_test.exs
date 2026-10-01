@@ -399,6 +399,11 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
       assert content["composite"]["s"] == "y"
       assert content["composite"]["ref"] === %{"_ref" => "author-1"}
       assert content["composite"]["n"] === 3
+      assert content["composite"]["b"] === true
+      # The datetime subfield's input is a `datetime-local`: a browser posts ""
+      # for an ISO value with an offset unless the input was handed a value it
+      # can show. Untouched, it must survive with its offset and seconds.
+      assert content["composite"]["dt"] === @iso_z
 
       assert content["composite"]["img"] === %{
                "url" => "https://cdn.test/a.jpg",
