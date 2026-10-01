@@ -315,8 +315,11 @@
         });
       }
       this._uploadInput.addEventListener("change", (e) => {
-        const files = e.target.files;
-        if (files && files.length) this._uploadFiles(files);
+        // Snapshot the FileList: it is LIVE, and clearing the input below
+        // empties it while the async uploader is still awaiting the first
+        // file — only that one would ever upload.
+        const files = Array.from(e.target.files || []);
+        if (files.length) this._uploadFiles(files);
         e.target.value = "";
       });
       this._densityInput.addEventListener("input", (e) => {
