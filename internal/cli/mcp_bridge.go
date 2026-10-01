@@ -149,6 +149,9 @@ func registerOneBridgeTool(srv *mcp.Server, g globals, ctx manifest.Context, m *
 		if err := decodeMCPArgs(req, &args); err != nil {
 			return mcpArgError(err), nil
 		}
+		if err := refuseRemoteLocalFile(ctx, cmd, args); err != nil {
+			return mcpArgError(err), nil
+		}
 		tail := buildCommandTail(cmd, args)
 		// Bridge tools inherit the manifest's agent-default view generically
 		// (agentViewGlobals, run.go): a command declaring
@@ -157,6 +160,38 @@ func registerOneBridgeTool(srv *mcp.Server, g globals, ctx manifest.Context, m *
 		status, body, rerr := execManifestCommand(agentViewGlobals(g, cmd), ctx, m, cmd, tail)
 		return mcpRunFor(status, body, rerr, cmd.Writes), nil
 	})
+	return nil
+}
+
+// refuseRemoteLocalFile is the filesystem half of the remote boundary
+// newMCPHTTPHandler draws for credentials. A per-request remote build carries
+// ctx.AmbientCredentialsOK == false (the caller may use only what its own request
+// carries); the same caller must not name a path on the SERVING host either. The
+// bridge passes `--file` and file-typed args straight to the headless dispatcher,
+// which reads them with os.ReadFile / os.Open — so a remote caller holding any
+// write token could post /etc/barkpark/*.env or the operator's config.json as a
+// document or media upload and read it back. An operator-local server (stdio, an
+// ambient-credential context) keeps local paths: that caller is the operator.
+func refuseRemoteLocalFile(ctx manifest.Context, cmd manifest.Command, args map[string]any) error {
+	if ctx.AmbientCredentialsOK {
+		return nil
+	}
+	names := []string{}
+	for _, a := range cmd.Args {
+		if a.Type == "file" {
+			names = append(names, a.Name)
+		}
+	}
+	for _, f := range cmd.Flags {
+		if f.Name == "file" || f.Type == "file" {
+			names = append(names, f.Name)
+		}
+	}
+	for _, n := range names {
+		if v, ok := args[n]; ok && v != nil && fmt.Sprint(v) != "" {
+			return fmt.Errorf("%s: a remote MCP caller cannot name a file on the serving host — send the content itself", n)
+		}
+	}
 	return nil
 }
 
