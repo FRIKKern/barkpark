@@ -68,6 +68,62 @@ defmodule BarkparkCloud.GitHub do
     end
   end
 
+  @doc """
+  The install URL carrying a TEAM-BOUND `state` (see `install_state/2`). GitHub
+  hands `state` back on the App's Setup URL redirect beside `installation_id`, so
+  the console can return it with the POST that records the installation. `nil`
+  when no slug is configured, exactly like `install_url/0`.
+  """
+  @spec install_url(Team.t() | binary(), binary()) :: String.t() | nil
+  def install_url(team, user_id) when is_binary(user_id) do
+    case install_url() do
+      nil -> nil
+      url -> url <> "?state=" <> URI.encode_www_form(install_state(team, user_id))
+    end
+  end
+
+  # task-r3b-gh-install-bind. GET /app/installations/:id (the only validation
+  # record_installation/2 performs) is answered with the APP's JWT, so it says the
+  # id EXISTS — for every install of the App, whoever owns it. Without a binding,
+  # an admin of team B could submit team A's integer id and drive A's org (list
+  # its repos, create repos, push files). The state is an AEAD-sealed (Vault,
+  # AES-256-GCM) {team, user, expiry} minted when the console offers the install
+  # link and required back on the record POST, so only the team that STARTED an
+  # install can record the id GitHub returned to it.
+  @install_state_ttl_seconds 3600
+
+  @doc "Seal a team+user-bound install `state`, valid for one hour."
+  @spec install_state(Team.t() | binary(), binary()) :: String.t()
+  def install_state(team, user_id) when is_binary(user_id) do
+    exp = System.system_time(:second) + @install_state_ttl_seconds
+    Vault.encrypt(Jason.encode!(%{"t" => team_id(team), "u" => user_id, "e" => exp}))
+  end
+
+  @doc """
+  `:ok` when `state` was sealed by this plane for THIS team and user and has not
+  expired; `{:error, :install_state_invalid}` for anything else (missing,
+  tampered, foreign team, foreign user, expired).
+  """
+  @spec verify_install_state(term(), Team.t() | binary(), binary()) ::
+          :ok | {:error, :install_state_invalid}
+  def verify_install_state(state, team, user_id) when is_binary(state) and is_binary(user_id) do
+    tid = team_id(team)
+    now = System.system_time(:second)
+
+    with {:ok, json} <- Vault.decrypt(state),
+         {:ok, %{"t" => ^tid, "u" => ^user_id, "e" => exp}} when is_integer(exp) <-
+           Jason.decode(json),
+         true <- exp > now do
+      :ok
+    else
+      _ -> {:error, :install_state_invalid}
+    end
+  rescue
+    _ -> {:error, :install_state_invalid}
+  end
+
+  def verify_install_state(_state, _team, _user_id), do: {:error, :install_state_invalid}
+
   @doc "The team's installation row, or `nil`. Team-scoped — never crosses teams."
   @spec installation_for(Team.t() | binary()) :: Installation.t() | nil
   def installation_for(team) do

@@ -140,6 +140,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "forms_unsupported",
              "github_error",
              "illegal_transition",
+             "install_state_invalid",
              "installation_id_required",
              "installation_not_found",
              "instance_no_origin",
