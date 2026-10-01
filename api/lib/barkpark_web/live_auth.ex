@@ -83,10 +83,27 @@ defmodule BarkparkWeb.LiveAuth do
   # would reopen the hole). Fronts the `:scoped_plugin_admin` and
   # `:scoped_admin_studio` live_sessions (router.ex); the flat sessions and the
   # global-registry `:scoped_admin_studio_dataset` stay on `:admin`.
+  #
+  # The decision is RE-RUN on every live patch that moves the URL to another
+  # workspace (r4a LiveView authz sweep). `on_mount` runs once per socket, but a
+  # client may `live_patch` to any URL that routes to the SAME LiveView in the
+  # SAME live_session — and `/w/:workspace_slug/...` is a param of that route.
+  # Without the hook an owner/admin of workspace A (any workspace; they can
+  # create their own) who is a plain member of B mounted `/w/A/.../settings`
+  # and patched to `/w/B/.../settings`: `LiveScope` re-checks READ for B and
+  # passes, so the page ran as an admin page for B (B's settings, B's chat
+  # sessions). The hook attaches here, FIRST in the on_mount chain, so it runs
+  # before `LiveScope`'s own handle_params hook and before the LiveView's.
   def on_mount(:scoped_admin, params, session, socket) do
     case scoped_target_workspace(params) do
-      %{id: _} = ws -> scoped_admin_authorize(socket, session, ws)
-      nil -> scoped_admin_deny(socket)
+      %{id: _} = ws ->
+        case scoped_admin_authorize(socket, session, ws) do
+          {:cont, socket} -> {:cont, arm_scoped_admin_reauth(socket, session, ws)}
+          halted -> halted
+        end
+
+      nil ->
+        scoped_admin_deny(socket)
     end
   end
 
@@ -283,6 +300,34 @@ defmodule BarkparkWeb.LiveAuth do
       nil -> scoped_admin_authorize_user(socket, session, ws)
       api_token -> {:cont, assign(socket, :api_token, api_token)}
     end
+  end
+
+  # Same-workspace patches (ChatLive switching sessions, the settings tabs) are
+  # the hot path and cost nothing: the URL slug is compared with the slug that
+  # was admitted. Only a slug CHANGE re-runs the full gate, with the SAME
+  # session the mount used, so the token/user/dev-root arms are identical.
+  defp arm_scoped_admin_reauth(socket, session, ws) do
+    socket
+    |> assign(:scoped_admin_workspace_slug, ws.slug)
+    |> attach_hook(:scoped_admin_reauth, :handle_params, fn params, _uri, socket ->
+      if params["workspace_slug"] == socket.assigns[:scoped_admin_workspace_slug] do
+        {:cont, socket}
+      else
+        case scoped_target_workspace(params) do
+          %{id: _} = target ->
+            case scoped_admin_authorize(socket, session, target) do
+              {:cont, socket} ->
+                {:cont, assign(socket, :scoped_admin_workspace_slug, target.slug)}
+
+              halted ->
+                halted
+            end
+
+          nil ->
+            scoped_admin_deny(socket)
+        end
+      end
+    end)
   end
 
   defp scoped_admin_candidates(session) do
