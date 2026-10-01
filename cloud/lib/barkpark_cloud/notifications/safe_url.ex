@@ -44,6 +44,27 @@ defmodule BarkparkCloud.Notifications.SafeUrl do
   # Any host ending in one of these suffixes is internal by convention.
   @blocked_suffixes ~w(.localhost .internal .local)
 
+  @doc """
+  A BARE host (no scheme — an SMTP relay, say) that is internal WITHOUT any DNS
+  lookup: a blocked internal name (`localhost`, `*.internal`, `*.local`, …) or an
+  IP literal in a private/loopback/link-local/metadata range. Offline and
+  deterministic, so it can gate a save. A public-looking NAME that resolves to a
+  private address is not caught here (that needs `check/2`'s resolution).
+  """
+  @spec literal_internal_host?(term()) :: boolean()
+  def literal_internal_host?(host) when is_binary(host) do
+    normalized =
+      host |> String.trim() |> String.downcase() |> String.trim_trailing(".") |> strip_brackets()
+
+    blocked_name?(normalized) or
+      case :inet.parse_address(to_charlist(normalized)) do
+        {:ok, addr} -> private_address?(addr)
+        {:error, _} -> false
+      end
+  end
+
+  def literal_internal_host?(_), do: false
+
   @doc "Convenience boolean wrapper over `check/1`."
   @spec safe?(String.t()) :: boolean()
   def safe?(url), do: check(url) == :ok

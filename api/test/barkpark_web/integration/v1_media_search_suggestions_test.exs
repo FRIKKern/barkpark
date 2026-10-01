@@ -133,6 +133,20 @@ defmodule BarkparkWeb.Integration.V1MediaSearchSuggestionsTest do
   end
 
   test "zero-hit queries appear in nohits bucket", %{conn: conn} do
+    # nohits carries the popular k-floor (3 searches, task-bee78e63628ffe9b):
+    # one person's single no-hit query is never shown to anyone else.
+    search(conn, "zzznohitsquery")
+    search(conn, "zzzlonenohit")
+
+    suggest_once =
+      conn
+      |> authed()
+      |> get(~p"/v1/media/production/search/suggestions")
+      |> json_response(200)
+
+    refute Enum.any?(suggest_once["result"]["nohits"], &(&1["query"] == "zzznohitsquery"))
+
+    search(conn, "zzznohitsquery")
     search(conn, "zzznohitsquery")
 
     suggest =

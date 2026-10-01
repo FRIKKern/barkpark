@@ -328,6 +328,11 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
     # This changes header rows, not the panel's width or reading measure.
     {~S|.editor-panel[data-test-id="studio-paper-editor"] > .editor-header|,
      ~w(display flex-shrink)},
+    # task-43fe1756e8ae8120: the toggle-bearing doc editor header takes the
+    # same second header row at <=720px — bucket-scoped OFF the wide desk
+    # (html:not([data-width-bucket="wide"])), header rows only, no panel width.
+    {~S|html:not([data-width-bucket="wide"]) .editor-panel > .editor-header:has(.editor-mode-toggle)|,
+     ~w(display flex-shrink)},
 
     # --- a different element that merely shares the name prefix ---
     {".pane-column-collapsed-label", ~w(display flex overflow)}

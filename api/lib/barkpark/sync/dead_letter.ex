@@ -6,6 +6,18 @@ defmodule Barkpark.Sync.DeadLetter do
   dead-lettering is an inspectable quarantine, never a silent skip
   (see `Barkpark.Sync.Applier` — write-then-advance). `record_failure/5`
   writes the envelope on INSERT only; conflict updates never overwrite it.
+
+  ## The exit (task-b2b871424bd184eb)
+
+  `status` moves `pending → dead` automatically and leaves quarantine ONLY
+  through `resolve/3`, an operator act: `"dead"`/`"pending"` → `"resolved"`.
+  The row is kept, envelope intact, for audit — resolving never deletes.
+  There is deliberately NO replay: the cursor has already advanced past a
+  dead event, so re-applying its (older) envelope could overwrite newer
+  state. An operator who wants the write re-issues it at the source, then
+  resolves the row. Today the call is the operator's from a remote console
+  (`bin/barkpark rpc 'Barkpark.Sync.DeadLetter.resolve("api", "production", 42)'`);
+  a Studio/HTTP surface over `list_dead/2` + `resolve/3` remains unbuilt.
   """
   use Ecto.Schema
   import Ecto.Query
@@ -68,6 +80,25 @@ defmodule Barkpark.Sync.DeadLetter do
     |> Repo.update_all(set: [status: "dead", updated_at: DateTime.utc_now()])
 
     :ok
+  end
+
+  @doc """
+  Take one quarantined event OUT of quarantine: `"dead"` or `"pending"` →
+  `"resolved"`. Returns `:ok`, or `{:error, :not_found}` when no quarantined
+  row matches (absent, or already resolved). The envelope is kept.
+  """
+  @spec resolve(String.t(), String.t(), non_neg_integer()) :: :ok | {:error, :not_found}
+  def resolve(source, dataset, event_id) do
+    from(d in __MODULE__,
+      where:
+        d.source == ^source and d.dataset == ^dataset and d.event_id == ^event_id and
+          d.status in ["dead", "pending"]
+    )
+    |> Repo.update_all(set: [status: "resolved", updated_at: DateTime.utc_now()])
+    |> case do
+      {1, _} -> :ok
+      {0, _} -> {:error, :not_found}
+    end
   end
 
   @doc "Queryable surface: all dead-lettered rows for `{source, dataset}`."

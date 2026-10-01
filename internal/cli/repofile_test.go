@@ -281,10 +281,13 @@ func TestRepoFileServerNameResolution(t *testing.T) {
 			wantDataset:   "staging",
 		},
 		{
-			name:          "unknown URL is used verbatim, tokenless from the file layer",
-			file:          `{"server":"https://nowhere.example"}`,
-			wantServer:    "https://nowhere.example",
-			wantToken:     "tok-global", // same as -s today: lower layers still supply the token
+			name:       "unknown URL is used verbatim, and the saved token stays home",
+			file:       `{"server":"https://nowhere.example"}`,
+			wantServer: "https://nowhere.example",
+			// Same as a raw -s URL under THE BINDING: tok-global was saved for
+			// localhost:4000, so it is withheld and the baked floor is sent
+			// (repofile_credential_binding_test.go).
+			wantToken:     "barkpark-dev-token",
 			wantWorkspace: "default",
 			wantDataset:   "production",
 		},

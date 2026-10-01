@@ -614,6 +614,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             <% end %>
           </:presence>
           <:actions>
+            <%!-- task-43fe1756e8ae8120: `extra_actions` (the Classic/Beta mode
+                  toggle and its identity alert) render OUTSIDE the overflow
+                  menu. The menu collapses its rightmost children into a
+                  popover of CLONES that forward the click to the original
+                  child; the toggle is a two-button GROUP, so its clone forwards
+                  to the group div and neither mode fires. At phone width the
+                  toggle was always the first child collapsed. --%>
+            <%= render_slot(@extra_actions) %>
             <bp-overflow-menu class="bp-overflow-menu">
               <%= for action <- @doc_actions do %>
                 <.doc_action_button
@@ -625,7 +633,6 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   project_slug={scope_slug(@parent_assigns, :current_project)}
                 />
               <% end %>
-              <%= render_slot(@extra_actions) %>
             </bp-overflow-menu>
           </:actions>
         </.document_header>

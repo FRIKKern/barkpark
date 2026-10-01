@@ -29,6 +29,7 @@
     constructor() {
       super();
       this._observer = null;
+      this._mutation = null;
       this._popover = null;
       this._trigger = null;
       this._raf = null;
@@ -37,20 +38,47 @@
       this._escHandler = null;
     }
 
+    // task-43fe1756e8ae8120 — measured at 390px in headless Chrome: four doc
+    // actions [data-overflowed] and ZERO "More actions" triggers in the
+    // document. Two holes, both closed here:
+    //
+    //   1. A LiveView patch can DETACH and RE-ATTACH this element.
+    //      disconnectedCallback disconnects the observers, and the old
+    //      `if (this._initialized) return;` guard then skipped re-observing on
+    //      reconnect — a dead component: no reflow ever again. Build the
+    //      trigger ONCE; (re)wire the observers on EVERY connect.
+    //   2. A patch morphs this element's children back to the server render,
+    //      which never carries the JS-built trigger, so the trigger is REMOVED
+    //      while children keep [data-overflowed]. A size-only ResizeObserver
+    //      never hears that; a child-list MutationObserver does, and puts the
+    //      trigger back in its own callback (a microtask, before paint).
     connectedCallback() {
-      if (this._initialized) return;
-      this._initialized = true;
+      if (!this._initialized) {
+        this._initialized = true;
+        this._buildTrigger();
+      }
+      this._reattachTrigger();
 
-      this._buildTrigger();
-      this._observer = new ResizeObserver(() => this._scheduleReflow());
-      this._observer.observe(this);
+      if (!this._observer) {
+        this._observer = new ResizeObserver(() => this._scheduleReflow());
+        this._observer.observe(this);
+      }
+      if (!this._mutation) {
+        this._mutation = new MutationObserver(() => {
+          this._reattachTrigger();
+          this._scheduleReflow();
+        });
+        this._mutation.observe(this, { childList: true });
+      }
       this._scheduleReflow();
     }
 
     disconnectedCallback() {
       if (this._observer) this._observer.disconnect();
+      if (this._mutation) this._mutation.disconnect();
       this._closePopover();
       this._observer = null;
+      this._mutation = null;
     }
 
     _buildTrigger() {
@@ -89,7 +117,16 @@
       this._raf = requestAnimationFrame(() => this._reflow());
     }
 
+    // Re-attach a trigger a LiveView patch stripped (see connectedCallback).
+    // The append is itself a child-list mutation; the next callback finds the
+    // trigger in place and appends nothing, so this cannot loop.
+    _reattachTrigger() {
+      if (this._trigger && this._trigger.parentNode !== this) this.appendChild(this._trigger);
+    }
+
     _reflow() {
+      this._reattachTrigger();
+
       const items = this._collectItems();
 
       // Show everything first, then measure.
