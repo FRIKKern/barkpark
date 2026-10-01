@@ -2351,13 +2351,28 @@ gate_says "partition 2 of 2 reported 0 times" "…and says which partition is mi
 gate_names "mix-test (partitions incomplete)" "validation-perf"
 CELLS_NONE="$TMPROOT/cells-none"
 mkdir -p "$CELLS_NONE"
-gate "no Test partition uploaded a record" 1 \
+# A refusal is red on its OWN annotation ("an instrument REFUSED TO MEASURE"),
+# not the allow-set one `gate` looks for, so these two arms read it directly.
+gate_refused() {
+  local label="$1" rc
+  shift
+  env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" "$@" bash --noprofile --norc "$AGG" >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
+  if [ "$rc" -eq 1 ]; then ok "$label -> exit 1"; else no "$label -> exit $rc, wanted 1"; fi
+  if grep -qF -- "::error title=Elixir gate RED — an instrument REFUSED TO MEASURE" "$GATE_OUT" \
+     || grep -qF -- "::error title=Elixir gate RED — a refusal reached the aggregate" "$GATE_OUT"; then
+    ok "  …and reached its own REFUSED verdict line"
+  else
+    no "  …but printed NO refusal verdict line — the step body crashed rather than decided"
+    sed 's/^/        /' "$GATE_OUT" >&2
+  fi
+}
+gate_refused "no Test partition uploaded a record" \
   R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=true O_TEST=true MIX_TEST_CELLS="$CELLS_NONE"
 gate_says "no partition uploaded a record" "…and says no record arrived"
 CELLS_REFUSED="$TMPROOT/cells-refused"
 cells "$CELLS_REFUSED" "1:2:MEASURED-CLEAN" "2:2:REFUSED"
-gate "a later Test partition REFUSED" 1 \
+gate_refused "a later Test partition REFUSED" \
   R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=true O_TEST=true MIX_TEST_CELLS="$CELLS_REFUSED"
 gate_says "REFUSED mix-test" "…and the refusal from partition 2 survives the fold"
