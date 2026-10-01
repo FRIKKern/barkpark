@@ -3751,7 +3751,17 @@ class BpPaperCanvas extends HTMLElement {
     if (this._editor) {
       this._programmaticApply = true;
       try {
-        this._editor.commands.setContent(runToTiptap(this._blocks), false);
+        // The seed is the run's starting point, not an edit: keep it out of
+        // undo history. In history, a Cmd+Z on an untouched run inverted it to
+        // the empty pre-seed doc and ProseMirror threw (doc needs a block).
+        this._editor
+          .chain()
+          .setContent(runToTiptap(this._blocks), false)
+          .command(({ tr }) => {
+            tr.setMeta("addToHistory", false);
+            return true;
+          })
+          .run();
       } catch (error) {
         this._failMount("seed", error);
         return;
