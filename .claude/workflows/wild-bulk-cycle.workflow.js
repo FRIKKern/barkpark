@@ -814,7 +814,8 @@ Steps — task first, code second, ledger LIVE throughout:
 8. Merge-gated criteria stay open; lifecycle stays in_progress — the LEAD closes on merge. Your branch is named in the evidence.
 ${TASKS_BLOCK}
 ${LIVENESS_BLOCK}
-Constraints: curl localhost only; never mix compile against prod; don't touch other worktrees' WIP.`,
+Constraints: curl localhost only; never mix compile against prod; don't touch other worktrees' WIP.
+NO git stash IN A WORKTREE. refs/stash is ONE repo-global stack that every worktree on this machine shares, so parallel builders push and pop each other's entries: five wild-bulk builders collided on it on 2026-08-31, and a failed push followed by an unguarded pop takes a stranger's work. To set work aside, commit WIP to your own branch (amend it later); to drop a change, git restore <path>. Never stash push, pop, apply or drop.`,
           { label: `build:${d.slug}:${slug(t.title)}`, phase: 'Build', schema: BUILD_SCHEMA, model: BUILD_MODEL, isolation: 'worktree' }
         )
       )
