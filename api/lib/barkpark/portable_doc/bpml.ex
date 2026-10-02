@@ -82,6 +82,13 @@ defmodule Barkpark.PortableDoc.Bpml do
       and only clients that want the new key need regenerate. This IS the
       deliberate decision the printer's comment asked someone to make; it is not
       a silent widening.
+    * The Run-4 round-trip matrix (`test/barkpark/round_trip_integrity_matrix_test.exs`)
+      found an UNEDITED pull → push of the golden corpus rewriting stored data:
+      a `lineage` node's `unit`/`value`, a `stat`'s `source`, the
+      `sourceDefault` of `stats`/`stat-grid`/`lineage` and an `expandable`'s
+      `open` were not spelled, so they were dropped. Each now rides LAST in its
+      element's row — again a widening: a block without those keys prints
+      byte-identically.
   """
   @spec vocabulary() :: map()
   def vocabulary do

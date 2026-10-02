@@ -1785,7 +1785,12 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       # `.bp-stat__v--loss`/`--peace` off it. This line is the tripwire that
       # makes the grammar-digest move visible to a reviewer — a client
       # regenerating types off the digest sees exactly this one new key.
-      assert blocks["stat"] == ["label", "value", "denom", "verdict"]
+      # `source` after it, added on purpose by the Run-4 round-trip matrix: a
+      # stat's provenance ref (THE KILDE LAW) was dropped by an unedited
+      # pull → push. Same widening rule: only the new key moves.
+      assert blocks["stat"] == ["label", "value", "denom", "verdict", "source"]
+      assert blocks["lineage-node"] == ["title", "overline", "source", "tone", "unit", "value"]
+      assert blocks["expandable"] == ["id", "summary", "open"]
       assert blocks["paper"] == ["slug", "title"]
       # aliases ride the table — <strong> teaches nothing new
       assert inline["b"] == "strong"
