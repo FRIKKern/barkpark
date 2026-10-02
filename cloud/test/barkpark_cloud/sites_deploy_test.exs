@@ -2221,7 +2221,13 @@ defmodule BarkparkCloud.SitesDeployTest do
         "grace-#{inspect(ref)}",
         [:barkpark_cloud, :sites, :deploy, :grace],
         fn event, measurements, metadata, _ ->
-          send(test, {:grace_telemetry, event, measurements, metadata})
+          # OURS ONLY. Other async modules run Deploy.run/1 through refusals
+          # too (sites_deploy_refusal_class_test, …), and the handler runs in
+          # whichever process emits; `assert_received` takes the FIRST match, so
+          # a peer's poll_refusal could stand in for this test's.
+          if self() == test or test in List.wrap(Process.get(:"$callers")) do
+            send(test, {:grace_telemetry, event, measurements, metadata})
+          end
         end,
         nil
       )

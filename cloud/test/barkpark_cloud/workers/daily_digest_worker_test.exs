@@ -340,7 +340,13 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
       handler,
       [:barkpark_cloud, :notifications, :fleet_digest, :settled],
       fn _event, measurements, metadata, _ ->
-        send(test, {:fleet_digest, ref, measurements, metadata})
+        # OURS ONLY. The handler runs in whichever process emits, and other
+        # async modules settle fleet digests too (DailyDigestWorkerTest,
+        # NotificationsTest); unfiltered, their `instances: 1` arrived first on
+        # main push run 36885879832. Keep events from this test's lineage.
+        if self() == test or test in List.wrap(Process.get(:"$callers")) do
+          send(test, {:fleet_digest, ref, measurements, metadata})
+        end
       end,
       nil
     )

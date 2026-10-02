@@ -586,7 +586,13 @@ defmodule BarkparkCloud.NotificationsTest do
         "covered-#{inspect(ref)}",
         [:barkpark_cloud, :notifications, :fleet_digest, :settled],
         fn _event, measurements, metadata, _cfg ->
-          send(test_pid, {ref, measurements, metadata})
+          # OURS ONLY. The handler runs in whichever process emits, and other
+          # async modules settle fleet digests too (DailyDigestWorkerTest,
+          # NotificationsTest); unfiltered, their `instances: 1` arrived first on
+          # main push run 36885879832. Keep events from this test's lineage.
+          if self() == test_pid or test_pid in List.wrap(Process.get(:"$callers")) do
+            send(test_pid, {ref, measurements, metadata})
+          end
         end,
         nil
       )
