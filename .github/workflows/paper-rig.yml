@@ -122,7 +122,7 @@ jobs:
       # the re-capture arm diffs against them, so only that arm pulls the
       # ~103 MB of pixels; every other run checks out pointers and spares the
       # repo's LFS bandwidth. gate.sh reads baselines/*.report.json, not LFS.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           lfs: ${{ (github.event_name == 'workflow_dispatch' && inputs.recapture) || contains(github.event.pull_request.labels.*.name, 'rig-recapture') }}
 

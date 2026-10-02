@@ -148,7 +148,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The scream's own tripwire. If the comparison stops being able to fail,
       # the verdict below is decoration — and this run says so first.
@@ -372,7 +372,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Shell syntax
         run: bash -n scripts/crown-reconcile.sh
       - name: Mutation proofs (crown-reconcile.test.sh)

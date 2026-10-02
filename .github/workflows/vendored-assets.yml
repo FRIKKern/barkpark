@@ -35,7 +35,7 @@ jobs:
     name: deploy.sh ↔ embedded asset in sync
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The harness below reads deploy.sh at a PINNED historical revision
           # for its pre-fix control; the default depth-1 clone cannot reach it.
