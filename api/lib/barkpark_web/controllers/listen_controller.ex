@@ -515,7 +515,31 @@ defmodule BarkparkWeb.ListenController do
   # — same testing seam as `replay_since/3`, `format_event/2` and
   # `forward_event?/2` (the live `receive` loop is otherwise un-assertable).
   @doc false
+  # A SIBLING PROJECT's event is dropped first (r4a realtime authz sweep). The
+  # topic and the replay are keyed by workspace + dataset NAME, which every
+  # project in the workspace shares; the re-render below is scoped to the
+  # listener's project, so a P2 event missed and fell through to redacting P2's
+  # frozen snapshot with P1's schema (usually none) — P2's private fields went
+  # out in clear. An event from another project is not this stream's business.
   def redacted_result(event, dataset, %CallerContext{} = ctx, scope) do
+    if other_project?(event, scope),
+      do: :drop,
+      else: render_or_redact(event, dataset, ctx, scope)
+  end
+
+  defp other_project?(event, scope) when is_list(scope) do
+    case {Map.get(event, :project_id), Keyword.get(scope, :project_id)} do
+      {ev_proj, listener_proj} when is_binary(ev_proj) and is_binary(listener_proj) ->
+        ev_proj != listener_proj
+
+      _ ->
+        false
+    end
+  end
+
+  defp other_project?(_event, _scope), do: false
+
+  defp render_or_redact(event, dataset, %CallerContext{} = ctx, scope) do
     case Content.get_document(event.doc_id, event.type, dataset, scope) do
       {:ok, doc} ->
         Envelope.render(doc, fetch_schema(event.type, dataset, scope), ctx)
