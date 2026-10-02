@@ -53,7 +53,10 @@ defmodule BarkparkWeb.LiveScope do
   def on_mount(:resolve, params, _session, socket) do
     case resolve_and_authorize(socket, params) do
       {:ok, socket} ->
-        {:cont, attach_hook(socket, :live_scope_reauth, :handle_params, &reauthorize/3)}
+        {:cont,
+         socket
+         |> attach_hook(:live_scope_reauth, :handle_params, &reauthorize/3)
+         |> arm_seat_watch()}
 
       {:halt, socket} ->
         {:halt, socket}
@@ -97,8 +100,12 @@ defmodule BarkparkWeb.LiveScope do
       {:cont, socket}
     else
       case resolve_and_authorize(socket, params) do
-        {:ok, socket} -> {:cont, socket}
-        {:halt, socket} -> {:halt, socket}
+        {:ok, socket} ->
+          {:cont,
+           if(socket.assigns[:seat_watch?], do: watch_current_workspace(socket), else: socket)}
+
+        {:halt, socket} ->
+          {:halt, socket}
       end
     end
   end
@@ -129,6 +136,62 @@ defmodule BarkparkWeb.LiveScope do
   end
 
   defp resolve_and_authorize(socket, _params), do: deny(socket)
+
+  # ── Seat changes reach an OPEN socket (r4a realtime authz sweep) ───────────
+  #
+  # Read admission ran at mount and on a scope-changing patch only, so a member
+  # removed or demoted (roster UI, `/v1` members API, SCIM deprovision) kept an
+  # open Studio tab reading the workspace — panes, navigation, live pushes —
+  # until the browser reconnected. `Tenancy.Members.announce_seats_changed/1`
+  # now publishes on the workspace's seats topic after every seat change; a
+  # connected socket listens for its CURRENT workspace and re-runs the same
+  # `resolve_and_authorize/2` against the scope it last admitted. A refusal is
+  # the ordinary `deny/1` (full redirect to /login).
+  defp arm_seat_watch(socket) do
+    if Phoenix.LiveView.connected?(socket) and not Map.get(socket.assigns, :seat_watch?, false) do
+      socket
+      |> assign(:seat_watch?, true)
+      |> watch_current_workspace()
+      |> attach_hook(:live_scope_seat_watch, :handle_info, &seat_changed/2)
+    else
+      socket
+    end
+  end
+
+  # Subscribe to the seats topic of the workspace the socket is in now; a live
+  # patch into another workspace re-subscribes (`reauthorize/3` → here).
+  defp watch_current_workspace(socket) do
+    case {socket.assigns[:current_workspace], socket.assigns[:seat_watch_ws]} do
+      {%{id: ws_id}, ws_id} ->
+        socket
+
+      {%{id: ws_id}, previous} when is_binary(ws_id) ->
+        if is_binary(previous),
+          do: Phoenix.PubSub.unsubscribe(Barkpark.PubSub, Tenancy.Members.seats_topic(previous))
+
+        Phoenix.PubSub.subscribe(Barkpark.PubSub, Tenancy.Members.seats_topic(ws_id))
+        assign(socket, :seat_watch_ws, ws_id)
+
+      _ ->
+        socket
+    end
+  end
+
+  defp seat_changed({:workspace_seats_changed, ws_id}, socket) do
+    with %{id: ^ws_id} <- socket.assigns[:current_workspace],
+         {ws_slug, proj_slug, dataset} <- socket.assigns[@authorized_scope] do
+      params = %{"workspace_slug" => ws_slug, "project_slug" => proj_slug, "dataset" => dataset}
+
+      case resolve_and_authorize(socket, params) do
+        {:ok, socket} -> {:halt, socket}
+        {:halt, socket} -> {:halt, socket}
+      end
+    else
+      _ -> {:halt, socket}
+    end
+  end
+
+  defp seat_changed(_msg, socket), do: {:cont, socket}
 
   # Membership + read permission via the canonical gate. Anonymous (nil
   # token) is allowed into: (a) the seeded Default workspace — the
