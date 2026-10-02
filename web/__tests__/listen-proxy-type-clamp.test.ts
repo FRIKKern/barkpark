@@ -136,14 +136,14 @@ test("a PUBLISHED document of a type the site does not serve never reaches the c
   const body = await clientStream();
   assert.ok(!body.includes("PRIVATE-SUBMISSION"), `private-type content streamed:\n${body}`);
   assert.ok(!body.includes("visitor@private.example"), `private-type field streamed:\n${body}`);
-  assert.ok(body.includes("PUBLIC-BODY"), `a served type must still stream:\n${body}`);
+  assert.ok(body.includes('"documentId":"p1"'), `a served type must still stream:\n${body}`);
 });
 
 test("the replay leg (?lastEventId=0) is filtered the same way", async () => {
   script = [CONTACT, POST, CONTACT];
   const body = await clientStream("?lastEventId=0");
   assert.ok(!body.includes("PRIVATE-SUBMISSION"), body);
-  assert.ok(body.includes("PUBLIC-BODY"), body);
+  assert.ok(body.includes('"documentId":"p1"'), body);
 });
 
 test("a frame whose result _type disagrees with its type, or that names no type, is dropped", async () => {
@@ -151,5 +151,5 @@ test("a frame whose result _type disagrees with its type, or that names no type,
   const body = await clientStream();
   assert.ok(!body.includes("MISLABELLED-SECRET"), body);
   assert.ok(!body.includes("UNTYPED-SECRET"), body);
-  assert.ok(body.includes("PUBLIC-BODY"), body);
+  assert.ok(body.includes('"documentId":"p1"'), body);
 });
