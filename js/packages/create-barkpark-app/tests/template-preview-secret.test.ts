@@ -109,11 +109,15 @@ describe('the preview route uses it', () => {
     expect(src).toContain("export const runtime = 'nodejs'")
   })
 
-  it('keeps the same-origin redirect guard it already had', async () => {
-    // Do not churn what was already sound: the open-redirect rejection stays.
+  it('keeps a same-origin redirect guard', async () => {
+    // The open-redirect rejection stays. r4a: the prefix checks (`//`, `/\`) it
+    // had were bypassable with a tab (`/\t/evil.example` — browsers strip it), so
+    // the guard now refuses control characters and backslashes and requires the
+    // path to resolve on its own origin. Behaviour is pinned in
+    // template-preview-redirect.test.ts; this pins that the guard is still wired.
     const src = await fs.readFile(ROUTE, 'utf8')
+    expect(src).toContain('safeRedirectPath(url.searchParams.get(\'path\'))')
     expect(src).toContain("raw.startsWith('/')")
-    expect(src).toContain("!raw.startsWith('//')")
-    expect(src).toContain("!raw.startsWith('/\\\\')")
+    expect(src).toContain('target.origin === base')
   })
 })
