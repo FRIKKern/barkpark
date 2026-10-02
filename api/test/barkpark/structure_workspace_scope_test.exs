@@ -7,8 +7,9 @@ defmodule Barkpark.StructureWorkspaceScopeTest do
       `paper` schema but no `post` shows Papers, never Posts; and
     * plugin desk contributions are filtered to the workspace's types — a
       globally-registered plugin node (frt's game groups, the tasks list)
-      whose type exists in the catalog but is absent from the scope is
-      dropped, so it can't leak into a workspace that never registered it.
+      whose type is plugin-owned but absent from the scope is dropped, so it
+      can't leak into a workspace that never registered it — and ANOTHER
+      workspace's catalog never decides that gate.
 
   Regression guard for the workspace-desk-leak fix: pre-fix `build/2` called
   `list_schemas/1` unscoped and ran the plugin chain without scope, so every
@@ -91,6 +92,39 @@ defmodule Barkpark.StructureWorkspaceScopeTest do
 
     assert "task" in a_types, "workspace A registered task → Tasks desk node kept"
     refute "task" in b_types, "workspace B has no task schema → Tasks desk node dropped"
+  end
+
+  # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+  @tag :requires_plugins
+  test "another workspace's schema never decides this workspace's plugin nodes", ctx do
+    # task-5ae31d6d9f13965f. frt contributes its game-type nodes UNCONDITIONALLY
+    # (no presence check), so the host gate alone decides them. The gate used to
+    # classify against the UNSCOPED catalog — every workspace's types in the
+    # dataset — so workspace A's `rune` node flipped from shown to hidden the
+    # moment workspace B registered `rune`: a cross-tenant existence oracle.
+    # It now classifies against plugin-owned types (code), so A's desk is the
+    # same either way — and `rune` (frt-owned, absent from A) is gated out.
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_plugin_settings(ctx.ws_a.id, %{
+        "frt" => %{"enabled" => true}
+      })
+
+    a_scope = scope(ctx.ws_a, ctx.proj_a)
+    before = Structure.build(@dataset, a_scope)
+
+    register_schema!("rune", "Runes", scope(ctx.ws_b, ctx.proj_b))
+    after_b = Structure.build(@dataset, a_scope)
+
+    assert titles(before) == titles(after_b),
+           "workspace B registering `rune` changed workspace A's desk: " <>
+             inspect(MapSet.difference(titles(before), titles(after_b)))
+
+    refute "rune" in type_names(before),
+           "frt-owned `rune` is absent from workspace A → its desk node is gated out"
+
+    # A's OWN registration still passes the gate.
+    register_schema!("rune", "Runes", a_scope)
+    assert "rune" in (Structure.build(@dataset, a_scope) |> type_names())
   end
 
   # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
