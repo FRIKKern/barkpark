@@ -7,12 +7,19 @@ defmodule Barkpark.Content.ExactDraftDeleteTest do
   @dataset "exact_delete_test"
   @type_name "exact_note"
 
-  setup do
-    {:ok, _} =
-      Content.upsert_schema(
-        %{"name" => @type_name, "title" => "Note", "visibility" => "public", "fields" => []},
-        @dataset
-      )
+  # The :unboxed test writes on its OWN committed connections into the Default
+  # workspace. Creating this file's dataset inside the test's sandbox
+  # transaction takes the Default audit-chain lock (dataset creation orders
+  # audit before the row) and holds it until the sandbox rolls back, so the
+  # unboxed writes would wait on their own test. It does not use @dataset.
+  setup ctx do
+    unless ctx[:unboxed] do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => @type_name, "title" => "Note", "visibility" => "public", "fields" => []},
+          @dataset
+        )
+    end
 
     :ok
   end
@@ -113,6 +120,7 @@ defmodule Barkpark.Content.ExactDraftDeleteTest do
     end
   end
 
+  @tag :unboxed
   test "a separately committed human edit between read and delete survives", ctx do
     :ok = Barkpark.PluginEnv.with_plugins([InterleaveHook], ctx)
     id = "interleaved-#{System.unique_integer([:positive])}"
