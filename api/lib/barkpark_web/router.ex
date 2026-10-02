@@ -3062,7 +3062,11 @@ defmodule BarkparkWeb.Router do
     # scopes. The dead-render ScopedPaperController is retired from routing
     # (its HTML view lives on under /s/:token).
     live_session :scoped_paper_reader,
-      on_mount: [{BarkparkWeb.PluginScopeSession, :scope}, {BarkparkWeb.PaperViewer, :viewer}],
+      on_mount: [
+        {BarkparkWeb.PluginScopeSession, :scope},
+        {BarkparkWeb.PaperViewer, :viewer},
+        {BarkparkWeb.PaperViewer, :scoped_admission}
+      ],
       session: {BarkparkWeb.PluginScopeSession, :build, []},
       root_layout: {BarkparkWeb.Layouts, :bulldocs} do
       live("/papers/:slug", BulldocsLive, :index)
