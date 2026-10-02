@@ -18,7 +18,7 @@ import {
   saveCloudSession,
   saveConfig,
 } from '../src/state/appConfig'
-import { getSecretStore } from '../src/state/secrets'
+import { getSecretStore, setSecretStoreForTesting, type SecretStore } from '../src/state/secrets'
 import { setStorageForTesting, type KeyValueStorage } from '../src/state/storage'
 
 const CLOUD_TOK = 'bpc_cloud_SECRET_aaaa'
@@ -41,12 +41,34 @@ class RecordingStorage implements KeyValueStorage {
   }
 }
 
+/** A durable SecretStore with switchable failure modes (the device's
+ * Keychain/Keystore stand-in). */
+class FakeKeychain implements SecretStore {
+  durable = true
+  failWrites = false
+  corruptWrites = false
+  readonly map = new Map<string, string>()
+  get(key: string): string | undefined {
+    return this.map.get(key)
+  }
+  set(key: string, value: string): void {
+    if (this.failWrites) throw new Error('keychain write refused')
+    this.map.set(key, this.corruptWrites ? `${value}-garbled` : value)
+  }
+  delete(key: string): void {
+    this.map.delete(key)
+  }
+}
+
 let disk: RecordingStorage
+let keychain: FakeKeychain
 
 beforeEach(() => {
-  setStorageForTesting(undefined) // also resets the in-memory secret twin
+  setStorageForTesting(undefined) // also resets the secret store
   disk = new RecordingStorage()
   setStorageForTesting(disk)
+  keychain = new FakeKeychain()
+  setSecretStoreForTesting(keychain)
 })
 
 function everythingOnDisk(): string {
@@ -114,6 +136,53 @@ describe('credentials never reach the plaintext MMKV blob', () => {
     expect(loadConfig()).toEqual({})
     expect(getSecretStore().get('barkpark.cloudToken')).toBeUndefined()
     expect(getSecretStore().get('barkpark.instanceToken')).toBeUndefined()
+  })
+
+  it('migration write failure: the MMKV copy is kept, the user stays signed in, the next launch retries', () => {
+    const legacy = {
+      cloudUrl: 'https://api.barkpark.cloud',
+      cloudToken: CLOUD_TOK,
+      server: 'https://g.example',
+      token: SERVER_TOK,
+    }
+    disk.set(CONFIG_KEY, JSON.stringify(legacy))
+    keychain.failWrites = true
+
+    const config = loadConfig()
+    expect(config.cloudToken).toBe(CLOUD_TOK)
+    expect(config.token).toBe(SERVER_TOK)
+    expect(disk.getString(CONFIG_KEY)).toContain(CLOUD_TOK) // not deleted
+    expect(disk.getString(CONFIG_KEY)).toContain(SERVER_TOK)
+
+    // Next launch, the Keychain works again: the move completes.
+    keychain.failWrites = false
+    const retried = loadConfig()
+    expect(retried.cloudToken).toBe(CLOUD_TOK)
+    expect(retried.token).toBe(SERVER_TOK)
+    expect(disk.getString(CONFIG_KEY)).not.toContain(CLOUD_TOK)
+    expect(keychain.map.get('barkpark.instanceToken')).toBe(SERVER_TOK)
+  })
+
+  it('migration read-back mismatch: the MMKV copy is kept and the real token still loads', () => {
+    disk.set(CONFIG_KEY, JSON.stringify({ cloudUrl: 'https://api.barkpark.cloud', cloudToken: CLOUD_TOK }))
+    keychain.corruptWrites = true
+
+    expect(loadConfig().cloudToken).toBe(CLOUD_TOK) // never the garbled read-back
+    expect(disk.getString(CONFIG_KEY)).toContain(CLOUD_TOK)
+  })
+
+  it('a failed save keeps the token in MMKV rather than dropping it (no logout)', () => {
+    keychain.failWrites = true
+    saveCloudSession({ url: 'https://api.barkpark.cloud', token: CLOUD_TOK, teamId: 'team' })
+    expect(loadConfig().cloudToken).toBe(CLOUD_TOK)
+  })
+
+  it('a binary without the native module (non-durable store) keeps the pre-fix blob behaviour', () => {
+    setSecretStoreForTesting(undefined) // jest default: the in-memory, non-durable twin
+    expect(getSecretStore().durable).toBe(false)
+    saveCloudSession({ url: 'https://api.barkpark.cloud', token: CLOUD_TOK, teamId: 'team' })
+    expect(disk.getString(CONFIG_KEY)).toContain(CLOUD_TOK)
+    expect(loadConfig().cloudToken).toBe(CLOUD_TOK)
   })
 
   it('saveConfig with an empty token clears the stored one', () => {

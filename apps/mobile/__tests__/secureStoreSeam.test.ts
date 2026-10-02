@@ -9,6 +9,7 @@ import { getSecretStore, setSecretStoreForTesting } from '../src/state/secrets'
 const mockItems = new Map<string, string>()
 const mockCalls: { op: string; key: string; options: unknown }[] = []
 let mockProbeAnswer: 'real' | 'mock' = 'real'
+let mockGarble = false
 
 jest.mock('expo-secure-store', () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY',
@@ -19,7 +20,7 @@ jest.mock('expo-secure-store', () => ({
   },
   setItem: (key: string, value: string, options: unknown) => {
     mockCalls.push({ op: 'set', key, options })
-    mockItems.set(key, value)
+    mockItems.set(key, mockGarble ? value + '-garbled' : value)
   },
   deleteItemAsync: (key: string, options: unknown) => {
     mockCalls.push({ op: 'delete', key, options })
@@ -35,6 +36,7 @@ beforeEach(() => {
   mockItems.clear()
   mockCalls.length = 0
   mockProbeAnswer = 'real'
+  mockGarble = false
   setSecretStoreForTesting(undefined)
 })
 
@@ -58,9 +60,20 @@ describe('SecretStore over expo-secure-store', () => {
     expect(store.get('barkpark.instanceToken')).toBeUndefined()
   })
 
+  it('set verifies by reading the Keychain back, past the cache, and throws on a mismatch', () => {
+    const store = getSecretStore()
+    expect(store.durable).toBe(true)
+    mockGarble = true
+    expect(() => store.set('barkpark.cloudToken', 'tok')).toThrow(/read-back mismatch/)
+    mockGarble = false
+    store.set('barkpark.cloudToken', 'tok')
+    expect(store.get('barkpark.cloudToken')).toBe('tok')
+  })
+
   it('a module that answers undefined (an auto-mock / missing native half) is refused, not trusted', () => {
     mockProbeAnswer = 'mock'
     const store = getSecretStore()
+    expect(store.durable).toBe(false) // appConfig will keep tokens where they were
     store.set('k', 'v')
     // The in-memory twin took the write — nothing was "stored" into a void.
     expect(store.get('k')).toBe('v')

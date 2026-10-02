@@ -2,7 +2,7 @@
 //
 // The MMKV blob (src/state/storage.ts) is a PLAIN mmap file in the app
 // sandbox: no encryptionKey, and on iOS it lives under a backed-up directory.
-// Tokens therefore never go there. expo-secure-store is Keychain on iOS and
+// Tokens therefore belong here. expo-secure-store is Keychain on iOS and
 // Keystore-wrapped prefs on Android; its config plugin (app.json) also keeps
 // the store out of Android Auto Backup.
 //
@@ -11,22 +11,31 @@
 // migrated to another device through a backup — a restored phone signs in
 // again instead of inheriting a 30-day Cloud session.
 //
+// `durable` tells appConfig whether a token handed here survives a restart.
 // Same shape as storage.ts: the native require lives inside the try, so jest
-// (and any binary built before the module was added) gets an in-memory twin
-// instead of a red suite or a crash. That twin never touches disk: the cost
-// of a stale binary is a sign-in per launch, never a token in a plain file.
+// (and any binary built before the module was added — it is a NATIVE module,
+// so it needs a new build, not an OTA update) gets a non-durable in-memory
+// twin instead of a red suite or a crash. appConfig never moves a token into
+// a non-durable store: on such a binary the blob keeps it, exactly as before
+// this change, until a rebuilt binary migrates it.
 //
-// Deletes are async in expo-secure-store; the write-through cache below makes
+// `set` VERIFIES: it reads the Keychain back (bypassing the cache) and throws
+// on a mismatch, so a caller deletes its plaintext copy only after a proven
+// write. Deletes are async in expo-secure-store; the write-through cache makes
 // a delete visible to the very next synchronous read (a sign-out followed by
 // loadConfig() must read "signed out", not the Keychain's pre-delete answer).
 
 export interface SecretStore {
+  /** True only when a value set here survives an app restart. */
+  readonly durable: boolean
   get(key: string): string | undefined
+  /** Throws when the value cannot be stored and read back verbatim. */
   set(key: string, value: string): void
   delete(key: string): void
 }
 
 class MemorySecretStore implements SecretStore {
+  readonly durable = false
   private map = new Map<string, string>()
 
   get(key: string): string | undefined {
@@ -58,20 +67,26 @@ function nativeStore(): SecretStore {
   }
   const cache = new Map<string, string | null>()
   return {
+    durable: true,
     get(key) {
       if (cache.has(key)) return cache.get(key) ?? undefined
-      let value: string | null = null
       try {
-        value = SecureStore.getItem(key, options)
+        const value = SecureStore.getItem(key, options)
+        cache.set(key, value)
+        return value ?? undefined
       } catch {
-        // An unreadable item reads as absent (signed out), never a crash.
-        value = null
+        // Unreadable reads as absent for this call, never a crash — and is NOT
+        // cached, so the next read asks the Keychain again.
+        return undefined
       }
-      cache.set(key, value)
-      return value ?? undefined
     },
     set(key, value) {
       SecureStore.setItem(key, value, options)
+      const readBack = SecureStore.getItem(key, options)
+      if (readBack !== value) {
+        cache.delete(key)
+        throw new Error(`secure store read-back mismatch for ${key}`)
+      }
       cache.set(key, value)
     },
     delete(key) {

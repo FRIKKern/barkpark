@@ -11,12 +11,19 @@ import { getStorage } from './storage'
 const CONFIG_KEY = 'barkpark.config.v1'
 
 // THE CREDENTIAL SPLIT (task-d524e210de241375). The MMKV blob is a plain file,
-// so the two bearer tokens the app holds live in the SecretStore (Keychain /
-// Keystore) and the blob carries only addresses, names and scope. Callers
-// still see one StoredConfig — the split is invisible above this module.
-// The MRU entries keep NO token at all: nothing reads one today (a server
-// switch goes back through the Cloud cascade, which mints a fresh one), and
-// twenty dormant tokens are twenty things to leak.
+// so when a DURABLE SecretStore exists (expo-secure-store: Keychain /
+// Keystore) the two bearer tokens live there and the blob carries only
+// addresses, names and scope. Callers still see one StoredConfig — the split
+// is invisible above this module. The MRU entries keep NO token at all:
+// nothing reads one today (a server switch goes back through the Cloud
+// cascade, which mints a fresh one), and twenty dormant tokens are twenty
+// things to leak.
+//
+// NEVER LOSE A TOKEN. A token leaves the blob only after the SecretStore has
+// taken it AND read it back verbatim. On a binary without the native module
+// (secrets.durable === false), or when a write throws or reads back wrong,
+// the blob keeps its plaintext copy — the pre-fix status quo, never a logout —
+// and the next load retries the move.
 const CLOUD_TOKEN_KEY = 'barkpark.cloudToken'
 const INSTANCE_TOKEN_KEY = 'barkpark.instanceToken'
 
@@ -28,11 +35,9 @@ function hasPlaintextToken(config: StoredConfig): boolean {
   )
 }
 
-/** The blob's shape: the config minus every token. */
-function withoutTokens(config: StoredConfig): StoredConfig {
+/** The MRU entries without their (unread) tokens. */
+function stripServerTokens(config: StoredConfig): StoredConfig {
   const blob: StoredConfig = { ...config }
-  delete blob.cloudToken
-  delete blob.token
   if (blob.knownServers !== undefined) {
     blob.knownServers = blob.knownServers.map((entry) => {
       const kept = { ...entry }
@@ -43,10 +48,35 @@ function withoutTokens(config: StoredConfig): StoredConfig {
   return blob
 }
 
-function writeSecret(key: string, value: string | undefined): void {
+/** The blob's shape once the secrets are safely elsewhere: no token at all. */
+function withoutTokens(config: StoredConfig): StoredConfig {
+  const blob = stripServerTokens(config)
+  delete blob.cloudToken
+  delete blob.token
+  return blob
+}
+
+const norm = (value: string | undefined): string => (value ?? '').trim()
+
+/** Write both tokens and verify each by read-back. false = keep the
+ * plaintext copy (no durable store, a write threw, or a read-back differed). */
+function persistSecrets(config: StoredConfig): boolean {
   const secrets = getSecretStore()
-  if ((value ?? '').trim() === '') secrets.delete(key)
-  else secrets.set(key, value as string)
+  if (!secrets.durable) return false
+  try {
+    const pairs: [string, string | undefined][] = [
+      [CLOUD_TOKEN_KEY, config.cloudToken],
+      [INSTANCE_TOKEN_KEY, config.token],
+    ]
+    for (const [key, value] of pairs) {
+      if (norm(value) === '') secrets.delete(key)
+      else secrets.set(key, value as string)
+      if (norm(secrets.get(key)) !== norm(value)) return false
+    }
+    return true
+  } catch {
+    return false
+  }
 }
 
 function readBlob(): StoredConfig {
@@ -63,16 +93,16 @@ function readBlob(): StoredConfig {
 }
 
 export function loadConfig(): StoredConfig {
-  let blob = readBlob()
-  // Migration: an install from before the split holds its tokens in the
-  // blob. Move them into the SecretStore and rewrite the blob clean — the
-  // user stays signed in, and the plaintext copy is gone from this launch on.
-  if (hasPlaintextToken(blob)) {
-    saveConfig(blob)
-    blob = withoutTokens(blob)
-  }
-  const config: StoredConfig = { ...blob }
+  const blob = readBlob()
+  // Migration / retry: a blob that still holds a token (an install from
+  // before the split, or a save whose secret write failed). Move it into the
+  // SecretStore; only a verified move rewrites the blob clean. A failed move
+  // returns the blob's tokens as they are — the user stays signed in, and the
+  // next load tries again.
+  if (hasPlaintextToken(blob) && !saveConfigVerified(blob)) return blob
+  const config: StoredConfig = withoutTokens(blob)
   const secrets = getSecretStore()
+  if (!secrets.durable) return config
   const cloudToken = secrets.get(CLOUD_TOKEN_KEY)
   const token = secrets.get(INSTANCE_TOKEN_KEY)
   if (cloudToken !== undefined) config.cloudToken = cloudToken
@@ -80,12 +110,18 @@ export function loadConfig(): StoredConfig {
   return config
 }
 
-export function saveConfig(config: StoredConfig): void {
+/** saveConfig, reporting whether the tokens reached the durable store. */
+function saveConfigVerified(config: StoredConfig): boolean {
   // Secrets first: a sign-out (saveConfig({})) must drop the credentials even
   // if the blob write that follows were to fail.
-  writeSecret(CLOUD_TOKEN_KEY, config.cloudToken)
-  writeSecret(INSTANCE_TOKEN_KEY, config.token)
-  getStorage().set(CONFIG_KEY, JSON.stringify(withoutTokens(config)))
+  const moved = persistSecrets(config)
+  const blob = moved ? withoutTokens(config) : stripServerTokens(config)
+  getStorage().set(CONFIG_KEY, JSON.stringify(blob))
+  return moved
+}
+
+export function saveConfig(config: StoredConfig): void {
+  saveConfigVerified(config)
 }
 
 /** Store the Cloud session (device-flow approval or paste-era login). */
