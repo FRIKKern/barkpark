@@ -395,10 +395,17 @@ defmodule BarkparkWeb.SearchChannel do
   # keeps its membership row — which is exactly why the disconnect broadcast
   # exists as well; the two cover different inputs and neither substitutes for
   # the other.
+  #
+  # The TOKEN is re-checked too (r4a realtime authz sweep): `connect/3` verified
+  # it once, and the disconnect broadcast only fires from `Auth.revoke_token/1`.
+  # A bulk revoke (SCIM deprovision) or a natural expiry left the token's own
+  # membership row in place, so `authorize/3` kept answering :ok.
   defp reauthorize(socket) do
     case socket.assigns[:current_workspace] do
       %Tenancy.Workspace{id: ws_id} ->
-        TenancyAuth.authorize(socket.assigns.api_token, ws_id, :read)
+        if Barkpark.Auth.token_live?(socket.assigns.api_token),
+          do: TenancyAuth.authorize(socket.assigns.api_token, ws_id, :read),
+          else: {:error, :forbidden}
 
       # No resolved workspace means this channel never completed a join;
       # fail closed rather than serving on an unresolvable scope.

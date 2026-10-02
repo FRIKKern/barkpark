@@ -260,7 +260,12 @@ defmodule Barkpark.Scim do
           from(t in base, where: t.workspace_id in ^ws_ids or is_nil(t.workspace_id))
       end
 
-    {n, _} = Repo.update_all(query, set: [revoked_at: now])
+    {n, revoked} = Repo.update_all(select(query, [t], t), set: [revoked_at: now])
+
+    # The bulk update skips `Auth.revoke_token/1`, so send its socket teardown
+    # here: an open search socket holding one of these tokens must close now,
+    # not at its next frame (r4a realtime authz sweep).
+    Enum.each(revoked, &Barkpark.Auth.broadcast_socket_teardown/1)
 
     if n > 0 do
       Audit.emit(%{
