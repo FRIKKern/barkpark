@@ -154,17 +154,101 @@ defmodule Barkpark.Plugins.Enablement do
   defp workspace_overrides(nil), do: %{}
 
   defp workspace_overrides(workspace_id) when is_binary(workspace_id) do
-    case Tenancy.get_workspace_by_id(workspace_id) do
-      nil -> %{}
-      workspace -> Tenancy.workspace_plugin_settings(workspace)
+    if Process.get({__MODULE__, :memoized, workspace_id}) do
+      case Process.get({__MODULE__, :memo, workspace_id}) do
+        {:ok, overrides} ->
+          overrides
+
+        nil ->
+          overrides = read_overrides!(workspace_id)
+          Process.put({__MODULE__, :memo, workspace_id}, {:ok, overrides})
+          overrides
+      end
+    else
+      read_overrides!(workspace_id)
     end
   rescue
+    # A failed read is answered with the declaration defaults and is NOT
+    # memoized: the next call reads again.
     _ -> %{}
   catch
     _, _ -> %{}
   end
 
   defp workspace_overrides(_), do: %{}
+
+  defp read_overrides!(workspace_id) do
+    case Tenancy.get_workspace_by_id(workspace_id) do
+      nil -> %{}
+      workspace -> Tenancy.workspace_plugin_settings(workspace)
+    end
+  end
+
+  # ── The per-session memo (task-c8a87043cb286a2f) ───────────────────────────
+  #
+  # WHY. A Studio socket resolves enablement INSIDE render — the shell's doc
+  # actions, the top-menu tabs and their disabled twins each call `effective/1`
+  # — so every render read the workspace row, three times per leg, and every
+  # `presence_diff` re-renders every open Studio socket on the workspace. One
+  # join therefore cost one workspace read per OPEN SESSION (measured: a desk
+  # mount at 59 statements climbed 59, 60, 61 … with each prior live session).
+  #
+  # WHAT. A process that calls `memoize!/1` (the connected Studio LiveView, and
+  # nothing else) keeps the workspace's override map in its process dictionary
+  # after the first read. It is subscribed to `topic/1`, and every workspace
+  # write in `Barkpark.Tenancy` funnels through `bust_default_scope/1`, which
+  # calls `workspace_changed/1` and broadcasts there — a rename, an archive, a
+  # delete, a plugin toggle. The LiveView answers with `forget/1`, so the next
+  # render reads the row again. The ANSWER is never different from an unmemoized
+  # read of the same row; only the number of reads changes. Opt-in per process,
+  # because a request process (the dead render) is reused across keep-alive
+  # requests and receives no broadcast, so it must never memoize.
+
+  @doc "Memoize this workspace's overrides in the CALLING process and subscribe to its changes."
+  @spec memoize!(binary()) :: :ok
+  def memoize!(workspace_id) when is_binary(workspace_id) do
+    unless Process.get({__MODULE__, :memoized, workspace_id}) do
+      :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, topic(workspace_id))
+      Process.put({__MODULE__, :memoized, workspace_id}, true)
+    end
+
+    :ok
+  end
+
+  @doc "Drop the calling process's memo for `workspace_id`; the next `effective/1` reads the row."
+  @spec forget(binary()) :: :ok
+  def forget(workspace_id) do
+    Process.delete({__MODULE__, :memo, workspace_id})
+    :ok
+  end
+
+  @doc "The PubSub topic a workspace write is announced on."
+  @spec topic(binary()) :: String.t()
+  def topic(workspace_id), do: "workspace_plugins:" <> workspace_id
+
+  @doc """
+  Announce a workspace write to every process memoizing it. Takes the write's
+  RESULT and passes any other shape through untouched, so it can sit in a pipe.
+  """
+  def workspace_changed({:ok, %Barkpark.Tenancy.Workspace{id: id}} = result) when is_binary(id) do
+    announce(id)
+    result
+  end
+
+  def workspace_changed(result), do: result
+
+  @doc "Tell every process memoizing `workspace_id` that its row changed."
+  @spec announce(binary()) :: :ok
+  def announce(workspace_id) when is_binary(workspace_id) do
+    _ =
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        topic(workspace_id),
+        {:plugin_enablement_changed, workspace_id}
+      )
+
+    :ok
+  end
 
   # ── Merge ──────────────────────────────────────────────────────────────────
 

@@ -79,6 +79,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
         _ ->
           :ok
       end
+
+      # PERF ONLY (task-c8a87043cb286a2f): this socket's renders resolve plugin
+      # enablement several times each, and presence re-renders every open
+      # socket. Read the workspace's overrides once, keep them until a workspace
+      # write announces a change (handle_info below). Same answer, fewer reads.
+      case socket.assigns[:current_workspace] do
+        %{id: ws_id} when is_binary(ws_id) -> Barkpark.Plugins.Enablement.memoize!(ws_id)
+        _ -> :ok
+      end
     end
 
     # ag-studio-capability-hide: the LOAD-BEARING server-side deny-gate. Attach
@@ -360,6 +369,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   # Fall-through: a stray PubSub message must not FunctionClauseError-crash the
   # session (mirrors bulldocs_live.ex). Keep LAST among handle_info/2 clauses.
+  # A workspace write (plugin toggle, rename, archive, delete): forget the
+  # memoized enablement so the next render reads the row, exactly as an
+  # unmemoized socket would. Nothing is re-rendered here — the same as before
+  # the memo, when a settings change surfaced on the socket's next render.
+  def handle_info({:plugin_enablement_changed, ws_id}, socket) do
+    Barkpark.Plugins.Enablement.forget(ws_id)
+    {:noreply, socket}
+  end
+
   def handle_info(_other, socket), do: {:noreply, socket}
 
   # ── handle_event/3 routing heads ────────────────────────────────────────────

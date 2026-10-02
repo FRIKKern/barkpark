@@ -623,7 +623,9 @@ defmodule Barkpark.Tenancy do
   # wrong, whereas deciding not to bust can.
   defp bust_default_scope(result) do
     DefaultScopeCache.invalidate()
-    result
+    # Every workspace write funnels here; a Studio socket memoizing this
+    # workspace's plugin enablement forgets it (task-c8a87043cb286a2f).
+    Barkpark.Plugins.Enablement.workspace_changed(result)
   end
 
   defp scope_default_project_id do
