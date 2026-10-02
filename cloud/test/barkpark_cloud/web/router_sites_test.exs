@@ -461,14 +461,14 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
         call(
           :post,
           "/v1/sites/#{site.id}/deploy",
-          %{git_ref: "main", artifact_url: "file:///tmp/artifact.tar.gz"},
+          %{git_ref: "main", artifact_url: "https://artifacts.example.com/artifact.tar.gz"},
           token
         )
 
       assert conn.status == 201
       body = json_body(conn)
       assert body["deployment"]["status"] == "queued"
-      assert body["deployment"]["artifact_url"] == "file:///tmp/artifact.tar.gz"
+      assert body["deployment"]["artifact_url"] == "https://artifacts.example.com/artifact.tar.gz"
     end
 
     test "no artifact AND no connected repo → 422 no_build_source" do
@@ -2880,7 +2880,7 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
         call(
           :post,
           "/v1/sites/#{site_id}/deploy",
-          %{git_ref: "main", artifact_url: "file:///tmp/demo.tar.gz"},
+          %{git_ref: "main", artifact_url: "https://artifacts.example.com/demo.tar.gz"},
           token
         )
 

@@ -1124,7 +1124,7 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
         call(
           :post,
           "/v1/sites/#{site.id}/deploy",
-          %{git_ref: "main", artifact_url: "file:///tmp/build.tar.gz"},
+          %{git_ref: "main", artifact_url: "https://artifacts.example.com/build.tar.gz"},
           token
         )
 

@@ -101,7 +101,10 @@ defmodule BarkparkCloud.Web.RouterDeployGitRefLengthTest do
         call(
           :post,
           "/v1/sites/#{site.id}/deploy",
-          %{git_ref: @way_over_ref, artifact_url: "file:///tmp/artifact.tar.gz"},
+          %{
+            git_ref: @way_over_ref,
+            artifact_url: "https://artifacts.example.com/artifact.tar.gz"
+          },
           token
         )
 
@@ -125,7 +128,7 @@ defmodule BarkparkCloud.Web.RouterDeployGitRefLengthTest do
         call(
           :post,
           "/v1/sites/#{site.id}/deploy",
-          %{git_ref: @over_ref, artifact_url: "file:///tmp/artifact.tar.gz"},
+          %{git_ref: @over_ref, artifact_url: "https://artifacts.example.com/artifact.tar.gz"},
           token
         )
 
@@ -140,7 +143,7 @@ defmodule BarkparkCloud.Web.RouterDeployGitRefLengthTest do
         call(
           :post,
           "/v1/sites/#{site.id}/deploy",
-          %{git_ref: @max_ref, artifact_url: "file:///tmp/artifact.tar.gz"},
+          %{git_ref: @max_ref, artifact_url: "https://artifacts.example.com/artifact.tar.gz"},
           token
         )
 

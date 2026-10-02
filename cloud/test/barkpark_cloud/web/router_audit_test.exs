@@ -1382,7 +1382,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
         call(
           :post,
           "/v1/sites/#{site.id}/deploy",
-          %{git_ref: "abc123", artifact_url: "file:///tmp/app.tgz"},
+          %{git_ref: "abc123", artifact_url: "https://artifacts.example.com/app.tgz"},
           token
         )
 
