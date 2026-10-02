@@ -319,6 +319,40 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       %{ticket: ticket, asset_id: asset_id}
     end
 
+    # The operator timeline labels each attachment with the uploaded file's
+    # name. It used to print the raw asset UUID (`📎 1426cec4-…`).
+    test "InboxLive.attachment_names/3 resolves the uploaded file name, ticket-scoped",
+         %{ticket: ticket, asset_id: asset_id} do
+      thread = %{
+        "id" => ticket,
+        "messages" => [
+          %{"author_kind" => "submitter", "attachments" => [asset_id, "no-such-asset"]},
+          %{"author_kind" => "operator", "attachments" => []}
+        ]
+      }
+
+      assert Barkpark.Plugins.Tickets.InboxLive.attachment_names(thread, @dataset, []) ==
+               %{asset_id => "doc.pdf"}
+
+      # The Studio passes its full scope (workspace + project); the stored file
+      # carries no project, so the lookup must resolve by workspace only — the
+      # same scope the operator download route uses — or every name is lost.
+      assert Barkpark.Plugins.Tickets.InboxLive.attachment_names(
+               thread,
+               @dataset,
+               project_id: Ecto.UUID.generate()
+             ) == %{asset_id => "doc.pdf"}
+
+      # Scoped to the ticket: the same id read under another ticket names nothing.
+      other = insert_ticket!("key-B")
+
+      assert Barkpark.Plugins.Tickets.InboxLive.attachment_names(
+               %{thread | "id" => other},
+               @dataset,
+               []
+             ) == %{}
+    end
+
     test "owning key streams the exact bytes back → 200", %{ticket: ticket, asset_id: asset_id} do
       conn = submitter_conn("key-A")
       conn = Controller.show(conn, %{"id" => ticket, "asset_id" => asset_id})
