@@ -32,7 +32,8 @@ import { runToTiptap } from "./run-convert.js";
 //   * the 7 NATIVE field-* types (string/slug/text/boolean/select/datetime/color).
 //
 // EXCLUDED on purpose (these EXIST in SLASH_ITEMS but cannot be DIRECT-inserted):
-//   * sheet / embed            — REFERENCES; need a target/ref a slash pick can't supply.
+//   * embed                    — a REFERENCE by note title; a sheet (by doc id) IS insertable:
+//                                its atom mounts the reference picker for an empty ref.
 //   * composite / arrayOf / codelist / localizedText
 //                              — object boundaries (no canvas node-view).
 //   * eyebrow / byline / ingress / pullquote
@@ -80,6 +81,11 @@ export const CANVAS_SLASH_TYPES = new Set([
   "field-select",
   "field-datetime",
   "field-color",
+  // A sheet REFERENCE inserts with an empty `ref`: the bpSheet atom mounts its
+  // reference picker (pd-ee-sheet-embed-retarget), so the author picks the sheet
+  // right on the chip, and the server hydrates the snapshot on save. Without this
+  // there was NO way to embed a sheet from the editor (run-4 lane C dogfood).
+  "sheet",
 ]);
 
 // canvasDefaultBlock(type) → the minimal VALID portable-doc block for `type`,
@@ -157,6 +163,8 @@ export function canvasDefaultBlock(type) {
       return { id: null, type: "divider" };
     case "diagram":
       return { id: null, type: "diagram", source: "", caption: "" };
+    case "sheet":
+      return { id: null, type: "sheet", ref: "" };
     case "action":
       return { id: null, type: "action", href: "", label: "" };
     case "image":

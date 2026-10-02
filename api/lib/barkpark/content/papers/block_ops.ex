@@ -1001,7 +1001,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # additive + idempotent — they only fill a missing id / coerce a string
          # item, never disturb an op-supplied id or a canonical inline item. Run
          # BEFORE locate so the affected block + fragment_html see the final list.
-         new_blocks = patched |> ensure_block_ids() |> normalize_render_shapes(),
+         new_blocks =
+           patched
+           |> ensure_block_ids()
+           |> normalize_render_shapes()
+           |> hydrate_changed_sheet_blocks(blocks, doc, dataset, slug),
          # Field-encryption CHOKEPOINT (Phase 2): encrypt marked bound block
          # values BEFORE locate/render/project, so the streaming editor stores
          # ciphertext-at-rest and the delta fragment + body_html cache redact the
@@ -1650,6 +1654,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         # current rev, no write or broadcast. Canonical ops keep their semantics.
         {:ok, blocks, paper_current_rev(doc), nil}
       else
+        new_blocks = hydrate_changed_sheet_blocks(new_blocks, blocks, doc, dataset, slug)
         rev = paper_next_rev(doc)
         style = get_in(doc.content || %{}, ["style"])
         scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
@@ -3119,6 +3124,54 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp reject_hollow_result(_no_blocks_list), do: :ok
+
+  # Sheet-embed hydration on the op paths (sheets-engine.md §Embed pipeline):
+  # a paper save that adds a `{"type":"sheet","ref":…}` block, or retargets
+  # one, fills its snapshot from the referenced sheet. `upsert_blocks_doc`
+  # hydrates every sheet block; the canvas op paths hydrate only a sheet block
+  # that is NEW (id absent before the op) or whose ref/tab CHANGED, so an
+  # ordinary typing batch never queries sheets. The chip retarget clears the
+  # old snapshot and relies on this to draw the new grid. The batch path runs
+  # it after the contextual-history exactness check.
+  defp hydrate_changed_sheet_blocks(new_blocks, old_blocks, %Document{} = doc, dataset, slug)
+       when is_list(new_blocks) and is_list(old_blocks) do
+    before =
+      for %{"type" => "sheet", "id" => id} = block <- old_blocks,
+          into: %{},
+          do: {id, {block["ref"], block["tab"]}}
+
+    changed? = fn
+      %{"type" => "sheet", "ref" => ref} = block when is_binary(ref) and ref != "" ->
+        Map.get(before, block["id"]) != {ref, block["tab"]}
+
+      _ ->
+        false
+    end
+
+    case Enum.filter(new_blocks, changed?) do
+      [] ->
+        new_blocks
+
+      changed ->
+        scope = %{
+          "dataset" => dataset,
+          "dataset_id" => doc.dataset_id,
+          "workspace_id" => doc.workspace_id
+        }
+
+        hydrated =
+          changed
+          |> Sheets.hydrate_sheet_blocks(scope, slug)
+          |> Map.new(&{&1["id"], &1})
+
+        Enum.map(new_blocks, fn block ->
+          if changed?.(block), do: Map.get(hydrated, block["id"], block), else: block
+        end)
+    end
+  end
+
+  defp hydrate_changed_sheet_blocks(new_blocks, _old_blocks, _doc, _dataset, _slug),
+    do: new_blocks
 
   # Quality gate, op-path RATCHET (p-quality-gate): halt only on the
   # non-hollow → hollow edge. Fresh hollow papers (seeded title + empty

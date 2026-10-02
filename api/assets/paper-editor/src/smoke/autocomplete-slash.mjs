@@ -280,12 +280,14 @@ check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
   // terminal / figure / action / table are NOW insertable (their node-views mount a
   // minimal valid default), so they moved OUT of this excluded set.
   for (const t of [
-    "sheet", "embed", "composite", "arrayOf", "codelist", "localizedText",
+    "embed", "composite", "arrayOf", "codelist", "localizedText",
     "field-image", "field-reference", "eyebrow", "byline", "ingress", "pullquote",
   ]) {
     assert.ok(!CANVAS_SLASH_TYPES.has(t), `${t} must NOT be insertable`);
   }
-  assert.equal(CANVAS_SLASH_TYPES.size, 33, "exactly 33 insertable types (+ note, + stage, + card, + checklist, + quote, + image, + toggle, + steps, + tabs, + equation, + footnotes, + contents, + video)");
+  assert.equal(CANVAS_SLASH_TYPES.size, 34, "exactly 34 insertable types (+ note, + stage, + card, + checklist, + quote, + image, + toggle, + steps, + tabs, + equation, + footnotes, + contents, + video, + sheet)");
+  // A sheet inserts as an empty reference; its atom mounts the reference picker.
+  assert.deepEqual(canvasDefaultBlock("sheet"), { id: null, type: "sheet", ref: "" });
 });
 
 // (d) THE CALLOUT SHORTHAND — `> [!warn]- ` replaces the para with a bpCallout node
