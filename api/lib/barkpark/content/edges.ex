@@ -153,6 +153,56 @@ defmodule Barkpark.Content.Edges do
     # single disconnect pass then one empty confirming scan — the same set of
     # docs is disconnected as before.
     drain_scalar_referencers(doc_id, pub_id, dataset, opts, MapSet.new())
+
+    # arrayOf-of-reference holders, read from the DOCUMENTS themselves. The edge
+    # scan above sees only what the async projector has already materialised: a
+    # referrer written moments before the disconnect — or on an instance whose
+    # projector has not caught up — kept its reference, published row included.
+    # Both stored shapes (bare id, `{"_ref": id}`) are matched; drained in passes
+    # exactly like the scalar scan.
+    drain_array_referencers(pub_id, dataset, opts, MapSet.new())
+  end
+
+  defp drain_array_referencers(pub_id, dataset, opts, attempted) do
+    fresh =
+      pub_id
+      |> find_array_referencing_docs(dataset, opts)
+      |> Enum.reject(fn key -> MapSet.member?(attempted, key) end)
+
+    case fresh do
+      [] ->
+        :ok
+
+      _ ->
+        Enum.each(fresh, fn {ref_doc_id, type} ->
+          disconnect_one_source(ref_doc_id, type, pub_id, dataset, opts)
+        end)
+
+        drain_array_referencers(
+          pub_id,
+          dataset,
+          opts,
+          Enum.reduce(fresh, attempted, &MapSet.put(&2, &1))
+        )
+    end
+  end
+
+  # `{doc_id, type}` of every stored row (draft or published) holding `pub_id`
+  # in an arrayOf-of-reference field, under the caller's scope.
+  defp find_array_referencing_docs(pub_id, dataset, opts) do
+    for schema <- Content.list_schemas(dataset, opts),
+        field <- schema.fields || [],
+        get_in(field, ["of", "type"]) == "reference",
+        doc <-
+          Barkpark.Content.Query.list_array_reference_holders(
+            schema.name,
+            dataset,
+            field["name"],
+            pub_id,
+            opts
+          ),
+        uniq: true,
+        do: {doc.doc_id, schema.name}
   end
 
   # Repeatedly scan + disconnect scalar referencers until none remain. Bounded:
