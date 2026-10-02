@@ -600,7 +600,36 @@ defmodule Barkpark.Plugins.Tasks do
       the `type:listener` corpus globally (PDF-D19).
   """
   @impl Barkpark.Plugin
-  def desk_items(dataset) do
+  def desk_items(dataset), do: desk_items_for(task_schema_present?(dataset))
+
+  # A workspace-scoped desk build skips the presence probe
+  # (task-90c3a512181b8537). The probe is `Content.get_schema/2` with NO
+  # workspace: it asks whether ANY workspace has a `task` schema in this
+  # dataset. Under a `:workspace_id` scope, `Structure.scope_plugin_nodes/4`
+  # already gates the Tasks list on the caller's OWN catalog (`task` is
+  # plugin-owned, so the list is kept iff it is in scope). There the probe is
+  # redundant and reads other workspaces' rows. So a scoped build emits the
+  # list and lets the host gate decide. An unscoped build keeps the probe,
+  # because the flat desk reads every tenant by design. With no scope this is
+  # exactly `desk_items/1`, so the registry's default-lift fingerprint
+  # (`resolver_is_default_lift?/4`) still matches.
+  @impl Barkpark.Plugin
+  def resolve_desk_items(prev, ctx) do
+    items =
+      if workspace_scoped?(ctx),
+        do: desk_items_for(true),
+        else: desk_items(Map.get(ctx, :dataset, "production"))
+
+    prev ++ items
+  end
+
+  # Same truthiness test as the host gate (`Keyword.get(opts, :workspace_id)`).
+  defp workspace_scoped?(%{scope: scope}) when is_list(scope),
+    do: Keyword.get(scope, :workspace_id) not in [nil, false]
+
+  defp workspace_scoped?(_ctx), do: false
+
+  defp desk_items_for(task_schema_present?) do
     # The Barkpark Projects board link — the visual kanban over type:task docs
     # (BoardLive at /admin/projects). Ungated by schema presence: the board
     # reads the task corpus GLOBALLY, so it is reachable from any dataset's desk
@@ -621,7 +650,7 @@ defmodule Barkpark.Plugins.Tasks do
     fleet_link = %{type: :link, label: "Fleet", path: "/admin/fleet", icon: "activity"}
 
     task_list =
-      if task_schema_present?(dataset) do
+      if task_schema_present? do
         [%{type: :document_list, label: "Tasks", doc_type: "task", icon: "✅"}]
       else
         []

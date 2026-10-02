@@ -193,13 +193,32 @@ defmodule Barkpark.Plugins.Tickets do
   `ticket` schema existing in the requested dataset (mirrors tasks.ex).
   """
   @impl Barkpark.Plugin
-  def desk_items(dataset) do
-    if ticket_schema_present?(dataset) do
-      [%{type: :document_list, label: "Tickets", doc_type: "ticket", icon: "🎫"}]
-    else
-      []
-    end
+  def desk_items(dataset), do: desk_items_for(ticket_schema_present?(dataset))
+
+  # A workspace-scoped build skips the unscoped presence probe: the host gate
+  # (`Structure.scope_plugin_nodes/4`) decides `ticket` against the caller's
+  # own catalog. Same rule and reasoning as `Barkpark.Plugins.Tasks`
+  # (task-90c3a512181b8537). With no scope this is exactly `desk_items/1`.
+  @impl Barkpark.Plugin
+  def resolve_desk_items(prev, ctx) do
+    items =
+      if workspace_scoped?(ctx),
+        do: desk_items_for(true),
+        else: desk_items(Map.get(ctx, :dataset, "production"))
+
+    prev ++ items
   end
+
+  # Same truthiness test as the host gate (`Keyword.get(opts, :workspace_id)`).
+  defp workspace_scoped?(%{scope: scope}) when is_list(scope),
+    do: Keyword.get(scope, :workspace_id) not in [nil, false]
+
+  defp workspace_scoped?(_ctx), do: false
+
+  defp desk_items_for(true),
+    do: [%{type: :document_list, label: "Tickets", doc_type: "ticket", icon: "🎫"}]
+
+  defp desk_items_for(false), do: []
 
   @doc """
   Adds the operator inbox to the shared Studio top menu.
