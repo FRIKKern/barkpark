@@ -582,7 +582,7 @@ defmodule BarkparkCloud.NotificationsTest do
       ref = make_ref()
       test_pid = self()
 
-      :telemetry.attach(
+      BarkparkCloud.TelemetryTap.attach(
         "covered-#{inspect(ref)}",
         [:barkpark_cloud, :notifications, :fleet_digest, :settled],
         fn _event, measurements, metadata, _cfg ->
@@ -591,7 +591,7 @@ defmodule BarkparkCloud.NotificationsTest do
         nil
       )
 
-      on_exit(fn -> :telemetry.detach("covered-#{inspect(ref)}") end)
+      on_exit(fn -> BarkparkCloud.TelemetryTap.detach("covered-#{inspect(ref)}") end)
 
       assert {:ok, %{sent: 1}} = Notifications.deliver_fleet_digest(fleet)
 

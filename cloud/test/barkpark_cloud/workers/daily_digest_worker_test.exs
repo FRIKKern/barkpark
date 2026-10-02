@@ -336,7 +336,7 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     test = self()
     handler = "digest-probe-#{System.unique_integer([:positive])}"
 
-    :telemetry.attach(
+    BarkparkCloud.TelemetryTap.attach(
       handler,
       [:barkpark_cloud, :notifications, :fleet_digest, :settled],
       fn _event, measurements, metadata, _ ->
@@ -345,7 +345,7 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
       nil
     )
 
-    on_exit(fn -> :telemetry.detach(handler) end)
+    on_exit(fn -> BarkparkCloud.TelemetryTap.detach(handler) end)
     ref
   end
 

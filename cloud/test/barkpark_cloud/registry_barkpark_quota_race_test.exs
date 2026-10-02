@@ -91,7 +91,7 @@ defmodule BarkparkCloud.RegistryBarkparkQuotaRaceTest do
     me = self()
     handler = {__MODULE__, ref}
 
-    :telemetry.attach(
+    BarkparkCloud.TelemetryTap.attach(
       handler,
       [:barkpark_cloud, :repo, :query],
       fn _event, _measure, meta, _cfg -> send(me, {ref, {meta.query, meta.params}}) end,
@@ -101,7 +101,7 @@ defmodule BarkparkCloud.RegistryBarkparkQuotaRaceTest do
     try do
       fun.()
     after
-      :telemetry.detach(handler)
+      BarkparkCloud.TelemetryTap.detach(handler)
     end
 
     drain(ref, [])

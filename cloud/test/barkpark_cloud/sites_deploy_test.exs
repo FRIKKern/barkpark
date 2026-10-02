@@ -2217,7 +2217,7 @@ defmodule BarkparkCloud.SitesDeployTest do
       ref = make_ref()
       test = self()
 
-      :telemetry.attach(
+      BarkparkCloud.TelemetryTap.attach(
         "grace-#{inspect(ref)}",
         [:barkpark_cloud, :sites, :deploy, :grace],
         fn event, measurements, metadata, _ ->
@@ -2226,7 +2226,7 @@ defmodule BarkparkCloud.SitesDeployTest do
         nil
       )
 
-      on_exit(fn -> :telemetry.detach("grace-#{inspect(ref)}") end)
+      on_exit(fn -> BarkparkCloud.TelemetryTap.detach("grace-#{inspect(ref)}") end)
       :ok
     end
 

@@ -56,7 +56,7 @@ defmodule BarkparkCloud.Web.RouterMeMembershipReadCountTest do
     test = self()
     handler_id = {__MODULE__, ref}
 
-    :telemetry.attach(
+    BarkparkCloud.TelemetryTap.attach(
       handler_id,
       [:barkpark_cloud, :repo, :query],
       fn _event, _measure, meta, _config ->
@@ -68,7 +68,7 @@ defmodule BarkparkCloud.Web.RouterMeMembershipReadCountTest do
     try do
       fun.()
     after
-      :telemetry.detach(handler_id)
+      BarkparkCloud.TelemetryTap.detach(handler_id)
     end
 
     ref
