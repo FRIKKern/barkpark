@@ -28,8 +28,8 @@ function liveViewMorph(window, from, to) {
       import.meta.url,
     ), "utf8");
     const instrumented = liveViewSource.replace(
-      ",rt=hn;",
-      ",rt=hn;window.__bpPaperLinksMorphdom=rt;",
+      ",ot=dn;",
+      ",ot=dn;window.__bpPaperLinksMorphdom=ot;",
     );
     assert.notEqual(instrumented, liveViewSource,
       "the shipped LiveView bundle exposes its vendored morphdom in this test");
