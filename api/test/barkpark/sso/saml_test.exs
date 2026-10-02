@@ -154,6 +154,68 @@ defmodule Barkpark.Sso.SamlTest do
     assert fp == "sha256:" <> Base.encode64(:crypto.hash(:sha256, i.cert_der))
   end
 
+  # EEF-CVE-2026-28809 (esaml XXE, no fixed Hex release). The ACS and SLO
+  # bodies are attacker-controlled and parsed before any signature check.
+  describe "untrusted XML: DOCTYPE refused before the parse" do
+    setup do
+      dir = Path.join(System.tmp_dir!(), "saml-xxe-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      secret = Path.join(dir, "secret.txt")
+      File.write!(secret, "XXE-CANARY-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf!(dir) end)
+      %{secret: secret}
+    end
+
+    defp xxe_response(secret) do
+      """
+      <?xml version="1.0"?>
+      <!DOCTYPE samlp:Response [<!ENTITY xxe SYSTEM "file://#{secret}">]>
+      <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" Version="2.0" ID="_x1" IssueInstant="2026-01-01T00:00:00Z">
+        <saml:Issuer>&xxe;</saml:Issuer>
+      </samlp:Response>
+      """
+    end
+
+    test "an XXE SAMLResponse is refused with an error tuple, never parsed", %{secret: secret} do
+      i = idp()
+      {_org, c} = connection(i.cert_pem)
+
+      assert {:error, :doctype_not_permitted} = Saml.consume(c, xxe_response(secret), @slug)
+    end
+
+    test "an XXE LogoutRequest is refused with an error tuple, never parsed", %{secret: secret} do
+      i = idp()
+      {_org, c} = connection(i.cert_pem, %{idp_slo_url: "https://idp.example.com/slo"})
+
+      xml = """
+      <?xml version="1.0"?>
+      <!DOCTYPE samlp:LogoutRequest [<!ENTITY xxe SYSTEM "file://#{secret}">]>
+      <samlp:LogoutRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" Version="2.0" ID="_lr3" IssueInstant="2026-01-01T00:00:00Z">
+        <saml:NameID>&xxe;</saml:NameID>
+      </samlp:LogoutRequest>
+      """
+
+      assert {:error, :doctype_not_permitted} = Saml.consume_logout_request(c, xml, @slug)
+    end
+
+    test "a DOCTYPE with no entities (external DTD) is refused too, in any case" do
+      for decl <- [~s(<!DOCTYPE r SYSTEM "http://127.0.0.1:9/x.dtd">), ~s(<!doctype r>)] do
+        assert {:error, :doctype_not_permitted} = Saml.parse_untrusted_xml(decl <> "<r/>")
+      end
+    end
+
+    test "the xmerl layer below the guard never expands an entity and never exits" do
+      # An undeclared entity reference reaches xmerl (no DOCTYPE to refuse);
+      # xmerl answers with an EXIT, which must come back as an error tuple.
+      assert {:error, {:parse_error, _}} = Saml.parse_untrusted_xml("<r>&xxe;</r>")
+      assert {:error, {:parse_error, _}} = Saml.parse_untrusted_xml("<r><unclosed></r>")
+    end
+
+    test "CONTROL: a DOCTYPE-free document still parses" do
+      assert {:ok, _doc} = Saml.parse_untrusted_xml(~s(<?xml version="1.0"?><r a="1">x</r>))
+    end
+  end
+
   describe "Single Logout" do
     test "a validly-signed IdP LogoutRequest yields its name_id + session_index" do
       i = idp()
