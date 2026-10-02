@@ -34,7 +34,12 @@ defmodule BarkparkWeb.HistoryController do
       )
 
     has_more = length(fetched) > limit
-    revisions = fetched |> Enum.take(limit) |> Enum.map(&render_revision/1)
+    # An erased user's stamped email is never served (Accounts.Privacy).
+    revisions =
+      fetched
+      |> Enum.take(limit)
+      |> Barkpark.Accounts.Privacy.redact_actor_labels()
+      |> Enum.map(&render_revision/1)
 
     json(conn, %{
       revisions: revisions,
@@ -59,6 +64,7 @@ defmodule BarkparkWeb.HistoryController do
         end
 
       caller_context = CallerContext.from_conn(conn)
+      [rev] = Barkpark.Accounts.Privacy.redact_actor_labels([rev])
       json(conn, %{revision: render_revision_full(rev, schema, caller_context)})
     else
       {:error, :invalid_uuid} -> not_found(conn, "revision not found")
