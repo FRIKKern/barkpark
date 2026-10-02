@@ -581,6 +581,9 @@ function hasOnlyBpKeys(attrs) {
 const CANVAS_SLASH_ITEMS = [
   ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)).flatMap((it) =>
     it.type === "list" ? [it, { group: "Text", type: "checklist", label: "Checklist", hint: "☑", desc: "to-do items" }] : [it]),
+  // Canvas-only, like the checklist row: SLASH_ITEMS also feeds the per-block menu,
+  // whose server default_block/2 has no sheet clause.
+  { group: "Visual", type: "sheet", label: "Sheet", hint: "▦", desc: "embed a spreadsheet" },
   ...CANVAS_COMPOUND_INSERTS.map((c) => ({
     group: "Starters",
     type: c.kind,
