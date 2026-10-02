@@ -255,6 +255,12 @@
       this._collectionsEl = this.querySelector(".bp-ae-collections");
       this._gridWrapEl = this.querySelector(".bp-ae-grid-wrap");
       this._gridEl = this.querySelector(".bp-ae-grid");
+      // `error` does not bubble; listen in the capture phase so one handler on
+      // the explorer covers every thumbnail in the grid, list and filmstrip.
+      if (!this._thumbErrorWired) {
+        this._thumbErrorWired = true;
+        this.addEventListener("error", (e) => this._onThumbError(e), true);
+      }
       this._loadMoreEl = this.querySelector(".bp-ae-load-more");
       this._filmstripEl = this.querySelector(".bp-ae-filmstrip-track");
       this._searchEl = this.querySelector(".bp-ae-search");
@@ -1142,17 +1148,24 @@
               : "FILE";
     }
 
-    // onerror attribute that swaps a broken <img> for the same file-icon
-    // placeholder used for non-image kinds, so a deleted/unprocessed/404'd
-    // asset never shows the browser's broken-image glyph.
+    // Marks a thumbnail <img> for the delegated error handler (`_onThumbError`,
+    // wired once beside the grid lookup), which swaps a broken image for the
+    // same file-icon placeholder used for non-image kinds — so a deleted /
+    // unprocessed / 404'd asset never shows the browser's broken-image glyph.
+    // NOT an inline `onerror` attribute: the Studio CSP forbids inline event
+    // handlers, so the old attribute never ran — the browser blocked it, logged
+    // a CSP violation, and the broken glyph stayed.
     _thumbFallbackAttr(kind) {
-      const label = this._thumbLabel(kind);
-      return (
-        ' onerror="this.onerror=null;this.outerHTML=&quot;' +
-        "<div class='bp-ae-file-icon'>" +
-        label +
-        "</div>&quot;\""
-      );
+      return ' data-bp-thumb-fallback="' + esc(this._thumbLabel(kind)) + '"';
+    }
+
+    _onThumbError(e) {
+      const img = e.target;
+      if (!img || img.tagName !== "IMG" || !img.hasAttribute("data-bp-thumb-fallback")) return;
+      const icon = document.createElement("div");
+      icon.className = "bp-ae-file-icon";
+      icon.textContent = img.getAttribute("data-bp-thumb-fallback");
+      img.replaceWith(icon);
     }
 
     _cardThumb(doc) {
