@@ -216,14 +216,32 @@ defmodule BarkparkWeb.Endpoint do
       # this branch it escapes parse_body → a generic 413 that is NOT the
       # canonical {error:{code,message,request_id}} envelope. Mirror the
       # ParseError branch so an oversize upload returns a typed, enveloped 413.
+      #
+      # The limit named in the message and hint is the one THIS route applied
+      # (`body_length/1`): the code-keyed default hint says "100 MB", which told
+      # an anonymous form poster refused at 64 KB to keep their 200 KB body.
       Plug.Parsers.RequestTooLargeError ->
-        conn
-        |> parse_error_json(413, %{
-          code: "payload_too_large",
-          message: "request body exceeds the maximum allowed size"
-        })
+        limit = format_bytes(body_length(conn))
+
+        BarkparkWeb.ErrorResponse.emit_custom(
+          conn,
+          413,
+          "payload_too_large",
+          "request body exceeds the maximum allowed size (#{limit} for this route)",
+          %{},
+          "Reduce the request body — this route accepts at most #{limit}. Upload a smaller file or split the request."
+        )
     end
   end
+
+  defp format_bytes(bytes) when bytes >= 1_000_000 and rem(bytes, 1_000_000) == 0,
+    do: "#{div(bytes, 1_000_000)} MB"
+
+  defp format_bytes(bytes) when bytes >= 1024 * 1024,
+    do: "#{Float.round(bytes / (1024 * 1024), 1)} MiB"
+
+  defp format_bytes(bytes) when bytes >= 1024, do: "#{div(bytes, 1024)} KiB"
+  defp format_bytes(bytes), do: "#{bytes} bytes"
 
   # Emit a canonical §9 error envelope from parse_body's rescue (it runs before
   # any controller, so there's no action_fallback here). Routes through the ONE
