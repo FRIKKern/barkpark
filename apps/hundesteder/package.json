@@ -7,11 +7,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
     "test": "node --test --test-reporter=spec __tests__/*.test.ts"
   },
   "dependencies": {
-    "next": "15.5.27",
+    "next": "16.3.8",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
