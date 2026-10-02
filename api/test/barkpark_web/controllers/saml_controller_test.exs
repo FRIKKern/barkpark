@@ -389,6 +389,42 @@ defmodule BarkparkWeb.SamlControllerTest do
            |> json_response(400)
   end
 
+  # EEF-CVE-2026-28809 (esaml XXE): a DOCTYPE-bearing body used to reach
+  # xmerl, whose entity refusal is an EXIT the action never caught — a 500.
+  # It is now refused before the parse, as an ordinary rejected assertion.
+  test "POST ACS with a DOCTYPE/XXE SAMLResponse is a 401 refusal, not a 500", %{conn: conn} do
+    i = idp()
+    setup_conn(i.cert_pem)
+
+    xml = """
+    <?xml version="1.0"?>
+    <!DOCTYPE r [<!ENTITY xxe SYSTEM "file:///etc/hosts">]>
+    <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="_x1" Version="2.0">&xxe;</samlp:Response>
+    """
+
+    body =
+      conn
+      |> post("/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => Base.encode64(xml)})
+      |> json_response(401)
+
+    assert body["error"]["code"] == "unauthorized"
+  end
+
+  test "POST SLO with a DOCTYPE/XXE SAMLRequest is a 401 refusal, not a 500", %{conn: conn} do
+    i = idp()
+    setup_conn(i.cert_pem, %{idp_slo_url: "https://idp.example.com/slo"})
+
+    xml = """
+    <?xml version="1.0"?>
+    <!DOCTYPE r [<!ENTITY xxe SYSTEM "file:///etc/hosts">]>
+    <samlp:LogoutRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="_l1" Version="2.0">&xxe;</samlp:LogoutRequest>
+    """
+
+    assert conn
+           |> post("/v1/auth/saml/#{@slug}/slo", %{"SAMLRequest" => Base.encode64(xml)})
+           |> json_response(401)
+  end
+
   test "POST SLO with a LIST-valued SAMLRequest is 400, not a 500", %{conn: conn} do
     i = idp()
     setup_conn(i.cert_pem, %{idp_slo_url: "https://idp.example.com/slo"})
