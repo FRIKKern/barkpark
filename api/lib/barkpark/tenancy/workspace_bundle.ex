@@ -606,15 +606,26 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         fault
 
       nil ->
-        if ctx.into_dataset do
-          # The remap stages every member it needs before writing, so it
-          # needs the same membership refusal the restore path runs first.
-          assert_member_tables!(manifest)
-          sources = Map.new(dumps, fn {table, dump} -> {table, copy_source(dump)} end)
-          DatasetRemap.run(manifest, sources, ctx.into_dataset)
-        else
-          run_import(manifest, dumps, mode, ctx)
+        result =
+          if ctx.into_dataset do
+            # The remap stages every member it needs before writing, so it
+            # needs the same membership refusal the restore path runs first.
+            assert_member_tables!(manifest)
+            sources = Map.new(dumps, fn {table, dump} -> {table, copy_source(dump)} end)
+            DatasetRemap.run(manifest, sources, ctx.into_dataset)
+          else
+            run_import(manifest, dumps, mode, ctx)
+          end
+
+        # The workspaces row arrives by raw COPY, past every `Tenancy` write
+        # that announces a change; announce it here, AFTER the transaction has
+        # committed, so a Studio socket memoizing this workspace's plugin
+        # enablement reads the imported row (task-c8a87043cb286a2f).
+        with {:ok, _} <- result, ws_id when is_binary(ws_id) <- manifest["workspace_id"] do
+          Barkpark.Plugins.Enablement.announce(ws_id)
         end
+
+        result
     end
   end
 
