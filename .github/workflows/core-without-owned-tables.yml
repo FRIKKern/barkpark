@@ -77,7 +77,7 @@ jobs:
     steps:
       # fetch-depth: 0 for the same reason elixir.yml's mix-test and the nightly
       # carry it: suite tests walk git history and `git describe --tags`.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

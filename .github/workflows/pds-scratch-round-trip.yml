@@ -71,7 +71,7 @@ jobs:
       # is not "true", so injection is off by default on every scheduled run.
       INJECT_FAILURE: ${{ inputs.inject_failure }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         # fetch-depth: 0 — Barkpark.BuildInfo shells `git describe --tags` during
         # the prod compile that `barkpark up` triggers; the default depth-1
         # checkout has no tags and turns that into noise on a job whose whole

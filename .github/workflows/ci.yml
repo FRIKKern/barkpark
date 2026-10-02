@@ -124,7 +124,7 @@ jobs:
     outputs:
       web: ${{ steps.sets.outputs.web }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
           # `refs/pull/N/merge` — a commit that already contains main's advance
@@ -324,7 +324,7 @@ jobs:
     name: Web path-escape ratchet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
 
       # Harness FIRST, subject second — the house selftest-first idiom. A gate
@@ -349,7 +349,7 @@ jobs:
     name: Golden Rule 8 observer (selftest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 12 arms in one temp repo: 5 that must FIRE on a branch switch in a
       # primary checkout (switch / checkout / -b / detached / `git -C`), and 7
@@ -392,7 +392,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Detect web app presence
         id: detect
@@ -515,7 +515,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Detect web app presence
         id: detect

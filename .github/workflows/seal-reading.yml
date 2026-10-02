@@ -61,7 +61,7 @@
 #
 #   `console-harness.yml`'s seal-predicate step says outright that it runs the
 #   predicate's TESTS and never a live seal run, and it is right to: it checks out
-#   at actions/checkout@v4's depth-1 default, clause (b) decides ancestry with
+#   at actions/checkout@v7's depth-1 default, clause (b) decides ancestry with
 #   `git merge-base --is-ancestor`, and under a shallow clone that exits 128 —
 #   which the predicate catches as "not an ancestor" and would publish as a false
 #   NO SEAL manufactured out of a checkout. That is a statement about DEPTH-1
@@ -150,7 +150,7 @@ jobs:
       # state, so a dispatch from a branch must still read main. `fetch-depth: 0`
       # is the whole point — a shallow clone is refusal 8 and clause (b) cannot
       # evaluate ancestry over one.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0

@@ -247,7 +247,7 @@ jobs:
       # fires on the next api/ merge and main-red-owner.yml owns the red.
       locks: ${{ steps.sets.outputs.locks }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
           # `refs/pull/N/merge` — a commit that already contains main's advance
@@ -440,7 +440,7 @@ jobs:
     name: Security gate shape ratchet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Harness (the ratchet must be able to fail)
         run: bash scripts/security-gate-shape.test.sh
 
@@ -479,7 +479,7 @@ jobs:
       run:
         working-directory: api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
@@ -686,7 +686,7 @@ jobs:
       verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Selftest (the overlap + binding ratchets must be able to fail)
         id: s1
@@ -860,7 +860,7 @@ jobs:
       verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
@@ -895,7 +895,7 @@ jobs:
       # and no per-head run ever measured the pair.
       #
       # ONLY --selftest IS WIRED, deliberately. The live arm needs both histories
-      # back to the merge base, and actions/checkout@v4 clones the pull_request
+      # back to the merge base, and actions/checkout@v7 clones the pull_request
       # merge ref at depth 1 -- merge-tree would find no merge base and the arm
       # would exit 2 on its own plumbing rather than on the defect. Deepening the
       # fetch to cover a repo landing ~100 commits a day is a flake surface bought
@@ -982,7 +982,7 @@ jobs:
       run:
         working-directory: api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
@@ -1520,7 +1520,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: File (or update) the CI failure issue
         env:
