@@ -240,7 +240,7 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   #     this file returns only `@bucket_seconds` and the two lines here.
   #
   # The bound the bucket exists to hold is real and config-unreachable:
-  # phoenix_live_view is LOCKED at 1.1.28 in api/mix.lock, whose
+  # phoenix_live_view is LOCKED at 1.1.33 in api/mix.lock, whose
   # `@max_session_age` is the compile-time constant 1_209_600 (14 days) with no
   # option or config seam, and api/config carries no live_view max_age
   # override. A 7-day bucket under a 14-day token is 7 days of slack.

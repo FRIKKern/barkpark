@@ -17,7 +17,7 @@
 //
 //     for(let{el:a,lock:l,loading:h}of e){
 //       if(!l&&!h)throw new Error("putRef requires lock or loading");
-//       if(a.setAttribute(N,this.refSrc()),      // N = "data-phx-ref-src"
+//       if(a.setAttribute(F,this.refSrc()),      // F = "data-phx-ref-src"
 //          h&&a.setAttribute(ve,r),              // ve = "data-phx-ref-loading"
 //          l&&a.setAttribute(C,r),               // C  = "data-phx-ref-lock"
 //          !h||…)continue;                       // ← not loading: LEAVE NOW
