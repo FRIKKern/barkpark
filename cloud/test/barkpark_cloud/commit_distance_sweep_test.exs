@@ -115,14 +115,14 @@ defmodule BarkparkCloud.CommitDistanceSweepTest do
     test = self()
     handler = {__MODULE__, ref}
 
-    :telemetry.attach(
+    BarkparkCloud.TelemetryTap.attach(
       handler,
       CommitDistanceSweep.telemetry_event(),
       fn _event, measurements, meta, _ -> send(test, {ref, measurements, meta}) end,
       nil
     )
 
-    on_exit(fn -> :telemetry.detach(handler) end)
+    on_exit(fn -> BarkparkCloud.TelemetryTap.detach(handler) end)
 
     fn ->
       receive do

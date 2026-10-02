@@ -85,6 +85,21 @@ defmodule Barkpark.Content.Schema do
   end
 
   def list_schemas(dataset, opts \\ []) do
+    # Memoized per request / per Studio callback, like `get_schema_raw/3`: one
+    # connected desk callback built the SAME catalog twice (`Structure`'s
+    # `scope_plugin_nodes/4`, once per attributed plugin). Keyed on the WHOLE opts — the
+    # catalog reads scope, dataset pin and grant narrowing out of them — so two
+    # calls share a result only when they would have run the same query. The
+    # newest 4 catalogs; every schema write in this module resets the memo.
+    Barkpark.Content.WriteScope.request_memo(
+      opts,
+      {:list_schemas, dataset, Keyword.delete(opts, :memoize)},
+      fn -> do_list_schemas(dataset, opts) end,
+      4
+    )
+  end
+
+  defp do_list_schemas(dataset, opts) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 

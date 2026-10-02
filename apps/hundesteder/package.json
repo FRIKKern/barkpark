@@ -2,7 +2,7 @@
   "name": "hundesteder",
   "version": "1.0.0",
   "private": true,
-  "description": "Hundesteder.no — an editorial directory of dog-friendly places in Norway.",
+  "description": "Hundesteder.no \u2014 an editorial directory of dog-friendly places in Norway.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -11,7 +11,7 @@
     "test": "node --test --test-reporter=spec __tests__/*.test.ts"
   },
   "dependencies": {
-    "next": "15.3.9",
+    "next": "15.5.27",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
@@ -23,5 +23,11 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss@<8.5.23": ">=8.5.23 <9",
+      "nanoid@<3.3.18": ">=3.3.18 <4"
+    }
   }
 }

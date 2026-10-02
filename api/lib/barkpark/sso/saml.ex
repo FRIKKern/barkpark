@@ -86,8 +86,14 @@ defmodule Barkpark.Sso.Saml do
   def consume(%SamlConnection{} = conn, xml, slug) when is_binary(xml) do
     sp = sp_for(conn, slug)
 
-    {doc, _} = :xmerl_scan.string(to_charlist(xml), namespace_conformant: true)
+    with {:ok, doc} <- parse_untrusted_xml(xml) do
+      validate_assertion(doc, sp)
+    end
+  rescue
+    e -> {:error, {:parse_error, Exception.message(e)}}
+  end
 
+  defp validate_assertion(doc, sp) do
     # task-223e04ce556b1950: one-time use. esaml calls this hook LAST, after
     # the signature and conditions checks, so only a valid assertion is ever
     # recorded. It hands us a digest of the whole (unsigned) envelope; the key
@@ -117,8 +123,6 @@ defmodule Barkpark.Sso.Saml do
       {:error, reason} ->
         {:error, reason}
     end
-  rescue
-    e -> {:error, {:parse_error, Exception.message(e)}}
   end
 
   # ── Single Logout (SLO) ─────────────────────────────────────────────────────
@@ -161,21 +165,21 @@ defmodule Barkpark.Sso.Saml do
   def consume_logout_request(%SamlConnection{} = conn, xml, slug) when is_binary(xml) do
     sp = sp_for(conn, slug)
 
-    {doc, _} = :xmerl_scan.string(to_charlist(xml), namespace_conformant: true)
+    with {:ok, doc} <- parse_untrusted_xml(xml) do
+      case :esaml_sp.validate_logout_request(doc, sp) do
+        {:ok, req} ->
+          {:ok,
+           %{
+             name_id: req |> esaml_logoutreq(:name) |> to_string(),
+             # esaml's decoder never parses SessionIndex (it only generates it),
+             # so pull it from the signature-covered doc ourselves. nil = the
+             # IdP wants ALL of the subject's sessions gone (SAML profile).
+             session_index: logout_request_session_index(doc)
+           }}
 
-    case :esaml_sp.validate_logout_request(doc, sp) do
-      {:ok, req} ->
-        {:ok,
-         %{
-           name_id: req |> esaml_logoutreq(:name) |> to_string(),
-           # esaml's decoder never parses SessionIndex (it only generates it),
-           # so pull it from the signature-covered doc ourselves. nil = the
-           # IdP wants ALL of the subject's sessions gone (SAML profile).
-           session_index: logout_request_session_index(doc)
-         }}
-
-      {:error, reason} ->
-        {:error, reason}
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   rescue
     e -> {:error, {:parse_error, Exception.message(e)}}
@@ -208,6 +212,39 @@ defmodule Barkpark.Sso.Saml do
   end
 
   # ── internals ──────────────────────────────────────────────────────────────
+
+  # EEF-CVE-2026-28809 (esaml XXE, no fixed Hex release): the SAMLResponse /
+  # SAMLRequest body is attacker-controlled and is parsed HERE, before esaml
+  # checks any signature. A SAML protocol message never carries a DTD, so any
+  # `<!DOCTYPE` is refused before xmerl sees the bytes: no DTD means no entity
+  # declarations, so neither XXE (`<!ENTITY x SYSTEM "file:…">`) nor
+  # billion-laughs can start. Below it, defence in depth: entities off
+  # explicitly (the OTP 27+ default, pinned so a runtime default can never turn
+  # it back on) and a fetch_fun that refuses every external fetch. xmerl
+  # reports a fatal parse error as an EXIT, which `rescue` does not catch; it
+  # becomes an error tuple so the caller refuses (401) instead of crashing the
+  # request (500).
+  @doctype_re ~r/<!DOCTYPE/i
+
+  @doc false
+  @spec parse_untrusted_xml(binary()) :: {:ok, tuple()} | {:error, term()}
+  def parse_untrusted_xml(xml) when is_binary(xml) do
+    if Regex.match?(@doctype_re, xml) do
+      {:error, :doctype_not_permitted}
+    else
+      {doc, _rest} =
+        :xmerl_scan.string(to_charlist(xml),
+          namespace_conformant: true,
+          allow_entities: false,
+          fetch_fun: fn _uri, _state -> {:error, :external_fetch_not_permitted} end,
+          quiet: true
+        )
+
+      {:ok, doc}
+    end
+  catch
+    :exit, reason -> {:error, {:parse_error, inspect(reason, limit: 20)}}
+  end
 
   defp sp_for(conn, slug) do
     fp = cert_fingerprint(conn.idp_cert_pem)

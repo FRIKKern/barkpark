@@ -16,6 +16,41 @@ const SIG_HEADER = 'x-barkpark-signature'
 const DELIVERY_HEADER = 'x-barkpark-delivery-id'
 const DEFAULT_TOLERANCE_S = 300
 const DEDUP_LRU_SIZE = 512
+const DEFAULT_MAX_BODY_BYTES = 4 * 1024 * 1024
+const TOO_LARGE = Symbol('too_large')
+
+/**
+ * Read the body as text, refusing past `max` bytes WITHOUT buffering the rest:
+ * a declared Content-Length over the cap is refused before a byte is read, and
+ * a chunked/undeclared body is counted as it streams and cancelled at the cap.
+ * The HMAC can only be checked over the whole body, so this cap is what keeps
+ * an unauthenticated sender from making the handler hold an arbitrary amount.
+ */
+async function readBodyCapped(req: Request, max: number): Promise<string | typeof TOO_LARGE> {
+  const declared = Number(req.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > max) return TOO_LARGE
+  if (req.body === null) return ''
+  const reader = req.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > max) {
+      await reader.cancel().catch(() => undefined)
+      return TOO_LARGE
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let at = 0
+  for (const c of chunks) {
+    bytes.set(c, at)
+    at += c.byteLength
+  }
+  return new TextDecoder().decode(bytes)
+}
 
 // Module-scoped dedup state. Two structures, because a delivery id is only a
 // TRUE duplicate once its onMutation has fully SETTLED — committing on arrival
@@ -94,6 +129,12 @@ function validateConfig(cfg: WebhookConfig): void {
   ) {
     throw new TypeError('createWebhookHandler: toleranceSeconds must be a positive number')
   }
+  if (
+    cfg.maxBodyBytes !== undefined &&
+    (typeof cfg.maxBodyBytes !== 'number' || !(cfg.maxBodyBytes > 0))
+  ) {
+    throw new TypeError('createWebhookHandler: maxBodyBytes must be a positive number')
+  }
 }
 
 /**
@@ -114,6 +155,7 @@ function validateConfig(cfg: WebhookConfig): void {
  *     401 { error: 'bad_signature' }  missing/invalid HMAC
  *     401 { error: 'stale' }          timestamp ±5min outside server clock
  *     400 { error: 'bad_request' }    body unreadable / non-JSON
+ *     413 { error: 'payload_too_large' } body over `maxBodyBytes` (default 4 MiB)
  *     500 { error: 'handler_failed' } onMutation threw
  *
  *   GET → 405 { error: 'method_not_allowed' }
@@ -141,6 +183,10 @@ export function createWebhookHandler(cfg: WebhookConfig): WebhookHandlers {
     typeof cfg.toleranceSeconds === 'number' && cfg.toleranceSeconds > 0
       ? Math.floor(cfg.toleranceSeconds)
       : DEFAULT_TOLERANCE_S
+  const maxBodyBytes =
+    typeof cfg.maxBodyBytes === 'number' && cfg.maxBodyBytes > 0
+      ? Math.floor(cfg.maxBodyBytes)
+      : DEFAULT_MAX_BODY_BYTES
 
   const POST = async (req: Request): Promise<Response> => {
     const parsedSig = parseSignatureHeader(req.headers.get(SIG_HEADER))
@@ -153,7 +199,9 @@ export function createWebhookHandler(cfg: WebhookConfig): WebhookHandlers {
 
     let rawBody: string
     try {
-      rawBody = await req.text()
+      const read = await readBodyCapped(req, maxBodyBytes)
+      if (read === TOO_LARGE) return json(413, { error: 'payload_too_large' })
+      rawBody = read
     } catch {
       return json(400, { error: 'bad_request' })
     }

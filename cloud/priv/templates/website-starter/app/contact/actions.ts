@@ -1,9 +1,17 @@
 'use server'
 
+import { headers } from 'next/headers'
 import { defineActions } from '@barkpark/nextjs/actions'
 import { barkparkClient } from '../../barkpark.config'
 import { resolveServerToken } from '../../lib/resolve-server-token'
 import { publicSubmissionMessage, serverLogDetail } from '../../lib/submission-error'
+import {
+  HONEYPOT_FIELD,
+  clientKey,
+  contactFieldError,
+  createContactRateLimiter,
+  isHoneypotFilled,
+} from '../../lib/contact-guard'
 
 /**
  * `barkpark.config.ts` builds a TOKENLESS client on purpose — it is the shared,
@@ -21,6 +29,12 @@ const actions = defineActions({
   client: barkparkClient.withConfig({ token: resolveServerToken(process.env) }),
 })
 
+// Per-server-instance limiter (in memory) — see lib/contact-guard.ts for what
+// that does and does not cover.
+const limiter = createContactRateLimiter()
+
+const THANKS = 'Thanks \u2014 we\u2019ll be in touch.'
+
 export interface ContactFormState {
   ok: boolean
   message: string
@@ -34,8 +48,14 @@ export async function submitContact(
   const email = String(formData.get('email') ?? '').trim()
   const message = String(formData.get('message') ?? '').trim()
 
-  if (name.length === 0 || email.length === 0 || message.length === 0) {
-    return { ok: false, message: 'All fields are required.' }
+  const fieldError = contactFieldError({ name, email, message })
+  if (fieldError !== null) return { ok: false, message: fieldError }
+
+  // A filled honeypot gets the normal answer and no write.
+  if (isHoneypotFilled(formData.get(HONEYPOT_FIELD))) return { ok: true, message: THANKS }
+
+  if (!limiter.allow(clientKey(await headers()))) {
+    return { ok: false, message: 'Too many messages from here just now. Please try again later.' }
   }
 
   try {
@@ -46,7 +66,7 @@ export async function submitContact(
       message,
       receivedAt: new Date().toISOString(),
     })
-    return { ok: true, message: 'Thanks \u2014 we\u2019ll be in touch.' }
+    return { ok: true, message: THANKS }
   } catch (err) {
     // The visitor is anonymous. The upstream error text can name the API host,
     // the dataset, workspace/project slugs, schema fields, or why a bearer token

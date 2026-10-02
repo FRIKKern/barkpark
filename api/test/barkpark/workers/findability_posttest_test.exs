@@ -114,7 +114,12 @@ defmodule Barkpark.Workers.FindabilityPosttestTest do
       handler_id,
       FindabilityPosttest.telemetry_event(),
       fn event, measurements, metadata, _cfg ->
-        send(test_pid, {:findability_miss, event, measurements, metadata})
+        # OURS ONLY. A handler runs in whichever process emits, and this module
+        # is async: a peer test's event would satisfy (or break) the receive
+        # below. Keep events from this test's process and its $callers lineage.
+        if self() == test_pid or test_pid in List.wrap(Process.get(:"$callers")) do
+          send(test_pid, {:findability_miss, event, measurements, metadata})
+        end
       end,
       nil
     )

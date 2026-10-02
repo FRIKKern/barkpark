@@ -107,6 +107,29 @@ describe('verifyWebhookSignature', () => {
     ).toBe(true)
   })
 
+  it('an empty or missing secret is false, never a throw and never a forgeable empty-key HMAC', async () => {
+    // r4a: `secret: process.env.X!` with X unset hands in undefined / ''. The
+    // check must refuse by guard, not by whichever runtime happens to reject a
+    // zero-length HMAC key (Node throws DataError; a lenient one would verify a
+    // signature anyone can compute).
+    const forged = sign('', NOW, BODY)
+    for (const secret of ['', undefined, null] as unknown as string[]) {
+      await expect(
+        verifyWebhookSignature({ body: BODY, signature: forged, secret, nowSeconds: NOW }),
+      ).resolves.toBe(false)
+    }
+    // An empty previousSecret is ignored, and an empty primary never lets it in.
+    await expect(
+      verifyWebhookSignature({
+        body: BODY,
+        signature: forged,
+        secret: '',
+        previousSecret: '',
+        nowSeconds: NOW,
+      }),
+    ).resolves.toBe(false)
+  })
+
   it('rejects malformed / missing signatures without throwing', async () => {
     for (const bad of [null, undefined, '', 'garbage', 'v1=abc', `t=${NOW}`, `t=nope,v1=abc`]) {
       expect(

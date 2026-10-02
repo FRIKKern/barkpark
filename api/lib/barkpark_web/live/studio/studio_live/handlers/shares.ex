@@ -60,8 +60,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   # `parse_entry/1` see 4+ segments and fall to its catch-all, and a `;` makes
   # `parse/1` return two shares where `add_share/1` matches only `[%Share{}]`.
   # Both already fail closed with `{:error, :invalid}`.
-  # Moved to `Shared.declarable_scope?/2` (`@canonical
-  # capability:share-scope-tenancy`) so the panel's READ half enforces the same
+  # Moved to `Shared.declarable_scope?/2` (which carries this capability's ONE
+  # canonical marker) so the panel's READ half enforces the same
   # rule as these two write halves. It lived here as a private while
   # `load_share_rows/0` had no clamp at all — the split that let the disclosure
   # direction stay open after the availability direction was closed

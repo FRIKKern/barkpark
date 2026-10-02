@@ -16,7 +16,7 @@ export function portableTextBoundary(host, singleBlockType = () => null) {
           const allowed = type === "list" ? ["bulletList", "orderedList"]
             : type === "heading" ? ["heading"] : ["paragraph"];
           if (tr.doc.childCount !== 1 || !allowed.includes(tr.doc.firstChild?.type.name)) {
-            message = "This field edits one block. Add separate blocks in the Paper canvas instead. This edit was not applied.";
+            message = "This field edits one block. Add the next block with + Add block below. This edit was not applied.";
           }
         }
         tr.doc.descendants((node, _pos, parent) => {

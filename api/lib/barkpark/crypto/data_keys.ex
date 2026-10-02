@@ -240,11 +240,22 @@ defmodule Barkpark.Crypto.DataKeys do
   def __cache_put_for_test__(workspace_id, scope, version, dek),
     do: cache_put(workspace_id, scope, version, dek)
 
-  defp ensure_cache do
+  # Fallback only: the table is created at boot by init_cache/0.
+  defp ensure_cache, do: init_cache()
+
+  @doc """
+  Create the cache table, owned by the CALLER. `Barkpark.Application.start/2`
+  calls this at boot so the table lives as long as the application; a lazy
+  create from a request, Task or test process would die with that process and
+  make a sibling's next `:ets` call raise `ArgumentError`. Idempotent.
+  """
+  @spec init_cache() :: :ok
+  def init_cache do
     case :ets.whereis(@cache) do
       :undefined ->
         try do
-          :ets.new(@cache, [:named_table, :public, :set, read_concurrency: true])
+          _ = :ets.new(@cache, [:named_table, :public, :set, read_concurrency: true])
+          :ok
         rescue
           ArgumentError -> :ok
         end

@@ -39,7 +39,7 @@ defmodule BarkparkCloud.Notifications.ReceiptLossTest do
     ref = "receipt-loss-#{System.unique_integer([:positive])}"
     test = self()
 
-    :telemetry.attach(
+    BarkparkCloud.TelemetryTap.attach(
       ref,
       ReceiptLoss.telemetry_event(),
       fn event, measurements, metadata, _ ->
@@ -48,7 +48,7 @@ defmodule BarkparkCloud.Notifications.ReceiptLossTest do
       nil
     )
 
-    on_exit(fn -> :telemetry.detach(ref) end)
+    on_exit(fn -> BarkparkCloud.TelemetryTap.detach(ref) end)
     :ok
   end
 

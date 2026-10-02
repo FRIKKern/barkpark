@@ -516,14 +516,14 @@ defmodule BarkparkCloud.TerminalWriteCensusTest do
     me = self()
     handler = "arm-d-deferral-unrecorded-#{inspect(ref)}"
 
-    :telemetry.attach(
+    BarkparkCloud.TelemetryTap.attach(
       handler,
       [:barkpark_cloud, :sites, :deploy, :deferral_unrecorded],
       fn _event, measurements, metadata, _ -> send(me, {ref, measurements, metadata}) end,
       nil
     )
 
-    on_exit(fn -> :telemetry.detach(handler) end)
+    on_exit(fn -> BarkparkCloud.TelemetryTap.detach(handler) end)
 
     # THE OUTCOME NO LONGER CLAIMS A COUNTED DEFERRAL
     # (ccpca-bl-deploy-defer-cas-loss-counting): `{:ok, :deferred}` said "a

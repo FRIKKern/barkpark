@@ -120,7 +120,7 @@ defmodule BarkparkCloud.AgentCommandResultsTest do
     parent = self()
     handler_id = {__MODULE__, ref}
 
-    :telemetry.attach(
+    BarkparkCloud.TelemetryTap.attach(
       handler_id,
       AgentCommandResults.telemetry_event(),
       fn _event, measurements, metadata, _ ->
@@ -129,7 +129,7 @@ defmodule BarkparkCloud.AgentCommandResultsTest do
       nil
     )
 
-    on_exit(fn -> :telemetry.detach(handler_id) end)
+    on_exit(fn -> BarkparkCloud.TelemetryTap.detach(handler_id) end)
     ref
   end
 

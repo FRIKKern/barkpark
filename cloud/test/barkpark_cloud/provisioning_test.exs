@@ -3313,7 +3313,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       test = self()
       id = {:dr_w4_s4_pressure_sql, make_ref()}
 
-      :telemetry.attach(
+      BarkparkCloud.TelemetryTap.attach(
         id,
         [:barkpark_cloud, :repo, :query],
         fn _event, _measure, meta, _cfg ->
@@ -3325,7 +3325,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       try do
         fun.()
       after
-        :telemetry.detach(id)
+        BarkparkCloud.TelemetryTap.detach(id)
       end
 
       drain_repo_sql([])

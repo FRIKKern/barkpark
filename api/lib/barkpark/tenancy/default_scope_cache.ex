@@ -132,26 +132,35 @@ defmodule Barkpark.Tenancy.DefaultScopeCache do
     end
   end
 
-  defp ensure_table do
+  # Fallback only: the table is created at boot by init_cache/0.
+  defp ensure_table, do: init_cache()
+
+  @doc """
+  Create the cache table, owned by the CALLER. `Barkpark.Application.start/2`
+  calls this at boot so the table lives as long as the application; a lazy
+  create from a request, Task or test process would die with that process and
+  make a sibling's next `:ets` call raise `ArgumentError`. Idempotent.
+  """
+  @spec init_cache() :: :ok
+  def init_cache do
     case :ets.whereis(@table) do
       :undefined ->
         try do
-          :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
+          _ = :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
+          :ok
         rescue
-          # Lost the create race to another process; the table exists either way.
           ArgumentError -> :ok
         end
 
       _ref ->
         :ok
     end
-
-    :ok
   end
 
-  # The table is unowned (created by whichever process got there first), so a
-  # concurrent `invalidate/0` deleting it is a live possibility. A missing table
-  # is a cold cache, which is always correct — never a crash.
+  # Booted nodes own the table from Application.start/2 (init_cache/0), but a
+  # node without the application falls back to a caller-owned table that can
+  # vanish. A missing table is a cold cache, which is always correct — never a
+  # crash.
   defp safe_insert(entry) do
     :ets.insert(@table, entry)
     :ok

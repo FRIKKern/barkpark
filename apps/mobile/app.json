@@ -15,6 +15,7 @@
     "android": {
       "package": "cloud.barkpark.mobile",
       "edgeToEdgeEnabled": true
-    }
+    },
+    "plugins": [["expo-secure-store", { "faceIDPermission": false }]]
   }
 }

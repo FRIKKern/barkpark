@@ -2,6 +2,8 @@ module github.com/FRIKKern/barkpark
 
 go 1.25.0
 
+toolchain go1.25.14
+
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.1

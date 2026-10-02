@@ -31,9 +31,10 @@ defmodule BarkparkCloud.CursorSqlShapeTest do
   # detached per call so a failure never leaks a handler into another test.
   defp capture_sql(fun) do
     test = self()
+    id = {@handler_id, make_ref()}
 
-    :telemetry.attach(
-      {@handler_id, make_ref()},
+    BarkparkCloud.TelemetryTap.attach(
+      id,
       [:barkpark_cloud, :repo, :query],
       fn _event, _measure, meta, _cfg -> send(test, {:sql, meta.query}) end,
       nil
@@ -42,9 +43,7 @@ defmodule BarkparkCloud.CursorSqlShapeTest do
     try do
       fun.()
     after
-      for {id, _, _, _} <- :telemetry.list_handlers([:barkpark_cloud, :repo, :query]),
-          match?({@handler_id, _}, id),
-          do: :telemetry.detach(id)
+      BarkparkCloud.TelemetryTap.detach(id)
     end
 
     drain_sql([])

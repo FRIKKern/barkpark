@@ -14,8 +14,8 @@ function shippedMorphdom(window) {
     import.meta.url,
   ), "utf8");
   const instrumented = source.replace(
-    ",rt=hn;",
-    ",rt=hn;window.__bpPaperLinkRefMorphdom=rt;",
+    ",ot=dn;",
+    ",ot=dn;window.__bpPaperLinkRefMorphdom=ot;",
   );
   assert.notEqual(instrumented, source,
     "the shipped LiveView bundle exposes its vendored morphdom in this test");

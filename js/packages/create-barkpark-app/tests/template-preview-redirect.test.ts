@@ -85,6 +85,45 @@ describe('blog-starter preview redirects stay on the host the editor came from',
     }
   })
 
+  // r4a: browsers STRIP ASCII tab / LF / CR from a URL before resolving it, so
+  // `/\t/evil.example` arrives as `//evil.example` — protocol-relative, off-site.
+  // A prefix check on the raw string cannot see that; both routes must refuse
+  // any control character (and a backslash anywhere) and answer `/`.
+  const STRIPPED_OFFSITE = [
+    '/\t/evil.example',
+    '/\n/evil.example',
+    '/\r/evil.example',
+    '/\t\\evil.example',
+    '/x/../\\evil.example',
+    '/\u0000/evil.example',
+  ]
+
+  it('/api/exit-preview refuses targets a browser rewrites to another host', async () => {
+    const { GET } = await load(EXIT)
+    for (const target of STRIPPED_OFFSITE) {
+      const res = await GET(asNextStartSees(`/api/exit-preview?path=${encodeURIComponent(target)}`))
+      expect(res.headers.get('location'), JSON.stringify(target)).toBe('/')
+    }
+  })
+
+  it('/api/preview refuses targets a browser rewrites to another host', async () => {
+    const { GET } = await load(PREVIEW)
+    for (const target of STRIPPED_OFFSITE) {
+      const res = await GET(
+        asNextStartSees(`/api/preview?secret=${SECRET}&path=${encodeURIComponent(target)}`),
+      )
+      expect(res.headers.get('location'), JSON.stringify(target)).toBe('/')
+    }
+  })
+
+  it('an ordinary path with a query and hash still round-trips (control)', async () => {
+    const { GET } = await load(EXIT)
+    const res = await GET(
+      asNextStartSees(`/api/exit-preview?path=${encodeURIComponent('/posts/a-b?x=1#top')}`),
+    )
+    expect(res.headers.get('location')).toBe('/posts/a-b?x=1#top')
+  })
+
   it('a bad secret still never enables draft mode', async () => {
     const { GET } = await load(PREVIEW)
     const res = await GET(asNextStartSees('/api/preview?secret=nope&path=/posts/hello'))

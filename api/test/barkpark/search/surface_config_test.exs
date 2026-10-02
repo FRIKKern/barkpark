@@ -120,6 +120,28 @@ defmodule Barkpark.Search.SurfaceConfigTest do
       assert SurfaceConfigs.__cache_size_for_test__() == 1
     end
 
+    # task-45913114e6d4ffbe: the table used to be created by whichever process
+    # touched it first and died with that process; an async sibling's exit then
+    # made :ets.insert/2 raise mid-loop here (main elixir run 36976528873).
+    test "the cache table is owned by the boot-time CacheOwner, not by a caller" do
+      owner = Process.whereis(Barkpark.Search.SurfaceConfigs.CacheOwner)
+
+      assert is_pid(owner)
+      assert :ets.info(:barkpark_search_surface_config_cache, :owner) == owner
+    end
+
+    test "the cache outlives the process that wrote to it" do
+      {pid, ref} =
+        spawn_monitor(fn ->
+          SurfaceConfigs.__store_config_for_test__("documents", "ds-ephemeral", %{"w" => 1})
+        end)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+
+      assert :ets.whereis(:barkpark_search_surface_config_cache) != :undefined
+      assert SurfaceConfigs.get("documents", "ds-ephemeral") == %{"w" => 1}
+    end
+
     test "distinct {surface, scope} keys don't collide" do
       SurfaceConfigs.__store_config_for_test__("documents", "prod", %{"who" => "docs"})
       SurfaceConfigs.__store_config_for_test__("media", "prod", %{"who" => "media"})

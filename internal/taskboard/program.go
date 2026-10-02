@@ -1175,7 +1175,7 @@ func (m Model) toggleMouse() (tea.Model, tea.Cmd) {
 // reading frame resolves its own subject (charter D30) — both funnel here.
 func (m Model) claimTask(t Task) (Model, tea.Cmd) {
 	if t.Lifecycle != lifeReady {
-		m.setStrip(claimBlockedReason(t), RoleWarn)
+		m.setStrip(claimBlockedReason(t, CmuxWorkerID()), RoleWarn)
 		return m, nil
 	}
 	return m, m.claimCmd(t.DocID, CmuxWorkerID())
@@ -1378,10 +1378,15 @@ func hasLiveClaim(t Task) bool {
 }
 
 // claimBlockedReason explains, in plain words, why a non-ready row cannot be
-// claimed — so 'c' on the wrong row teaches instead of failing silently.
-func claimBlockedReason(t Task) string {
+// claimed — so 'c' on the wrong row teaches instead of failing silently. An
+// in-progress row held by SOMEONE ELSE names the holder: pointing at x there
+// sent the user to a close only the holder may make.
+func claimBlockedReason(t Task, worker string) string {
 	switch t.Lifecycle {
 	case lifeInProgress:
+		if hasLiveClaim(t) && t.Claim.Worker != worker {
+			return fmt.Sprintf("already claimed by %s — only they can close it", t.Claim.Worker)
+		}
 		return "already in progress — press x to close it instead"
 	case lifeBlocked:
 		return "blocked by unmet dependencies — not ready to claim"
