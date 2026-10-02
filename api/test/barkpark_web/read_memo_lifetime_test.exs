@@ -9,9 +9,9 @@ defmodule BarkparkWeb.ReadMemoLifetimeTest do
 
       | read                         | before                         | after                         |
       |------------------------------|--------------------------------|-------------------------------|
-      | desk mount, connected leg    | 34 (datasets 10, projects 7,   | 20 (datasets 2, projects 2,   |
-      |                              |  schema_definitions 10)        |  schema_definitions 9)        |
-      | desk mount, both legs        | 76                             | 62 (the dead render is not    |
+      | desk mount, connected leg    | 34 (datasets 10, projects 7,   | 19 (datasets 2, projects 2,   |
+      |                              |  schema_definitions 10)        |  schema_definitions 8)        |
+      | desk mount, both legs        | 76                             | 61 (the dead render is not    |
       |                              |                                |  memoized — see StudioLive)   |
       | GET /v1/data/query           | 7 (schema_definitions 4)       | 6 (schema_definitions 2)      |
       | GET /v1/data/query?count=true| 9 (schema_definitions 5)       | 7 (schema_definitions 2)      |
@@ -81,9 +81,10 @@ defmodule BarkparkWeb.ReadMemoLifetimeTest do
              "the connected desk mount read datasets+projects #{tenancy}x (#{inspect(per)}); " <>
                "it was 17 before the per-callback memo and 4 with it"
 
-      assert schemas <= 9,
+      assert schemas <= 8,
              "the connected desk mount read schema_definitions #{schemas}x (#{inspect(per)}); " <>
-               "it was 10 before (one lookup per distinct type is the floor)"
+               "it was 10 before the memo, 9 with the row memo, 8 once the catalog " <>
+               "is memoized too (scope_plugin_nodes/4 built the SAME unscoped catalog twice)"
     end
 
     test "one GET /v1/data/query reads its schema row at most twice", %{conn: conn} do
@@ -146,6 +147,33 @@ defmodule BarkparkWeb.ReadMemoLifetimeTest do
       assert length(held) == 8, "the schema memo holds #{length(held)} rows, not 8"
       refute Enum.at(names, 0) in held, "the OLDEST row was kept and a newer one dropped"
       assert List.last(names) in held
+      WriteScope.reset_request_memo()
+    end
+
+    test "two catalogs under DIFFERENT scopes are never conflated, and a write between is seen" do
+      schema!("memocat#{System.unique_integer([:positive])}", "Catalog Probe")
+      ws = Barkpark.TenancyFixtures.create_workspace!()
+      wide = []
+      narrow = [workspace_id: ws.id]
+
+      # the truth, memo OFF
+      truth_wide = Enum.map(Content.list_schemas(@dataset, wide), & &1.name)
+      truth_narrow = Enum.map(Content.list_schemas(@dataset, narrow), & &1.name)
+      refute truth_wide == truth_narrow, "vacuous: the two scopes return the same catalog"
+
+      WriteScope.reset_request_memo()
+      on = [memoize: true]
+      assert Enum.map(Content.list_schemas(@dataset, on ++ wide), & &1.name) == truth_wide
+
+      assert Enum.map(Content.list_schemas(@dataset, on ++ narrow), & &1.name) == truth_narrow,
+             "the memo served the WIDE catalog to a NARROWER scope"
+
+      added = "memocatnew#{System.unique_integer([:positive])}"
+      schema!(added, "Added Mid-Request")
+
+      assert added in Enum.map(Content.list_schemas(@dataset, on ++ wide), & &1.name),
+             "the memo served a catalog from before this process's own schema write"
+
       WriteScope.reset_request_memo()
     end
 
