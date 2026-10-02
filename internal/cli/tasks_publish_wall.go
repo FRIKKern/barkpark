@@ -454,12 +454,14 @@ var registeredTagReader = fetchRegisteredTags
 // a blind client must not refuse a publish the server would have accepted.
 //
 // blind reports that the check could not run, so the caller can SAY so instead
-// of implying the row was cleared.
-func checkTagRegistry(ctx manifest.Context, body map[string]any) (ref *publishWallRefusal, blind bool) {
+// of implying the row was cleared. empty narrows a blind read: the registry
+// answered cleanly with NO tags, which is a different fix (register one, or
+// check the dataset) from a read that failed (retry).
+func checkTagRegistry(ctx manifest.Context, body map[string]any) (ref *publishWallRefusal, blind bool, empty bool) {
 	tags, spineRef := wallTagEntries(body)
 	if spineRef != nil || len(tags) == 0 {
 		// The spine check runs first and already refused; nothing to resolve.
-		return nil, false
+		return nil, false, false
 	}
 	names := make([]string, 0, len(tags))
 	for _, entry := range tags {
@@ -468,12 +470,12 @@ func checkTagRegistry(ctx manifest.Context, body map[string]any) (ref *publishWa
 		}
 	}
 	if len(names) == 0 {
-		return nil, false
+		return nil, false, false
 	}
 
 	registry, authoritative := registeredTagReader(ctx)
 	if !authoritative {
-		return nil, true
+		return nil, true, registry != nil && len(registry) == 0
 	}
 	known := make(map[string]bool, len(registry))
 	for _, name := range registry {
@@ -486,7 +488,7 @@ func checkTagRegistry(ctx manifest.Context, body map[string]any) (ref *publishWa
 		}
 	}
 	if len(unknown) == 0 {
-		return nil, false
+		return nil, false, false
 	}
 	suggestions := make(map[string][]string, len(unknown))
 	for _, name := range unknown {
@@ -499,13 +501,15 @@ func checkTagRegistry(ctx manifest.Context, body map[string]any) (ref *publishWa
 		Unknown:      unknown,
 		Suggestions:  suggestions,
 		RegistrySize: len(registry),
-	}, false
+	}, false, false
 }
 
 // fetchRegisteredTags reads the dataset's published type:tag documents and
 // returns their ids. The second return is AUTHORITATIVE: false whenever the
 // answer cannot be trusted as the complete registry — a transport error, a
 // non-2xx, an undecodable body, an empty page, or a TRUNCATED page (`hasMore`).
+// The empty page alone comes back as a non-nil EMPTY slice (every failure is
+// nil), so the caller can name it instead of calling the registry unreadable.
 // The truncated page is the subtle one: it decodes fine and looks like a
 // registry, and using it would refuse real tags that live past the boundary.
 func fetchRegisteredTags(ctx manifest.Context) ([]string, bool) {
@@ -545,9 +549,11 @@ func fetchRegisteredTags(ctx manifest.Context) ([]string, bool) {
 	}
 	// A registry that reads as EMPTY is indistinguishable from a dataset whose
 	// tag schema was never seeded, and refusing every tag on that basis would
-	// break --publish outright. Treat it as blind.
+	// break --publish outright. Treat it as blind — but say it was EMPTY, not
+	// unreadable: the read worked, and the fix is a registered tag or the right
+	// dataset, not a retry.
 	if len(names) == 0 {
-		return nil, false
+		return []string{}, false
 	}
 	return names, true
 }
