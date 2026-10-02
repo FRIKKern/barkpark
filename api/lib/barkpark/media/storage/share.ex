@@ -6,6 +6,7 @@ defmodule Barkpark.Media.Storage.Share do
   import Ecto.Query
   alias Barkpark.Content
   alias Barkpark.Content.Document
+  alias Barkpark.Content.DraftId
   alias Barkpark.Media.Storage.Collections
   alias Barkpark.Repo
 
@@ -43,7 +44,7 @@ defmodule Barkpark.Media.Storage.Share do
         "content" => Map.put(content, "shareLink", share_link)
       }
 
-      case Content.upsert_document(@collection_type, attrs, dataset, write_opts(opts)) do
+      case write_share_link(doc, attrs, dataset, opts) do
         {:ok, _updated} ->
           {:ok,
            %{
@@ -78,7 +79,7 @@ defmodule Barkpark.Media.Storage.Share do
         "content" => Map.put(content, "shareLink", Map.merge(share_link, %{"enabled" => false}))
       }
 
-      Content.upsert_document(@collection_type, attrs, dataset, write_opts(opts))
+      write_share_link(doc, attrs, dataset, opts)
     end
   end
 
@@ -131,6 +132,25 @@ defmodule Barkpark.Media.Storage.Share do
   # insert a fresh one, leaving the resolved collection's shareLink untouched.
   # `:ttl` (create's own opt) is dropped — only the tenancy keys + `source`
   # belong on the write.
+  # The share link is folder metadata, not an edit awaiting review.
+  # `upsert_document/4` always writes `drafts.<id>`, so on a PUBLISHED folder
+  # (the Studio explorer creates and publishes every folder) it forked the
+  # folder: the listing showed it twice, the share token lived on the draft
+  # fork, and the share link served that fork, whose id no asset's membership
+  # names — an EMPTY gallery for a folder holding assets (r4-lane-c dogfood).
+  # A published folder gets the link written through and published back in
+  # place; a draft-only folder keeps its draft row, as before.
+  defp write_share_link(%Document{doc_id: doc_id}, attrs, dataset, opts) do
+    with {:ok, updated} <-
+           Content.upsert_document(@collection_type, attrs, dataset, write_opts(opts)) do
+      if DraftId.draft?(doc_id) do
+        {:ok, updated}
+      else
+        Content.publish_document(doc_id, @collection_type, dataset, write_opts(opts))
+      end
+    end
+  end
+
   defp write_opts(opts) do
     opts
     |> Keyword.take([:workspace_id, :project_id])
