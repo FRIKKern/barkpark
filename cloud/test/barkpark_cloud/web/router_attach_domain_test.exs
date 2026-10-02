@@ -33,7 +33,13 @@ defmodule BarkparkCloud.Web.RouterAttachDomainTest do
 
   @password "correct-horse-battery"
   @worker_token "worker-token-test-fixed"
-  @domain "gyldendal.barkpark.cloud"
+  # A hostname label OWNED by this module. Every async module that writes a
+  # hostname claim and takes the `hostname:<fqdn>` advisory lock must use its
+  # own label: sandbox transactions never commit, so two modules racing one
+  # literal (one holding the url claim and wanting the lock, the other holding
+  # the lock and writing the claim) deadlock — Postgres 40P01 on main, run
+  # 36956647851 (`gyldendal.barkpark.cloud` was shared by three modules).
+  @domain "routerdom.barkpark.cloud"
   @box_ip "203.0.113.10"
 
   ## Fixtures (mirror RouterSelfUpdateTest's)
@@ -148,7 +154,7 @@ defmodule BarkparkCloud.Web.RouterAttachDomainTest do
         call(
           :post,
           "/v1/barkparks/#{bp.id}/domain",
-          %{domain: "Gyldendal.Barkpark.Cloud."},
+          %{domain: "Routerdom.Barkpark.Cloud."},
           session_token(user)
         )
 
@@ -461,7 +467,7 @@ defmodule BarkparkCloud.Web.RouterAttachDomainTest do
         call(
           :post,
           "/v1/barkparks/#{bp.id}/domain",
-          %{domain: "  Gyldendal.Barkpark.Cloud. "},
+          %{domain: "  Routerdom.Barkpark.Cloud. "},
           token
         )
 
@@ -510,7 +516,7 @@ defmodule BarkparkCloud.Web.RouterAttachDomainTest do
                "claim_token" => job.claim_token,
                "ip" => @box_ip,
                "custom_host" => @domain,
-               "dns_label" => "gyldendal",
+               "dns_label" => "routerdom",
                "dns_zone" => "barkpark.cloud",
                "app_port" => 4000
              }

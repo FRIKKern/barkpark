@@ -209,8 +209,17 @@ defmodule BarkparkWeb.TicketKeyRouteSweepTest do
   # `:raised` when the (auth-agnostic) controller blows up on dummy params — both
   # the anon and keyed passes hit the identical code path, so `:raised == :raised`
   # still proves no elevation.
+  #
+  # `scoped_conn/0`, never a bare `build_conn/0`: the per-IP buckets that live
+  # INSIDE controllers (the Bulldocs form's 20-submission bucket, keyed on the
+  # client IP) ignore the `:rate_limits` override above, and a bare conn bills
+  # them to the whole-node `127.0.0.1` key every other unscoped test also spends.
+  # When the run had left that bucket ONE token, the anon pass took it
+  # last token (404) and the keyed pass got 429 — read as an elevation. The
+  # scope gives this test its own buckets, and anon + keyed still share one, so
+  # the two passes are billed identically.
   defp status_for(verb, path, token) do
-    conn = build_conn()
+    conn = scoped_conn()
     conn = if token, do: put_req_header(conn, "authorization", "Bearer #{token}"), else: conn
 
     try do
@@ -225,7 +234,7 @@ defmodule BarkparkWeb.TicketKeyRouteSweepTest do
   # Drive the RequireTicketKey plug directly (the gate the `/v1/tickets` exempt
   # prefix runs behind once the sibling slice adds its routes).
   defp ticket_gate(token) do
-    conn = build_conn()
+    conn = scoped_conn()
     conn = if token, do: put_req_header(conn, "authorization", "Bearer #{token}"), else: conn
     BarkparkWeb.Plugs.RequireTicketKey.call(conn, [])
   end
