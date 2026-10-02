@@ -840,7 +840,7 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 		if ref := checkLabelSpineLocal(body); ref != nil {
 			return mcpTextError(mcpPublishWallMessage(ref))
 		}
-		if ref, _ := checkTagRegistry(ctx, body); ref != nil {
+		if ref, _, _ := checkTagRegistry(ctx, body); ref != nil {
 			return mcpTextError(mcpPublishWallMessage(ref))
 		}
 	}

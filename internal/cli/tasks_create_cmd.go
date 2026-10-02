@@ -114,7 +114,7 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	// ("plausible tag names") into a SECOND phantom, so it is checked here — the
 	// last point at which refusing still costs the server nothing.
 	if publish {
-		ref, blind := checkTagRegistry(ctx, body)
+		ref, blind, empty := checkTagRegistry(ctx, body)
 		if ref != nil {
 			return renderPublishWallRefusal(out, ref)
 		}
@@ -136,6 +136,9 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 			// The blast radius is bounded by checkTagRegistry itself: `blind` is
 			// only ever true when the body carries weighted tags AND the read was
 			// non-authoritative. A create with no tags never reaches here.
+			if empty {
+				return renderTagRegistryEmptyRefusal(out, ctx, body)
+			}
 			return renderTagRegistryUnreadableRefusal(out, body)
 		}
 	}
@@ -527,6 +530,38 @@ func renderTagRegistryUnreadableRefusal(out *writer, body map[string]any) int {
 	return exitUsage
 }
 
+// renderTagRegistryEmptyRefusal is the same fail-closed refusal for a registry
+// that READ fine and holds no published tag. Calling that "could not be read"
+// sent a fresh install chasing a read failure: the fix is to register the tag
+// (or point at the dataset that has them), not to retry.
+func renderTagRegistryEmptyRefusal(out *writer, ctx manifest.Context, body map[string]any) int {
+	names := wallTagNames(body)
+	first := "<tag>"
+	if len(names) > 0 {
+		first = names[0]
+	}
+	register := fmt.Sprintf("bp doc create tag --set _id=%s --set title=%s && bp doc publish tag %s", first, first, first)
+	msg := fmt.Sprintf("task create --publish: refused before writing anything — the tag registry in dataset %q is EMPTY: no type:tag doc is published there, so no tag on this row can pass the publish wall", ctx.Dataset)
+	if renderErrorEnvelopeDetailed(out, tagRegistryEmptyCode, msg, "",
+		"nothing was created — no draft was left behind. Register each tag first (`"+register+"`), or check -s/-d if this dataset should already have tags.",
+		tagRegistryUnreadableDetails(body)) {
+		return exitUsage
+	}
+	out.userErr("%s", msg)
+	out.errf("  code:  %s", tagRegistryEmptyCode)
+	if len(names) > 0 {
+		out.errf("  tags:  %s", strings.Join(names, ", "))
+	}
+	out.errf("  why:   the server publishes a tagged row only when every weighted tag is ALREADY a published type:tag doc.")
+	out.errf("  fix:   register each tag, then retry —")
+	out.errf("           bp doc create tag --set _id=%s --set title=%s", first, first)
+	out.errf("           bp doc publish tag %s", first)
+	out.errf("         expected tags here? check the server and dataset (-s / -d): %s lists what this one holds", tagRegistryCommand)
+	out.errf("         or file it as a draft now (`bp task create …` without --publish) and publish later.")
+	out.errf("  nothing was created — no draft was left behind.")
+	return exitUsage
+}
+
 // tagRegistryUnreadableDetails is the machine payload for the fail-closed
 // registry refusal: the tag names that could NOT be checked. A caller cannot
 // re-derive them from the exit code, and they are exactly the list to re-check
@@ -548,6 +583,10 @@ func tagRegistryUnreadableDetails(body map[string]any) json.RawMessage {
 // ever raises it, and borrowing one of theirs would make a client-side "we could
 // not ask" indistinguishable from a server-side "we asked and the answer was no".
 const tagRegistryUnreadableCode = "tag_registry_unreadable"
+
+// tagRegistryEmptyCode names the refusal for a registry that read cleanly with
+// no published tag. Client-only for the same reason as the code above.
+const tagRegistryEmptyCode = "tag_registry_empty"
 
 // wallTagNames lists the weighted tag names on body, for the refusal above. A
 // malformed tags field yields nothing — the spine check upstream owns that
