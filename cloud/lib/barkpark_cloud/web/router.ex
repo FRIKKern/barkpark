@@ -12473,8 +12473,13 @@ defmodule BarkparkCloud.Web.Router do
     case conn.body_params["bundle_ref"] do
       ref when is_binary(ref) ->
         case String.trim(ref) do
-          "" -> newest_bundle_ref(conn.assigns.current_team)
-          trimmed -> {:ok, trimmed}
+          "" ->
+            newest_bundle_ref(conn.assigns.current_team)
+
+          trimmed ->
+            if own_bundle_ref?(trimmed, conn.assigns.current_team.id),
+              do: {:ok, trimmed},
+              else: {:error, :invalid_bundle_ref}
         end
 
       nil ->
@@ -12487,6 +12492,21 @@ defmodule BarkparkCloud.Web.Router do
         {:error, :invalid_bundle_ref}
     end
   end
+
+  # r4a: an explicit ref is client input, and the worker restores whatever key
+  # prefix the claim carries — another team's `archives/<B>/…` would restore
+  # B's database onto a box the caller owns. The same boundary
+  # `ArchiveStore.delete_bundle/2` holds: the ref must live under the caller's
+  # OWN `archives/<team_id>/` prefix, with no `.`/`..` segment or backslash that
+  # could walk it back out.
+  defp own_bundle_ref?(ref, team_id) when is_binary(team_id) and team_id != "" do
+    prefix = "archives/" <> team_id <> "/"
+
+    String.starts_with?(ref, prefix) and ref != prefix and not String.contains?(ref, "\\") and
+      ref |> String.split("/") |> Enum.all?(&(&1 not in [".", ".."]))
+  end
+
+  defp own_bundle_ref?(_ref, _team_id), do: false
 
   defp newest_bundle_ref(team) do
     case ArchiveStore.list_archives(team.id) do

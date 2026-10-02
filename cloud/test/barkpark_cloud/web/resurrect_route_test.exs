@@ -31,7 +31,9 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
   @opts Router.init([])
   @password "correct-horse-battery"
   @worker_token "worker-token-test-fixed"
-  @bundle "s3://barkpark-archives/shop-2026-07-09.tar.zst"
+  # An explicit bundle_ref must live under the caller's OWN archives/<team_id>/
+  # prefix (r4a) — the shape ArchiveStore.list_archives/1 hands back.
+  defp bundle(team), do: "archives/#{team.id}/shop.barkpark.cloud/20260709T000000Z/"
 
   @azure_creds %{
     "tenant_id" => "11111111-1111-1111-1111-111111111111",
@@ -204,7 +206,7 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
         call(
           :post,
           "/v1/resurrect",
-          %{name: "Shop", provider: "hetzner", bundle_ref: @bundle},
+          %{name: "Shop", provider: "hetzner", bundle_ref: bundle(team)},
           token_for(user)
         )
 
@@ -214,7 +216,7 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
       assert is_binary(body["id"]) and body["id"] != ""
       assert is_binary(body["job_id"]) and body["job_id"] != ""
       # An explicit bundle_ref is echoed back verbatim (the resolved ref — D47).
-      assert body["bundle_ref"] == @bundle
+      assert body["bundle_ref"] == bundle(team)
 
       # The fresh row landed, provider persisted, region/size nil-honest (D23).
       assert [%Barkpark{id: id, provider: "hetzner", region: nil, server_type: nil}] =
@@ -224,8 +226,10 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
 
       # …and a pending resurrect job carrying the bundle_ref (fetched directly —
       # latest_provision_job/1 is kind:"provision"-filtered by design).
-      assert %ProvisionJob{status: "pending", bundle_ref: @bundle} =
+      assert %ProvisionJob{status: "pending", bundle_ref: job_ref} =
                BarkparkCloud.Repo.get_by(ProvisionJob, barkpark_id: id, kind: "resurrect")
+
+      assert job_ref == bundle(team)
     end
 
     test "region/server_type ride through when pinned" do
@@ -235,7 +239,7 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
       assert call(
                :post,
                "/v1/resurrect",
-               %{name: "Pinned", bundle_ref: @bundle, region: "hel1", server_type: "cx32"},
+               %{name: "Pinned", bundle_ref: bundle(team), region: "hel1", server_type: "cx32"},
                token_for(user)
              ).status == 202
 
@@ -252,7 +256,7 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
         call(
           :post,
           "/v1/resurrect",
-          %{name: "AzShop", provider: "azure", bundle_ref: @bundle},
+          %{name: "AzShop", provider: "azure", bundle_ref: bundle(team)},
           token_for(user)
         )
 
@@ -301,10 +305,34 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
       end)
 
       conn =
-        call(:post, "/v1/resurrect", %{name: "Shop", bundle_ref: @bundle}, token_for(user))
+        call(:post, "/v1/resurrect", %{name: "Shop", bundle_ref: bundle(team)}, token_for(user))
 
       assert conn.status == 202
-      assert json_body(conn)["bundle_ref"] == @bundle
+      assert json_body(conn)["bundle_ref"] == bundle(team)
+    end
+
+    test "another team's bundle (or one that walks out of the own prefix) is a 422; no row, no job" do
+      # r4a: the worker restores whatever key prefix the claim carries. Team A
+      # naming archives/<B>/… would restore B's database onto A's box.
+      {user, team} = user_with_team()
+      subscribe!(team)
+      {_victim, victim_team} = user_with_team()
+
+      for bad <- [
+            bundle(victim_team),
+            "archives/#{team.id}/../#{victim_team.id}/shop.barkpark.cloud/20260709T000000Z/",
+            "archives/#{team.id}/",
+            "archives/#{team.id}/.\\../x/",
+            "s3://barkpark-archives/shop-2026-07-09.tar.zst"
+          ] do
+        conn = call(:post, "/v1/resurrect", %{name: "Shop", bundle_ref: bad}, token_for(user))
+
+        assert conn.status == 422, "bundle_ref #{inspect(bad)} was accepted (#{conn.status})"
+        assert json_body(conn)["error"] == "invalid_bundle_ref"
+      end
+
+      assert Registry.list_barkparks(team) == []
+      assert resurrect_claim().status == 204
     end
 
     test "a NON-STRING bundle_ref is a 422, never a silent newest-resolution" do
@@ -374,7 +402,7 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
       {user, team} = user_with_team()
       subscribe!(team)
 
-      conn = call(:post, "/v1/resurrect", %{name: "", bundle_ref: @bundle}, token_for(user))
+      conn = call(:post, "/v1/resurrect", %{name: "", bundle_ref: bundle(team)}, token_for(user))
       assert conn.status == 422
       assert json_body(conn)["error"] == "name_required"
     end
@@ -387,7 +415,7 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
         call(
           :post,
           "/v1/resurrect",
-          %{name: "Shop", provider: "gcp", bundle_ref: @bundle},
+          %{name: "Shop", provider: "gcp", bundle_ref: bundle(team)},
           token_for(user)
         )
 
@@ -403,7 +431,7 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
         call(
           :post,
           "/v1/resurrect",
-          %{name: "Shop", provider: "azure", bundle_ref: @bundle},
+          %{name: "Shop", provider: "azure", bundle_ref: bundle(team)},
           token_for(user)
         )
 
@@ -423,7 +451,7 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
       {:ok, _live} = Registry.register_managed_barkpark(team, "Shop", "shop", provider: "hetzner")
 
       conn =
-        call(:post, "/v1/resurrect", %{name: "Shop", bundle_ref: @bundle}, token_for(user))
+        call(:post, "/v1/resurrect", %{name: "Shop", bundle_ref: bundle(team)}, token_for(user))
 
       assert conn.status == 422
       assert json_body(conn)["error"] == "live_twin"
@@ -432,7 +460,9 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
     end
 
     test "an unauthenticated request → 401" do
-      conn = call(:post, "/v1/resurrect", %{name: "Shop", bundle_ref: @bundle}, "not-a-token")
+      conn =
+        call(:post, "/v1/resurrect", %{name: "Shop", bundle_ref: "archives/x/y/"}, "not-a-token")
+
       assert conn.status == 401
     end
 
@@ -444,7 +474,7 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
       {:ok, _} = Accounts.add_member(team, member, "member")
 
       conn =
-        call(:post, "/v1/resurrect", %{name: "Shop", bundle_ref: @bundle}, token_for(member))
+        call(:post, "/v1/resurrect", %{name: "Shop", bundle_ref: bundle(team)}, token_for(member))
 
       # 403 (role) before any body validation.
       assert conn.status == 403
@@ -459,7 +489,7 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
       assert call(
                :post,
                "/v1/resurrect",
-               %{name: "Shop", bundle_ref: @bundle, region: "hel1", server_type: "cx32"},
+               %{name: "Shop", bundle_ref: bundle(team), region: "hel1", server_type: "cx32"},
                token_for(user)
              ).status == 202
 
@@ -471,7 +501,7 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
       assert conn.status == 200
       payload = json_body(conn)
 
-      assert payload["bundle_ref"] == @bundle
+      assert payload["bundle_ref"] == bundle(team)
       # It IS the provision claim shape: name/slug/region/size + the agent token.
       assert payload["name"] == "Shop"
       assert payload["region"] == "hel1"
@@ -491,14 +521,14 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
       assert call(
                :post,
                "/v1/resurrect",
-               %{name: "AzShop", provider: "azure", bundle_ref: @bundle},
+               %{name: "AzShop", provider: "azure", bundle_ref: bundle(team)},
                token_for(user)
              ).status == 202
 
       payload = json_body(resurrect_claim())
       assert payload["kind"] == "azure"
       assert payload["credentials"] == @azure_creds
-      assert payload["bundle_ref"] == @bundle
+      assert payload["bundle_ref"] == bundle(team)
     end
 
     test "no pending resurrect job → 204" do
