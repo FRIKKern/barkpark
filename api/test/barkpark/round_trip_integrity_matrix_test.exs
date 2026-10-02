@@ -23,7 +23,11 @@ defmodule Barkpark.RoundTripIntegrityMatrixTest do
   Markdown import -> export -> import is not a path: there is no PortableDoc ->
   markdown exporter (formats are json and bpml), so it cannot round-trip.
   """
-  use BarkparkWeb.ConnCase, async: false
+  # Every test runs twice: on a legacy field document, and on one whose block
+  # list a Beta edit materialised (the projection branch of every writer).
+  use BarkparkWeb.ConnCase,
+    async: false,
+    parameterize: [%{variant: :legacy}, %{variant: :blocks}]
 
   import Barkpark.TenancyFixtures
 
@@ -86,7 +90,7 @@ defmodule Barkpark.RoundTripIntegrityMatrixTest do
     %{ws: ws, proj: proj, scope: scope}
   end
 
-  setup do
+  setup %{variant: variant} do
     {default_ws, default_proj} = ensure_default_scope!()
     src = tenancy!(@ds)
     doc_id = "rt-#{System.unique_integer([:positive])}"
@@ -102,6 +106,22 @@ defmodule Barkpark.RoundTripIntegrityMatrixTest do
         @ds,
         src.scope ++ [source: :api]
       )
+
+    fields_doc =
+      if variant == :blocks do
+        {blocks, _} = Content.resolve_blocks_for_edit(fields_doc, @type_name, @ds)
+        probe = Enum.find(blocks, &(&1["fieldName"] == "probe"))
+        op = %{"op" => "patch-block", "id" => probe["id"], "patch" => %{"value" => "p"}}
+
+        {:ok, _} =
+          Content.apply_document_block_op(fields_doc.doc_id, @type_name, op, @ds, src.scope)
+
+        {:ok, d} = Content.get_document(fields_doc.doc_id, @type_name, @ds, src.scope)
+        true = is_list(d.content["blocks"])
+        d
+      else
+        fields_doc
+      end
 
     slug = "rt-paper-#{System.unique_integer([:positive])}"
 
@@ -131,7 +151,9 @@ defmodule Barkpark.RoundTripIntegrityMatrixTest do
   # ── comparison ────────────────────────────────────────────────────────────
 
   defp field_failures(base, got) do
-    for {name, _decl, _} <- FieldShapeCorpus.cells(),
+    names = Enum.map(FieldShapeCorpus.cells(), &elem(&1, 0)) ++ ["blocks"]
+
+    for name <- names,
         Map.fetch(base, name) !== Map.fetch(got || %{}, name) do
       {name, Map.get(base, name, :absent), Map.get(got || %{}, name, :absent)}
     end
@@ -468,12 +490,15 @@ defmodule Barkpark.RoundTripIntegrityMatrixTest do
   # ── 6. revision restore of the first revision ─────────────────────────────
 
   describe "revision restore" do
-    test "the field corpus: restoring rev 1 after an edit gives rev 1 back", %{
+    # The revision restored is the one captured for the CURRENT stored state
+    # (the newest), and the restored document must equal it — cells and, on a
+    # block-bearing doc, the block list.
+    test "the field corpus: an edit, then restoring the prior revision gives it back", %{
       src: src,
       fields_doc: doc
     } do
-      [first | _] =
-        Content.list_revisions(doc.doc_id, @type_name, @ds, src.scope) |> Enum.reverse()
+      [first | _] = Content.list_revisions(doc.doc_id, @type_name, @ds, src.scope)
+      assert first.content["probe"] == "p"
 
       {:ok, _} =
         Content.apply_mutations(
