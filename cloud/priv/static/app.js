@@ -213,6 +213,9 @@
     not_live: "The instance isn't live yet — wait for provisioning to finish.",
     no_admin_token: "No stored credentials for this instance — it may need a re-provision.",
     instance_unreachable: "Couldn't reach the instance — try again in a moment.",
+    // r4a — the 422 on POST /v1/fleet/supports when the host already belongs to
+    // another team's server: a support must be a machine your team controls.
+    host_taken: "That host is already registered to another team. Use the address of a server your team controls.",
     // task-71082f5541c13b53 (N-08) — the 409 every /v1/sites/:id/forms route
     // sends when the instance's plugin roster has no `forms`: the intake route
     // does not exist there, so there is nothing to turn on or read. Names the
