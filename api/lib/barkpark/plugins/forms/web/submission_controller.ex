@@ -89,8 +89,14 @@ defmodule Barkpark.Plugins.Forms.Web.SubmissionController do
       {:error, :not_found} ->
         envelope(conn, 404, "not_found", "form endpoint not found")
 
+      # The code-keyed `forbidden` hint ("Use a token with write/admin
+      # permission…") is wrong here: an anonymous form post never carries a
+      # token. Name the real gate — the endpoint's allowed origins.
       {:error, :origin} ->
-        envelope(conn, 403, "forbidden", "this origin may not post to this form")
+        envelope(conn, 403, "forbidden", "this origin may not post to this form", nil,
+          hint:
+            "This form accepts posts only from the origins listed on its form_endpoint (allowed_origins). Post from one of those origins, or add this origin to the endpoint."
+        )
 
       {:error, {:unknown_fields, names}} ->
         envelope(conn, 422, "validation_failed", "unknown form fields", %{unknown_fields: names})
@@ -109,10 +115,17 @@ defmodule Barkpark.Plugins.Forms.Web.SubmissionController do
     end
   end
 
-  defp envelope(conn, status, code, message, details \\ nil) do
+  defp envelope(conn, status, code, message, details \\ nil, opts \\ []) do
     env =
       %{code: code, message: message}
       |> then(fn env -> if details, do: Map.put(env, :details, details), else: env end)
+      # A route-specific hint wins over the code-keyed default (Errors.put_hint).
+      |> then(fn env ->
+        case Keyword.get(opts, :hint) do
+          hint when is_binary(hint) -> Map.put(env, :hint, hint)
+          _ -> env
+        end
+      end)
       |> Barkpark.Content.Errors.stamp(conn)
 
     conn

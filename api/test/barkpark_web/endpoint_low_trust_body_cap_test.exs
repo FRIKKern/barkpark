@@ -41,6 +41,16 @@ defmodule BarkparkWeb.EndpointLowTrustBodyCapTest do
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "payload_too_large"
     end
 
+    # Run-4 lane C: the 413 named the GLOBAL cap ("100 MB") to a poster this
+    # route refused at 64 KiB.
+    test "the 413 names THIS route's limit, not the global 100 MB", %{conn: conn} do
+      error = Jason.decode!(post_json(conn, @forms_path, json_body(200_000)).resp_body)["error"]
+
+      assert error["message"] =~ "64 KiB"
+      assert error["hint"] =~ "64 KiB"
+      refute error["hint"] =~ "100 MB"
+    end
+
     test "a small body still reaches the controller (404 for an unknown endpoint)", %{conn: conn} do
       resp = post_json(conn, @forms_path, json_body(100))
       assert resp.status == 404
