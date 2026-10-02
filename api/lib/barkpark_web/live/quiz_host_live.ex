@@ -6,6 +6,14 @@ defmodule BarkparkWeb.QuizHostLive do
   input. Subscribes to the room events topic so every `{:tally, t}` /
   `{:player_joined|left, _}` broadcast re-renders without polling.
 
+  Host controls: the browser session that OWNS the pin (`Quiz.Bridge`, first
+  host wins: `bind_as_host/4` with `?quiz=`, `claim_host/2` without) gets a
+  toolbar that drives the room's phases: start the question (arms the
+  countdown from its `time_limit`), reveal the answer, show scores, end the
+  game. Every control re-checks ownership on the server; a second browser on
+  the same host URL sees the projector without controls, and only the owner
+  subscribes to the host-only answer topic.
+
   This is the surface P5's crowd heatmap will eventually replace the bars with
   (`/papers/hyperquiz-realtime-protocol`); for P1 it's the individual-tally view.
   """
@@ -53,20 +61,34 @@ defmodule BarkparkWeb.QuizHostLive do
       # Bound as THIS host session: a second browser (a player who read the PIN
       # off the projector) cannot swap a live room's quiz (task-680f88266f783346).
       qid when is_binary(qid) and qid != "" -> Quiz.bind_quiz_as_host(pin, qid, host_key)
-      _ -> :ok
+      # No quiz: still claim the unowned pin, so the default question can be run.
+      _ -> Quiz.Bridge.claim_host(pin, host_key)
     end
 
+    host? = Quiz.Bridge.host?(pin, host_key)
+
     Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(pin))
+    # The answer rides a HOST-ONLY topic (`Room.host_topic/1`); this route is
+    # anonymous, so only the owning session may hear it.
+    if host?, do: Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.host_topic(pin))
+
     state = Quiz.state(pin)
 
-    {:ok,
-     assign(socket,
-       pin: pin,
-       question: state.question,
-       tally: state.tally,
-       player_count: state.player_count,
-       error: nil
-     )}
+    socket =
+      assign(socket,
+        pin: pin,
+        host_key: host_key,
+        host?: host?,
+        question: state.question,
+        tally: state.tally,
+        player_count: state.player_count,
+        phase: state.phase,
+        scores: state.scores,
+        answer: nil,
+        error: nil
+      )
+
+    {:ok, arm_countdown(socket, state.seconds_remaining)}
   end
 
   # The host browser's identity: a hash of its session CSRF token (per browser
@@ -79,8 +101,50 @@ defmodule BarkparkWeb.QuizHostLive do
 
   # The pre-connect skeleton AND the base for the capacity-refusal state.
   defp unavailable_assigns(socket, pin) do
-    assign(socket, pin: pin, question: nil, tally: %{}, player_count: 0, error: nil)
+    assign(socket,
+      pin: pin,
+      host_key: nil,
+      host?: false,
+      question: nil,
+      tally: %{},
+      player_count: 0,
+      phase: nil,
+      scores: [],
+      answer: nil,
+      ends_at: nil,
+      remaining: nil,
+      error: nil
+    )
   end
+
+  # Host controls. The buttons render only for the owner, but the event is a
+  # public wire message, so ownership is re-checked here on every press.
+  @impl true
+  def handle_event("host", %{"action" => action}, socket) do
+    %{pin: pin, host_key: key} = socket.assigns
+
+    if Quiz.Bridge.host?(pin, key) do
+      case action do
+        "start" -> Quiz.start_question(pin)
+        "reveal" -> Quiz.reveal(pin)
+        "scores" -> Quiz.leaderboard(pin)
+        "end" -> Quiz.end_game(pin)
+        _ -> :ok
+      end
+    end
+
+    {:noreply, socket}
+  end
+
+  # The countdown the projector shows. The room owns the real deadline (its
+  # auto-reveal fires on expiry); this is the display of it, ticked once a second.
+  defp arm_countdown(socket, secs) when is_number(secs) and secs > 0 do
+    ends_at = System.monotonic_time(:millisecond) + round(secs * 1000)
+    if connected?(socket), do: Process.send_after(self(), {:countdown, ends_at}, 1000)
+    assign(socket, ends_at: ends_at, remaining: ceil(secs))
+  end
+
+  defp arm_countdown(socket, _secs), do: assign(socket, ends_at: nil, remaining: nil)
 
   @impl true
   def handle_info({:quiz, _pin, {:tally, tally}}, socket),
@@ -97,6 +161,45 @@ defmodule BarkparkWeb.QuizHostLive do
   # Live-edit (P4): re-render the projector with the swapped question.
   def handle_info({:quiz, _pin, {:question_updated, question}}, socket),
     do: {:noreply, assign(socket, question: question)}
+
+  # Phase transitions, broadcast by the room on the shared events topic.
+  def handle_info({:quiz, _pin, {:phase, :question, payload}}, socket) do
+    socket =
+      assign(socket,
+        phase: :question,
+        question: payload.question,
+        tally: payload.tally,
+        answer: nil
+      )
+
+    {:noreply, arm_countdown(socket, payload.time_limit)}
+  end
+
+  def handle_info({:quiz, _pin, {:phase, :reveal, payload}}, socket) do
+    socket = assign(socket, phase: :reveal, tally: payload.tally, scores: payload.scores)
+    {:noreply, arm_countdown(socket, nil)}
+  end
+
+  def handle_info({:quiz, _pin, {:phase, phase, payload}}, socket)
+      when phase in [:leaderboard, :ended, :lobby] do
+    scores = Map.get(payload, :scores, socket.assigns.scores)
+    {:noreply, arm_countdown(assign(socket, phase: phase, scores: scores), nil)}
+  end
+
+  # Host-only topic (subscribed only by the owner): the correct choice id.
+  def handle_info({:quiz, _pin, {:reveal_answer, answer}}, socket),
+    do: {:noreply, assign(socket, answer: answer)}
+
+  def handle_info({:countdown, ends_at}, %{assigns: %{ends_at: ends_at}} = socket) do
+    left = ends_at - System.monotonic_time(:millisecond)
+
+    if left > 0 and socket.assigns.phase == :question do
+      Process.send_after(self(), {:countdown, ends_at}, min(1000, left))
+      {:noreply, assign(socket, remaining: ceil(left / 1000))}
+    else
+      {:noreply, assign(socket, remaining: 0)}
+    end
+  end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
 
@@ -129,19 +232,72 @@ defmodule BarkparkWeb.QuizHostLive do
             in a moment and the room starts as soon as one frees up.
           </p>
         <% @question -> %>
-          <h1 class="q-question">{@question.prompt}</h1>
-          <img :if={@question[:image]} src={@question[:image]} alt="" class="q-image" />
-          <div class="q-meta">{@total} answers in</div>
-
-          <div class="q-bar-row" :for={{choice, idx} <- Enum.with_index(@question.choices)}>
-            <div class="q-bar-label">
-              <span>{choice.label}</span>
-              <span class="q-count">{Map.get(@tally, choice.id, 0)}</span>
-            </div>
-            <div class="q-bar-track">
-              <div class={"q-bar-fill c#{rem(idx, 4)}"} style={"width: #{pct(Map.get(@tally, choice.id, 0), @total)}%"}></div>
-            </div>
+          <div :if={@host?} class="q-host-controls" role="toolbar" aria-label="Host controls">
+            <button type="button" class="q-host-btn" phx-click="host" phx-value-action="start">
+              {if @phase == :question and is_nil(@ends_at), do: "Start question", else: "Restart question"}
+            </button>
+            <button
+              type="button"
+              class="q-host-btn"
+              phx-click="host"
+              phx-value-action="reveal"
+              disabled={@phase != :question}
+            >
+              Reveal answer
+            </button>
+            <button
+              type="button"
+              class="q-host-btn"
+              phx-click="host"
+              phx-value-action="scores"
+              disabled={@phase not in [:reveal, :ended]}
+            >
+              Show scores
+            </button>
+            <button
+              type="button"
+              class="q-host-btn"
+              phx-click="host"
+              phx-value-action="end"
+              disabled={@phase == :ended}
+            >
+              End game
+            </button>
           </div>
+
+          <%= if @phase in [:leaderboard, :ended] do %>
+            <h1 class="q-question">{if @phase == :ended, do: "Game over", else: "Scores"}</h1>
+            <ol :if={@scores != []} class="q-scores">
+              <li :for={row <- @scores}>
+                <span>{row.name}</span> <span class="q-count">{row.score}</span>
+              </li>
+            </ol>
+            <p :if={@scores == []} class="q-status">No points scored yet.</p>
+          <% else %>
+            <h1 class="q-question">{@question.prompt}</h1>
+            <img :if={@question[:image]} src={@question[:image]} alt="" class="q-image" />
+            <div class="q-meta">
+              {@total} answers in<span :if={@remaining} class="q-timer" role="timer"> · {@remaining}s left</span><span :if={@phase == :reveal}> · answers locked</span>
+            </div>
+
+            <div class="q-bar-row" :for={{choice, idx} <- Enum.with_index(@question.choices)}>
+              <div class="q-bar-label">
+                <span class={if @answer == choice.id, do: "q-correct"}>
+                  {choice.label}{if @answer == choice.id, do: " ✓"}
+                </span>
+                <span class="q-count">{Map.get(@tally, choice.id, 0)}</span>
+              </div>
+              <div class="q-bar-track">
+                <div class={"q-bar-fill c#{rem(idx, 4)}"} style={"width: #{pct(Map.get(@tally, choice.id, 0), @total)}%"}></div>
+              </div>
+            </div>
+
+            <ol :if={@phase == :reveal and @scores != []} class="q-scores">
+              <li :for={row <- @scores}>
+                <span>{row.name}</span> <span class="q-count">{row.score}</span>
+              </li>
+            </ol>
+          <% end %>
         <% true -> %>
           <p class="q-status">Opening the room…</p>
       <% end %>

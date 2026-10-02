@@ -137,6 +137,30 @@ defmodule Barkpark.Quiz.Bridge do
     do: GenServer.call(__MODULE__, {:bind_as_host, pin, quiz_id, host_key, dataset})
 
   @doc """
+  Claim an UNOWNED live pin for a host session without binding a quiz — the
+  host screen opened with no `?quiz=`. Same ownership rule as
+  `bind_as_host/4`: the first host owns the pin until its room dies, the owner
+  re-claiming is `:ok`, anyone else is `{:error, :not_host}`. A nil key never
+  claims, so a browser without a session can watch but never drive a room.
+  """
+  @spec claim_host(String.t(), String.t() | nil) :: :ok | {:error, :not_host}
+  def claim_host(_pin, nil), do: {:error, :not_host}
+
+  def claim_host(pin, host_key) when is_binary(host_key),
+    do: GenServer.call(__MODULE__, {:claim_host, pin, host_key})
+
+  @doc """
+  Whether `host_key` owns `pin` — the gate every host control re-checks on the
+  server before it moves the room (start, reveal, scores, end). A nil key is
+  never the host.
+  """
+  @spec host?(String.t(), String.t() | nil) :: boolean()
+  def host?(_pin, nil), do: false
+
+  def host?(pin, host_key) when is_binary(host_key),
+    do: GenServer.call(__MODULE__, {:host?, pin, host_key})
+
+  @doc """
   The current binding index, `%{quiz_id => %{pin => dataset}}`.
 
   Read-only introspection over state that is otherwise invisible — the GC
@@ -214,6 +238,34 @@ defmodule Barkpark.Quiz.Bridge do
         handle_call({:bind, pin, quiz_id, dataset}, from, state)
     end
   end
+
+  # The claim dies with the room: monitor it so `drop_pin/2` (the :DOWN path)
+  # retires the owner exactly as it retires a bound pin.
+  def handle_call({:claim_host, pin, host_key}, _from, state) do
+    owners = Map.get(state, :host_keys, %{})
+
+    case Map.fetch(owners, pin) do
+      {:ok, ^host_key} ->
+        {:reply, :ok, state}
+
+      {:ok, _other} ->
+        {:reply, {:error, :not_host}, state}
+
+      :error ->
+        state = Map.put(state, :host_keys, Map.put(owners, pin, host_key))
+
+        state =
+          case Quiz.Room.whereis(pin) do
+            nil -> state
+            room -> monitor_room(pin, room, state)
+          end
+
+        {:reply, :ok, state}
+    end
+  end
+
+  def handle_call({:host?, pin, host_key}, _from, state),
+    do: {:reply, Map.get(Map.get(state, :host_keys, %{}), pin) == host_key, state}
 
   def handle_call(:bindings, _from, state), do: {:reply, state.bindings, state}
 
