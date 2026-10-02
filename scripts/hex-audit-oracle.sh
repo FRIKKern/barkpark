@@ -100,7 +100,15 @@ text = ANSI.sub("", raw)
 HEAD = re.compile(r"^ {2}(\S+) (\S+) - (\S+)(?: \((\w+)\))?\s*$")
 AKA = re.compile(r"^\s*aka: (.+?)\s*$")
 
-readable = ("Advisories:" in text) or ("Retired:" in text)
+# A CLEAN lock is a report too. Hex prints exactly this line (exit 0) when the
+# lock carries nothing — it is the answer "zero advisories", not the absence of
+# an answer. Matched as a WHOLE LINE, so the sentence quoted inside an error
+# cannot pass for it. Before this arm a fully clean cloud/mix.lock read as
+# CANNOT READ and the oracle exited 3 on every run (task-5a0545cb11c0ee83).
+CLEAN_LINE = "No retired or security advisory packages found"
+clean_report = any(l.strip() == CLEAN_LINE for l in text.splitlines())
+
+readable = ("Advisories:" in text) or ("Retired:" in text) or clean_report
 
 entries, cur = [], None
 in_adv = False
@@ -244,6 +252,15 @@ FIX
   cat >"$T/unreadable.txt" <<'FIX'
 ** (Mix) The task "hex.audit" could not be found
 FIX
+  # Hex's own output for a lock with nothing to report (captured from
+  # `mix hex.audit` in cloud/, 2026-10-02, exit 0).
+  cat >"$T/hexclean.txt" <<'FIX'
+No retired or security advisory packages found
+FIX
+  # The same words, but not as hex's whole line: still no report.
+  cat >"$T/hexclean.quoted.txt" <<'FIX'
+** (Mix) could not print "No retired or security advisory packages found": network unreachable
+FIX
   cat >"$T/unknownsev.txt" <<'FIX'
 Advisories:
   mystery 1.0.0 - EEF-CVE-2026-00000
@@ -257,6 +274,8 @@ FIX
   summarise "$T/lowonly.txt" fix; [ "$R_HIGH" = 0 ] && [ "$R_TOTAL" = 1 ] && ok "MUTANT: drop the HIGH -> high=0 total=1 (severity really is read)" || no "lowonly gave high=$R_HIGH total=$R_TOTAL"
   summarise "$T/clean.txt" fix; [ "$R_READABLE" = 1 ] && [ "$R_TOTAL" = 0 ] && ok "an empty Advisories block is READABLE and clean" || no "clean gave readable=$R_READABLE total=$R_TOTAL"
   summarise "$T/unreadable.txt" fix; [ "$R_READABLE" = 0 ] && ok "a mix error is UNREADABLE, not clean" || no "unreadable gave readable=$R_READABLE"
+  summarise "$T/hexclean.txt" fix; [ "$R_READABLE" = 1 ] && [ "$R_TOTAL" = 0 ] && [ "$R_HIGH" = 0 ] && ok "hex's clean-lock line is READABLE with 0 advisories" || no "hexclean gave readable=$R_READABLE total=$R_TOTAL high=$R_HIGH"
+  summarise "$T/hexclean.quoted.txt" fix; [ "$R_READABLE" = 0 ] && ok "the clean-lock words inside an error line stay UNREADABLE (whole-line match)" || no "quoted clean line gave readable=$R_READABLE"
   summarise "$T/unknownsev.txt" fix; [ "$R_HIGH" = 1 ] && ok "an advisory with NO severity counts toward the red (never downgraded)" || no "unknownsev gave high=$R_HIGH"
   IGNORES=("GHSA-vg8x-66vg-5pxh")
   summarise "$T/high.txt" fix; [ "$R_HIGH" = 0 ] && [ "$R_TOTAL" = 1 ] && ok "--ignore matches an AKA, not just the primary id" || no "aka-ignore gave high=$R_HIGH total=$R_TOTAL"
@@ -317,6 +336,9 @@ STUB
   e2e "absolute, planted HIGH" 1 "$T/high.txt"
   e2e "absolute, plant removed" 0 "$T/lowonly.txt"
   e2e "an unreadable feed is CANNOT READ, never green" 3 "$T/unreadable.txt"
+  e2e "hex's clean-lock report is GREEN, not CANNOT READ" 0 "$T/hexclean.txt"
+  e2e "hex's clean-lock report under the ratchet: nothing NEW" 0 "$T/hexclean.txt" --baseline "$T/e2e-base.txt"
+  e2e "a lock with a known HIGH advisory still reds" 1 "$T/high.txt"
 
   rm -rf "$T"
   echo

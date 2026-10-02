@@ -33,16 +33,8 @@
 api:EEF-CVE-2026-43966  cowlib 2.20.0  MEDIUM  (no fixed version published)
 api:EEF-CVE-2026-43969  cowlib 2.20.0  LOW  (no fixed version published)
 api:EEF-CVE-2026-28809  esaml 4.6.0  MEDIUM  (no upstream fix; mitigated by OTP 27+)
-cloud:EEF-CVE-2026-66838  postgrex 0.22.2  MEDIUM
-cloud:EEF-CVE-2026-58225  postgrex 0.22.2  LOW
-cloud:EEF-CVE-2026-56813  plug 1.20.1  LOW
-cloud:EEF-CVE-2026-56814  plug 1.20.1  MEDIUM
-cloud:EEF-CVE-2026-74836  bandit 1.12.0  HIGH
-cloud:EEF-CVE-2026-65623  bandit 1.12.0  HIGH
-cloud:EEF-CVE-2026-75484  bandit 1.12.0  MEDIUM
-cloud:EEF-CVE-2026-82728  mint 1.9.1  HIGH
-cloud:EEF-CVE-2026-59246  mint 1.9.1  MEDIUM
-cloud:EEF-CVE-2026-59249  mint 1.9.1  MEDIUM
-cloud:EEF-CVE-2026-58229  mint 1.9.1  HIGH
-cloud:EEF-CVE-2026-54893  swoosh 1.26.2  LOW
-cloud:EEF-CVE-2026-58226  hpax 1.0.3  HIGH
+# CLOUD TRIM 2026-10-02 (task-5a0545cb11c0ee83, run-4 lane D): cloud/mix.lock
+# carries bandit 1.12.5, mint 1.11.0, plug 1.20.3, postgrex 0.22.4,
+# swoosh 1.28.1; `mix hex.audit` in cloud/ prints "No retired or security
+# advisory packages found" (exit 0). All 13 cloud records were CLEARED and
+# removed; cloud carries no recorded advisory, so any cloud id is NEW.
