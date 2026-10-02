@@ -7,6 +7,16 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
 
   @fake_app_server Path.expand("../../../fixtures/codex_app_server/fake_app_server.py", __DIR__)
 
+  # A STARTUP BUDGET, not a latency assertion (task-697215d9d7dad3f7). A
+  # success-path call spawns the Python fake app server (twice for readiness:
+  # the version probe, then the session handshake) and must finish inside
+  # `timeout_ms`. At 500 ms a loaded runner's interpreter startup alone could
+  # spend it: main run 36589134658 failed `{:error, :timeout}` on a fixture
+  # that was answering correctly. These tests assert the WIRE, so they get a
+  # budget that only a hang can exhaust; they return as soon as the fake
+  # answers. The fail-closed timeout tests keep their short timeouts on purpose.
+  @startup_budget_ms 10_000
+
   defp fake_app_server(mode \\ :normal) do
     id = System.unique_integer([:positive])
     log = TestTmp.path("codex_app_server_fake_#{id}.jsonl")
@@ -26,7 +36,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
                sink: self(),
                session_id: "barkpark-session",
                cwd: "/tmp",
-               timeout_ms: 500
+               timeout_ms: @startup_budget_ms
              })
 
     assert runtime.provider_session_id == "thread-1"
@@ -87,7 +97,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
                sink: self(),
                session_id: "barkpark-session",
                provider_session_id: "native-thread",
-               timeout_ms: 500
+               timeout_ms: @startup_budget_ms
              })
 
     assert runtime.provider_session_id == "thread-resumed"
