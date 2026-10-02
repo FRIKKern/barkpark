@@ -185,7 +185,7 @@ test("a drafts. document in the LIVE stream never reaches the client", async () 
     `the draft document id reached the browser:\n${body}`,
   );
   assert.ok(
-    body.includes("PUBLIC-BODY"),
+    body.includes('"documentId":"p1"'),
     `the published document must still stream — the filter must not be a mute:\n${body}`,
   );
 });
@@ -206,7 +206,7 @@ test("?lastEventId=0 REPLAY is filtered the same way as the live leg", async () 
     !body.includes("UNPUBLISHED-SECRET"),
     `replayed draft content reached the browser:\n${body}`,
   );
-  assert.ok(body.includes("PUBLIC-BODY"), body);
+  assert.ok(body.includes('"documentId":"p1"'), body);
 });
 
 test("a draft frame SPLIT ACROSS TWO CHUNKS is still dropped whole", async () => {
@@ -226,7 +226,7 @@ test("a draft frame SPLIT ACROSS TWO CHUNKS is still dropped whole", async () =>
     !body.includes("drafts.l1"),
     `a chunk-split draft id leaked:\n${body}`,
   );
-  assert.ok(body.includes("PUBLIC-BODY"), body);
+  assert.ok(body.includes('"documentId":"p1"'), body);
 });
 
 test("a PUBLISHED frame split across two chunks still arrives intact", async () => {
@@ -237,7 +237,7 @@ test("a PUBLISHED frame split across two chunks still arrives intact", async () 
   assertPrivileged();
 
   assert.ok(
-    body.includes("PUBLIC-BODY"),
+    body.includes('"documentId":"p1"'),
     `buffering must reassemble a split published frame, not swallow it:\n${body}`,
   );
   assert.ok(
@@ -257,7 +257,7 @@ test("a MALFORMED frame is dropped, not forwarded", async () => {
     !body.includes("not json at all"),
     `an unparseable frame must fail CLOSED — it is exactly what an attacker aims for:\n${body}`,
   );
-  assert.ok(body.includes("PUBLIC-BODY"), body);
+  assert.ok(body.includes('"documentId":"p1"'), body);
 });
 
 test("a mutation frame with NO published/draft discriminator is dropped", async () => {
@@ -274,7 +274,7 @@ test("a mutation frame with NO published/draft discriminator is dropped", async 
     !body.includes("OPAQUE-PAYLOAD"),
     `absent discriminator must DROP, not pass:\n${body}`,
   );
-  assert.ok(body.includes("PUBLIC-BODY"), body);
+  assert.ok(body.includes('"documentId":"p1"'), body);
 });
 
 test("welcome and keepalive frames still pass through", async () => {
