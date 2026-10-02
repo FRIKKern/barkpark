@@ -22,7 +22,6 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INJECTOR="$HERE/dependabot-task-trailer.sh"
 GATE="$HERE/pr-task-gate.sh"
-STANDING="task-3e5d6364196a7cda"
 
 for f in "$INJECTOR" "$GATE"; do
   if [ ! -f "$f" ]; then
@@ -30,6 +29,15 @@ for f in "$INJECTOR" "$GATE"; do
     exit 2
   fi
 done
+
+# The standing id is read from its ONE home (the injector's DEFAULT_TASK_ID),
+# never restated here, so repointing the row is a one-line change (§5 holds
+# the workflow to the same rule).
+STANDING="$(sed -n 's/^DEFAULT_TASK_ID="\(task-[a-z0-9-]*\)"$/\1/p' "$INJECTOR")"
+if [ -z "$STANDING" ]; then
+  echo "dependabot-task-trailer.test: CANNOT MEASURE — no DEFAULT_TASK_ID=\"task-…\" line in $INJECTOR (rc 2)" >&2
+  exit 2
+fi
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -65,6 +73,14 @@ if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -qF 'Bumps [foo]'; then
   ok "the original body survives the append (nothing is replaced)"
 else
   bad "the append destroyed the original body" "out=<<$OUT>>"
+fi
+
+# The workflow's step summary reports `tail -n 1 new-body.txt` instead of
+# restating the id, so the trailer must be the body's LAST line.
+if [ "$(printf '%s\n' "$OUT" | tail -n 1)" = "Task: ${STANDING}" ]; then
+  ok "the trailer is the last line of the new body (what the step summary reports)"
+else
+  bad "the trailer is not the body's last line" "last=<<$(printf '%s\n' "$OUT" | tail -n 1)>>"
 fi
 
 # IDEMPOTENCE, end to end: feed the stamped body back in.
@@ -218,6 +234,67 @@ if [ -f "$WF" ]; then
   fi
 else
   bad "the workflow is absent" "$WF"
+fi
+
+echo "── §5 the edit re-fires the gate; the id has one home ──────────────────"
+# task-9747f19f13f83368. GitHub starts no workflow run for an event that
+# GITHUB_TOKEN causes, so an edit made with it never re-fires the gate's
+# `edited` arm (measured on #16717). Each check is a function over a file so
+# it can run against a MUTANT of the workflow and be seen to red.
+
+# 1. The edit prefers the dedicated token, and falls back to GITHUB_TOKEN.
+# shellcheck disable=SC2016,SC2329  # literal ${{ }} patterns; called via "$check"
+wf_token_preferred() {
+  grep -qF 'GH_TOKEN: ${{ secrets.DEPENDABOT_TRAILER_TOKEN || secrets.GITHUB_TOKEN }}' "$1"
+}
+# 2. On the fallback it says so, as a ::warning naming the cure.
+# shellcheck disable=SC2016,SC2329  # literal ${{ }} / $VAR patterns; called via "$check"
+wf_fallback_warns() {
+  grep -qF 'HAS_TRAILER_TOKEN: ${{ secrets.DEPENDABOT_TRAILER_TOKEN != '"''"' }}' "$1" \
+    && grep -qF 'if [ "$HAS_TRAILER_TOKEN" != "true" ]; then' "$1" \
+    && grep -E '::warning title=' "$1" | grep -qF 'DEPENDABOT_TRAILER_TOKEN'
+}
+# 3. No task id on any executable (non-comment) line: the injector is its home.
+# shellcheck disable=SC2329  # called via "$check"
+wf_no_restated_id() {
+  ! grep -vE '^[[:space:]]*#' "$1" | grep -qE 'task-[0-9a-f]{16}'
+}
+
+if [ -f "$WF" ]; then
+  for check in wf_token_preferred wf_fallback_warns wf_no_restated_id; do
+    if "$check" "$WF"; then
+      ok "$check holds on the shipped workflow"
+    else
+      bad "$check does NOT hold on the shipped workflow" "$WF"
+    fi
+  done
+
+  # MUTANTS. Each one reverts exactly one property; its check must red on it.
+  # A mutant that did not change the file proves nothing, so that is a FAIL too.
+  M1="$TMP/wf-m1.yml"; M2="$TMP/wf-m2.yml"; M3="$TMP/wf-m3.yml"
+  # shellcheck disable=SC2016
+  sed 's/GH_TOKEN: \${{ secrets.DEPENDABOT_TRAILER_TOKEN || secrets.GITHUB_TOKEN }}/GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}/' "$WF" > "$M1"
+  sed '/::warning title=Task gate will NOT re-evaluate/d' "$WF" > "$M2"
+  # shellcheck disable=SC2016
+  sed "s/echo \"Appended '\${trailer}'/echo \"Appended Task: ${STANDING}/" "$WF" > "$M3"
+  for pair in "wf_token_preferred:$M1" "wf_fallback_warns:$M2" "wf_no_restated_id:$M3"; do
+    check="${pair%%:*}"; mut="${pair#*:}"
+    if cmp -s "$WF" "$mut"; then
+      bad "MUTATION DID NOT APPLY for $check" "the mutant equals the workflow, so this measured NOTHING"
+    elif "$check" "$mut"; then
+      bad "$check is UNPROVEN: it still holds on a mutant that reverts it" "$mut"
+    else
+      ok "DETECTOR FIRES: $check reds on its mutant"
+    fi
+  done
+fi
+
+# The injector itself names the id exactly once outside comments.
+n="$(grep -vE '^[[:space:]]*#' "$INJECTOR" | grep -cE 'task-[0-9a-f]{16}')"
+if [ "$n" = 1 ]; then
+  ok "the injector names the standing id once (DEFAULT_TASK_ID)"
+else
+  bad "the injector names a task id $n times outside comments, expected 1" "$INJECTOR"
 fi
 
 echo
