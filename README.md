@@ -9,6 +9,8 @@ Barkpark is an open-source CMS you can run on your computer or a server.
 Define your own fields, edit content visually, and publish it through an API.
 Build a website or just keep a recipe collection. Use only what you need.
 
+Barkpark syncs between a local instance and a remote one. Several people can share one server while each runs Barkpark on their own machine — like running Sanity on your own computer. When the internet is down, everything still works, and you can pass documents to coworkers, family and friends over your local network.
+
 ## What you can do
 
 | Use | What you get |
