@@ -97,7 +97,7 @@ jobs:
       # _build restore and no save: this job compiles from nothing, so it can
       # neither read a contaminated build nor write one into the gate's namespace.
       - name: Restore deps (dependency SOURCES)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: api/deps
           key: ${{ runner.os }}-mix-test-deps-v2-27.0-1.18.4-${{ hashFiles('api/mix.lock') }}

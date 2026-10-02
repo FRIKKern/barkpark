@@ -87,7 +87,7 @@ jobs:
           elixir-version: "1.18.4"
 
       - name: Cache deps + _build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             api/deps
