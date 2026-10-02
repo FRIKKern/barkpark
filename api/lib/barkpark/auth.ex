@@ -60,6 +60,36 @@ defmodule Barkpark.Auth do
   end
 
   @doc """
+  Is this ALREADY-VERIFIED token still live — the same predicate as
+  `verify_token/1` (`kind == "api"`, not revoked, not expired), re-asked by row
+  id for a long-lived connection that verified once at connect.
+
+  A socket cannot rely on the revocation teardown broadcast alone: bulk
+  revokers (`Barkpark.Scim` deprovision, `Repo.update_all` paths) set
+  `revoked_at` without one, and natural expiry has no event at all. Callers
+  re-ask this per frame (r4a realtime authz sweep).
+  """
+  @spec token_live?(term()) :: boolean()
+  def token_live?(%ApiToken{id: id}) when is_binary(id) do
+    case Repo.uuid_or_nil(id) do
+      nil ->
+        false
+
+      uuid ->
+        now = DateTime.utc_now()
+
+        ApiToken
+        |> where([t], t.id == ^uuid)
+        |> where([t], t.kind == "api")
+        |> where([t], is_nil(t.revoked_at))
+        |> where([t], is_nil(t.expires_at) or t.expires_at > ^now)
+        |> Repo.exists?()
+    end
+  end
+
+  def token_live?(_token), do: false
+
+  @doc """
   Resolve a raw bearer to its `ApiToken` id, or nil.
 
   The IDENTITY half of `verify_token/1` — same WHERE clause, same fail-closed
